@@ -86,6 +86,18 @@ DipLock/
 └── todo.md  ← это файл
 ```
 
+### 6. Автотесты и исправления пайплайна (12.09.2026)
+- [x] Подключён **pytest**: `backend/pytest.ini`, `requirements-dev.txt`, `backend/tests/`
+- [x] 54 теста: валидация `/analyze`, `config`, `bandpass_filter`, `epoch_segmenter`, `edf_loader`, `dipole_fitter`, `brain_export`
+- [x] Найдено и исправлено **17 багов**, из-за которых `/analyze` падал на реальных EDF
+      (baseline, `psd_welch`→`compute_psd`, `n_fft`, имена/единицы каналов, `resample`, montage,
+      фильтр raw, `Evoked` для диполей, Brodmann-атлас, BEM, nibabel, empirical cov,
+      `mne.read_surface`, trimesh-децимация) — см. `audit.md`
+- [x] Прореживание дипольного фитинга (`DIPOLE_FIT_DECIM`) и лимит эпох (`DIPOLE_FIT_MAX_EPOCHS`)
+- [x] Проверка цепочки локализации: `head_to_mni` + Brodmann (`BA24-rh`) + анатомия + surface-экспорт
+- [x] Исправлена несогласованность `/init-status`: URL БД из `settings` (был `os.getenv`)
+- [x] Ручная проверка полного пайплайна на `data/edf/test.edf`
+
 ## 📋 План на следующие этапы
 
 ### Этап 2: Пользовательский UI (Frontend) — обсуждение в новой сессии

@@ -1,20 +1,40 @@
 """fit_dipole + локализация (анатомия + Brodmann)."""
+import os
+
 import mne
 import numpy as np
 from functools import lru_cache
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from app.core.config import Settings
 
 
 def fit_dipoles_for_epochs(epochs: mne.Epochs, settings: Settings, freq_bands: dict):
-    cov = _get_covariance(settings)
     bem = _get_bem(settings)
     trans = settings.fsaverage_trans
     subjects_dir = settings.subjects_dir
 
+    # Ковариация: из файла, иначе считаем empirical прямо из эпох
+    # (method='shrunk' требует scikit-learn).
+    cov = _get_covariance(settings)
+    if cov is None:
+        cov = mne.compute_covariance(epochs, method="empirical", verbose=False)
+
+    # Итерация по mne.Epochs даёт numpy-массивы (не .average()), а mne.fit_dipole
+    # требует Evoked — поэтому собираем Evoked для каждой эпохи вручную.
+    max_epochs = int(getattr(settings, "dipole_fit_max_epochs", 0) or 0)
+    n_fit = len(epochs) if max_epochs <= 0 else min(len(epochs), max_epochs)
+    data = epochs.get_data()[:n_fit]  # (n_fit, n_channels, n_times)
+    tmin = float(epochs.times[0])
+    decim = max(1, int(getattr(settings, "dipole_fit_decim", 1) or 1))
+
     all_dips = []
-    for i, epoch in enumerate(epochs):
-        evoked = epoch.average()
+    for i in range(n_fit):
+        evoked = mne.EvokedArray(
+            data[i], epochs.info.copy(), tmin=tmin, nave=1, verbose=False,
+        )
+        # Прореживание по времени: fit_dipole на каждую точку очень дорог
+        if decim > 1:
+            evoked.decimate(decim, verbose=False)
         try:
             dip = mne.fit_dipole(
                 evoked, cov, bem, trans=trans,
@@ -110,30 +130,32 @@ def _get_transform(subjects_dir: str, trans_path: str) -> "mne.Transform":
 @lru_cache(maxsize=1)
 def _get_ba_centers(subjects_dir: str) -> List[Tuple[str, np.ndarray]]:
     """
-    Центры Brodmann-меток на fsaverage. Строится один раз и кэшируется.
+    Центры Brodmann-меток на fsaverage (атлас PALS_B12_Brodmann).
 
-    Возвращает список [(ba_name, center_coords), ...].
+    Строится один раз и кэшируется. Возвращает [(name, center_coords), ...],
+    где name имеет вид "BA17-lh".
     """
-    labels = mne.read_labels_from_parc(
-        "aparc.a2009s", subjects_dir=subjects_dir,
-        subject="fsaverage",
+    labels = mne.read_labels_from_annot(
+        "fsaverage", parc="PALS_B12_Brodmann",
+        subjects_dir=subjects_dir, verbose=False,
     )
-    verts_cache = {}
+    verts_cache: Dict[str, np.ndarray] = {}
     centers = []
     for label in labels:
-        if not label.name.startswith("BA"):
+        # В PALS_B12_Brodmann метки названы "Brodmann.<area>-lh/rh"
+        if not label.name.startswith("Brodmann"):
             continue
-        hemi = "lh" if label.hemi == "L" else "rh"
+        hemi = label.hemi  # 'lh' или 'rh'
         if hemi not in verts_cache:
-            verts, _ = mne.surface.io.read_surface(
-                f"{subjects_dir}/fsaverage/surf/{hemi}.white",
+            verts, _ = mne.read_surface(
+                f"{subjects_dir}/fsaverage/surf/{hemi}.white", verbose=False,
             )
             verts_cache[hemi] = verts
         verts = verts_cache[hemi]
         if len(verts) <= max(label.vertices):
             continue
         center = verts[label.vertices].mean(axis=0)
-        centers.append((label.name, center))
+        centers.append((label.name.replace("Brodmann.", "BA"), center))
     return centers
 
 
@@ -152,9 +174,21 @@ def _find_ba(mni_pos, ba_centers) -> str:
 def _get_covariance(settings) -> Optional["mne.Covariance"]:
     try:
         return mne.read_cov(f"{settings.subjects_dir}/fsaverage-cov.fif")
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         return None
 
 
-def _get_bem(settings):
-    return f"{settings.subjects_dir}/bem/fsaverage-5-embed-mri.bem"
+def _get_bem(settings) -> str:
+    """Путь к BEM-решению fsaverage; ищем существующий файл."""
+    candidates = [
+        f"{settings.subjects_dir}/fsaverage/bem/fsaverage-5120-5120-5120-bem-sol.fif",
+        f"{settings.subjects_dir}/fsaverage/bem/fsaverage-5120-5120-5120-bem.fif",
+        f"{settings.subjects_dir}/bem/fsaverage-5120-5120-5120-bem-sol.fif",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        "BEM-решение fsaverage не найдено. Ожидался один из файлов: "
+        + ", ".join(candidates)
+    )

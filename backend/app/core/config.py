@@ -1,7 +1,7 @@
 """Настройки DipLock через Pydantic Settings."""
 from pydantic import Field
 from pydantic_settings import BaseSettings
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 class Settings(BaseSettings):
@@ -34,6 +34,16 @@ class Settings(BaseSettings):
         default="/app/data/results",
         env="RESULTS_DIR",
     )
+
+    # Единицы EDF: None = автоопределение MNE + эвристика масштаба (см. edf_loader)
+    edf_units: Optional[str] = Field(default=None, env="EDF_UNITS")
+
+    # Дипольный фитинг: прореживание evoked по времени для скорости
+    # (fit_dipole на каждую временную точку очень дорог). 1 = без прореживания.
+    # 5 при 500 Гц даёт 100 Гц → безопасно для сигнала с low-pass до 40 Гц.
+    dipole_fit_decim: int = Field(default=5, env="DIPOLE_FIT_DECIM")
+    # Максимум эпох для фитинга (0 = все). Ограничивает время ответа API.
+    dipole_fit_max_epochs: int = Field(default=0, env="DIPOLE_FIT_MAX_EPOCHS")
 
     # Артефакты
     z_score_threshold: float = 5.0

@@ -25,11 +25,20 @@ def segment_epochs(
 
     # Эпохи с reject-фильтрацией: эпохи с артефактами ОТБРАСЫВАЮТСЯ (drop),
     # если превышают порог. Пропущенные доступны через epochs.drop_log/metrics.
+    # baseline=None явно: MNE по умолчанию берёт (None, 0), что при tmin=0
+    # даёт интервал в 1 сэмпл и ValueError. Для continuous EEG без стимула
+    # коррекция по baseline неприменима.
     epochs = mne.Epochs(
         raw, events, tmin=0, tmax=epoch_length_sec,
-        baseline=(None, 0),
+        baseline=None,
         reject=dict(eeg=reject_threshold_uv * 1e-6),
         preload=True, verbose=False,
     )
+
+    if len(epochs) == 0:
+        raise ValueError(
+            f"Все эпохи отброшены reject-фильтром (порог {reject_threshold_uv} мкВ). "
+            "Проверьте масштаб/единицы EDF и качество сигнала."
+        )
 
     return epochs

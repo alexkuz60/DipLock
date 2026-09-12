@@ -123,4 +123,38 @@ docker-fsaverage), которые стоит исправить до масшт�
 | **4.x** Нет LICENSE / AGENTS.md / audit.md | Добавлены `LICENSE` (MIT), `AGENTS.md`, `audit.md` | — |
 | **3.5** Docker fsaverage | **ОТЛОЖЕНО** — перенесено в `todo.md` | — |
 
-**Открытыми остаются** (см. `todo.md`): alembic-миграции, тестовый фреймворк, контейнерная интеграция fsaverage, HEALTHCHECK.
+**Открытыми остаются** (см. `todo.md`): alembic-миграции, контейнерная интеграция fsaverage, HEALTHCHECK.
+
+---
+
+## 🐞 Баги, найденные автотестами (12.09.2026)
+
+Подключён `pytest` (`backend/tests/`, 54 теста). Прогон пайплайна и реального
+EDF вскрыл **17 дефектов**, из-за которых `/analyze` не работал на реальных данных:
+
+| # | Симптом | Причина | Файл | Фикс |
+|---|---|---|---|---|
+| 1 | `ValueError: Baseline interval is only one sample` | MNE по умолчанию берёт `baseline=(None, 0)`, а при `tmin=0` это 1 сэмпл | `services/epoch_segmenter.py` | явный `baseline=None` |
+| 2 | `AttributeError: No mne.time_frequency attribute psd_welch` | API удалён в MNE ≥ 1.10 | `services/bandpass_filter.py` | `epochs.compute_psd(method="welch")` |
+| 3 | `ValueError: n_fft ... > n_times` (эпохи ≤ 1 с) | жёсткий `n_fft=256` больше длины сигнала | `services/bandpass_filter.py` | `n_fft=min(256, len(n_times))` |
+| 4 | `ValueError: Ни один из стандартных каналов не найден` | имена `"EEG F7"`, `T3/T4/T5/T6` не совпадали со стандартом 10-20 | `services/edf_loader.py` | `normalize_channel_name()` (префиксы + алиасы T3→T7…) |
+| 5 | `AttributeError: 'str' object has no attribute 'copy'` | `resample(events="auto")` — `events` принимает массив, не строку | `services/edf_loader.py` | `resample(500.0)` только при `sfreq > 500` |
+| 6 | FutureWarning → поломка в MNE 1.14 | montage `standard_1020` переименован | `services/edf_loader.py` | `colin27_1020` + fallback на старое имя |
+| 7 | `RuntimeWarning: filter_length > signal` (искажение спектра) | band-фильтр применялся к коротким эпохам (250–1000 мс) | `api/routes.py`, `bandpass_filter.py` | фильтровать continuous **raw** до нарезки |
+| 8 | `RuntimeError: this Epochs-object is empty` | EDF без physical dimension: данные в µV читались как «вольты» (x1e6), reject 150 мкВ отбросил все эпохи | `services/edf_loader.py`, `epoch_segmenter.py` | авто-детект масштаба + `EDF_UNITS` + понятная ошибка вместо пустых эпох |
+| 9 | `AttributeError: 'numpy.ndarray' object has no attribute 'average'` | итерация по `Epochs` даёт массивы, а `fit_dipole` требует `Evoked` | `services/dipole_fitter.py` | сборка `EvokedArray` на каждую эпоху |
+| 10 | `AttributeError: No mne attribute read_labels_from_parc` | такого API в MNE нет | `dipole_fitter.py`, `api/routes.py` | `mne.read_labels_from_annot` |
+| 11 | Все BA = `unknown` | атлас Brodmann — `PALS_B12_Brodmann`, метки `Brodmann.N`; в `aparc.a2009s` их нет | `dipole_fitter.py`, `api/routes.py` | parc=`PALS_B12_Brodmann`, префикс `Brodmann`, имя `BA<N>` |
+| 12 | BA-центры всегда из правого полушария | `label.hemi` = `'lh'/'rh'`, а сравнивалось с `'L'` | `dipole_fitter.py` | `hemi = label.hemi` |
+| 13 | `FileNotFoundError` BEM; `EEG average reference is mandatory` | путь `bem/fsaverage-5-embed-mri.bem` не существовал; average reference была отложенной проекцией | `dipole_fitter.py`, `edf_loader.py` | поиск реального `fsaverage-5120-5120-5120-bem-sol.fif`; `set_eeg_reference(projection=False)` |
+| 14 | `ModuleNotFoundError: nibabel` | отсутствовал в зависимостях | `requirements.txt` | `nibabel>=5.0.0` |
+| 15 | `ValueError: scikit-learn is not installed` | `compute_covariance(method='shrunk')` требует sklearn | `dipole_fitter.py` | `method='empirical'` (cov из эпох, если файла нет) |
+| 16 | `AttributeError: module 'mne.surface' has no attribute 'io'` | `mne.surface.io.read_surface` не существует | `utils/brain_export.py` | `mne.read_surface` |
+| 17 | Децимация меша молча не применялась (163842 вершины); `AttributeError: 'Trimesh' object has no attribute 'simplify_quadratic_decimation'` | неверное имя метода (`quadric`), в trimesh 5.x `face_count` — keyword-аргумент, отсутствовал `fast-simplification` | `utils/brain_export.py`, `requirements.txt` | `simplify_quadric_decimation(face_count=...)` + `fast-simplification` |
+
+**Производительность:** `fit_dipole` по каждой временной точке эпохи (1000 точек) идёт
+> 90 с/эпоху. Добавлено прореживание `dipole_fit_decim` (по умолчанию 10).
+
+Все исправления покрыты тестами и подтверждены на реальном `data/edf/test.edf`.
+**Вывод:** «зелёный» `/init-status` не гарантировал работоспособность пайплайна —
+тесты обязательны (см. `AGENTS.md`).

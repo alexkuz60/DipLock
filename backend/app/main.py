@@ -72,7 +72,7 @@ async def init_status() -> Dict:
     # 3. База данных
     try:
         from sqlalchemy.engine import make_url
-        db_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./diplock.db")
+        db_url = settings.database_url
         url = make_url(db_url)
         if url.drivername.startswith("sqlite"):
             db_path = url.database or "./diplock.db"

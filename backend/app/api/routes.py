@@ -41,21 +41,23 @@ def _run_analysis(
 
     session_id = str(uuid.uuid4())
 
-    raw = load_edf(filepath, settings.standard_channels)
+    raw = load_edf(filepath, settings.standard_channels, units=settings.edf_units)
     annotations, artifact_stats = detect_artifacts(
         raw, settings, z_threshold, pp_threshold_uv,
     )
 
-    epochs = segment_epochs(raw, annotations, epoch_length_ms=epoch_length_ms)
-
+    # Band-specific фильтр применяем к continuous raw ДО нарезки: короткие
+    # эпохи (250–1000 мс) короче FIR-фильтра и дают сильные искажения.
     if freq_band != "all" or single_freq is not None:
-        epochs = apply_band_filter(
-            epochs, freq_band,
+        raw = apply_band_filter(
+            raw, freq_band,
             custom_min=custom_min_freq,
             custom_max=custom_max_freq,
             single_freq=single_freq,
             bandwidth_hz=settings.default_single_freq_bandwidth_hz,
         )
+
+    epochs = segment_epochs(raw, annotations, epoch_length_ms=epoch_length_ms)
 
     freq_powers = compute_band_power(epochs, settings.freq_bands)
     dipoles = fit_dipoles_for_epochs(epochs, settings, freq_bands=freq_powers)
@@ -233,9 +235,12 @@ async def get_brodmann_labels():
     import mne
     if not os.path.isdir(f"{settings.subjects_dir}/fsaverage"):
         mne.datasets.fsaverage.data_path()
-    labels = mne.read_labels_from_parc(
-        "aparc.a2009s", subjects_dir=settings.subjects_dir,
-        subject="fsaverage",
+    labels = mne.read_labels_from_annot(
+        "fsaverage", parc="PALS_B12_Brodmann",
+        subjects_dir=settings.subjects_dir, verbose=False,
     )
-    ba = [l.name for l in labels if l.name.startswith("BA")]
+    ba = [
+        l.name.replace("Brodmann.", "BA")
+        for l in labels if l.name.startswith("Brodmann")
+    ]
     return {"brodmann_areas": ba}

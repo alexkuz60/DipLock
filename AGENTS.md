@@ -19,6 +19,10 @@ venv/bin/pip install -r requirements.txt
 # Запуск сервера (рабочая директория — backend/)
 cd backend && venv/bin/uvicorn app.main:app --reload --port 8000
 
+# Тесты (pytest)
+cd backend && venv/bin/pip install -r requirements-dev.txt
+venv/bin/python -m pytest
+
 # Проверка
 curl :8000/health       # {"status":"ok",...}
 curl :8000/init-status  # готовность MNE/БД/fsaverage
@@ -61,11 +65,30 @@ data/                  # локальные данные (edf/results) — НЕ 
 
 ## Тесты
 
-Специализированный фреймворк ещё не подключён — добавить `pytest`.
-Проверка после изменений: сервер стартует, `/health` и `/init-status` → 200.
+Фреймворк: **pytest** (`backend/tests/`, конфиг `backend/pytest.ini`).
+
+```bash
+cd backend && venv/bin/pip install -r requirements-dev.txt
+cd backend && venv/bin/python -m pytest            # все тесты
+cd backend && venv/bin/python -m pytest tests/test_api.py -v
+```
+
+Тесты быстрые (без сети), используют синтетический ЭЭГ (см. `tests/conftest.py`)
+и `TestClient`. Покрывают: валидацию `/analyze`, config, bandpass_filter,
+epoch_segmenter, montage edf_loader. **Правило:** новый сервис/багфикс → тест.
 
 ## Правила безопасности
 
 - Не передавать в `head_to_mni` путь-строку вместо `mne.Transform` (использовать `mne.read_trans`).
 - CORS: не комбинировать `allow_origins=["*"]` с `allow_credentials=True`.
 - Валидировать размер загружаемых EDF-файлов.
+- MNE API дрейфует между версиями: `psd_welch`→`compute_psd`, `standard_1020`→`colin27_1020`,
+  `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`.
+  Проверяйте актуальный API через тесты.
+- Фильтровать band-specific фильтром continuous **raw** до нарезки, а не короткие эпохи.
+- Единицы EDF: часть файлов без physical dimension MNE читает как «вольты» (в 1e6 раз больше) —
+  есть авто-детект масштаба (`_ensure_physical_units`) и переменная `EDF_UNITS`.
+- Brodmann-атлас — `PALS_B12_Brodmann` (метки `Brodmann.N`), а не `aparc.a2009s`; нужен `nibabel`.
+- BEM fsaverage: `fsaverage/bem/fsaverage-5120-5120-5120-bem-sol.fif`; average reference должна быть
+  применена (`projection=False`), иначе `mne.fit_dipole` падает.
+- `mne.fit_dipole` требует `Evoked` (не массив) и дорог — используйте `dipole_fit_decim`.

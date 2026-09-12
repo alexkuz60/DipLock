@@ -16,16 +16,17 @@ def export_fsaverage_surface(settings=None):
     surfaces = {}
     for hemi in ["lh", "rh"]:
         surf_path = f"{subjects_dir}/fsaverage/surf/{hemi}.inflated"
-        verts, faces = mne.surface.io.read_surface(surf_path)
+        verts, faces = mne.read_surface(surf_path, verbose=False)
 
-        # Децимация для frontend
+        # Децимация для frontend (необязательная оптимизация: не ломаем экспорт)
         if len(verts) > 10000:
             try:
                 import trimesh
                 mesh = trimesh.Trimesh(verts, faces)
-                mesh = mesh.simplify_quadratic_decimation(8000)
+                # trimesh 5.x: первый позиционный аргумент — percent, нужен face_count
+                mesh = mesh.simplify_quadric_decimation(face_count=8000)
                 verts, faces = mesh.vertices, mesh.faces
-            except ImportError:
+            except Exception:
                 pass
 
         surfaces[hemi] = {
@@ -40,16 +41,19 @@ def export_fsaverage_surface(settings=None):
 
 
 def _export_ba_labels(settings) -> dict:
-    labels = mne.read_labels_from_parc(
-        "aparc.a2009s", subjects_dir=settings.subjects_dir,
-        subject="fsaverage",
+    labels = mne.read_labels_from_annot(
+        "fsaverage", parc="PALS_B12_Brodmann",
+        subjects_dir=settings.subjects_dir, verbose=False,
     )
     ba_data = {}
     for label in labels:
-        if label.name.startswith("BA"):
-            ba_data[label.name] = {
-                "hemi": label.hemi,
-                "vertices": label.vertices.tolist(),
-                "n_vertices": len(label.vertices),
-            }
+        # В PALS_B12_Brodmann метки названы "Brodmann.<area>-lh/rh"
+        if not label.name.startswith("Brodmann"):
+            continue
+        name = label.name.replace("Brodmann.", "BA")
+        ba_data[name] = {
+            "hemi": label.hemi,
+            "vertices": label.vertices.tolist(),
+            "n_vertices": len(label.vertices),
+        }
     return ba_data
