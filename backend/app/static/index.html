@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DipLock — Старт</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh; color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px; width: 100%;
+            background: rgba(255, 255, 255, 0.1); backdrop-filter: blur(10px);
+            border-radius: 16px; padding: 40px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+        .header { text-align: center; margin-bottom: 40px; }
+        .logo { font-size: 2.5em; font-weight: 700; margin-bottom: 10px;
+            display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .logo .brain { font-size: 2.2em; }
+        .subtitle { font-size: 1.1em; opacity: 0.85; color: #e0e0e0; }
+        .progress-section { margin-bottom: 30px; }
+        .progress-title {
+            display: flex; align-items: center; gap: 12px;
+            margin-bottom: 12px; font-size: 1.15em; font-weight: 600;
+        }
+        .status-icon {
+            width: 24px; height: 24px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 14px; flex-shrink: 0;
+        }
+        .status-pending { background: #555; color: #aaa; }
+        .status-loading { background: #2196F3; color: white; animation: spin 1s linear infinite; }
+        .status-ready { background: #4CAF50; color: white; }
+        .status-error { background: #f44336; color: white; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .progress-bar { width: 100%; height: 10px; background: rgba(255,255,255,0.15);
+            border-radius: 5px; overflow: hidden; margin-bottom: 8px; }
+        .progress-fill { height: 100%; background: linear-gradient(90deg, #2196F3, #21CBF3);
+            border-radius: 5px; width: 0%; transition: width 0.6s ease; }
+        .description { font-size: 0.9em; opacity: 0.7; margin-top: 8px; line-height: 1.5; }
+        .overall { text-align: center; margin-top: 30px; padding-top: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2); }
+        .ready-btn {
+            background: linear-gradient(135deg, #4CAF50, #8BC34A);
+            color: white; border: none; padding: 14px 40px;
+            font-size: 1.2em; border-radius: 30px; cursor: pointer;
+            font-weight: 700; transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .ready-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(76,175,80,0.4); }
+        .ready-btn:disabled { background: #555; cursor: not-allowed; transform: none; box-shadow: none; }
+        .api-link { color: #21CBF3; text-decoration: none; font-size: 0.95em; }
+        .api-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo"><span class="brain">🧠</span><span>DipLock</span></div>
+            <p class="subtitle">Анализ ЭЭГ + токовые диполи в 3D</p>
+        </div>
+
+        <div class="progress-section">
+            <div class="progress-title">
+                <span id="icon-overall" class="status-icon status-pending">○</span>
+                <span>Инициализация приложения</span>
+                <span id="overall-percent" style="margin-left: auto;">0%</span>
+            </div>
+            <div class="progress-bar"><div id="progress-overall" class="progress-fill"></div></div>
+        </div>
+
+        <div id="checks-container"></div>
+
+        <div class="overall">
+            <button id="start-btn" class="ready-btn" disabled onclick="window.location.href='/docs'">
+                Перейти в Swagger UI →
+            </button>
+            <p style="margin-top: 16px; font-size: 0.9em; opacity: 0.7;">
+                <a href="/docs" class="api-link">Документация API (OpenAPI)</a>
+            </p>
+        </div>
+    </div>
+    <script>
+        const checks = [
+            { id: 'fsaverage', title: 'FSAverage данные', description: 'Шаблон FreeSurfer для модели мозга (~500 МБ)' },
+            { id: 'mne', title: 'MNE-Python', description: 'Библиотека для обработки ЭЭГ' },
+            { id: 'config', title: 'Конфигурация', description: 'Настройки приложения и пути' },
+            { id: 'database', title: 'База данных', description: 'SQLite (локальная) / PostgreSQL (production)' },
+            { id: 'transform', title: 'FSAverage transform', description: 'Трансформация (fsaverage-trans.fif)' },
+            { id: 'bem', title: 'BEM (модель головы)', description: 'Boundary Element Model для дипольной локализации' }
+        ];
+
+        let readyCount = 0;
+        const totalChecks = checks.length;
+
+        function buildCheckItems() {
+            const container = document.getElementById('checks-container');
+            checks.forEach(check => {
+                const div = document.createElement('div');
+                div.className = 'progress-section';
+                div.setAttribute('data-check', check.id);
+                div.innerHTML = `
+                    <div class="progress-title">
+                        <span class="status-icon status-pending">○</span>
+                        <span>${check.title}</span>
+                    </div>
+                    <div class="progress-bar"><div class="progress-fill"></div></div>
+                    <div class="description">${check.description}</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        async function runChecks() {
+            try {
+                const response = await fetch('/init-status');
+                const data = await response.json();
+                readyCount = 0;
+
+                checks.forEach(check => {
+                    const status = data.checks[check.id] || 'unknown';
+                    const element = document.querySelector(`[data-check="${check.id}"]`);
+                    if (!element) return;
+
+                    const icon = element.querySelector('.status-icon');
+                    const bar = element.querySelector('.progress-fill');
+                    const desc = element.querySelector('.description');
+
+                    if (status === 'ready') {
+                        icon.className = 'status-icon status-ready';
+                        icon.textContent = '✓';
+                        bar.style.width = '100%';
+                        bar.style.background = '#4CAF50';
+                        desc.style.opacity = '1';
+                        readyCount++;
+                    } else if (status === 'loading') {
+                        icon.className = 'status-icon status-loading';
+                        icon.textContent = '…';
+                        bar.style.width = '50%';
+                        bar.style.background = '#2196F3';
+                    } else if (status === 'error') {
+                        icon.className = 'status-icon status-error';
+                        icon.textContent = '✗';
+                        bar.style.width = '100%';
+                        bar.style.background = '#f44336';
+                    } else {
+                        icon.className = 'status-icon status-pending';
+                        icon.textContent = '○';
+                        bar.style.width = '0%';
+                    }
+                });
+
+                const percent = Math.round((readyCount / totalChecks) * 100);
+                const overallIcon = document.getElementById('icon-overall');
+                const overallBar = document.getElementById('progress-overall');
+                document.getElementById('overall-percent').textContent = percent + '%';
+
+                if (percent === 100) {
+                    overallIcon.className = 'status-icon status-ready';
+                    overallIcon.textContent = '✓';
+                    overallBar.style.width = '100%';
+                    overallBar.style.background = '#4CAF50';
+                    document.getElementById('start-btn').disabled = false;
+                } else if (percent > 0) {
+                    overallIcon.className = 'status-icon status-loading';
+                    overallIcon.textContent = '…';
+                    overallBar.style.width = percent + '%';
+                }
+
+                if (readyCount < totalChecks) {
+                    setTimeout(runChecks, 2000);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                setTimeout(runChecks, 3000);
+            }
+        }
+
+        buildCheckItems();
+        runChecks();
+    </script>
+</body>
+</html>

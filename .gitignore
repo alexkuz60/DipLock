@@ -1,0 +1,95 @@
+# ─────────────────────────────────────────────────────────────
+# DipLock .gitignore
+# Проект: анализ ЭЭГ и расчёт токовых диполей в 3D (FastAPI + MNE)
+# ─────────────────────────────────────────────────────────────
+
+# --- Python bytecode & caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+.eggs/
+.Python
+build/
+dist/
+share/python-wheels/
+
+# --- Testing, linting, coverage ---
+.mypy_cache/
+.mypy_cache
+.pytest_cache/
+.tox/
+.nox/
+.hypothesis/
+.cache
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+*.py,cover
+
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+ENV/
+venv.bak/
+.venv.bak/
+
+# --- Environment variables (секреты — НИКОГДА в репо!) ---
+.env
+.env.*
+!.env.example
+!.env.required
+!.env.template
+
+# --- IDE / редакторы ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.history/
+.project
+.pydevproject
+
+# --- OS artifacts ---
+.DS_Store
+.DS_Store?
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+
+# --- Database files ---
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+
+# --- Локальные данные и результаты анализа ---
+# test.edf хранится в репо как тестовый файдук
+data/results/
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Temporary / backup ---
+*.tmp
+*.temp
+*.bak
+
+# --- PyInstaller ---
+*.spec
+*.manifest
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+
+# --- SageMath ---
+*.sage.py
