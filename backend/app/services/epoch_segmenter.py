@@ -1,6 +1,7 @@
 """Нарезка эпох БЕЗ overlap. Длина выбирается из списка: [250, 500, ..., 2000] мс."""
 import mne
 import numpy as np
+from app.core.config import settings
 
 
 def segment_epochs(
@@ -10,7 +11,7 @@ def segment_epochs(
     reject_threshold_uv: float = 150.0,
 ) -> mne.Epochs:
     """Разбивает сессию на эпохи без наложения (non-overlapping)."""
-    valid_lengths = [250, 500, 750, 1000, 1250, 1500, 1750, 2000]
+    valid_lengths = settings.epoch_lengths_ms  # DRY: единый список из config.py
     if epoch_length_ms not in valid_lengths:
         raise ValueError(f"Длина эпохи {epoch_length_ms} мс не в списке: {valid_lengths}")
 
@@ -22,6 +23,8 @@ def segment_epochs(
         raw, duration=epoch_length_sec, first_samp=0,
     )
 
+    # Эпохи с reject-фильтрацией: эпохи с артефактами ОТБРАСЫВАЮТСЯ (drop),
+    # если превышают порог. Пропущенные доступны через epochs.drop_log/metrics.
     epochs = mne.Epochs(
         raw, events, tmin=0, tmax=epoch_length_sec,
         baseline=(None, 0),
@@ -29,5 +32,4 @@ def segment_epochs(
         preload=True, verbose=False,
     )
 
-    # Пометим пропущенные (с артефактами)
     return epochs

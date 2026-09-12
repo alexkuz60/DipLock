@@ -5,11 +5,11 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy import Column, String, Float, Integer, DateTime, JSON, ForeignKey
 from datetime import datetime
 
+from app.core.config import settings
+
 # SQLite для локальной разработки; PostgreSQL используется в продакшене через docker-compose
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "sqlite+aiosqlite:///./diplock.db",
-)
+# URL берём из settings (загружает .env) для единой конфигурации.
+DATABASE_URL = settings.database_url
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

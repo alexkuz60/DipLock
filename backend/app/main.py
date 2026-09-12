@@ -15,9 +15,12 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# CORS: конкретные origins (без "*" + credentials). Разрешаем локальную разработку.
+_default_cors = "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000"
+cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", _default_cors).split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,11 +1,13 @@
 """Экспорт surface-мешей FSAverage в JSON."""
 import mne
 import os
-from app.core.config import settings, Settings
+from app.core.config import settings
 
 
 def export_fsaverage_surface(settings=None):
-    settings = settings or Settings()
+    # Используем переданный settings ИЛИ глобальный синглтон (без повторного чтения .env)
+    if settings is None:
+        settings = globals()["settings"]
     subjects_dir = settings.subjects_dir
 
     if not os.path.isdir(f"{subjects_dir}/fsaverage"):

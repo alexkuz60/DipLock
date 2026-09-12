@@ -2,6 +2,7 @@
 import mne
 import numpy as np
 from typing import Dict, Optional
+from app.core.config import settings
 
 
 def apply_band_filter(
@@ -20,13 +21,7 @@ def apply_band_filter(
     - single_freq: одиночная частота (напр. 7.83 Гц) → narrow bandpass
       bandwidth_hz центрируется на ней (7.58 — 8.08)
     """
-    standard_bands = {
-        "delta": (1, 4),
-        "theta": (4, 8),
-        "alpha": (8, 13),
-        "beta": (13, 30),
-        "gamma": (30, 40),
-    }
+    standard_bands = settings.freq_bands  # DRY: единый словарь из config.py
 
     if single_freq is not None:
         fmin = single_freq - bandwidth_hz / 2
@@ -53,11 +48,21 @@ def apply_band_filter(
 
 
 def compute_band_power(epochs: mne.Epochs, bands: Dict[str, tuple]) -> Dict[str, float]:
-    """Средняя мощность по каждому диапазону (Welch)."""
+    """Средняя мощность по каждому диапазону (Welch). Один PSD-расчёт + нарезка."""
+    if not bands:
+        return {}
+
+    # Один общий расчёт PSD по всему охвату диапазонов
+    fmin_total = min(bands.values(), key=lambda x: x[0])[0]
+    fmax_total = max(bands.values(), key=lambda x: x[1])[1]
+    psds, freqs = mne.time_frequency.psd_welch(
+        epochs, fmin=fmin_total, fmax=fmax_total,
+        n_fft=256, verbose=False,
+    )
+
     powers = {}
+    # np.mean по времени+каналам: psds shape (n_epochs, n_channels, n_freqs)
     for name, (fmin, fmax) in bands.items():
-        psds, freqs = mne.time_frequency.psd_welch(
-            epochs, fmin=fmin, fmax=fmax, n_fft=256, verbose=False
-        )
-        powers[name] = float(np.mean(psds))
+        mask = (freqs >= fmin) & (freqs <= fmax)
+        powers[name] = float(np.mean(psds[:, :, mask]))
     return powers

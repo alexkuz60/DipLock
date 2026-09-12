@@ -1,7 +1,8 @@
 """fit_dipole + локализация (анатомия + Brodmann)."""
 import mne
 import numpy as np
-from typing import List, Dict
+from functools import lru_cache
+from typing import List, Optional, Tuple
 from app.core.config import Settings
 
 
@@ -43,11 +44,10 @@ def fit_dipoles_for_epochs(epochs: mne.Epochs, settings: Settings, freq_bands: d
 
 def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
     subjects_dir = settings.subjects_dir
-    trans = settings.fsaverage_trans
-    ba_labels = mne.read_labels_from_parc(
-        "aparc.a2009s", subjects_dir=subjects_dir,
-        subject="fsaverage",
-    )
+    trans_path = settings.fsaverage_trans
+    # Кэшированный один раз (module-level lru_cache)
+    transform = _get_transform(subjects_dir, trans_path)
+    ba_centers = _get_ba_centers(subjects_dir)
 
     for result in dipoles_result:
         if "error" in result or not result.get("trajectory"):
@@ -58,11 +58,12 @@ def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
         for dp in traj:
             pos = np.array(dp["pos_head"]).reshape(1, 3)
 
-            # MNI
+            # MNI — корректная сигнатура в MNE 1.13: (pos, subject, mri_head_t, ...)
             mni = None
             try:
                 mni = mne.head_to_mni(
-                    pos, 1, trans, subject="fsaverage",
+                    pos, subject="fsaverage",
+                    mri_head_t=transform,
                     subjects_dir=subjects_dir,
                 )
                 dp["mni_coords"] = mni[0].tolist()
@@ -79,16 +80,16 @@ def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
                     gof=[dp["gof"]],
                 )
                 vol_labels = dp_dip.to_volume_labels(
-                    trans, subject="fsaverage",
+                    transform, subject="fsaverage",
                     aseg="aparc.a2009s+aseg", subjects_dir=subjects_dir,
                 )
                 dp["anatomical_structure"] = vol_labels[0] if vol_labels else "unknown"
             except Exception:
                 dp["anatomical_structure"] = "unknown"
 
-            # Brodmann
+            # Brodmann — через кэшированные центры меток (без повторов read_surface)
             if mni is not None:
-                dp["brodmann_area"] = _find_ba(mni[0], ba_labels, subjects_dir)
+                dp["brodmann_area"] = _find_ba(mni[0], ba_centers)
             else:
                 dp["brodmann_area"] = "unknown"
             localized.append(dp)
@@ -100,38 +101,55 @@ def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
     return dipoles_result
 
 
-def _find_ba(mni_pos, ba_labels, subjects_dir) -> str:
-    """Поиск Brodmann Area по MNI-координатам (через ближайшую метку)."""
-    try:
-        # Ищем метку BA, центр которой ближе всего к позиции диполя
-        ras = mni_pos
-        best_label = "unknown"
-        best_dist = float("inf")
-        for label in ba_labels:
-            if not label.name.startswith("BA"):
-                continue
-            # Получаем вершины метки на поверхности
-            hemi = "lh" if label.hemi == "L" else "rh"
+@lru_cache(maxsize=1)
+def _get_transform(subjects_dir: str, trans_path: str) -> "mne.Transform":
+    """Закэшированный Transform (mri_head_t). Принимает путь к .fif, возвращает mne.Transform."""
+    return mne.read_trans(trans_path, verbose=False)
+
+
+@lru_cache(maxsize=1)
+def _get_ba_centers(subjects_dir: str) -> List[Tuple[str, np.ndarray]]:
+    """
+    Центры Brodmann-меток на fsaverage. Строится один раз и кэшируется.
+
+    Возвращает список [(ba_name, center_coords), ...].
+    """
+    labels = mne.read_labels_from_parc(
+        "aparc.a2009s", subjects_dir=subjects_dir,
+        subject="fsaverage",
+    )
+    verts_cache = {}
+    centers = []
+    for label in labels:
+        if not label.name.startswith("BA"):
+            continue
+        hemi = "lh" if label.hemi == "L" else "rh"
+        if hemi not in verts_cache:
             verts, _ = mne.surface.io.read_surface(
                 f"{subjects_dir}/fsaverage/surf/{hemi}.white",
             )
-            if len(verts) <= max(label.vertices):
-                continue
-            label_verts = verts[label.vertices]
-            if len(label_verts) == 0:
-                continue
-            # Расстояние до центра метки (в среднем в MNI-пространстве)
-            center = label_verts.mean(axis=0)
-            dist = np.linalg.norm(center - ras)
-            if dist < best_dist:
-                best_dist = dist
-                best_label = label.name
-        return best_label
-    except Exception:
-        return "unknown"
+            verts_cache[hemi] = verts
+        verts = verts_cache[hemi]
+        if len(verts) <= max(label.vertices):
+            continue
+        center = verts[label.vertices].mean(axis=0)
+        centers.append((label.name, center))
+    return centers
 
 
-def _get_covariance(settings) -> "mne.Covariance":
+def _find_ba(mni_pos, ba_centers) -> str:
+    """Поиск Brodmann Area по ближайшему центру метки (из кэша)."""
+    best_label = "unknown"
+    best_dist = float("inf")
+    for name, center in ba_centers:
+        dist = np.linalg.norm(center - mni_pos)
+        if dist < best_dist:
+            best_dist = dist
+            best_label = name
+    return best_label
+
+
+def _get_covariance(settings) -> Optional["mne.Covariance"]:
     try:
         return mne.read_cov(f"{settings.subjects_dir}/fsaverage-cov.fif")
     except FileNotFoundError:
