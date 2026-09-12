@@ -19,7 +19,7 @@
 ## 🚀 Структура проекта
 
 ```
-dip-lock/
+DipLock/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
@@ -32,23 +32,30 @@ dip-lock/
 │   │   │   └── routes.py
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   ├── edf_loader.py
-│   │   ├── artifact_detector.py
-│   │   ├── epoch_segmenter.py
-│   │   ├── bandpass_filter.py
-│   │   ├── dipole_fitter.py
-│   │   ├── brain_export.py
+│   │   │   ├── edf_loader.py
+│   │   │   ├── artifact_detector.py
+│   │   │   ├── epoch_segmenter.py
+│   │   │   ├── bandpass_filter.py
+│   │   │   └── dipole_fitter.py
 │   │   ├── models/
 │   │   │   ├── __init__.py
 │   │   │   └── db.py
-│   │   └── utils/
-│   │       ├── __init__.py
-│   │       └── brain_export.py
+│   │   ├── utils/
+│   │   │   ├── __init__.py
+│   │   │   └── brain_export.py
+│   │   └── static/
+│   │       └── index.html
 │   ├── requirements.txt
 │   ├── Dockerfile
-│   └── .env
+│   ├── .env              ← НЕ коммитится (см. .env.example)
+│   └── .env.example      ← шаблон конфигурации
+├── data/                 ← локальные данные
+│   ├── edf/              ← test.edf в репо
+│   └── results/          ← результаты анализа (игнорируются)
 ├── docker-compose.yml
 ├── init_db.sql
+├── setup.sh
+├── .gitignore
 └── README.md
 ```
 
@@ -61,7 +68,7 @@ dip-lock/
 bash setup.sh
 
 # Python окружение
-cd dip-lock/backend
+cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
@@ -79,7 +86,6 @@ uvicorn app.main:app --reload --port 8000
 ## 🐳 Запуск через Docker Compose
 
 ```bash
-cd dip-lock
 docker-compose up --build
 # → backend: http://localhost:8000
 # → Swagger UI: http://localhost:8000/docs

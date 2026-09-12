@@ -45,7 +45,7 @@
 ## 📂 Структура проекта
 
 ```
-dip-lock/
+DipLock/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
@@ -58,11 +58,11 @@ dip-lock/
 │   │   │   └── routes.py
 │   │   ├── services/
 │   │   │   ├── __init__.py
-│   │   ├── edf_loader.py
-│   │   ├── artifact_detector.py
-│   │   ├── epoch_segmenter.py
-│   │   ├── bandpass_filter.py
-│   │   ├── dipole_fitter.py
+│   │   │   ├── edf_loader.py
+│   │   │   ├── artifact_detector.py
+│   │   │   ├── epoch_segmenter.py
+│   │   │   ├── bandpass_filter.py
+│   │   │   └── dipole_fitter.py
 │   │   ├── models/
 │   │   │   ├── __init__.py
 │   │   │   └── db.py
@@ -73,15 +73,17 @@ dip-lock/
 │   │       └── index.html  ← стартовая страница
 │   ├── requirements.txt
 │   ├── Dockerfile
-│   └── .env
+│   ├── .env               ← НЕ коммитится
+│   └── .env.example       ← шаблон конфигурации
+├── data/  ← локальные данные
+│   ├── edf/          ← test.edf уже существует
+│   └── results/      ← результаты анализа (JSON, игнорируются)
 ├── docker-compose.yml  ← без version (устранено предупреждение)
 ├── init_db.sql
 ├── setup.sh
+├── .gitignore
 ├── README.md
-├── todo.md  ← это файл
-└── data/  ← локальные данные
-    ├── edf/          ← test.edf уже существует
-    └── results/      ← результаты анализа (JSON)
+└── todo.md  ← это файл
 ```
 
 ## 📋 План на следующие этапы
