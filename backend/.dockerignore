@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────
+# DipLock .dockerignore
+# Исключает лишние файлы из Docker build context (backend/)
+# ─────────────────────────────────────────────────────────────
+
+# --- Git ---
+.git
+.gitignore
+.gitattributes
+
+# --- Виртуальные окружения (ОГРОМНЫЕ! ~50K файлов) ---
+venv/
+.venv/
+env/
+ENV/
+venv.bak/
+.venv.bak/
+
+# --- Секреты / конфигурация окружения ---
+.env
+.env.*
+!.env.example
+
+# --- Python bytecode & caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.tox/
+.coverage
+htmlcov/
+build/
+dist/
+
+# --- Данные (монтируются через docker volumes) ---
+data/
+
+# --- IDE / редакторы ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.history/
+
+# --- OS artifacts ---
+.DS_Store
+.DS_Store?
+Thumbs.db
+Desktop.ini
+
+# --- Логи / временные файлы ---
+*.log
+logs/
+*.tmp
+*.temp
+*.bak
