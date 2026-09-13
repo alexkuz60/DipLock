@@ -2,8 +2,8 @@
  * Подмена fetch для тестов UI: отдаёт фикстуры бэкенда по путям API.
  */
 import { vi } from 'vitest'
-import { initStatusFixture, metaFixture } from './fixtures'
-import type { InitStatus, MetaResponse } from '@/shared/api/types'
+import { initStatusFixture, metaFixture, recordingFixture } from './fixtures'
+import type { InitStatus, MetaResponse, RecordingMeta } from '@/shared/api/types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -21,6 +21,8 @@ function urlOf(input: RequestInfo | URL): string {
 export type MockApiOptions = {
   initStatus?: InitStatus
   meta?: MetaResponse
+  /** Паспорт записи для GET /recordings/{id} */
+  recording?: RecordingMeta
   /** Смоделировать недоступность сервера (500 на /init-status) */
   initStatusFails?: boolean
 }
@@ -36,6 +38,9 @@ export function mockApiFetch(options: MockApiOptions = {}) {
     }
     if (url.includes('/meta')) {
       return jsonResponse(options.meta ?? metaFixture)
+    }
+    if (url.includes('/recordings/')) {
+      return jsonResponse(options.recording ?? recordingFixture)
     }
     return jsonResponse({ detail: `Нет мока для ${url}` }, 404)
   })

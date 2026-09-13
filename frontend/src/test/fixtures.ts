@@ -1,7 +1,7 @@
 /**
  * Фикстуры ответов бэкенда для тестов UI (совпадают по форме со схемами API).
  */
-import type { InitStatus, JobStatus, MetaResponse } from '@/shared/api/types'
+import type { InitStatus, JobStatus, MetaResponse, RecordingMeta } from '@/shared/api/types'
 
 export const metaFixture: MetaResponse = {
   app: 'DipLock',
@@ -59,6 +59,20 @@ export const initStatusFixture: InitStatus = {
     cache_dir: '/home/user/DipLock/data/cache',
   },
   api: { prefix: '/api/v1', docs_url: '/docs', meta_url: '/api/v1/meta' },
+}
+
+export const recordingFixture: RecordingMeta = {
+  recording_id: 'rec-1',
+  filename: 'probe.edf',
+  n_channels: 10,
+  channels: [...metaFixture.standard_channels],
+  unmatched_channels: [],
+  sfreq: 250,
+  duration_sec: 30,
+  units_autoscaled: false,
+  edf_units: null,
+  warnings: [],
+  created_at: '2026-09-13T09:00:00',
 }
 
 export const jobFixture: JobStatus = {

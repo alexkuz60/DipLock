@@ -8,13 +8,13 @@
 import type { ComponentType } from 'react'
 import { AppShell } from '@/app/layout/AppShell'
 import { EdfPanel } from './EdfPanel'
+import { EdfSection } from './EdfSection'
 import { HomeSection } from './HomeSection'
 import { ServerStatusSection } from './ServerStatusSection'
 import { SettingsSection } from './SettingsSection'
 import {
   DipolesPanel,
   DipolesSection,
-  EdfSection,
   GroupAnalysisPanel,
   GroupAnalysisSection,
   LocalizationTablePanel,

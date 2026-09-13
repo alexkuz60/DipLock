@@ -2,6 +2,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { SectionConfig } from '@/app/sections/registry'
 import { api } from '@/shared/api/client'
+import { TIME_LEVELS, useEdfParams } from '@/shared/state/edfParams'
 import { cx } from '@/shared/ui/cx'
 import { Tooltip } from '@/shared/ui/Tooltip'
 
@@ -57,6 +58,7 @@ export function StatusBar({ section }: { section: SectionConfig }) {
       </Tooltip>
 
       <span className="ml-auto flex items-center gap-4">
+        {section.id === 'edf' ? <EdfZoomIndicator /> : null}
         {meta.data ? (
           <span className="tnum">surface v{meta.data.surface_version}</span>
         ) : null}
@@ -67,4 +69,14 @@ export function StatusBar({ section }: { section: SectionConfig }) {
       </span>
     </footer>
   )
+}
+
+/**
+ * Индикатор зума вьюера: масштаб задаётся в панели раздела EDF,
+ * но видеть его нужно и в рабочей области (docs/ui.md).
+ */
+function EdfZoomIndicator() {
+  const level = useEdfParams((state) => state.params.timeLevel)
+  const factor = TIME_LEVELS[level] ?? 1
+  return <span className="tnum">Зум треков ×{factor}</span>
 }

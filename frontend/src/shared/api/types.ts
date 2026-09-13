@@ -46,6 +46,26 @@ export type ArtifactTypes = {
   ica_eog: number
 }
 
+/** Паспорт загруженной для просмотра записи (срез 2.2, без обработки) */
+export type RecordingMeta = {
+  recording_id: string
+  filename: string
+  /** Число каналов в файле */
+  n_channels: number
+  /** Каналы, сопоставленные с монтажом 10-20 (порядок монтажа) */
+  channels: string[]
+  /** Каналы файла вне монтажа 10-20 */
+  unmatched_channels: string[]
+  sfreq: number
+  duration_sec: number
+  /** Применён авто-пересчёт единиц (файл без physical dimension) */
+  units_autoscaled: boolean
+  /** Явные единицы из EDF_UNITS; null = автоопределение */
+  edf_units: string | null
+  warnings: string[]
+  created_at: string
+}
+
 export type PipelineInfo = {
   app_version: string
   mne_version: string

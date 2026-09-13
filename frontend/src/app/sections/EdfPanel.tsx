@@ -25,6 +25,7 @@ import {
   type FilterPresetId,
   type ReferenceMode,
 } from '@/shared/state/edfParams'
+import { useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { NumberField } from '@/shared/ui/NumberField'
@@ -67,6 +68,8 @@ export function EdfPanel() {
   const availableChannels = useEdfParams((state) => state.availableChannels)
   const toggleChannel = useEdfParams((state) => state.toggleChannel)
   const resetToDefaults = useEdfParams((state) => state.resetToDefaults)
+  const recording = useEdfRecording((state) => state.recording)
+  const demo = useEdfRecording((state) => state.demo)
   const applied = useEdfApplied()
   const dirty = useEdfDirty()
 
@@ -99,12 +102,45 @@ export function EdfPanel() {
     <>
       <Panel title="Запись">
         {meta.isPending ? <LoadingBlock label="Чтение параметров сервера…" /> : null}
-        <InfoRow label="Файл" value={availableChannels.length ? 'загружен' : 'не загружен'} />
-        <InfoRow label="Каналов в записи" value={availableChannels.length || null} />
-        <p className="mt-1 text-sm text-fg-2">
-          Загрузка EDF появится в рабочей области; параметры ниже сохраняются и применяются к
-          загрузке.
-        </p>
+        {recording ? (
+          <>
+            <InfoRow label="Файл" value={recording.filename} mono />
+            <InfoRow label="Каналов в файле" value={recording.n_channels} />
+            <InfoRow label="Каналы 10-20" value={recording.channels.length} />
+            <InfoRow label="Частота" value={`${recording.sfreq} Гц`} mono />
+            <InfoRow label="Длительность" value={`${recording.duration_sec} с`} mono />
+            <InfoRow
+              label="Единицы"
+              value={
+                recording.units_autoscaled
+                  ? 'µV (авто-пересчёт)'
+                  : (recording.edf_units ?? 'из файла')
+              }
+            />
+            {demo ? <InfoRow label="Рабочая область" value="демо-сигнал (синтетика)" /> : null}
+            {recording.warnings.length ? (
+              <div className="mt-2 space-y-1">
+                {recording.warnings.map((warning) => (
+                  <StatusPill key={warning} tone="warn">
+                    {warning}
+                  </StatusPill>
+                ))}
+              </div>
+            ) : null}
+            <p className="mt-2 text-sm text-fg-2">
+              Загружен только паспорт записи: обработка не запускалась (правило «UI не запускает
+              расчёт сам»).
+            </p>
+          </>
+        ) : (
+          <>
+            <InfoRow label="Файл" value="не загружен" />
+            <p className="mt-1 text-sm text-fg-2">
+              Загрузка EDF — в рабочей области раздела (drag & drop или кнопка «Выбрать файл EDF»).
+              Параметры ниже сохраняются и применяются к загрузке.
+            </p>
+          </>
+        )}
       </Panel>
 
       <Panel title="Фильтры и референс">

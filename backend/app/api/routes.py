@@ -38,10 +38,12 @@ from app.schemas.analysis import (
     JobCreated,
     JobStatus,
     MetaResponse,
+    RecordingMeta,
     SurfaceOut,
     SurfaceRef,
 )
 from app.services.job_manager import ProgressCallback, job_manager
+from app.services.recordings import recording_registry
 from app.services.surface_cache import (
     asset_version,
     brodmann_area_names,
@@ -416,6 +418,48 @@ async def analyze_eeg(
         logger.exception("Не удалось сохранить результат в БД")
 
     return result
+
+
+@router.post(
+    "/recordings", status_code=201, response_model=RecordingMeta,
+    summary="Загрузить EDF для просмотра (без обработки)",
+)
+async def create_recording(file: UploadFile = File(...)) -> RecordingMeta:
+    """Сохраняет EDF и возвращает паспорт записи (каналы, sfreq, длительность).
+
+    Артефакты/эпохи/диполи здесь не считаются: обработка стартует отдельной
+    задачей по кнопке «Пересчитать предподготовку» (docs/ui.md). Файл остаётся
+    в ``data/edf/<recording_id>/`` — его читают эндпоинты просмотра; устаревшие
+    записи реестр удаляет по TTL и лимиту истории.
+    """
+    safe_name = _safe_edf_name(file.filename)
+    tmp_path, upload_dir = await _save_upload(file, safe_name)
+    try:
+        recording = await asyncio.to_thread(
+            recording_registry.register, tmp_path, upload_dir, safe_name, settings,
+        )
+    except ValueError as e:
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:  # noqa: BLE001 — отдаём UI понятный текст, не traceback
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        logger.exception("Не удалось прочитать EDF %s", safe_name)
+        raise HTTPException(status_code=400, detail=f"Не удалось прочитать EDF: {e}")
+    return RecordingMeta(**recording.meta)
+
+
+@router.get(
+    "/recordings/{recording_id}", response_model=RecordingMeta,
+    summary="Паспорт записи",
+)
+async def get_recording(recording_id: str) -> RecordingMeta:
+    """Метаданные загруженной записи. 404 — неизвестна, устарела (TTL) или удалена."""
+    recording = recording_registry.get(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
+        )
+    return RecordingMeta(**recording.meta)
 
 
 @router.post(

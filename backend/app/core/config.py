@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = Field(default=2, env="MAX_CONCURRENT_JOBS")
     jobs_history_limit: int = Field(default=50, env="JOBS_HISTORY_LIMIT")
 
+    # Загруженные для просмотра записи: лимит истории и TTL (устаревшие
+    # каталоги удаляются с диска при обращении к реестру).
+    recordings_history_limit: int = Field(default=10, env="RECORDINGS_HISTORY_LIMIT")
+    recordings_ttl_hours: int = Field(default=24, env="RECORDINGS_TTL_HOURS")
+
     # База данных
     database_url: str = Field(
         default="postgresql+asyncpg://neurodipole:neurodipole@db:5432/diplock",

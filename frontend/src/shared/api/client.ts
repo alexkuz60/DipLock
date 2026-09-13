@@ -4,7 +4,14 @@
  * В dev-режиме запросы уходят на Vite dev-server и проксируются на :8000
  * (same-origin, CORS не нужен). В собранном виде UI раздаёт сам FastAPI.
  */
-import type { AnalyzeResponse, InitStatus, JobCreated, JobStatus, MetaResponse } from './types'
+import type {
+  AnalyzeResponse,
+  InitStatus,
+  JobCreated,
+  JobStatus,
+  MetaResponse,
+  RecordingMeta,
+} from './types'
 
 export const API_PREFIX = '/api/v1'
 
@@ -98,4 +105,8 @@ export const api = {
   /** История задач (новые — в конце). */
   jobs: (limit = 20, signal?: AbortSignal) =>
     request<JobStatus[]>(`${API_PREFIX}/jobs?limit=${limit}`, { signal }),
+
+  /** Паспорт загруженной записи (метаданные, без обработки). */
+  recording: (recordingId: string, signal?: AbortSignal) =>
+    request<RecordingMeta>(`${API_PREFIX}/recordings/${recordingId}`, { signal }),
 }

@@ -17,6 +17,16 @@ _MONTAGE_NAMES = ("colin27_1020", "standard_1020")
 _UNREALISTIC_STD_V = 1e-3  # > 1 мВ std для ЭЭГ физиологически невозможно
 _UV_TO_V = 1e-6
 
+
+def looks_unscaled(data_v: np.ndarray) -> bool:
+    """Похоже ли, что EDF прочитан как «вольты», хотя реально это микровольты.
+
+    Медианный std по каналам больше 1 мВ для ЭЭГ физиологически невозможен —
+    значит, файл без physical dimension и данные надо пересчитать x1e-6.
+    Используется и полным загрузчиком, и чтением метаданных записи (2.2).
+    """
+    return float(np.median(np.std(data_v, axis=1))) > _UNREALISTIC_STD_V
+
 # Устаревшие обозначения 10-20 -> современные (MNE montage знает оба)
 _CHANNEL_ALIASES: Dict[str, str] = {
     "T3": "T7",
@@ -71,8 +81,8 @@ def _ensure_physical_units(raw: mne.io.BaseRaw, requested_units: Optional[str]) 
     """
     if requested_units is not None:
         return raw
-    median_std = float(np.median(np.std(raw.get_data(verbose=False), axis=1)))
-    if median_std > _UNREALISTIC_STD_V:
+    if looks_unscaled(raw.get_data(verbose=False)):
+        median_std = float(np.median(np.std(raw.get_data(verbose=False), axis=1)))
         logger.warning(
             "Нефизиологичный масштаб EDF (median std=%.3g В): похоже, файл без "
             "physical dimension. Пересчитываем как микровольты (x1e-6). "

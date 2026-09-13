@@ -60,6 +60,31 @@ class ArtifactTypes(BaseModel):
     ica_eog: int = 0
 
 
+class RecordingMeta(BaseModel):
+    """Паспорт загруженной для просмотра записи EDF (просмотр ≠ обработка)."""
+
+    recording_id: str
+    filename: str
+    n_channels: int = Field(description="Число каналов в файле")
+    channels: List[str] = Field(
+        default_factory=list,
+        description="Каналы, сопоставленные с монтажом 10-20 (в порядке монтажа)",
+    )
+    unmatched_channels: List[str] = Field(
+        default_factory=list, description="Каналы файла, не вошедшие в монтаж 10-20"
+    )
+    sfreq: float = Field(description="Частота дискретизации, Гц")
+    duration_sec: float
+    units_autoscaled: bool = Field(
+        description="Применён авто-пересчёт единиц (файл без physical dimension)"
+    )
+    edf_units: Optional[str] = Field(
+        default=None, description="Явные единицы из EDF_UNITS; None = автоопределение"
+    )
+    warnings: List[str] = Field(default_factory=list)
+    created_at: datetime
+
+
 class PipelineInfo(BaseModel):
     """Провенанс результата: чем и с какими параметрами посчитано (F16)."""
 

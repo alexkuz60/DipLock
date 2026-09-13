@@ -75,3 +75,77 @@ def epochs_alpha() -> mne.Epochs:
         raw, events, tmin=0, tmax=1.0, baseline=None,
         preload=True, verbose=False,
     )
+
+
+def write_minimal_edf(path, ch_names, data_uv, sfreq, record_sec=1.0):
+    """Минимальный корректный EDF для тестов загрузки (без edfio).
+
+    Данные в мкВ, little-endian int16, записи по ``record_sec`` секунд.
+    Формат: фиксированная ширина полей заголовка (256 байт + 256 на канал).
+    """
+    ns = len(ch_names)
+    n_times = data_uv.shape[1]
+    samps_per_record = int(round(sfreq * record_sec))
+    n_records = int(np.ceil(n_times / samps_per_record))
+    pad = n_records * samps_per_record - n_times
+    if pad:
+        data_uv = np.pad(data_uv, ((0, 0), (0, pad)))
+
+    phys_min, phys_max = float(data_uv.min()) - 1, float(data_uv.max()) + 1
+    dig_min, dig_max = -32768, 32767
+
+    def field(text, width):
+        return str(text).ljust(width)[:width]
+
+    header_bytes = 256 + ns * 256
+    parts = [
+        field("0", 8), field("Synthetic DipLock", 80), field("Test recording", 80),
+        field("01.01.85", 8), field("00.00.00", 8), field(header_bytes, 8),
+        field("", 44), field(n_records, 8), field(record_sec, 8), field(ns, 4),
+    ]
+    for i in range(ns):
+        parts.append(field(ch_names[i], 16))
+    for _ in range(ns):
+        parts.append(field("AgAgCl", 80))  # трансдьюсер
+    for _ in range(ns):
+        parts.append(field("uV", 8))
+    for _ in range(ns):
+        parts.append(field(phys_min, 8))
+    for _ in range(ns):
+        parts.append(field(phys_max, 8))
+    for _ in range(ns):
+        parts.append(field(dig_min, 8))
+    for _ in range(ns):
+        parts.append(field(dig_max, 8))
+    for _ in range(ns):
+        parts.append(field("", 80))  # prefiltering
+    for _ in range(ns):
+        parts.append(field(samps_per_record, 8))
+    for _ in range(ns):
+        parts.append(field("", 32))
+    header = "".join(parts).encode("latin-1")
+    assert len(header) == header_bytes, (len(header), header_bytes)
+
+    scale = (phys_max - phys_min) / (dig_max - dig_min)
+    digital = np.rint((data_uv - phys_min) / scale + dig_min).astype("<i2")
+
+    with open(path, "wb") as fh:
+        fh.write(header)
+        for rec in range(n_records):
+            start = rec * samps_per_record
+            for ch in range(ns):
+                fh.write(digital[ch, start : start + samps_per_record].tobytes())
+
+
+@pytest.fixture
+def edf_file(tmp_path):
+    """Минимальный EDF: 5 каналов 10-20, 250 Гц, 4 с, синусы ~20 мкВ."""
+    path = tmp_path / "probe.edf"
+    ch_names = list(settings.standard_channels[:5])
+    sfreq = 250.0
+    t = np.arange(int(4 * sfreq)) / sfreq
+    data = np.vstack(
+        [np.sin(2 * np.pi * (6 + i) * t) * 20 + i for i in range(len(ch_names))]
+    )
+    write_minimal_edf(path, ch_names, data, sfreq)
+    return path

@@ -49,7 +49,8 @@ describe('каркас приложения', () => {
     expect(
       screen.getByRole('heading', { level: 1, name: 'EDF — просмотр записи' }),
     ).toBeInTheDocument()
-    expect(screen.getByText(/Фаза 2/)).toBeInTheDocument()
+    // Рабочая область раздела EDF: зона загрузки записи (срезы 2.2–2.3)
+    expect(screen.getByText('Файл записи не загружен')).toBeInTheDocument()
   })
 
   it('на Главной нет тулс-хедера раздела', () => {

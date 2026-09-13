@@ -3,7 +3,7 @@
  * реализуется в следующих фазах — планы перечислены в `docs/ui.md`.
  */
 import type { ReactNode } from 'react'
-import { Layers, Radar, Table2, Waves } from 'lucide-react'
+import { Layers, Radar, Table2 } from 'lucide-react'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { Panel } from '@/shared/ui/Panel'
 
@@ -44,24 +44,6 @@ function StubPanel({ title, options }: { title: string; options: string[] }) {
         ))}
       </ul>
     </Panel>
-  )
-}
-
-export function EdfSection() {
-  return (
-    <StubSection
-      phase="Фаза 2: рабочая область просмотра записи (параметры в правой панели уже работают)"
-      icon={<Waves className="size-12" />}
-      title="EDF — просмотр записи"
-      description="Мультитрековый просмотр ЭЭГ, зоны артефактов, маркеры эпох и инструменты предподготовки."
-      planned={[
-        'Загрузка EDF (drag & drop) с прогрессом и валидацией',
-        '18 треков 10-20 на canvas, дефолт-зум — вся сессия',
-        'Дискретные уровни зума x1 / x2 / x4 / x8 / x16 (min/max-огибающая)',
-        'Цветовые зоны артефактов и границы эпох, штриховка отброшенных эпох',
-        'Кнопка «Пересчитать предподготовку»: задача артефактов и эпох (без фитинга диполей)',
-      ]}
-    />
   )
 }
 
