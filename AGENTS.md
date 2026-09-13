@@ -106,8 +106,9 @@ cd frontend && npm run test                                    # Vitest (jsdom)
 санитизацию загрузок, config, bandpass_filter, epoch_segmenter, montage edf_loader; на UI — каркас
 (рейл, тулс-хедер, панели, хоткеи), реестр разделов, «Главная», «Настройки», «Состояние сервера»,
 HTTP-клиент и разбор ошибок, контролы правой панели, параметры раздела EDF, загрузка записи
-(`EdfSection`) и вьюер треков (`viewer/TrackStack` — с моком uPlot, математика окна/огибающей в
-`viewerMath.test.ts`, демо-сигнал в `demoSignal.test.ts`).
+(`EdfSection`), вьюер треков (`viewer/TrackStack` — с моком uPlot, математика окна/огибающей в
+`viewerMath.test.ts`, демо-сигнал в `demoSignal.test.ts`) и тулс-хедер раздела (`EdfToolActions` +
+`EdfRecalcButtons`, диалог паспорта `SessionPassportDialog`, стор записи `edfRecording.test.ts`).
 **Правило:** новый сервис/багфикс → тест (backend → pytest, frontend → Vitest).
 
 ## Правила безопасности

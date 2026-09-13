@@ -1,10 +1,18 @@
-/** Тесты слоя параметров EDF: дефолты из /meta, выбор каналов, признак устаревания. */
+/** Тесты слоя параметров EDF: дефолты из /meta, выбор каналов, стадии перерасчёта. */
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
   EDF_PARAM_DEFAULTS,
+  RECALC_STAGES,
+  STAGE_PARAM_KEYS,
   edfParamsFromMeta,
-  paramsEqual,
+  emptyStageSnapshot,
+  recalcStatusFrom,
+  stageSignature,
+  stageStateOf,
+  stageStatesOf,
   useEdfParams,
+  type EdfParams,
+  type RecalcStage,
 } from '@/shared/state/edfParams'
 import { metaFixture } from '@/test/fixtures'
 
@@ -13,8 +21,14 @@ function resetStore(): void {
   useEdfParams.setState({
     params: { ...EDF_PARAM_DEFAULTS },
     availableChannels: [],
-    applied: null,
+    stageApplied: emptyStageSnapshot(),
   })
+}
+
+/** Состояние стадии по текущим параметрам стора. */
+function stageState(stage: RecalcStage): string {
+  const { params, stageApplied } = useEdfParams.getState()
+  return stageStateOf(params, stageApplied, stage)
 }
 
 describe('слой параметров EDF', () => {
@@ -86,61 +100,123 @@ describe('слой параметров EDF', () => {
     expect(params.visibleChannels).toEqual(['Fp1', 'Fp2'])
   })
 
-  it('markApplied согласует снимок с параметрами, правка параметра его рассинхронизирует', () => {
+  it('снимок стадии делает её актуальной, правка её параметра — устаревшей', () => {
     useEdfParams.getState().setAvailableChannels(['Fp1'])
-    expect(useEdfParams.getState().applied).toBeNull()
+    expect(stageState('filter')).toBe('not_run')
 
-    useEdfParams.getState().markApplied()
+    useEdfParams.getState().markStageApplied('filter')
 
-    const applied = useEdfParams.getState().applied
-    expect(applied).not.toBeNull()
-    expect(paramsEqual(applied!, useEdfParams.getState().params)).toBe(true)
+    expect(stageState('filter')).toBe('ready')
+    // Соседние стадии пересчёт фильтра не «подтягивает»
+    expect(stageState('artifacts')).toBe('not_run')
+    expect(stageState('epochs')).toBe('not_run')
 
-    useEdfParams.getState().setParams({ filterPreset: 'custom' })
-    expect(paramsEqual(useEdfParams.getState().applied!, useEdfParams.getState().params)).toBe(false)
+    useEdfParams.getState().setParams({ notchHz: 50 })
+    expect(stageState('filter')).toBe('stale')
+    expect(stageState('artifacts')).toBe('not_run')
   })
 
-  it('clearApplied забывает результат (например, при открытии другой записи)', () => {
+  it('markApplied отмечает все стадии, clearApplied(stage) — только одну', () => {
     useEdfParams.getState().markApplied()
+    expect(RECALC_STAGES.map(stageState)).toEqual(['ready', 'ready', 'ready'])
+
+    useEdfParams.getState().clearApplied('artifacts')
+    expect(stageState('filter')).toBe('ready')
+    expect(stageState('artifacts')).toBe('not_run')
+
     useEdfParams.getState().clearApplied()
-
-    expect(useEdfParams.getState().applied).toBeNull()
+    expect(RECALC_STAGES.map(stageState)).toEqual(['not_run', 'not_run', 'not_run'])
   })
 
-  it('paramsEqual реагирует на каждый значимый параметр', () => {
+  it('параметры отрисовки не устаревают расчёт', () => {
+    useEdfParams.getState().markApplied()
+
+    useEdfParams.getState().setParams({
+      timeLevel: 3,
+      amplitudeMode: 'per_channel',
+      amplitudeScaleUv: 100,
+      epochBoundaries: false,
+      droppedEpochsHatched: false,
+      artifactVisibility: { ...EDF_PARAM_DEFAULTS.artifactVisibility, ica_eog: false },
+    })
+
+    const status = recalcStatusFrom(
+      stageStatesOf(useEdfParams.getState().params, useEdfParams.getState().stageApplied),
+    )
+    expect(status.stale).toBe(0)
+    expect(status.ready).toBe(3)
+    expect(status.text).toBe('Результат соответствует параметрам')
+  })
+
+  it('сводка различает «не рассчитан», «неполный» и «устаревший» результат', () => {
+    const notRun = recalcStatusFrom({ filter: 'not_run', artifacts: 'not_run', epochs: 'not_run' })
+    expect(notRun.tone).toBe('neutral')
+    expect(notRun.text).toBe('Результат не рассчитан')
+
+    const partial = recalcStatusFrom({ filter: 'ready', artifacts: 'not_run', epochs: 'not_run' })
+    expect(partial.text).toBe('Результат неполный: пересчитано 1 из 3 стадий')
+
+    const stale = recalcStatusFrom({ filter: 'stale', artifacts: 'ready', epochs: 'ready' })
+    expect(stale.tone).toBe('warn')
+    expect(stale.text).toBe('Параметры изменены — результат не пересчитан')
+  })
+
+  it('подпись стадии реагирует на каждый свой параметр и не реагирует на чужие', () => {
     const base = { ...EDF_PARAM_DEFAULTS }
-    const variants: Partial<typeof base>[] = [
-      { amplitudeMode: 'per_channel' },
-      { amplitudeScaleUv: 100 },
-      { timeLevel: 3 },
-      { filterPreset: 'none' },
-      { customBand: [2, 30] },
-      { notchHz: 50 },
-      { reference: 'custom' },
-      { zScoreThreshold: 7 },
-      { peakToPeakUv: 120 },
-      { flatLineUv: 3 },
-      { flatLineMs: 300 },
-      { epochLengthMs: 1000 },
-      { edfUnits: 'uV' },
-      { epochBoundaries: false },
-      { droppedEpochsHatched: false },
-      { visibleChannels: ['Fp1'] },
-      { artifactVisibility: { ...base.artifactVisibility, ica_eog: false } },
-    ]
-
-    for (const variant of variants) {
-      expect(paramsEqual(base, { ...base, ...variant })).toBe(false)
+    const variants: Record<RecalcStage, Partial<EdfParams>[][]> = {
+      filter: [
+        [{ filterPreset: 'none' }],
+        [{ customBand: [2, 30] }],
+        [{ notchHz: 50 }],
+        [{ reference: 'custom' }],
+        [{ edfUnits: 'uV' }],
+        [{ visibleChannels: ['Fp1'] }],
+      ],
+      artifacts: [
+        [{ zScoreThreshold: 7 }],
+        [{ peakToPeakUv: 120 }],
+        [{ flatLineUv: 3 }],
+        [{ flatLineMs: 300 }],
+      ],
+      epochs: [[{ epochLengthMs: 1000 }]],
     }
-    expect(paramsEqual(base, { ...base })).toBe(true)
+
+    for (const stage of RECALC_STAGES) {
+      // Каждый «свой» параметр меняет подпись стадии
+      for (const variant of variants[stage]) {
+        expect(stageSignature({ ...base, ...variant[0] }, stage)).not.toBe(
+          stageSignature(base, stage),
+        )
+      }
+    }
+
+    // Чужие параметры подпись не меняют: пороги артефактов не влияют на эпохи и т.д.
+    expect(stageSignature({ ...base, zScoreThreshold: 9 }, 'filter')).toBe(
+      stageSignature(base, 'filter'),
+    )
+    expect(stageSignature({ ...base, epochLengthMs: 500 }, 'artifacts')).toBe(
+      stageSignature(base, 'artifacts'),
+    )
+    expect(stageSignature({ ...base, filterPreset: 'none' }, 'epochs')).toBe(
+      stageSignature(base, 'epochs'),
+    )
   })
 
-  it('в localStorage уходят параметры, но не снимок результата', () => {
+  it('каждая стадия описана своим набором ключей параметров', () => {
+    for (const stage of RECALC_STAGES) {
+      expect(STAGE_PARAM_KEYS[stage].length).toBeGreaterThan(0)
+      // Параметры отрисовки в расчёте не участвуют
+      expect(STAGE_PARAM_KEYS[stage]).not.toContain('timeLevel')
+      expect(STAGE_PARAM_KEYS[stage]).not.toContain('amplitudeScaleUv')
+    }
+  })
+
+  it('в localStorage уходят параметры, но не снимки результатов', () => {
     useEdfParams.getState().markApplied()
     useEdfParams.getState().setParams({ notchHz: 50 })
 
     const raw = localStorage.getItem('diplock.edf') ?? ''
     expect(raw).toContain('"notchHz":50')
-    expect(raw).not.toContain('applied')
+    expect(raw).not.toContain('stageApplied')
   })
 })

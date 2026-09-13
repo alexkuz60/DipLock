@@ -9,6 +9,8 @@ import type { ComponentType } from 'react'
 import { AppShell } from '@/app/layout/AppShell'
 import { EdfPanel } from './EdfPanel'
 import { EdfSection } from './EdfSection'
+import { EdfToolHeaderActions } from './EdfToolActions'
+import { EdfZoomSelect } from './EdfZoomSelect'
 import { HomeSection } from './HomeSection'
 import { ServerStatusSection } from './ServerStatusSection'
 import { SettingsSection } from './SettingsSection'
@@ -26,11 +28,20 @@ type SectionModule = {
   Component: ComponentType
   /** Содержимое правого сайдбара раздела (если у него есть панель) */
   Panel?: ComponentType
+  /** Кнопки-действия тулс-хедера (после заголовка раздела) */
+  ToolActions?: ComponentType
+  /** Вторичные контролы тулс-хедера (правый край, перед кнопкой панели) */
+  HeaderExtra?: ComponentType
 }
 
 const SECTION_MODULES: Record<SectionId, SectionModule> = {
   home: { Component: HomeSection },
-  edf: { Component: EdfSection, Panel: EdfPanel },
+  edf: {
+    Component: EdfSection,
+    Panel: EdfPanel,
+    ToolActions: EdfToolHeaderActions,
+    HeaderExtra: EdfZoomSelect,
+  },
   dipoles: { Component: DipolesSection, Panel: DipolesPanel },
   table: { Component: LocalizationTableSection, Panel: LocalizationTablePanel },
   group: { Component: GroupAnalysisSection, Panel: GroupAnalysisPanel },
@@ -41,10 +52,15 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
 /** Раздел внутри каркаса: тулс-хедер + рабочая область + панель опций. */
 export function SectionRoute({ id }: { id: SectionId }) {
   const section = getSection(id)
-  const { Component, Panel } = SECTION_MODULES[id]
+  const { Component, Panel, ToolActions, HeaderExtra } = SECTION_MODULES[id]
 
   return (
-    <AppShell section={section} panel={Panel ? <Panel /> : undefined}>
+    <AppShell
+      section={section}
+      actions={ToolActions ? <ToolActions /> : undefined}
+      headerExtra={HeaderExtra ? <HeaderExtra /> : undefined}
+      panel={Panel ? <Panel /> : undefined}
+    >
       <Component />
     </AppShell>
   )

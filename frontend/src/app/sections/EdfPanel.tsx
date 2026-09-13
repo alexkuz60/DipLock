@@ -9,17 +9,20 @@
  * монтажа) — конфигурация остаётся в `backend/.env`, UI её не дублирует.
  */
 import { useQuery } from '@tanstack/react-query'
-import { RotateCcw, Sigma } from 'lucide-react'
+import { RotateCcw } from 'lucide-react'
 import { api } from '@/shared/api/client'
+import { RecalcProgress } from './EdfToolActions'
 import {
   ARTIFACT_KINDS,
   ARTIFACT_LABELS,
+  EDF_UNITS_OPTIONS,
   FILTER_PRESETS,
+  RECALC_STAGES,
+  RECALC_STAGE_LABELS,
   TIME_LEVELS,
-  useEdfApplied,
-  useEdfDirty,
   useEdfParams,
   useEdfParamsValue,
+  useEdfRecalcStatus,
   type AmplitudeMode,
   type EdfUnits,
   type FilterPresetId,
@@ -51,16 +54,9 @@ const NOTCH_OPTIONS = [
   { value: '60', label: '60 Гц (США)' },
 ]
 
-const EDF_UNIT_OPTIONS: { value: EdfUnits; label: string }[] = [
-  { value: 'auto', label: 'Авто (по масштабу файла)' },
-  { value: 'V', label: 'Вольты (V)' },
-  { value: 'mV', label: 'Милливольты (mV)' },
-  { value: 'uV', label: 'Микровольты (µV)' },
-]
-
 /** Пояснение к кнопке расчёта: обработка не запускается сама по себе */
 const RECALC_HINT =
-  'Расчёт запускается только этой кнопкой — правка параметров ничего не пересчитывает. Задача предподготовки (артефакты + эпохи) ещё не подключена к серверу, поэтому кнопка неактивна.'
+  'Расчёт запускается только кнопками шапки раздела — правка параметров ничего не пересчитывает. Задача предподготовки ещё не подключена к серверу (срез 2.7), поэтому кнопки неактивны.'
 
 export function EdfPanel() {
   const params = useEdfParamsValue()
@@ -70,8 +66,9 @@ export function EdfPanel() {
   const resetToDefaults = useEdfParams((state) => state.resetToDefaults)
   const recording = useEdfRecording((state) => state.recording)
   const demo = useEdfRecording((state) => state.demo)
-  const applied = useEdfApplied()
-  const dirty = useEdfDirty()
+  const passport = useEdfRecording((state) => state.passport)
+  const setPassport = useEdfRecording((state) => state.setPassport)
+  const recalc = useEdfRecalcStatus()
 
   const meta = useQuery({
     queryKey: ['meta'],
@@ -91,12 +88,17 @@ export function EdfPanel() {
     label: `${value} мс`,
   }))
 
-  const status =
-    applied === null
-      ? { tone: 'neutral' as const, text: 'Результат не рассчитан' }
-      : dirty
-        ? { tone: 'warn' as const, text: 'Параметры изменены — результат не пересчитан' }
-        : { tone: 'ok' as const, text: 'Результат соответствует параметрам' }
+  const status = { tone: recalc.tone, text: recalc.text }
+  const stageHint = RECALC_STAGES.map(
+    (stage) =>
+      `${RECALC_STAGE_LABELS[stage]} — ${
+        recalc.states[stage] === 'ready'
+          ? 'рассчитано'
+          : recalc.states[stage] === 'stale'
+            ? 'параметры изменены'
+            : 'не рассчитано'
+      }`,
+  ).join('; ')
 
   return (
     <>
@@ -105,18 +107,14 @@ export function EdfPanel() {
         {recording ? (
           <>
             <InfoRow label="Файл" value={recording.filename} mono />
-            <InfoRow label="Каналов в файле" value={recording.n_channels} />
-            <InfoRow label="Каналы 10-20" value={recording.channels.length} />
-            <InfoRow label="Частота" value={`${recording.sfreq} Гц`} mono />
-            <InfoRow label="Длительность" value={`${recording.duration_sec} с`} mono />
-            <InfoRow
-              label="Единицы"
-              value={
-                recording.units_autoscaled
-                  ? 'µV (авто-пересчёт)'
-                  : (recording.edf_units ?? 'из файла')
-              }
-            />
+            <InfoRow label="Каналов" value={recording.n_channels} />
+            <InfoRow label="Частота дискретизации" value={`${recording.sfreq} Гц`} mono />
+            <InfoRow label="Длина сессии" value={`${recording.duration_sec} с`} mono />
+            {recording.units_autoscaled ? (
+              <div className="mt-2">
+                <StatusPill tone="warn">Единицы масштабированы в µV автоматически</StatusPill>
+              </div>
+            ) : null}
             {demo ? <InfoRow label="Рабочая область" value="демо-сигнал (синтетика)" /> : null}
             {recording.warnings.length ? (
               <div className="mt-2 space-y-1">
@@ -127,20 +125,21 @@ export function EdfPanel() {
                 ))}
               </div>
             ) : null}
-            <p className="mt-2 text-sm text-fg-2">
-              Загружен только паспорт записи: обработка не запускалась (правило «UI не запускает
-              расчёт сам»).
-            </p>
           </>
         ) : (
-          <>
-            <InfoRow label="Файл" value="не загружен" />
-            <p className="mt-1 text-sm text-fg-2">
-              Загрузка EDF — в рабочей области раздела (drag & drop или кнопка «Выбрать файл EDF»).
-              Параметры ниже сохраняются и применяются к загрузке.
-            </p>
-          </>
+          <InfoRow label="Файл" value="не загружен" />
         )}
+
+        <div className="mt-2">
+          <SelectField
+            label="Единицы в БД"
+            value={passport.units}
+            options={EDF_UNITS_OPTIONS}
+            disabled={recording === null}
+            hint="Формат амплитуды при занесении данных в БД: EDF-файл не перезаписывается."
+            onChange={(value: EdfUnits) => setPassport({ units: value })}
+          />
+        </div>
       </Panel>
 
       <Panel title="Фильтры и референс">
@@ -313,7 +312,7 @@ export function EdfPanel() {
         <SelectField
           label="Единицы"
           value={params.edfUnits}
-          options={EDF_UNIT_OPTIONS}
+          options={EDF_UNITS_OPTIONS}
           onChange={(value) => setParams({ edfUnits: value })}
         />
       </Panel>
@@ -334,11 +333,20 @@ export function EdfPanel() {
       </Panel>
 
       <Panel title="Запуск">
-        <StatusPill tone={status.tone}>{status.text}</StatusPill>
+        {recording || demo ? (
+          <>
+            <StatusPill tone={status.tone}>{status.text}</StatusPill>
+            <div className="mt-3">
+              <RecalcProgress label="Готовность перерасчётов в панели" />
+            </div>
+            <p className="mt-2 text-sm text-fg-2" title={stageHint}>
+              Стадии: {stageHint}.
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-fg-2">Запись не загружена — пересчитывать пока нечего.</p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="primary" icon={<Sigma className="size-4" />} disabled title={RECALC_HINT}>
-            Пересчитать предподготовку
-          </Button>
           <Button
             icon={<RotateCcw className="size-4" />}
             onClick={() => resetToDefaults(meta.data ?? null)}

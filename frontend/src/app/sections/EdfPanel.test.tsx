@@ -1,14 +1,19 @@
 /**
  * Тесты панели раздела EDF: значения из /meta, отсутствие авто-запусков
- * обработки и индикация устаревшего результата.
+ * обработки и индикация устаревшего результата по стадиям.
  */
 import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { EdfPanel } from './EdfPanel'
-import { EDF_PARAM_DEFAULTS, useEdfParams } from '@/shared/state/edfParams'
+import {
+  EDF_PARAM_DEFAULTS,
+  emptyStageSnapshot,
+  useEdfParams,
+} from '@/shared/state/edfParams'
+import { useEdfRecording, EMPTY_PASSPORT } from '@/shared/state/edfRecording'
 import { mockApiFetch } from '@/test/apiMocks'
-import { metaFixture } from '@/test/fixtures'
+import { metaFixture, recordingFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 describe('панель раздела EDF', () => {
@@ -17,8 +22,9 @@ describe('панель раздела EDF', () => {
     useEdfParams.setState({
       params: { ...EDF_PARAM_DEFAULTS },
       availableChannels: [],
-      applied: null,
+      stageApplied: emptyStageSnapshot(),
     })
+    useEdfRecording.setState({ recording: null, passport: { ...EMPTY_PASSPORT } })
   })
 
   it('показывает пороги, длины эпох и каналы из конфигурации сервера', async () => {
@@ -55,6 +61,7 @@ describe('панель раздела EDF', () => {
   it('показывает устаревание результата и сбрасывает параметры к значениям сервера', async () => {
     const user = userEvent.setup()
     mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture, passport: { ...EMPTY_PASSPORT } })
     renderWithProviders(<EdfPanel />)
     await screen.findByLabelText('Fp1')
 
@@ -75,12 +82,53 @@ describe('панель раздела EDF', () => {
     expect(screen.getByText('Результат соответствует параметрам')).toBeInTheDocument()
   })
 
-  it('не даёт запустить предподготовку, пока задача не подключена к серверу', () => {
+  it('не запускает обработку сама: перерасчёт — только кнопками шапки раздела', () => {
     mockApiFetch()
     renderWithProviders(<EdfPanel />)
 
-    expect(screen.getByRole('button', { name: /Пересчитать предподготовку/ })).toBeDisabled()
-    expect(screen.getByText(/Расчёт запускается только этой кнопкой/)).toBeInTheDocument()
+    expect(screen.getByText(/Расчёт запускается только кнопками шапки раздела/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Пересчитать/ })).not.toBeInTheDocument()
+    // Пока записи нет, пересчитывать нечего — вместо статуса ясная причина
+    expect(screen.getByText(/пересчитывать пока нечего/)).toBeInTheDocument()
+  })
+
+  it('с записью показывает статус и подпись по стадиям перерасчёта', () => {
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture, passport: { ...EMPTY_PASSPORT } })
+    renderWithProviders(<EdfPanel />)
+
+    expect(screen.getByText('Результат не рассчитан')).toBeInTheDocument()
+    expect(
+      screen.getByRole('progressbar', { name: 'Готовность перерасчётов в панели' }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Фильтр и референс — не рассчитано/)).toBeInTheDocument()
+    expect(screen.getByText(/Поиск артефактов — не рассчитано/)).toBeInTheDocument()
+  })
+
+  it('в секции «Запись» — краткая инфа о файле вместо поясняющего текста', () => {
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture, passport: { ...EMPTY_PASSPORT } })
+    renderWithProviders(<EdfPanel />)
+
+    expect(screen.getByText(recordingFixture.filename)).toBeInTheDocument()
+    expect(screen.getByText('Каналов')).toBeInTheDocument()
+    expect(screen.getByText(`${recordingFixture.sfreq} Гц`)).toBeInTheDocument()
+    expect(screen.getByText(`${recordingFixture.duration_sec} с`)).toBeInTheDocument()
+    expect(screen.queryByText(/Загрузка EDF — в рабочей области раздела/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Каналы 10-20/)).not.toBeInTheDocument()
+  })
+
+  it('единицы для БД правятся в паспорте и не делают запросов', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture, passport: { ...EMPTY_PASSPORT } })
+    renderWithProviders(<EdfPanel />)
+
+    const callsBefore = fetchMock.mock.calls.length
+    await user.selectOptions(screen.getByLabelText('Единицы в БД'), 'uV')
+
+    expect(useEdfRecording.getState().passport.units).toBe('uV')
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 
   it('показывает поля своего диапазона только для пресета «Свой диапазон»', async () => {

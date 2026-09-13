@@ -9,7 +9,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EdfSection } from './EdfSection'
-import { EDF_PARAM_DEFAULTS, useEdfParams } from '@/shared/state/edfParams'
+import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { mockApiFetch } from '@/test/apiMocks'
 import { recordingFixture } from '@/test/fixtures'
@@ -57,7 +57,7 @@ describe('рабочая область раздела EDF', () => {
     useEdfParams.setState({
       params: { ...EDF_PARAM_DEFAULTS },
       availableChannels: [],
-      applied: null,
+      stageApplied: emptyStageSnapshot(),
     })
     useEdfRecording.setState({
       recording: null,
@@ -78,7 +78,7 @@ describe('рабочая область раздела EDF', () => {
     expect(screen.getByText('Файл записи не загружен')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Выбрать файл EDF/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Демо-сигнал/ })).toBeInTheDocument()
-    expect(screen.getByText(/обработка запускается отдельной кнопкой/)).toBeInTheDocument()
+    expect(screen.getByText(/обработка артефактов и шума запускается отдельными действиями/)).toBeInTheDocument()
   })
 
   it('загружает выбранный файл и показывает паспорт записи', async () => {

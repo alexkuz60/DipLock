@@ -9,7 +9,7 @@ import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SignalData } from '@/shared/lib/demoSignal'
-import { EDF_PARAM_DEFAULTS, useEdfParams } from '@/shared/state/edfParams'
+import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
 import { uplotCharts } from '@/test/uplot'
 
 import { TrackStack } from './TrackStack'
@@ -37,7 +37,7 @@ function paramsState(patch: Partial<typeof EDF_PARAM_DEFAULTS> = {}) {
   useEdfParams.setState({
     params: { ...EDF_PARAM_DEFAULTS, ...patch },
     availableChannels: [],
-    applied: null,
+    stageApplied: emptyStageSnapshot(),
   })
 }
 

@@ -3,14 +3,20 @@
  * результат предподготовки устарел.
  *
  * Ключевое правило (`docs/ui.md`): правка параметра **ничего не запускает**.
- * Обработка стартует только по кнопке, которая вызывает `markApplied()` —
- * с этого момента параметры и результат снова согласованы. До этого панель
- * показывает «параметры изменены, результат не пересчитан».
+ * Обработка стартует только по кнопке, которая вызывает `markStageApplied()` —
+ * с этого момента параметры стадии и результат снова согласованы. До этого
+ * панель и тулс-хедер показывают «параметры изменены, результат не пересчитан».
  *
- * В localStorage уходят только параметры (`params`), но не снимок `applied`:
- * результат расчёта живёт на сервере и после перезагрузки страницы к нему
- * нужен новый запуск, поэтому «результат не получен» — честное состояние.
+ * **Стадии** (`RecalcStage`): фильтр/референс, поиск артефактов, нарезка эпох.
+ * У каждой свой набор параметров (`STAGE_PARAM_KEYS`) и свой снимок результата,
+ * поэтому пересчёт одной стадии не обесценивает две другие. Параметры
+ * отображения (зум, шкала мкВ, видимость зон) расчёт не устаревают вовсе.
+ *
+ * В localStorage уходят только параметры (`params`), но не снимки результатов:
+ * результат живёт на сервере и после перезагрузки страницы к нему нужен новый
+ * запуск, поэтому «результат не рассчитан» — честное состояние.
  */
+import { useMemo } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { MetaResponse } from '@/shared/api/types'
@@ -39,6 +45,14 @@ export type ReferenceMode = 'average' | 'custom'
 
 /** Единицы EDF: 'auto' — авто-детект масштаба на бэкенде (см. EDF_UNITS) */
 export type EdfUnits = 'auto' | 'V' | 'mV' | 'uV'
+
+/** Варианты единиц для селектов (панель и паспорт сессии) — один источник */
+export const EDF_UNITS_OPTIONS: { value: EdfUnits; label: string }[] = [
+  { value: 'auto', label: 'Авто (по масштабу файла)' },
+  { value: 'V', label: 'Вольты (V)' },
+  { value: 'mV', label: 'Милливольты (mV)' },
+  { value: 'uV', label: 'Микровольты (µV)' },
+]
 
 export type FilterPresetId = 'band_1_40' | 'band_0_5_70' | 'none' | 'custom'
 
@@ -135,29 +149,111 @@ export function edfParamsFromMeta(meta: MetaResponse | null | undefined): EdfPar
   }
 }
 
-/** Полное сравнение параметров: определяет, устарел ли результат расчёта. */
-export function paramsEqual(a: EdfParams, b: EdfParams): boolean {
-  return (
-    a.amplitudeMode === b.amplitudeMode &&
-    a.amplitudeScaleUv === b.amplitudeScaleUv &&
-    a.timeLevel === b.timeLevel &&
-    a.filterPreset === b.filterPreset &&
-    a.customBand[0] === b.customBand[0] &&
-    a.customBand[1] === b.customBand[1] &&
-    a.notchHz === b.notchHz &&
-    a.reference === b.reference &&
-    a.zScoreThreshold === b.zScoreThreshold &&
-    a.peakToPeakUv === b.peakToPeakUv &&
-    a.flatLineUv === b.flatLineUv &&
-    a.flatLineMs === b.flatLineMs &&
-    a.epochLengthMs === b.epochLengthMs &&
-    a.edfUnits === b.edfUnits &&
-    a.epochBoundaries === b.epochBoundaries &&
-    a.droppedEpochsHatched === b.droppedEpochsHatched &&
-    ARTIFACT_KINDS.every((kind) => a.artifactVisibility[kind] === b.artifactVisibility[kind]) &&
-    a.visibleChannels.length === b.visibleChannels.length &&
-    a.visibleChannels.every((name, index) => b.visibleChannels[index] === name)
-  )
+/**
+ * Стадии предподготовки. У каждой — свой набор параметров и свой снимок
+ * результата: пересчёт фильтра не обесценивает найденные артефакты.
+ */
+export type RecalcStage = 'filter' | 'artifacts' | 'epochs'
+
+export const RECALC_STAGES: RecalcStage[] = ['filter', 'artifacts', 'epochs']
+
+export const RECALC_STAGE_LABELS: Record<RecalcStage, string> = {
+  filter: 'Фильтр и референс',
+  artifacts: 'Поиск артефактов',
+  epochs: 'Нарезка эпох',
+}
+
+/**
+ * Параметры каждой стадии. Зум, шкала мкВ и видимость зон сюда не входят:
+ * это отрисовка, а не расчёт. Выбор каналов — исключение: при референсе «по
+ * каналам» он меняет результат фильтрации, поэтому относится к стадии «фильтр».
+ */
+export const STAGE_PARAM_KEYS: Record<RecalcStage, (keyof EdfParams)[]> = {
+  filter: ['filterPreset', 'customBand', 'notchHz', 'reference', 'edfUnits', 'visibleChannels'],
+  artifacts: ['zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs'],
+  epochs: ['epochLengthMs'],
+}
+
+/** Состояние стадии: не считалась / параметры изменились / результат актуален. */
+export type EdfStageState = 'not_run' | 'stale' | 'ready'
+
+/** Снимки результатов по стадиям: null — стадия ещё не рассчитывалась. */
+export type EdfStageSnapshot = Record<RecalcStage, string | null>
+
+export function emptyStageSnapshot(): EdfStageSnapshot {
+  return { filter: null, artifacts: null, epochs: null }
+}
+
+/** Сериализованный снимок параметров стадии — сравнение без глубокого equals. */
+export function stageSignature(params: EdfParams, stage: RecalcStage): string {
+  return JSON.stringify(STAGE_PARAM_KEYS[stage].map((key) => params[key]))
+}
+
+export function stageStateOf(
+  params: EdfParams,
+  snapshot: EdfStageSnapshot,
+  stage: RecalcStage,
+): EdfStageState {
+  const applied = snapshot[stage]
+  if (!applied) return 'not_run'
+  return applied === stageSignature(params, stage) ? 'ready' : 'stale'
+}
+
+export function stageStatesOf(
+  params: EdfParams,
+  snapshot: EdfStageSnapshot,
+): Record<RecalcStage, EdfStageState> {
+  return {
+    filter: stageStateOf(params, snapshot, 'filter'),
+    artifacts: stageStateOf(params, snapshot, 'artifacts'),
+    epochs: stageStateOf(params, snapshot, 'epochs'),
+  }
+}
+
+/** Сводка готовности перерасчёта: одна строка для панели и сегменты прогресс-бара. */
+export type EdfRecalcStatus = {
+  states: Record<RecalcStage, EdfStageState>
+  ready: number
+  stale: number
+  notRun: number
+  total: number
+  tone: 'neutral' | 'ok' | 'warn'
+  text: string
+}
+
+export function recalcStatusFrom(states: Record<RecalcStage, EdfStageState>): EdfRecalcStatus {
+  const total = RECALC_STAGES.length
+  const values = RECALC_STAGES.map((stage) => states[stage])
+  const ready = values.filter((value) => value === 'ready').length
+  const stale = values.filter((value) => value === 'stale').length
+  const notRun = values.filter((value) => value === 'not_run').length
+
+  if (ready === total) {
+    return { states, ready, stale, notRun, total, tone: 'ok', text: 'Результат соответствует параметрам' }
+  }
+  if (stale > 0) {
+    return {
+      states,
+      ready,
+      stale,
+      notRun,
+      total,
+      tone: 'warn',
+      text: 'Параметры изменены — результат не пересчитан',
+    }
+  }
+  if (ready === 0) {
+    return { states, ready, stale, notRun, total, tone: 'neutral', text: 'Результат не рассчитан' }
+  }
+  return {
+    states,
+    ready,
+    stale,
+    notRun,
+    total,
+    tone: 'warn',
+    text: `Результат неполный: пересчитано ${ready} из ${total} стадий`,
+  }
 }
 
 export type EdfParamsState = {
@@ -165,18 +261,20 @@ export type EdfParamsState = {
   params: EdfParams
   /** Каналы записи, доступные для выбора (пустой — запись не загружена) */
   availableChannels: string[]
-  /** Снимок параметров, для которого получен результат; null — результата нет */
-  applied: EdfParams | null
+  /** Снимки результатов по стадиям (null — стадия ещё не рассчитывалась) */
+  stageApplied: EdfStageSnapshot
   setParams: (patch: Partial<EdfParams>) => void
   setAvailableChannels: (channels: string[]) => void
   toggleChannel: (name: string) => void
   setAllChannels: (visible: boolean) => void
   /** Сброс к значениям сервера (пороги/эпохи из `/meta`) */
   resetToDefaults: (meta?: MetaResponse | null) => void
-  /** Фиксирует, что расчёт выполнен именно с текущими параметрами */
+  /** Фиксирует, что стадия рассчитана именно с текущими параметрами */
+  markStageApplied: (stage: RecalcStage) => void
+  /** Все стадии рассчитаны (полная предподготовка одной задачей) */
   markApplied: () => void
-  /** Забыть результат (например, при открытии другой записи) */
-  clearApplied: () => void
+  /** Забыть результат одной стадии или всех (при открытии другой записи) */
+  clearApplied: (stage?: RecalcStage) => void
 }
 
 export const useEdfParams = create<EdfParamsState>()(
@@ -184,7 +282,7 @@ export const useEdfParams = create<EdfParamsState>()(
     (set) => ({
       params: { ...EDF_PARAM_DEFAULTS },
       availableChannels: [],
-      applied: null,
+      stageApplied: emptyStageSnapshot(),
       setParams: (patch) => set((state) => ({ params: { ...state.params, ...patch } })),
       setAvailableChannels: (channels) =>
         set((state) => {
@@ -228,8 +326,25 @@ export const useEdfParams = create<EdfParamsState>()(
             },
           }
         }),
-      markApplied: () => set((state) => ({ applied: state.params })),
-      clearApplied: () => set({ applied: null }),
+      markStageApplied: (stage) =>
+        set((state) => ({
+          stageApplied: {
+            ...state.stageApplied,
+            [stage]: stageSignature(state.params, stage),
+          },
+        })),
+      markApplied: () =>
+        set((state) => {
+          const next = { ...state.stageApplied }
+          for (const stage of RECALC_STAGES) next[stage] = stageSignature(state.params, stage)
+          return { stageApplied: next }
+        }),
+      clearApplied: (stage) =>
+        set((state) =>
+          stage
+            ? { stageApplied: { ...state.stageApplied, [stage]: null } }
+            : { stageApplied: emptyStageSnapshot() },
+        ),
     }),
     {
       name: 'diplock.edf',
@@ -242,6 +357,9 @@ export const useEdfParams = create<EdfParamsState>()(
         const storedParams = stored.params ?? {}
         return {
           ...current,
+          // Снимки результатов не переживают перезагрузку — берём из дефолтов,
+          // а не из возможного мусора в localStorage.
+          stageApplied: emptyStageSnapshot(),
           params: {
             ...current.params,
             ...storedParams,
@@ -261,18 +379,29 @@ export function useEdfParamsValue(): EdfParams {
   return useEdfParams((state) => state.params)
 }
 
-/** Снимок параметров, для которого получен результат (null — не рассчитано). */
-export function useEdfApplied(): EdfParams | null {
-  return useEdfParams((state) => state.applied)
+/** Сводка готовности перерасчёта: состояния стадий + текст и тон для панели. */
+export function useEdfRecalcStatus(): EdfRecalcStatus {
+  const params = useEdfParams((state) => state.params)
+  const snapshot = useEdfParams((state) => state.stageApplied)
+  return useMemo(() => recalcStatusFrom(stageStatesOf(params, snapshot)), [params, snapshot])
 }
 
 /**
- * Изменены ли параметры после последнего расчёта.
- * Результата ещё нет → false: это не «изменено», а «не рассчитано».
+ * Готовность конкретной стадии: пересчитана ли она и не устарела ли.
+ * Кнопка перерасчёта активна при непустом `needsRecalc`.
  */
-export function useEdfDirty(): boolean {
+export function useEdfStageState(stage: RecalcStage): {
+  state: EdfStageState
+  needsRecalc: boolean
+} {
   const params = useEdfParams((state) => state.params)
-  const applied = useEdfParams((state) => state.applied)
-  if (!applied) return false
-  return !paramsEqual(params, applied)
+  const snapshot = useEdfParams((state) => state.stageApplied)
+  const state = stageStateOf(params, snapshot, stage)
+  return { state, needsRecalc: state !== 'ready' }
+}
+
+/** Есть ли хоть одна стадия, которую надо пересчитать (для кнопки «всё»). */
+export function useEdfNeedsRecalc(): boolean {
+  const status = useEdfRecalcStatus()
+  return status.ready !== status.total
 }

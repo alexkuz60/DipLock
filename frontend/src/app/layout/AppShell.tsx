@@ -23,13 +23,15 @@ const TYPING_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
 export type AppShellProps = {
   section: SectionConfig
   children: ReactNode
-  /** Действия в тулс-хедере */
+  /** Действия в тулс-хедере (сразу после заголовка раздела) */
   actions?: ReactNode
+  /** Вторичные действия тулс-хедера (у правого края) */
+  headerExtra?: ReactNode
   /** Содержимое правого сайдбара */
   panel?: ReactNode
 }
 
-export function AppShell({ section, children, actions, panel }: AppShellProps) {
+export function AppShell({ section, children, actions, headerExtra, panel }: AppShellProps) {
   const navigate = useNavigate()
   const toggleRightPanel = useUiStore((state) => state.toggleRightPanel)
 
@@ -62,7 +64,9 @@ export function AppShell({ section, children, actions, panel }: AppShellProps) {
       <IconRail />
 
       <div className="flex min-w-0 flex-col">
-        {section.hasToolHeader ? <ToolHeader section={section} actions={actions} /> : null}
+        {section.hasToolHeader ? (
+          <ToolHeader section={section} actions={actions} secondary={headerExtra} />
+        ) : null}
         <main className="min-h-0 flex-1 overflow-auto">{children}</main>
         <StatusBar section={section} />
       </div>

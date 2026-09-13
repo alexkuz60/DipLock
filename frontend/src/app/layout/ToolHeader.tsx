@@ -7,11 +7,13 @@ import { IconButton } from '@/shared/ui/IconButton'
 
 export type ToolHeaderProps = {
   section: SectionConfig
-  /** Действия раздела (запуск задачи, экспорт и т.п.) */
+  /** Действия раздела (запуск задачи, экспорт и т.п.) — сразу после заголовка */
   actions?: ReactNode
+  /** Вторичные действия — прижаты к правому краю, перед кнопкой панели опций */
+  secondary?: ReactNode
 }
 
-export function ToolHeader({ section, actions }: ToolHeaderProps) {
+export function ToolHeader({ section, actions, secondary }: ToolHeaderProps) {
   const open = useUiStore((state) => state.rightPanelOpen[section.id] ?? false)
   const setRightPanel = useUiStore((state) => state.setRightPanel)
 
@@ -19,8 +21,17 @@ export function ToolHeader({ section, actions }: ToolHeaderProps) {
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-border bg-bg-1 px-4">
       <h1 className="truncate text-lg font-semibold text-fg-0">{section.title}</h1>
 
-      <div className="ml-auto flex items-center gap-2">
-        {actions}
+      {actions ? (
+        <>
+          <span aria-hidden className="h-6 w-px shrink-0 bg-border" />
+          <div className="flex min-w-0 items-center gap-1.5" aria-label="Действия раздела">
+            {actions}
+          </div>
+        </>
+      ) : null}
+
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {secondary}
         {section.hasRightPanel ? (
           <IconButton
             icon={open ? <PanelRightClose className="size-5" /> : <PanelRight className="size-5" />}
