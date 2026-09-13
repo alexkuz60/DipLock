@@ -24,8 +24,12 @@ export const DEMO_CHANNELS = [
   'F7', 'F8', 'T7', 'T8', 'P7', 'P8', 'Fz', 'Cz', 'Pz', 'Oz',
 ]
 
-/** Детерминированный ГПСЧ (mulberry32): демо-данные одинаковы между запусками. */
-function mulberry32(seed: number): () => number {
+/**
+ * Детерминированный ГПСЧ (mulberry32): демо-данные одинаковы между запусками.
+ * Экспортируется, чтобы фикстура слоёв (`viewerLayers.ts`) использовала тот же
+ * генератор и не дублировала его.
+ */
+export function mulberry32(seed: number): () => number {
   let state = seed >>> 0
   return () => {
     state = (state + 0x6d2b79f5) >>> 0

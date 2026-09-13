@@ -20,23 +20,17 @@ import { useMemo } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { MetaResponse } from '@/shared/api/types'
+import type { ArtifactKind } from '@/shared/lib/artifacts'
 
-/** Типы артефактов — совпадают с `ArtifactTypes` в контракте API */
-export type ArtifactKind = 'zscore_outlier' | 'peak_to_peak' | 'flat_line' | 'ica_eog'
-
-export const ARTIFACT_KINDS: ArtifactKind[] = [
-  'zscore_outlier',
-  'peak_to_peak',
-  'flat_line',
-  'ica_eog',
-]
-
-export const ARTIFACT_LABELS: Record<ArtifactKind, string> = {
-  zscore_outlier: 'z-score выбросы',
-  peak_to_peak: 'Превышение peak-to-peak',
-  flat_line: 'Плоская линия',
-  ica_eog: 'ICA: EOG-компоненты',
-}
+// Контракт артефактов живёт в `shared/lib/artifacts.ts` (срез 2.6): цвета селектят
+// и панель, и слои вьюера. Реэкспорт — чтобы раздел импортировал одно место.
+export type { ArtifactKind } from '@/shared/lib/artifacts'
+export {
+  ARTIFACT_COLORS,
+  ARTIFACT_KINDS,
+  ARTIFACT_LABELS,
+  ARTIFACT_SHORT_LABELS,
+} from '@/shared/lib/artifacts'
 
 /** Как масштабировать треки: одна шкала на все каналы или своя у каждого */
 export type AmplitudeMode = 'shared' | 'per_channel'
@@ -275,6 +269,11 @@ export type EdfParamsState = {
   markApplied: () => void
   /** Забыть результат одной стадии или всех (при открытии другой записи) */
   clearApplied: (stage?: RecalcStage) => void
+  /**
+   * Показать/скрыть тип артефакта в слоях вьюера. Параметр отрисовки: расчёт
+   * не устаревает и запросов не делает (легенда в панели и в шапке вьюера).
+   */
+  toggleArtifactVisibility: (kind: ArtifactKind) => void
 }
 
 export const useEdfParams = create<EdfParamsState>()(
@@ -345,6 +344,16 @@ export const useEdfParams = create<EdfParamsState>()(
             ? { stageApplied: { ...state.stageApplied, [stage]: null } }
             : { stageApplied: emptyStageSnapshot() },
         ),
+      toggleArtifactVisibility: (kind) =>
+        set((state) => ({
+          params: {
+            ...state.params,
+            artifactVisibility: {
+              ...state.params.artifactVisibility,
+              [kind]: !state.params.artifactVisibility[kind],
+            },
+          },
+        })),
     }),
     {
       name: 'diplock.edf',

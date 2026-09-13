@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SignalData } from '@/shared/lib/demoSignal'
 import { frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
+import type { EdfViewerLayers } from '@/shared/lib/viewerLayers'
 import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
 import { uplotCharts } from '@/test/uplot'
 
@@ -92,7 +93,9 @@ describe('вьюер треков', () => {
     expect(screen.getByTestId('track-F4')).toBeInTheDocument()
     expect(screen.getByTestId('track-C3')).toBeInTheDocument()
     // Порядок — как в сигнале/монтаже, а не как пришёл из выбора
-    const labels = screen.getAllByRole('button').map((node) => node.textContent)
+    const labels = screen
+      .getAllByTestId(/^track-label-/)
+      .map((node) => node.textContent)
     expect(labels).toEqual(['F3', 'F4', 'C3'])
     expect(uplotCharts()).toHaveLength(3)
   })
@@ -211,3 +214,138 @@ describe('вьюер треков', () => {
     expect(screen.getByTestId('signal-source')).toHaveTextContent('огибающая, 100 т/канал')
   })
 })
+
+/**
+ * Слои результата (срез 2.6): зоны артефактов и эпохи поверх треков.
+ *
+ * Проверяем связку «параметры отрисовки → слои»: легенда и чекбоксы панели
+ * управляют одним состоянием (`artifactVisibility`), клик по зоне даёт тултип
+ * с типом/интервалом/каналами, а переключатели эпох убирают границы и штриховку.
+ */
+describe('слои результата вьюера', () => {
+  beforeEach(() => {
+    uplotCharts().length = 0
+    localStorage.clear()
+  })
+
+  /** Слои: две зоны в начале сессии и отброшенные эпохи 1 и 3 (10 с, 2 с/эпоха). */
+  function layersFixture(): EdfViewerLayers {
+    return {
+      source: 'demo',
+      artifacts: [
+        {
+          id: 'zscore_outlier-1',
+          kind: 'zscore_outlier',
+          onsetSec: 1,
+          durationSec: 1,
+          channels: ['F3'],
+        },
+        { id: 'flat_line-1', kind: 'flat_line', onsetSec: 5, durationSec: 0.5, channels: [] },
+      ],
+      rejectedEpochs: [1, 3],
+    }
+  }
+
+  it('рисует зоны, легенду с числом зон по типам и помечает источник фикстурой', () => {
+    paramsState({ visibleChannels: ['F3', 'F4', 'C3'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    expect(screen.getByTestId('track-layers')).toBeInTheDocument()
+    expect(screen.getByTestId('zone-zscore_outlier-1')).toBeInTheDocument()
+    expect(screen.getByTestId('zone-flat_line-1')).toBeInTheDocument()
+    expect(screen.getByTestId('legend-zscore_outlier')).toHaveTextContent('1')
+    expect(screen.getByTestId('legend-peak_to_peak')).toHaveTextContent('0')
+    expect(screen.getByTestId('legend-ica_eog')).toHaveTextContent('0')
+    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
+  })
+
+  it('границы эпох: первая совпадает с краем записи и не рисуется, штриховка — только отброшенные', () => {
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000 })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    // 10 с / 2 с = 5 эпох: границы есть у 1…4, край записи линией не помечаем
+    expect(screen.queryByTestId('epoch-edge-0')).not.toBeInTheDocument()
+    expect(screen.getByTestId('epoch-edge-1')).toBeInTheDocument()
+    expect(screen.getByTestId('epoch-edge-4')).toBeInTheDocument()
+    expect(screen.getByTestId('epoch-hatch-1')).toBeInTheDocument()
+    expect(screen.getByTestId('epoch-hatch-3')).toBeInTheDocument()
+    expect(screen.queryByTestId('epoch-hatch-0')).not.toBeInTheDocument()
+  })
+
+  it('тумблеры панели убирают слои: видимость типа и геометрию эпох', () => {
+    paramsState({
+      visibleChannels: ['F3'],
+      artifactVisibility: {
+        zscore_outlier: false,
+        peak_to_peak: true,
+        flat_line: true,
+        ica_eog: true,
+      },
+      epochBoundaries: false,
+      droppedEpochsHatched: false,
+    })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    expect(screen.queryByTestId('zone-zscore_outlier-1')).not.toBeInTheDocument()
+    expect(screen.getByTestId('zone-flat_line-1')).toBeInTheDocument()
+    // Эпохи не строятся вовсе — ни линий, ни штриховки
+    expect(screen.queryByTestId('epoch-edge-1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('epoch-hatch-1')).not.toBeInTheDocument()
+  })
+
+  it('клик по зоне показывает детали (тип, интервал, каналы), крестик их скрывает', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    const zone = screen.getByTestId('zone-zscore_outlier-1')
+    expect(screen.queryByTestId('zone-details')).not.toBeInTheDocument()
+
+    await user.click(zone)
+
+    const details = screen.getByTestId('zone-details')
+    expect(details).toHaveTextContent('z-score')
+    expect(details).toHaveTextContent('1.000–2.000 с')
+    expect(details).toHaveTextContent('Каналы: F3')
+    expect(zone).toHaveAttribute('aria-pressed', 'true')
+    // Зона без каналов говорит «весь монтаж», а не пустой список
+    await user.click(screen.getByTestId('zone-flat_line-1'))
+    expect(screen.getByTestId('zone-details')).toHaveTextContent('весь монтаж')
+
+    await user.click(screen.getByRole('button', { name: 'Скрыть детали зоны' }))
+    expect(screen.queryByTestId('zone-details')).not.toBeInTheDocument()
+  })
+
+  it('легенда переключает видимость без запросов к серверу (правило «только по кнопке»)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'] })
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    await user.click(screen.getByTestId('legend-zscore_outlier'))
+
+    expect(useEdfParams.getState().params.artifactVisibility.zscore_outlier).toBe(false)
+    expect(screen.queryByTestId('zone-zscore_outlier-1')).not.toBeInTheDocument()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('без пропа слоёв берёт демо-фикстуру под длину сигнала', () => {
+    paramsState({ visibleChannels: ['F3'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    expect(screen.getByTestId('track-layers')).toBeInTheDocument()
+    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
+    // Фикстура даёт минимум две зоны каждого типа — легенда не пустая
+    expect(screen.getByTestId('legend-ica_eog').textContent).toMatch(/[2-4]/)
+  })
+
+  it('результат расчёта помечается в подписи иначе, чем фикстура', () => {
+    paramsState({ visibleChannels: ['F3'] })
+    const layers: EdfViewerLayers = { ...layersFixture(), source: 'result' }
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layers} />)
+
+    expect(screen.getByText('слои: результат расчёта')).toBeInTheDocument()
+  })
+})
+

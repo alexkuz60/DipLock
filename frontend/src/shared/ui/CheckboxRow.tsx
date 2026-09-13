@@ -13,6 +13,8 @@ export type CheckboxRowProps = {
   disabled?: boolean
   /** Моноширинная подпись (имена каналов: Fp1, C3…) */
   mono?: boolean
+  /** Цвет метки перед подписью (например, цвет зоны артефакта в легенде) */
+  swatch?: string
   className?: string
 }
 
@@ -23,6 +25,7 @@ export function CheckboxRow({
   hint,
   disabled = false,
   mono = false,
+  swatch,
   className,
 }: CheckboxRowProps) {
   const id = useId()
@@ -38,6 +41,14 @@ export function CheckboxRow({
           onChange={(event) => onChange(event.target.checked)}
           className="size-4 shrink-0 accent-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40"
         />
+        {swatch ? (
+          <span
+            aria-hidden
+            data-testid="checkbox-swatch"
+            className="size-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: swatch }}
+          />
+        ) : null}
         <label
           htmlFor={id}
           className={cx(

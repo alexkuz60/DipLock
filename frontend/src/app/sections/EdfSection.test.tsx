@@ -67,6 +67,7 @@ describe('рабочая область раздела EDF', () => {
       signalFrames: {},
       signalsPending: 0,
       signalsError: null,
+      layers: null,
     })
   })
 
@@ -82,6 +83,21 @@ describe('рабочая область раздела EDF', () => {
     expect(screen.getByRole('button', { name: /Выбрать файл EDF/ })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Демо-сигнал/ })).toBeInTheDocument()
     expect(screen.getByText(/обработка артефактов и шума запускается отдельными действиями/)).toBeInTheDocument()
+  })
+
+  it('пропускает слои записи в вьюер: зоны и легенда появляются вместе с треками', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    stubUpload()
+    renderWithProviders(<EdfSection />)
+
+    await user.upload(screen.getByLabelText('Выбрать файл EDF'), edfFile())
+    await waitFor(() => expect(useEdfRecording.getState().signalFrames[1]).toBeTruthy())
+
+    // Слои построены под длину и монтаж записи и отрисованы поверх треков
+    expect(screen.getByTestId('track-layers')).toBeInTheDocument()
+    expect(screen.getAllByTestId(/^legend-/)).toHaveLength(4)
+    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
   })
 
   it('загружает выбранный файл и показывает паспорт записи', async () => {

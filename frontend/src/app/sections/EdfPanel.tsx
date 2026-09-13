@@ -13,6 +13,7 @@ import { RotateCcw } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { RecalcProgress } from './EdfToolActions'
 import {
+  ARTIFACT_COLORS,
   ARTIFACT_KINDS,
   ARTIFACT_LABELS,
   EDF_UNITS_OPTIONS,
@@ -225,7 +226,10 @@ export function EdfPanel() {
         />
       </Panel>
 
-      <Panel title="Эпохи">
+      <Panel
+        title="Эпохи"
+        hint="Границы рисуются по выбранной длине эпохи; отброшенные эпохи помечаются штриховкой по результату стадии (срез 2.6 — демо-фикстура)."
+      >
         <SelectField
           label="Длина эпохи"
           value={String(params.epochLengthMs)}
@@ -317,11 +321,15 @@ export function EdfPanel() {
         />
       </Panel>
 
-      <Panel title="Легенда артефактов">
+      <Panel
+        title="Легенда артефактов"
+        hint="Срез 2.6: зоны рисуются из демо-фикстуры, пока поиск артефактов не подключён к серверу (срез 2.7). Цвет зоны и число совпадают с легендой над треками."
+      >
         {ARTIFACT_KINDS.map((kind) => (
           <CheckboxRow
             key={kind}
             label={ARTIFACT_LABELS[kind]}
+            swatch={ARTIFACT_COLORS[kind]}
             checked={params.artifactVisibility[kind]}
             onChange={(checked) =>
               setParams({

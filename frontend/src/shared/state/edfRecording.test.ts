@@ -31,6 +31,7 @@ describe('состояние раздела EDF', () => {
       signalFrames: {},
       signalsPending: 0,
       signalsError: null,
+      layers: null,
     })
   })
 

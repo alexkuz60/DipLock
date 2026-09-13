@@ -24,7 +24,7 @@ describe('панель раздела EDF', () => {
       availableChannels: [],
       stageApplied: emptyStageSnapshot(),
     })
-    useEdfRecording.setState({ recording: null, passport: { ...EMPTY_PASSPORT } })
+    useEdfRecording.setState({ recording: null, layers: null, passport: { ...EMPTY_PASSPORT } })
   })
 
   it('показывает пороги, длины эпох и каналы из конфигурации сервера', async () => {
@@ -128,6 +128,24 @@ describe('панель раздела EDF', () => {
     await user.selectOptions(screen.getByLabelText('Единицы в БД'), 'uV')
 
     expect(useEdfRecording.getState().passport.units).toBe('uV')
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('легенда артефактов: цветные метки типов и тумблер видимости без запросов', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    // 4 типа артефактов: у каждого чекбокс с цветной меткой зоны вьюера (срез 2.6)
+    expect(screen.getAllByTestId('checkbox-swatch')).toHaveLength(4)
+    expect(screen.getByLabelText('z-score выбросы')).toBeChecked()
+
+    const callsBefore = fetchMock.mock.calls.length
+    await user.click(screen.getByLabelText('z-score выбросы'))
+
+    expect(useEdfParams.getState().params.artifactVisibility.zscore_outlier).toBe(false)
+    expect(screen.getByLabelText('z-score выбросы')).not.toBeChecked()
     expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 

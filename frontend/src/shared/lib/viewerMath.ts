@@ -155,3 +155,21 @@ export function frameEnvelope(
 export function pointsBudget(widthPx: number): number {
   return Math.max(64, Math.floor(widthPx) * 2)
 }
+
+/**
+ * Пиксель окна для момента времени: ширина области — `trackWidth` (без колонки
+ * подписей каналов). Обратная функция к `xToTime`; вместе они держат курсор,
+ * зоны артефактов и границы эпох в одной системе координат.
+ */
+export function timeToX(timeSec: number, window: TimeWindow, trackWidth: number): number {
+  const span = window.t1 - window.t0
+  if (span <= 0) return 0
+  return ((timeSec - window.t0) / span) * trackWidth
+}
+
+/** Момент времени под пикселем окна (обратная к `timeToX`). */
+export function xToTime(xPx: number, window: TimeWindow, trackWidth: number): number {
+  const span = window.t1 - window.t0
+  if (trackWidth <= 0) return window.t0
+  return window.t0 + (xPx / trackWidth) * span
+}

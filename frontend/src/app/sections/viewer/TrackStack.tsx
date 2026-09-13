@@ -13,10 +13,15 @@
  * drag — панорамирование, движение мыши — курсор со временем,
  * клик по подписи канала — скрыть/показать, Ctrl+клик — только этот канал.
  *
+ * Поверх треков — **слои результата** (срез 2.6, `viewerLayers.ts` + `TrackLayers.tsx`):
+ * зоны артефактов (клик → детали: тип, интервал, каналы), границы эпох с номерами и
+ * штриховка отброшенных эпох. Слои — DOM поверх canvas, поэтому зум пересчитывает
+ * только их позиции. Пока стадии не подключены к серверу, данные слоёв — фикстура.
+ *
  * Чартам отключены собственные жесты (pointer-events: none): окном управляет
  * обёртка, чтобы drag/колесо работали одинаково на всех треках.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import {
@@ -24,11 +29,26 @@ import {
   frameEnvelope,
   panByPixels,
   pointsBudget,
+  xToTime,
   zoomWindow,
   type TimeWindow,
 } from '@/shared/lib/viewerMath'
 import type { SignalFrame } from '@/shared/lib/signalFrame'
+import {
+  artifactCounts,
+  buildEpochCells,
+  demoLayers,
+  visibleZones,
+  type EdfViewerLayers,
+} from '@/shared/lib/viewerLayers'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue } from '@/shared/state/edfParams'
+import { StatusPill } from '@/shared/ui/StatusPill'
+import {
+  ArtifactZoneLayer,
+  EpochLayer,
+  LayersLegend,
+  SelectedZoneCard,
+} from './TrackLayers'
 
 // Цвета холста: canvas не читает CSS-токены, значения синхронизированы с темой
 // (styles/index.css: --color-accent #4da3ff, --color-fg-2 #8695a8, --color-border).
@@ -42,6 +62,12 @@ const LABEL_WIDTH = 56
 
 export type TrackStackProps = {
   signal: SignalFrame
+  /**
+   * Слои результата (зоны артефактов, отброшенные эпохи). По умолчанию —
+   * детерминированная фикстура (срез 2.6); в срезе 2.7 сюда придёт результат
+   * задачи предподготовки.
+   */
+  layers?: EdfViewerLayers
 }
 
 function formatTick(spanSec: number, value: number): string {
@@ -184,6 +210,7 @@ function TrackRow({
     <div className="flex items-stretch gap-1" data-testid={`track-${name}`}>
       <button
         type="button"
+        data-testid={`track-label-${name}`}
         title="Клик — скрыть канал; Ctrl+клик — показать только этот"
         onClick={(event) => onLabelClick(name, event.ctrlKey || event.metaKey)}
         className="tnum w-14 shrink-0 cursor-pointer self-center rounded text-right font-mono text-xs text-fg-2 hover:text-fg-0"
@@ -197,16 +224,52 @@ function TrackRow({
 }
 
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */
-export function TrackStack({ signal }: TrackStackProps) {
+export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const params = useEdfParamsValue()
   const setParams = useEdfParams((state) => state.setParams)
   const toggleChannel = useEdfParams((state) => state.toggleChannel)
+  const toggleArtifactVisibility = useEdfParams((state) => state.toggleArtifactVisibility)
   const availableChannels = useEdfParams((state) => state.availableChannels)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const [centerSec, setCenterSec] = useState(() => signal.durationSec / 2)
   const [cursor, setCursor] = useState<{ xPx: number; timeSec: number } | null>(null)
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
+
+  // Слои результата: пока стадии не подключены — детерминированная фикстура.
+  // Ключ — источник сигнала (запись/демо) и каналы, а не объект кадра: при зуме
+  // сервер отдаёт новый кадр того же сигнала, и зоны не должны пересобираться.
+  const channelKey = signal.channels.join(',')
+  const layers = useMemo(
+    () => layersProp ?? demoLayers(signal.durationSec, signal.channels),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layersProp, signal.sourceId, signal.durationSec, channelKey],
+  )
+  const visibleZoneList = useMemo(
+    () => visibleZones(layers.artifacts, params.artifactVisibility),
+    [layers.artifacts, params.artifactVisibility],
+  )
+  const counts = useMemo(() => artifactCounts(layers.artifacts), [layers.artifacts])
+  const epochs = useMemo(
+    () =>
+      params.epochBoundaries || params.droppedEpochsHatched
+        ? buildEpochCells(signal.durationSec, params.epochLengthMs, layers.rejectedEpochs)
+        : [],
+    [
+      signal.durationSec,
+      params.epochBoundaries,
+      params.droppedEpochsHatched,
+      params.epochLengthMs,
+      layers.rejectedEpochs,
+    ],
+  )
+  const selectedZone = useMemo(
+    () => visibleZoneList.find((zone) => zone.id === selectedZoneId) ?? null,
+    [visibleZoneList, selectedZoneId],
+  )
+  const hasLayers =
+    visibleZoneList.length > 0 || (params.epochBoundaries && epochs.length > 1) || params.droppedEpochsHatched
 
   // Новая запись/демо — возвращаемся к «вся сессия». Зависимость именно от
   // источника, а не от объекта кадра: при зуме сервер отдаёт новый кадр того же
@@ -251,7 +314,8 @@ export function TrackStack({ signal }: TrackStackProps) {
       const xPx = Math.min(Math.max(event.clientX - rect.left - LABEL_WIDTH - 4, 0), trackWidth)
       const oldWin = zoomWindow(signal.durationSec, TIME_LEVELS[level], centerSec)
       const fraction = xPx / trackWidth
-      const cursorSec = oldWin.t0 + fraction * (oldWin.t1 - oldWin.t0)
+      // Якорь зума — время под курсором (та же функция, что у слоёв и курсора)
+      const cursorSec = xToTime(xPx, oldWin, trackWidth)
 
       const newWidth = signal.durationSec / TIME_LEVELS[next]
       setCenterSec(anchoredCenter(cursorSec, fraction, newWidth, signal.durationSec))
@@ -317,6 +381,10 @@ export function TrackStack({ signal }: TrackStackProps) {
     toggleChannel(name)
   }
 
+  // Зоны/эпохи живут в пикселях области треков — та же геометрия, что у курсора
+  const geometry = { window, trackWidth: width }
+  const handleZoneSelect = useCallback((id: string | null) => setSelectedZoneId(id), [])
+
   // Порядок отображения — порядок каналов сигнала (монтаж), а не порядок кликов
   const visible = signal.channels.filter(
     (name) => params.visibleChannels.includes(name) && signal.max[name],
@@ -334,10 +402,24 @@ export function TrackStack({ signal }: TrackStackProps) {
         <span data-testid="signal-source">
           {signal.level > 0 ? `огибающая, ${pointsPerChannel} т/канал` : 'полный сигнал'}
         </span>
+        {hasLayers ? (
+          <StatusPill tone="neutral" title="Срез 2.6: слои строятся из детерминированной фикстуры — стадии артефактов и эпох ещё не подключены к серверу (срез 2.7)">
+            слои: {layers.source === 'demo' ? 'демо-фикстура' : 'результат расчёта'}
+          </StatusPill>
+        ) : null}
         <span className="ml-auto truncate">
           Колесо — зум · drag — панорама · клик по каналу — скрыть · Ctrl+клик — только этот
         </span>
       </div>
+
+      {hasLayers ? (
+        <LayersLegend
+          className="px-2 pb-1"
+          counts={counts}
+          visibility={params.artifactVisibility}
+          onToggle={toggleArtifactVisibility}
+        />
+      ) : null}
 
       <div
         ref={wrapRef}
@@ -354,30 +436,67 @@ export function TrackStack({ signal }: TrackStackProps) {
             setCursor(null)
             return
           }
-          const timeSec = window.t0 + (xPx / trackWidth) * (window.t1 - window.t0)
+          const timeSec = xToTime(xPx, window, trackWidth)
           setCursor({ xPx: xPx + LABEL_WIDTH + 4, timeSec })
         }}
         onMouseLeave={() => setCursor(null)}
       >
-        {visible.length === 0 ? (
-          <p className="p-4 text-sm text-fg-2">
-            Все каналы скрыты — включите их в панели «Каналы» справа.
-          </p>
-        ) : (
-          visible.map((name, index) => (
-            <TrackRow
-              key={name}
-              name={name}
-              frame={signal}
-              window={window}
-              width={width}
-              amplitudeMode={params.amplitudeMode}
-              amplitudeScaleUv={params.amplitudeScaleUv}
-              showXAxis={index === visible.length - 1}
-              onLabelClick={handleLabelClick}
-            />
-          ))
-        )}
+        <div className="relative">
+          {visible.length === 0 ? (
+            <p className="p-4 text-sm text-fg-2">
+              Все каналы скрыты — включите их в панели «Каналы» справа.
+            </p>
+          ) : (
+            visible.map((name, index) => (
+              <TrackRow
+                key={name}
+                name={name}
+                frame={signal}
+                window={window}
+                width={width}
+                amplitudeMode={params.amplitudeMode}
+                amplitudeScaleUv={params.amplitudeScaleUv}
+                showXAxis={index === visible.length - 1}
+                onLabelClick={handleLabelClick}
+              />
+            ))
+          )}
+
+          {/*
+            Слои результата поверх canvas: одна система координат с курсором —
+            колонка подписей (LABEL_WIDTH) плюс зазор и ширина области треков.
+            Открывает список эпох, затем зоны артефактов: зоны кликабельны и
+            должны быть выше штриховки/линий.
+          */}
+          {hasLayers ? (
+            <div
+              data-testid="track-layers"
+              className="pointer-events-none absolute inset-y-0"
+              style={{ left: LABEL_WIDTH + 4, width }}
+            >
+              <EpochLayer
+                cells={epochs}
+                geometry={geometry}
+                showBoundaries={params.epochBoundaries}
+                showHatch={params.droppedEpochsHatched}
+              />
+              <ArtifactZoneLayer
+                zones={visibleZoneList}
+                geometry={geometry}
+                selectedId={selectedZoneId}
+                onSelect={handleZoneSelect}
+              />
+            </div>
+          ) : null}
+        </div>
+
+        {selectedZone ? (
+          <SelectedZoneCard
+            zone={selectedZone}
+            onClose={() => setSelectedZoneId(null)}
+            className="absolute top-1 right-2 z-10 max-w-xs"
+          />
+        ) : null}
 
         {cursor ? (
           <>

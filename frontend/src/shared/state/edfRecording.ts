@@ -15,6 +15,7 @@ import type { RecordingMeta } from '@/shared/api/types'
 import { uploadRecording } from '@/shared/api/upload'
 import { makeDemoSignal } from '@/shared/lib/demoSignal'
 import { decodeSignalFrame, frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
+import { DEMO_LAYERS_SEED, demoLayers, type EdfViewerLayers } from '@/shared/lib/viewerLayers'
 import { useEdfParams, type EdfUnits } from './edfParams'
 
 /** Снимает отметку «уровень в полёте», не мутируя прежний объект состояния. */
@@ -72,6 +73,12 @@ export type EdfRecordingState = {
   signalsPending: number
   /** Текст ошибки загрузки сигналов (для ErrorBlock + «Повторить») */
   signalsError: string | null
+  /**
+   * Слои результата вьюера (срез 2.6): зоны артефактов и отброшенные эпохи.
+   * Пока стадии не подключены к серверу — детерминированная фикстура, поэтому
+   * `layers.source === 'demo'`; срез 2.7 заменит её результатом задачи.
+   */
+  layers: EdfViewerLayers | null
   /** Метаданные сессии для БД (в файл не пишутся) */
   passport: SessionPassport
   /**
@@ -106,6 +113,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   signalsInFlight: {},
   signalsPending: 0,
   signalsError: null,
+  layers: null,
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
 
@@ -123,18 +131,23 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       signalsInFlight: {},
       signalsPending: 0,
       signalsError: null,
+      // Слои результата принадлежат записи: пока это фикстура под её длину и монтаж
+      layers: demoLayers(meta.duration_sec, meta.channels, DEMO_LAYERS_SEED),
       // Паспорт принадлежит сессии: новая запись — чистый паспорт
       passport: { ...EMPTY_PASSPORT, title: meta.filename },
     }),
 
   openDemo: (channels) => {
     const signal = makeDemoSignal(channels)
-    set({ demo: frameFromSignalData(signal) })
+    set({
+      demo: frameFromSignalData(signal),
+      layers: demoLayers(signal.durationSec, signal.channels, DEMO_LAYERS_SEED),
+    })
     // Демо-каналы становятся «доступными»: вьюер и блок «Каналы» работают
     // с реальным выбором пользователя, а не с отдельной веткой логики.
     useEdfParams.getState().setAvailableChannels(signal.channels)
   },
-  closeDemo: () => set({ demo: null }),
+  closeDemo: () => set({ demo: null, layers: null }),
 
   loadSignals: async (level) => {
     const { recording, signalFrames, signalsInFlight } = get()
@@ -178,6 +191,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       signalsInFlight: {},
       signalsPending: 0,
       signalsError: null,
+      // Слои результата тоже принадлежат записи — сбрасываем вместе с ней
+      layers: null,
       passport: { ...EMPTY_PASSPORT },
     })
     // Выбор каналов и результат предподготовки привязаны к записи

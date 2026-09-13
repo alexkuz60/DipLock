@@ -178,6 +178,7 @@ function RecordingTracks({
   const pending = useEdfRecording((state) => state.signalsPending)
   const signalsError = useEdfRecording((state) => state.signalsError)
   const loadSignals = useEdfRecording((state) => state.loadSignals)
+  const layers = useEdfRecording((state) => state.layers)
   const levelIndex = useEdfParams((state) => state.params.timeLevel)
   const level = resolveSignalLevel(TIME_LEVELS[levelIndex] ?? 1, levels)
   const baseLevel = resolveSignalLevel(levels[0] ?? 1, levels)
@@ -214,7 +215,7 @@ function RecordingTracks({
               onRetry={() => void loadSignals(level)}
             />
           ) : null}
-          <TrackStack signal={frame} />
+          <TrackStack signal={frame} layers={layers ?? undefined} />
           <p className="tnum px-2 pb-1 text-xs text-fg-2">
             {pending > 0 && !loaded
               ? `Уровень ×${level} догружается — пока показывается ${frame.level > 0 ? `уровень ×${frame.level}` : 'полный сигнал'}`

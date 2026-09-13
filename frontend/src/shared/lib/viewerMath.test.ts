@@ -7,7 +7,9 @@ import {
   fullWindow,
   panByPixels,
   pointsBudget,
+  timeToX,
   windowCenter,
+  xToTime,
   zoomWindow,
 } from '@/shared/lib/viewerMath'
 
@@ -133,5 +135,30 @@ describe('бюджет точек', () => {
 describe('windowCenter', () => {
   it('середина окна', () => {
     expect(windowCenter({ t0: 10, t1: 30 })).toBe(20)
+  })
+})
+
+describe('время ↔ пиксели окна', () => {
+  const window = { t0: 10, t1: 30 } // 20 с на 1000 px → 0.02 с/px
+
+  it('timeToX кладёт края окна на края области', () => {
+    expect(timeToX(10, window, 1000)).toBe(0)
+    expect(timeToX(30, window, 1000)).toBe(1000)
+    expect(timeToX(20, window, 1000)).toBe(500)
+    // Время до окна даёт отрицательный пиксель — вызывающий сам решает, обрезать
+    expect(timeToX(5, window, 1000)).toBe(-250)
+  })
+
+  it('xToTime — обратная к timeToX', () => {
+    expect(xToTime(0, window, 1000)).toBe(10)
+    expect(xToTime(1000, window, 1000)).toBe(30)
+    expect(xToTime(250, window, 1000)).toBeCloseTo(15, 9)
+    expect(xToTime(timeToX(17.5, window, 1000), window, 1000)).toBeCloseTo(17.5, 9)
+  })
+
+  it('вырожденные окно и ширина не дают NaN/Infinity', () => {
+    expect(timeToX(5, { t0: 5, t1: 5 }, 1000)).toBe(0)
+    expect(xToTime(100, { t0: 5, t1: 5 }, 1000)).toBe(5)
+    expect(xToTime(100, window, 0)).toBe(10)
   })
 })
