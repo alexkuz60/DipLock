@@ -46,6 +46,41 @@ export type ArtifactTypes = {
   ica_eog: number
 }
 
+/** Стадия предподготовки записи (срез 2.7) — совпадает с `RecalcStage` в UI */
+export type PreprocessStage = 'filter' | 'artifacts' | 'epochs'
+
+/** Зона артефакта из результата стадии (слои вьюера, срез 2.6/2.7) */
+export type ArtifactZoneOut = {
+  kind: import('@/shared/lib/artifacts').ArtifactKind
+  onset_sec: number
+  duration_sec: number
+  channels: string[]
+}
+
+/**
+ * Результат одной стадии предподготовки (`GET /recordings/{id}/preprocess/{job}`).
+ * Заполнены только поля запрошенной стадии, остальные — пустые значения.
+ */
+export type PreprocessResult = {
+  recording_id: string
+  stage: PreprocessStage
+  channels: string[]
+  band_hz: number[] | null
+  notch_hz: number | null
+  reference: string
+  sfreq: number
+  duration_sec: number
+  artifacts: ArtifactZoneOut[]
+  artifact_types: ArtifactTypes
+  ica_applied: boolean
+  epoch_length_ms: number
+  n_epochs_total: number
+  n_epochs_used: number
+  rejected_epochs: number[]
+  warnings: string[]
+  duration_sec_calc: number
+}
+
 /** Паспорт загруженной для просмотра записи (срез 2.2, без обработки) */
 export type RecordingMeta = {
   recording_id: string

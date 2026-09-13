@@ -38,12 +38,15 @@ from app.schemas.analysis import (
     JobCreated,
     JobStatus,
     MetaResponse,
+    PreprocessResult,
+    PreprocessStage,
     RecordingMeta,
     RecordingSignalsHeader,
     SurfaceOut,
     SurfaceRef,
 )
 from app.services.job_manager import ProgressCallback, job_manager
+from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recording_signals import (
     SignalBuildError,
     build_signal_blob,
@@ -371,10 +374,35 @@ async def _persist_job_result(job: Any, result: Dict[str, Any]) -> None:
 
 
 def _job_status(job: Any) -> JobStatus:
-    """``JobStatus`` из задачи; ``result_url`` заполняется только для успешных."""
+    """``JobStatus`` из задачи; ``result_url`` заполняется только для успешных.
+
+    У предподготовки результат лежит не в ``/jobs/{id}/result``, а рядом со
+    записью (``/recordings/{id}/preprocess/{job_id}``) — это отдельный контракт
+    (``PreprocessResult`` вместо ``AnalyzeResponse``).
+    """
     prefix = settings.api_prefix
-    result_url = f"{prefix}/jobs/{job.job_id}/result" if job.status == "succeeded" else None
+    result_url: Optional[str] = None
+    if job.status == "succeeded":
+        recording_id = job.meta.get("recording_id")
+        if job.kind == "preprocess" and recording_id:
+            result_url = f"{prefix}/recordings/{recording_id}/preprocess/{job.job_id}"
+        else:
+            result_url = f"{prefix}/jobs/{job.job_id}/result"
     return JobStatus(**job.as_dict(), result_url=result_url)
+
+
+def _preprocess_job_worker(
+    progress: ProgressCallback,
+    recording: Any,
+    params: PreprocessParams,
+) -> Dict[str, Any]:
+    """Воркер задачи предподготовки (поток): одна стадия на запись.
+
+    Загрузку не удаляем (в отличие от ``/jobs``): файл записи принадлежит
+    реестру просмотра и живёт по своему TTL.
+    """
+    return run_preprocess(recording, settings, params, progress)
+
 
 
 @router.post("/analyze", response_model=AnalyzeResponse, summary="Синхронный анализ EDF")
@@ -505,6 +533,120 @@ async def get_recording_signals(
     if if_none_match and version in if_none_match:
         return Response(status_code=304, headers=headers)
     return Response(content=data, media_type="application/octet-stream", headers=headers)
+
+
+def _parse_reference_channels(raw: Optional[str]) -> Optional[List[str]]:
+    """Разбирает список каналов референса из формы (``F3,F4`` → ``['F3','F4']``)."""
+    if not raw:
+        return None
+    names = [name.strip() for name in raw.split(",") if name.strip()]
+    return names or None
+
+
+@router.post(
+    "/recordings/{recording_id}/preprocess", status_code=202, response_model=JobCreated,
+    summary="Запустить стадию предподготовки (filter / artifacts / epochs)",
+)
+async def create_preprocess_job(
+    recording_id: str,
+    stage: PreprocessStage = Form(..., description="Стадия: filter | artifacts | epochs"),
+    band_min: Optional[float] = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: Optional[float] = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: Optional[float] = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: Optional[str] = Form(None, description="Каналы референса через запятую"),
+    z_threshold: float = Form(5.0),
+    pp_threshold_uv: float = Form(100.0),
+    flat_line_uv: float = Form(5.0),
+    flat_line_ms: float = Form(200.0),
+    run_ica: bool = Form(False, description="ICA-ветка детекции (тяжёлая — по умолчанию выключена)"),
+    epoch_length_ms: float = Form(2000.0),
+    reject_threshold_uv: float = Form(150.0),
+) -> JobCreated:
+    """Предподготовка записи **по кнопке**: одна стадия = одна задача.
+
+    Правка параметров в UI ничего не запускает (docs/ui.md) — расчёт стартует
+    только этим запросом. Стадии раздельные: пересчёт фильтра не обесценивает
+    найденные артефакты, а результат каждой стадии клиент подтверждает снимком
+    параметров (`stageApplied` в сторе раздела).
+
+    Задача возвращается сразу (202 + ``job_id``): прогресс — в ``GET /jobs/{id}``,
+    результат — в ``GET /recordings/{id}/preprocess/{job_id}``.
+    """
+    recording = recording_registry.get(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
+        )
+
+    band: Optional[tuple] = None
+    if band_min is not None or band_max is not None:
+        if band_min is None or band_max is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Полоса задаётся парой band_min и band_max либо не задаётся вовсе",
+            )
+        if band_min >= band_max:
+            raise HTTPException(
+                status_code=400, detail="band_min должен быть меньше band_max",
+            )
+        band = (band_min, band_max)
+
+    if stage == "epochs" and epoch_length_ms not in settings.epoch_lengths_ms:
+        raise HTTPException(
+            status_code=400,
+            detail=f"epoch_length_ms должен быть одним из {settings.epoch_lengths_ms}",
+        )
+
+    params = PreprocessParams(
+        stage=stage,
+        filter_band=band,
+        notch_hz=notch_hz,
+        reference=reference,
+        reference_channels=_parse_reference_channels(reference_channels),
+        z_threshold=z_threshold,
+        pp_threshold_uv=pp_threshold_uv,
+        flat_line_uv=flat_line_uv,
+        flat_line_ms=flat_line_ms,
+        run_ica=run_ica,
+        epoch_length_ms=epoch_length_ms,
+        reject_threshold_uv=reject_threshold_uv,
+    )
+
+    job = job_manager.submit(
+        "preprocess", recording.filename, _preprocess_job_worker,
+        recording, params,
+        meta={"recording_id": recording_id, "stage": stage},
+    )
+    prefix = settings.api_prefix
+    logger.info("Создана задача предподготовки %s (%s, стадия %s)", job.job_id, recording_id, stage)
+    return JobCreated(
+        job_id=job.job_id,
+        status=job.status,
+        poll_url=f"{prefix}/jobs/{job.job_id}",
+        result_url=f"{prefix}/recordings/{recording_id}/preprocess/{job.job_id}",
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/preprocess/{job_id}", response_model=PreprocessResult,
+    summary="Результат стадии предподготовки",
+)
+async def get_preprocess_result(recording_id: str, job_id: str) -> PreprocessResult:
+    """Результат стадии. 409 — задача идёт или упала; 404 — чужой/неизвестный job."""
+    job = job_manager.get(job_id)
+    if job is None or job.kind != "preprocess" or job.meta.get("recording_id") != recording_id:
+        raise HTTPException(
+            status_code=404, detail=f"Задача предподготовки {job_id} для записи {recording_id} не найдена",
+        )
+    if job.status == "failed":
+        raise HTTPException(status_code=409, detail=f"Задача завершилась ошибкой: {job.error}")
+    if job.status != "succeeded" or job.result is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Задача ещё не завершена (этап {job.stage}, прогресс {job.progress:.0%})",
+        )
+    return PreprocessResult(**job.result)
 
 
 @router.post(

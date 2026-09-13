@@ -1,7 +1,14 @@
 /**
  * Фикстуры ответов бэкенда для тестов UI (совпадают по форме со схемами API).
  */
-import type { InitStatus, JobStatus, MetaResponse, RecordingMeta } from '@/shared/api/types'
+import type {
+  InitStatus,
+  JobStatus,
+  MetaResponse,
+  PreprocessResult,
+  PreprocessStage,
+  RecordingMeta,
+} from '@/shared/api/types'
 
 export const metaFixture: MetaResponse = {
   app: 'DipLock',
@@ -92,4 +99,73 @@ export const jobFixture: JobStatus = {
   elapsed_sec: 12.5,
   error: null,
   result_url: null,
+}
+
+/** Завершённая задача предподготовки (срез 2.7) — её опрашивает стор записи. */
+export const preprocessJobFixture: JobStatus = {
+  job_id: 'job-pre-1',
+  kind: 'preprocess',
+  status: 'succeeded',
+  stage: 'done',
+  progress: 1,
+  message: 'Найдено артефактов: 2',
+  filename: 'probe.edf',
+  session_id: null,
+  created_at: '2026-09-13T09:00:00',
+  started_at: '2026-09-13T09:00:01',
+  finished_at: '2026-09-13T09:00:02',
+  elapsed_sec: 1.2,
+  error: null,
+  result_url: '/api/v1/recordings/rec-1/preprocess/job-pre-1',
+}
+
+/**
+ * Результат стадии предподготовки: заполнены только «свои» поля, как отдаёт
+ * бэкенд (`PreprocessResult`). Для `filter` — только параметры сигнала.
+ */
+export function preprocessResultFixture(
+  stage: PreprocessStage = 'artifacts',
+  overrides: Partial<PreprocessResult> = {},
+): PreprocessResult {
+  return {
+    recording_id: recordingFixture.recording_id,
+    stage,
+    channels: [...recordingFixture.channels],
+    band_hz: stage === 'filter' ? [1, 40] : null,
+    notch_hz: stage === 'filter' ? 50 : null,
+    reference: 'average',
+    sfreq: recordingFixture.sfreq,
+    duration_sec: recordingFixture.duration_sec,
+    artifacts:
+      stage === 'artifacts'
+        ? [
+            {
+              kind: 'zscore_outlier',
+              onset_sec: 4,
+              duration_sec: 0.5,
+              channels: ['F3', 'C3'],
+            },
+            {
+              kind: 'peak_to_peak',
+              onset_sec: 12,
+              duration_sec: 2,
+              channels: ['Fp1'],
+            },
+          ]
+        : [],
+    artifact_types: {
+      zscore_outlier: stage === 'artifacts' ? 1 : 0,
+      peak_to_peak: stage === 'artifacts' ? 1 : 0,
+      flat_line: 0,
+      ica_eog: 0,
+    },
+    ica_applied: false,
+    epoch_length_ms: stage === 'epochs' ? 2000 : 0,
+    n_epochs_total: stage === 'epochs' ? 15 : 0,
+    n_epochs_used: stage === 'epochs' ? 13 : 0,
+    rejected_epochs: stage === 'epochs' ? [2, 7] : [],
+    warnings: [],
+    duration_sec_calc: 0.4,
+    ...overrides,
+  }
 }

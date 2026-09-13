@@ -32,7 +32,8 @@ src/
 │   ├── lib/         # чистая логика: viewerMath (окна/огибающая), signalFrame (контейнер DPS1),
 │   │                # viewerLayers (слои: зоны артефактов, сетка эпох, фикстура), artifacts
 │   │                # (типы/цвета артефактов), demoSignal
-│   ├── state/       # zustand-сторы: uiStore (настройки UI) и edfParams (параметры раздела EDF)
+│   ├── state/       # zustand-сторы: uiStore (настройки UI), edfParams (параметры раздела EDF),
+│                    # edfRecording (запись, сигналы вьюера, слои, задачи стадий предподготовки)
 │   └── ui/          # Tooltip, IconButton, Button, Panel, Placeholder, StateViews,
 │                    # контролы: FieldRow, SegmentedControl, SelectField, NumberField,
 │                    #           CheckboxRow, StatusPill
@@ -58,5 +59,11 @@ UI **не запускает расчёт сам**. Правка парамет�
 (`shared/state/edfParams.ts`), а расчёт идёт отдельной задачей строго по кнопке
 (`markApplied()` фиксирует снимок параметров, для которого получен результат). Пока результат
 не получен или параметры изменились, панель показывает это статусом в блоке «Запуск».
+
+Кнопки стадий в тулс-хедере (`EdfRecalcButtons`) ставят задачу `POST /recordings/{id}/preprocess`
+(`stage=filter|artifacts|epochs`), опрашивают прогресс через `GET /jobs/{id}` и кладут результат в
+слои вьюера (`layers.source === 'result'`). Снимок параметров берётся в момент запуска
+(`stageSignature` → `markStageApplied(stage, signature)`), поэтому правка параметра во время задачи
+честно показывает «параметры изменены».
 
 Планируемый функционал разделов — в `docs/ui.md` (корень репозитория).

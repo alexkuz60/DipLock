@@ -1,0 +1,204 @@
+"""Предподготовка записи: стадии ``filter`` / ``artifacts`` / ``epochs`` (срез 2.7).
+
+Раздел EDF показывает запись, которую пользователь может предподготовить к
+анализу — но **только по кнопке** (правило `docs/ui.md`: правка параметра ничего
+не запускает). Здесь живёт то, что стоит за кнопками:
+
+* ``filter``  — читает EDF, ставит монтаж 10-20, применяет notch и полосовой
+  фильтр к continuous raw (до нарезки: короткие эпохи короче FIR-фильтра),
+  фиксирует параметры. Возвращает только сводку: сигналы вьюера отдаёт
+  отдельный бинарный эндпоинт (2.5) и здесь не дублируются;
+* ``artifacts`` — детекция артефактов на предподготовленном сигнале; зоны
+  (onset/duration/каналы) уходят прямо в слои вьюера (2.6);
+* ``epochs`` — нарезка эпох без наложения + reject-фильтр; индексы
+  отброшенных эпох приходят в UI для штриховки.
+
+Стадии раздельные: пересчёт фильтра не обесценивает найденные артефакты, а
+правка порогов не заставляет пересчитывать эпохи. Но каждая стадия считает
+свой результат **на свежем** предподготовленном сигнале — иначе артефакты
+искались бы на сигнале с устаревшими параметрами фильтра.
+
+Тяжёлые вычисления — CPU-bound: вызывающий код обязан запускать воркер в
+потоке (`job_manager`). Прогресс сообщается колбэком ``progress(stage, ...)``.
+"""
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
+from app.core.config import Settings
+from app.schemas.analysis import ArtifactZoneOut, PreprocessStage
+from app.services.artifact_detector import detect_artifacts
+from app.services.edf_loader import load_edf
+from app.services.epoch_segmenter import segment_epochs
+from app.services.recordings import Recording
+
+logger = logging.getLogger(__name__)
+
+
+class PreprocessError(ValueError):
+    """Ошибка параметров/данных стадии — превращается в понятный текст в задаче."""
+
+
+@dataclass
+class PreprocessParams:
+    """Параметры стадии предподготовки (плоская проекция формы запроса).
+
+    Поля сгруппированы по стадиям, ровно как ``STAGE_PARAM_KEYS`` в UI: правка
+    параметра помечает устаревшей только свою стадию, поэтому и на сервере
+    каждая стадия видит только свои значения.
+    """
+
+    stage: PreprocessStage = "filter"
+    # Стадия `filter`
+    filter_band: Optional[Tuple[float, float]] = None
+    notch_hz: Optional[float] = None
+    reference: str = "average"
+    reference_channels: Optional[List[str]] = None
+    # Стадия `artifacts`
+    z_threshold: float = 5.0
+    pp_threshold_uv: float = 100.0
+    flat_line_uv: float = 5.0
+    flat_line_ms: float = 200.0
+    run_ica: bool = False
+    # Стадия `epochs`
+    epoch_length_ms: float = 2000.0
+    reject_threshold_uv: float = 150.0
+
+
+def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) -> Any:
+    """Читает запись и применяет предподготовку (монтаж, референс, фильтры).
+
+    Полоса фильтра — из параметров стадии `filter`; ``None`` означает «без
+    фильтра» (пользователь выбрал пресет «Без фильтра»). Единицы берутся из
+    конфигурации сервера, как и в остальном пайплайне.
+    """
+    l_freq: Optional[float] = None
+    h_freq: Optional[float] = None
+    if params.filter_band is not None:
+        l_freq, h_freq = params.filter_band
+
+    try:
+        return load_edf(
+            recording.path,
+            cfg.standard_channels,
+            l_freq=l_freq,
+            h_freq=h_freq,
+            units=cfg.edf_units,
+            notch_hz=params.notch_hz,
+            reference_channels=params.reference_channels,
+        )
+    except ValueError as exc:
+        raise PreprocessError(str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — отдаём UI понятный текст, не traceback
+        raise PreprocessError(f"Не удалось прочитать EDF: {exc}") from exc
+
+
+def _detect(
+    raw: Any, cfg: Settings, params: PreprocessParams, progress: Any,
+) -> Tuple[Any, Dict[str, Any]]:
+    """Детекция артефактов с порогами из параметров стадии.
+
+    ``flat_line_*`` в сервисе берутся из настроек, поэтому передаём копию
+    конфигурации с порогами стадии — детектор остаётся неизменным.
+    """
+    progress("artifacts", message="Детекция артефактов")
+    stage_cfg = cfg.model_copy(update={
+        "flat_line_threshold_uv": params.flat_line_uv,
+        "flat_line_min_duration_ms": params.flat_line_ms,
+    })
+    return detect_artifacts(
+        raw, stage_cfg,
+        z_threshold=params.z_threshold,
+        pp_threshold_uv=params.pp_threshold_uv,
+        run_ica=params.run_ica,
+    )
+
+
+def _zones(stats: Dict[str, Any]) -> List[ArtifactZoneOut]:
+    """Зоны артефактов из статистики детектора (для слоёв вьюера)."""
+    return [ArtifactZoneOut(**zone) for zone in stats.get("zones", [])]
+
+
+def run_preprocess(
+    recording: Recording,
+    cfg: Settings,
+    params: PreprocessParams,
+    progress: Any,
+) -> Dict[str, Any]:
+    """Считает одну стадию предподготовки; результат — ``PreprocessResult``.
+
+    Возвращает dict (его валидирует ``PreprocessResult`` в API): так воркер не
+    зависит от схемы ответа, а прогресс доступен по ходу вычислений.
+    """
+    started = time.perf_counter()
+    progress("load_edf", message="Чтение EDF, монтаж 10-20")
+
+    raw = _prepare_raw(recording, cfg, params)
+    warnings: List[str] = []
+
+    base: Dict[str, Any] = {
+        "recording_id": recording.recording_id,
+        "stage": params.stage,
+        "channels": list(raw.ch_names),
+        "sfreq": float(raw.info["sfreq"]),
+        "duration_sec": round(float(raw.times[-1]) if raw.n_times else 0.0, 3),
+        "warnings": warnings,
+    }
+
+    if params.stage == "filter":
+        band = list(params.filter_band) if params.filter_band is not None else None
+        if band is None:
+            warnings.append("Полоса пропускания не задана — сигнал без band-pass фильтра")
+        base.update({
+            "band_hz": band,
+            "notch_hz": params.notch_hz,
+            "reference": params.reference,
+        })
+        progress("done", 1.0, message="Фильтр и референс применены")
+        base["duration_sec_calc"] = round(time.perf_counter() - started, 3)
+        return base
+
+    annotations, stats = _detect(raw, cfg, params, progress)
+
+    if params.stage == "artifacts":
+        base.update({
+            "artifacts": [zone.model_dump() for zone in _zones(stats)],
+            "artifact_types": stats["by_type"],
+            "ica_applied": bool(stats.get("ica_applied")),
+        })
+        if not stats.get("ica_applied") and params.run_ica:
+            warnings.append(
+                "ICA не применена: в записи нет EOG-подобных каналов или фитинг не удался"
+            )
+        progress("done", 1.0, message=f"Найдено артефактов: {stats['total']}")
+        base["duration_sec_calc"] = round(time.perf_counter() - started, 3)
+        return base
+
+    # Стадия `epochs`: нарезка + reject-фильтр. Отброшенные эпохи нужны UI для
+    # штриховки, поэтому вместо одного числа отдаём индексы (порядок событий).
+    progress("epochs", message=f"Нарезка эпох по {params.epoch_length_ms:.0f} мс")
+    try:
+        epochs = segment_epochs(
+            raw, annotations,
+            epoch_length_ms=params.epoch_length_ms,
+            reject_threshold_uv=params.reject_threshold_uv,
+        )
+    except ValueError as exc:
+        raise PreprocessError(str(exc)) from exc
+
+    rejected = [index for index, log in enumerate(epochs.drop_log) if log]
+    base.update({
+        "epoch_length_ms": params.epoch_length_ms,
+        "n_epochs_total": len(epochs.drop_log),
+        "n_epochs_used": len(epochs),
+        "rejected_epochs": rejected,
+    })
+    if rejected:
+        warnings.append(
+            f"Отброшено эпох: {len(rejected)} из {len(epochs.drop_log)} "
+            f"(порог {params.reject_threshold_uv:.0f} мкВ)"
+        )
+    progress("done", 1.0, message=f"Эпох: {len(epochs)} из {len(epochs.drop_log)}")
+    base["duration_sec_calc"] = round(time.perf_counter() - started, 3)
+    return base

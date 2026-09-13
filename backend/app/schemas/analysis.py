@@ -60,6 +60,68 @@ class ArtifactTypes(BaseModel):
     ica_eog: int = 0
 
 
+# Тип артефакта и стадия предподготовки (срез 2.7): те же строки, что в UI
+# (`shared/lib/artifacts.ts` и `shared/state/edfParams.ts` STAGE_PARAM_KEYS).
+ArtifactKind = Literal["zscore_outlier", "peak_to_peak", "flat_line", "ica_eog"]
+PreprocessStage = Literal["filter", "artifacts", "epochs"]
+
+
+class ArtifactZoneOut(BaseModel):
+    """Зона артефакта для слоёв вьюера: интервал + затронутые каналы.
+
+    Плоская проекция аннотаций MNE: ``onset``/``duration``/``description`` плюс
+    каналы, по которым сработал детектор (для тултипа зоны). Каналы могут быть
+    пустыми, если детектор не сопоставил аннотацию с конкретным каналом
+    (например, ICA находит компоненты, а не каналы).
+    """
+
+    kind: ArtifactKind
+    onset_sec: float
+    duration_sec: float
+    channels: List[str] = Field(default_factory=list)
+
+
+class PreprocessResult(BaseModel):
+    """Результат задачи предподготовки записи (стадия ``preprocess``).
+
+    Стадии раздельные (``filter`` / ``artifacts`` / ``epochs``): каждая считает
+    свой слот и не обесценивает результаты других. В ответе заполняются только
+    поля, относящиеся к запрошенной стадии, остальные остаются пустыми.
+
+    Треки приходят из ``GET /recordings/{id}/signals`` и здесь не дублируются —
+    это десятки тысяч точек на канал (docs/ui.md §8).
+    """
+
+    recording_id: str
+    stage: PreprocessStage
+
+    # Стадия `filter`: какие параметры фильтра/референса зафиксированы
+    channels: List[str] = Field(default_factory=list, description="Каналы после монтажа 10-20")
+    band_hz: Optional[List[float]] = Field(
+        default=None, description="Полоса пропускания после предподготовки, Гц (None — без фильтра)"
+    )
+    notch_hz: Optional[float] = Field(default=None, description="Частота notch-фильтра, Гц (None — выключен)")
+    reference: str = Field(default="average", description="Референс: average | custom")
+    sfreq: float = 0.0
+    duration_sec: float = 0.0
+
+    # Стадия `artifacts`: зоны для слоёв вьюера (срез 2.6)
+    artifacts: List[ArtifactZoneOut] = Field(default_factory=list)
+    artifact_types: ArtifactTypes = Field(default_factory=ArtifactTypes)
+    ica_applied: bool = False
+
+    # Стадия `epochs`: сетка эпох и отброшенные reject-фильтром
+    epoch_length_ms: float = 0.0
+    n_epochs_total: int = 0
+    n_epochs_used: int = 0
+    rejected_epochs: List[int] = Field(
+        default_factory=list, description="Индексы эпох, отброшенных reject-фильтром"
+    )
+
+    warnings: List[str] = Field(default_factory=list)
+    duration_sec_calc: float = Field(default=0.0, description="Длительность расчёта, сек")
+
+
 class RecordingMeta(BaseModel):
     """Паспорт загруженной для просмотра записи EDF (просмотр ≠ обработка)."""
 

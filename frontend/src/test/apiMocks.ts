@@ -2,9 +2,22 @@
  * Подмена fetch для тестов UI: отдаёт фикстуры бэкенда по путям API.
  */
 import { vi } from 'vitest'
-import { initStatusFixture, metaFixture, recordingFixture } from './fixtures'
+import {
+  initStatusFixture,
+  metaFixture,
+  preprocessJobFixture,
+  preprocessResultFixture,
+  recordingFixture,
+} from './fixtures'
 import { encodeSignalBlob } from './signalBlob'
-import type { InitStatus, MetaResponse, RecordingMeta } from '@/shared/api/types'
+import type {
+  InitStatus,
+  JobStatus,
+  MetaResponse,
+  PreprocessResult,
+  PreprocessStage,
+  RecordingMeta,
+} from '@/shared/api/types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -61,16 +74,54 @@ export type MockApiOptions = {
   initStatusFails?: boolean
   /** Смоделировать отказ сигналов записи (например 404 после TTL) */
   signalsFail?: boolean
+  /** Стадия предподготовки, если запрос её не указал (срез 2.7) */
+  preprocessStage?: PreprocessStage
+  /** Явный результат стадии (иначе — фикстура под запрошенную стадию) */
+  preprocessResult?: PreprocessResult
+  /** Статус задачи предподготовки: failed имитирует ошибку стадии */
+  preprocessJob?: JobStatus
+  /** Смоделировать отказ запуска стадии (404 записи) */
+  preprocessStartFails?: boolean
 }
 
 export function mockApiFetch(options: MockApiOptions = {}) {
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  // Мок «помнит» стадию из POST: результат GET должен соответствовать запросу
+  let requestedStage: PreprocessStage = options.preprocessStage ?? 'artifacts'
+
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = urlOf(input)
+    const method = init?.method ?? 'GET'
+
     if (url.includes('/init-status')) {
       if (options.initStatusFails) {
         return jsonResponse({ detail: 'Сервис недоступен' }, 500)
       }
       return jsonResponse(options.initStatus ?? initStatusFixture)
+    }
+    if (url.includes('/preprocess')) {
+      if (method === 'POST') {
+        const form = init?.body as FormData | undefined
+        const stage = form?.get('stage')
+        if (stage) requestedStage = String(stage) as PreprocessStage
+        if (options.preprocessStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(
+          {
+            job_id: preprocessJobFixture.job_id,
+            status: preprocessJobFixture.status,
+            poll_url: `/api/v1/jobs/${preprocessJobFixture.job_id}`,
+            result_url: `/api/v1/recordings/${recordingFixture.recording_id}/preprocess/${preprocessJobFixture.job_id}`,
+          },
+          202,
+        )
+      }
+      return jsonResponse(
+        options.preprocessResult ?? preprocessResultFixture(requestedStage),
+      )
+    }
+    if (url.includes('/jobs/')) {
+      return jsonResponse(options.preprocessJob ?? preprocessJobFixture)
     }
     if (url.includes('/signals')) {
       if (options.signalsFail) {

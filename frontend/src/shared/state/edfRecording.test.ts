@@ -6,11 +6,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   EMPTY_PASSPORT,
   acceptEdfFile,
+  buildPreprocessForm,
+  filterBandOf,
+  layersFromResult,
   useEdfRecording,
   validateEdfFile,
 } from '@/shared/state/edfRecording'
+import {
+  EDF_PARAM_DEFAULTS,
+  emptyStageSnapshot,
+  stageStateOf,
+  useEdfParams,
+} from '@/shared/state/edfParams'
 import { mockApiFetch } from '@/test/apiMocks'
-import { recordingFixture } from '@/test/fixtures'
+import {
+  preprocessJobFixture,
+  preprocessResultFixture,
+  recordingFixture,
+} from '@/test/fixtures'
 
 /** Файл с заданным именем и «весом» (байты не аллоцируем — важен только size). */
 function edfFile(name = 'probe.edf', size = 1024): File {
@@ -32,6 +45,12 @@ describe('состояние раздела EDF', () => {
       signalsPending: 0,
       signalsError: null,
       layers: null,
+      stageJobs: {},
+    })
+    useEdfParams.setState({
+      params: { ...EDF_PARAM_DEFAULTS },
+      availableChannels: [],
+      stageApplied: emptyStageSnapshot(),
     })
   })
 
@@ -131,5 +150,200 @@ describe('состояние раздела EDF', () => {
 
     expect(useEdfRecording.getState().signalFrames).toEqual({})
     expect(useEdfRecording.getState().signalsError).toBeNull()
+  })
+})
+
+describe('стадии предподготовки (срез 2.7)', () => {
+  it('buildPreprocessForm: параметры фильтра идут всегда, пороги — по стадии', () => {
+    const params = { ...EDF_PARAM_DEFAULTS, visibleChannels: ['F3', 'C3'] }
+
+    const artifacts = buildPreprocessForm('artifacts', params)
+    expect(artifacts.get('stage')).toBe('artifacts')
+    expect(artifacts.get('band_min')).toBe('1')
+    expect(artifacts.get('band_max')).toBe('40')
+    expect(artifacts.get('z_threshold')).toBe(String(params.zScoreThreshold))
+    expect(artifacts.get('pp_threshold_uv')).toBe(String(params.peakToPeakUv))
+    expect(artifacts.get('flat_line_uv')).toBe(String(params.flatLineUv))
+    expect(artifacts.get('flat_line_ms')).toBe(String(params.flatLineMs))
+    // Длина эпохи — параметр другой стадии, в артефактах её быть не должно
+    expect(artifacts.get('epoch_length_ms')).toBeNull()
+
+    const epochs = buildPreprocessForm('epochs', { ...params, epochLengthMs: 1000 })
+    expect(epochs.get('epoch_length_ms')).toBe('1000')
+    expect(epochs.get('z_threshold')).toBeNull()
+  })
+
+  it('buildPreprocessForm: notch, референс по каналам и пресет «без фильтра»', () => {
+    const custom = buildPreprocessForm('filter', {
+      ...EDF_PARAM_DEFAULTS,
+      filterPreset: 'custom',
+      customBand: [0.5, 70],
+      notchHz: 50,
+      reference: 'custom',
+      visibleChannels: ['F3', 'C3'],
+    })
+    expect(custom.get('band_min')).toBe('0.5')
+    expect(custom.get('band_max')).toBe('70')
+    expect(custom.get('notch_hz')).toBe('50')
+    expect(custom.get('reference')).toBe('custom')
+    expect(custom.get('reference_channels')).toBe('F3,C3')
+
+    const none = buildPreprocessForm('filter', { ...EDF_PARAM_DEFAULTS, filterPreset: 'none' })
+    expect(none.get('band_min')).toBeNull()
+    expect(none.get('band_max')).toBeNull()
+    expect(filterBandOf({ ...EDF_PARAM_DEFAULTS, filterPreset: 'none' })).toBeNull()
+  })
+
+  it('layersFromResult заменяет слот своей стадии, сохраняя слот другой', () => {
+    const previous = {
+      artifacts: [
+        {
+          id: 'flat_line-1',
+          kind: 'flat_line' as const,
+          onsetSec: 1,
+          durationSec: 0.2,
+          channels: [],
+        },
+      ],
+      rejectedEpochs: [5],
+      source: 'result' as const,
+    }
+
+    const afterEpochs = layersFromResult(preprocessResultFixture('epochs'), previous)
+    expect(afterEpochs.rejectedEpochs).toEqual([2, 7])
+    expect(afterEpochs.artifacts).toEqual(previous.artifacts)
+
+    const afterArtifacts = layersFromResult(preprocessResultFixture('artifacts'), afterEpochs)
+    expect(afterArtifacts.rejectedEpochs).toEqual([2, 7])
+    expect(afterArtifacts.artifacts.map((zone) => zone.kind)).toEqual([
+      'zscore_outlier',
+      'peak_to_peak',
+    ])
+    expect(afterArtifacts.artifacts[0].channels).toEqual(['F3', 'C3'])
+  })
+
+  it('layersFromResult не тащит демо-фикстуру в результат расчёта', () => {
+    const demo = {
+      artifacts: [
+        {
+          id: 'zscore_outlier-1',
+          kind: 'zscore_outlier' as const,
+          onsetSec: 1,
+          durationSec: 1,
+          channels: [],
+        },
+      ],
+      rejectedEpochs: [1],
+      source: 'demo' as const,
+    }
+
+    const result = layersFromResult(preprocessResultFixture('artifacts'), demo)
+
+    expect(result.source).toBe('result')
+    expect(result.rejectedEpochs).toEqual([])
+    expect(result.artifacts).toHaveLength(2)
+  })
+})
+
+describe('запуск стадии по кнопке (срез 2.7)', () => {
+  beforeEach(() => {
+    useEdfRecording.setState({ recording: null, stageJobs: {}, layers: null })
+    useEdfParams.setState({
+      params: { ...EDF_PARAM_DEFAULTS },
+      availableChannels: [],
+      stageApplied: emptyStageSnapshot(),
+    })
+  })
+
+  it('runStage: задача → слои результата + снимок параметров стадии', async () => {
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture })
+
+    await useEdfRecording.getState().runStage('artifacts')
+
+    const state = useEdfRecording.getState()
+    expect(state.stageJobs.artifacts?.status).toBe('succeeded')
+    expect(state.layers?.source).toBe('result')
+    expect(state.layers?.artifacts.map((zone) => zone.kind)).toEqual([
+      'zscore_outlier',
+      'peak_to_peak',
+    ])
+    const paramsState = useEdfParams.getState()
+    expect(stageStateOf(paramsState.params, paramsState.stageApplied, 'artifacts')).toBe('ready')
+    // Другие стадии результат не получили — они раздельные
+    expect(paramsState.stageApplied.epochs).toBeNull()
+  })
+
+  it('runStage: стадия epochs заполняет штриховку, не трогая зоны', async () => {
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture })
+
+    await useEdfRecording.getState().runStage('artifacts')
+    await useEdfRecording.getState().runStage('epochs')
+
+    const layers = useEdfRecording.getState().layers
+    expect(layers?.rejectedEpochs).toEqual([2, 7])
+    expect(layers?.artifacts).toHaveLength(2)
+  })
+
+  it('runStage: снимок честный — правка параметров во время задачи даёт stale', async () => {
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture })
+
+    const pending = useEdfRecording.getState().runStage('artifacts')
+    // Пользователь правит порог, пока задача выполняется
+    useEdfParams.getState().setParams({ peakToPeakUv: 42 })
+    await pending
+
+    const { params, stageApplied } = useEdfParams.getState()
+    expect(stageStateOf(params, stageApplied, 'artifacts')).toBe('stale')
+  })
+
+  it('runStage: ошибка стадии остаётся на кнопке понятным текстом', async () => {
+    mockApiFetch({
+      preprocessJob: {
+        ...preprocessJobFixture,
+        status: 'failed',
+        error: 'Все эпохи отброшены reject-фильтром',
+      },
+    })
+    useEdfRecording.setState({ recording: recordingFixture })
+
+    await useEdfRecording.getState().runStage('epochs')
+
+    const job = useEdfRecording.getState().stageJobs.epochs
+    expect(job?.status).toBe('failed')
+    expect(job?.error).toMatch(/Все эпохи отброшены/)
+    // Провал не помечает стадию рассчитанной
+    expect(useEdfParams.getState().stageApplied.epochs).toBeNull()
+  })
+
+  it('runStage: отказ сервера при запуске тоже показывается как ошибка стадии', async () => {
+    mockApiFetch({ preprocessStartFails: true })
+    useEdfRecording.setState({ recording: recordingFixture })
+
+    await useEdfRecording.getState().runStage('filter')
+
+    expect(useEdfRecording.getState().stageJobs.filter?.status).toBe('failed')
+    expect(useEdfRecording.getState().stageJobs.filter?.error).toMatch(/не найдена/)
+  })
+
+  it('runStage без записи не делает запросов', async () => {
+    const fetchMock = mockApiFetch()
+
+    await useEdfRecording.getState().runStage('artifacts')
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(useEdfRecording.getState().stageJobs).toEqual({})
+  })
+
+  it('закрытие записи сбрасывает задачи стадий', async () => {
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture })
+    await useEdfRecording.getState().runStage('artifacts')
+
+    useEdfRecording.getState().closeRecording()
+
+    expect(useEdfRecording.getState().stageJobs).toEqual({})
   })
 })

@@ -264,7 +264,7 @@ export type EdfParamsState = {
   /** Сброс к значениям сервера (пороги/эпохи из `/meta`) */
   resetToDefaults: (meta?: MetaResponse | null) => void
   /** Фиксирует, что стадия рассчитана именно с текущими параметрами */
-  markStageApplied: (stage: RecalcStage) => void
+  markStageApplied: (stage: RecalcStage, signature?: string) => void
   /** Все стадии рассчитаны (полная предподготовка одной задачей) */
   markApplied: () => void
   /** Забыть результат одной стадии или всех (при открытии другой записи) */
@@ -325,11 +325,13 @@ export const useEdfParams = create<EdfParamsState>()(
             },
           }
         }),
-      markStageApplied: (stage) =>
+      markStageApplied: (stage, signature) =>
         set((state) => ({
           stageApplied: {
             ...state.stageApplied,
-            [stage]: stageSignature(state.params, stage),
+            // Подпись можно передать явно: задача могла считаться по параметрам,
+            // которые пользователь успел изменить, пока она выполнялась.
+            [stage]: signature ?? stageSignature(state.params, stage),
           },
         })),
       markApplied: () =>

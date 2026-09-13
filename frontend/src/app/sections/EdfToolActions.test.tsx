@@ -52,6 +52,7 @@ describe('тулс-хедер раздела EDF', () => {
       uploadError: null,
       passport: { ...EMPTY_PASSPORT },
       fileDialogRequest: 0,
+      stageJobs: {},
     })
   })
 
@@ -89,6 +90,11 @@ describe('тулс-хедер раздела EDF', () => {
     act(() => {
       useEdfRecording.setState({ recording: recordingFixture })
     })
+
+    // С загруженной записью стадии можно считать — кнопки активны (срез 2.7)
+    for (const name of STAGE_BUTTONS) {
+      expect(screen.getByRole('button', { name })).toBeEnabled()
+    }
 
     const bar = await screen.findByRole('progressbar', { name: 'Готовность перерасчётов' })
     expect(bar).toHaveAttribute('aria-valuenow', '0')
@@ -148,5 +154,34 @@ describe('тулс-хедер раздела EDF', () => {
     expect(useEdfRecording.getState().passport.subject).toBe('S-01')
     // Паспорт — данные для БД: ни одного запроса на запись/изменение файла
     expect(fetchMock.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('кнопка стадии запускает задачу и заменяет демо-слои результатом (срез 2.7)', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderSection()
+
+    act(() => {
+      useEdfRecording.setState({ recording: recordingFixture })
+    })
+
+    // До нажатия стадии запросов предподготовки нет: UI не имитирует обработку
+    const preprocessCalls = () =>
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/preprocess'))
+    expect(preprocessCalls()).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Пересчитать: Поиск артефактов' }))
+
+    await waitFor(() => {
+      expect(useEdfRecording.getState().stageJobs.artifacts?.status).toBe('succeeded')
+    })
+    const layers = useEdfRecording.getState().layers
+    expect(layers?.source).toBe('result')
+    expect(layers?.artifacts.map((zone) => zone.kind)).toEqual(['zscore_outlier', 'peak_to_peak'])
+    // Снимок стадии зафиксирован: готовность выросла на одну стадию из трёх
+    expect(
+      screen.getByRole('progressbar', { name: 'Готовность перерасчётов' }),
+    ).toHaveAttribute('aria-valuenow', '1')
+    expect(preprocessCalls().length).toBeGreaterThan(0)
   })
 })

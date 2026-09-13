@@ -53,6 +53,7 @@ backend/app/
 │   ├── dipole_fitter.py
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL (2.2)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
+│   ├── preprocess.py      # стадии предподготовки записи: filter/artifacts/epochs (2.7)
 │   ├── job_manager.py     # фоновые задачи: этапы, прогресс, семафор (F7)
 │   └── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
 ├── models/db.py       # SQLAlchemy модели (Session, Epoch, Dipole)
@@ -105,7 +106,9 @@ cd frontend && npm run test                                    # Vitest (jsdom)
 Тесты быстрые (без сети): синтетический ЭЭГ (`backend/tests/conftest.py`) + `TestClient`; ветки с
 реальными данными (`~/mne_data`, `data/edf/test.edf`) помечаются маркером `integration` и скипаются
 без них. Покрывают: контракт API и Pydantic-схемы, job-API и прогресс, кэш поверхности (ETag/304),
-санитизацию загрузок, сигналы записи (формат `DPS1`, ETag/304, уровни, кэш), config, bandpass_filter,
+санитизацию загрузок, сигналы записи (формат `DPS1`, ETag/304, уровни, кэш), стадии предподготовки
+(`POST /recordings/{id}/preprocess`: 202 + задача, `result_url`, 400/404, зоны с каналами, отброшенные
+эпохи), config, bandpass_filter,
 epoch_segmenter, montage edf_loader; на UI — каркас
 (рейл, тулс-хедер, панели, хоткеи), реестр разделов, «Главная», «Настройки», «Состояние сервера»,
 HTTP-клиент и разбор ошибок, контролы правой панели, параметры раздела EDF, загрузка записи
@@ -145,7 +148,15 @@ HTTP-клиент и разбор ошибок, контролы правой п
   границы эпох, штриховка отброшенных. Контракт типов и цветов живёт в `frontend/src/shared/lib/artifacts.ts`
   (реэкспорт из `shared/state/edfParams.ts`), геометрия/фикстура — в `shared/lib/viewerLayers.ts`,
   отрисовка — в `app/sections/viewer/TrackLayers.tsx`. Цвета — токены темы (`--color-artifact-*`),
-  заливка через `color-mix`, hex в JS не дублируется. Пока стадии `artifacts`/`epochs` не подключены
-  (срез 2.7), слои берутся из детерминированной фикстуры `demoLayers` с `source: 'demo'` — UI не
-  имитирует обработку. Слои, курсор и мышь делят одну систему координат через `timeToX`/`xToTime`
+  заливка через `color-mix`, hex в JS не дублируется. До запуска стадии слои берутся из
+  детерминированной фикстуры `demoLayers` с `source: 'demo'` (UI не имитирует обработку), после —
+  из результата задачи (`source: 'result'`, срез 2.7), причём слоты стадий не перетирают друг друга.
+  Слои, курсор и мышь делят одну систему координат через `timeToX`/`xToTime`
   в `shared/lib/viewerMath.ts`.
+- Предподготовка записи (2.7): стадия = задача (`kind=preprocess`) через общий `job_manager`, файл
+  записи не удаляется. Контракт `PreprocessResult` (`backend/app/schemas/analysis.py`) отдаётся
+  `app/services/preprocess.py`; `filter`/`artifacts`/`epochs` считаются на **свежем** сигнале (параметры
+  фильтра уходят в запрос любой стадии), снимок параметров фиксируется в момент запуска кнопки
+  (`stageSignature` + `markStageApplied(stage, signature)`), ошибка стадии показывается текстом.
+  Детектор артефактов возвращает `zones` с каналами — аннотации MNE их не хранят. Пирамида сигналов
+  пока «сырая»: перевод её на отфильтрованный сигнал — отдельный срез, а не тихая подмена данных.

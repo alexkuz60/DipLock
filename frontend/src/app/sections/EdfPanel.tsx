@@ -55,9 +55,9 @@ const NOTCH_OPTIONS = [
   { value: '60', label: '60 Гц (США)' },
 ]
 
-/** Пояснение к кнопке расчёта: обработка не запускается сама по себе */
+/** Пояснение к кнопкам расчёта: обработка не запускается сама по себе */
 const RECALC_HINT =
-  'Расчёт запускается только кнопками шапки раздела — правка параметров ничего не пересчитывает. Задача предподготовки ещё не подключена к серверу (срез 2.7), поэтому кнопки неактивны.'
+  'Расчёт запускается только кнопками шапки раздела — правка параметров ничего не пересчитывает. Каждая кнопка считает одну стадию на сервере и заменяет её слой в треках результатом.'
 
 export function EdfPanel() {
   const params = useEdfParamsValue()
@@ -67,6 +67,7 @@ export function EdfPanel() {
   const resetToDefaults = useEdfParams((state) => state.resetToDefaults)
   const recording = useEdfRecording((state) => state.recording)
   const demo = useEdfRecording((state) => state.demo)
+  const stageJobs = useEdfRecording((state) => state.stageJobs)
   const passport = useEdfRecording((state) => state.passport)
   const setPassport = useEdfRecording((state) => state.setPassport)
   const recalc = useEdfRecalcStatus()
@@ -100,6 +101,13 @@ export function EdfPanel() {
             : 'не рассчитано'
       }`,
   ).join('; ')
+
+  // Ошибки стадий (срез 2.7): задача упала — панель объясняет это текстом,
+  // а не только красной точкой на кнопке.
+  const stageErrors = RECALC_STAGES.flatMap((stage) => {
+    const job = stageJobs[stage]
+    return job?.status === 'failed' && job.error ? [{ stage, message: job.error }] : []
+  })
 
   return (
     <>
@@ -350,6 +358,15 @@ export function EdfPanel() {
             <p className="mt-2 text-sm text-fg-2" title={stageHint}>
               Стадии: {stageHint}.
             </p>
+            {stageErrors.length ? (
+              <div className="mt-2 space-y-1">
+                {stageErrors.map(({ stage, message }) => (
+                  <StatusPill key={stage} tone="danger">
+                    {RECALC_STAGE_LABELS[stage]}: {message}
+                  </StatusPill>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : (
           <p className="text-sm text-fg-2">Запись не загружена — пересчитывать пока нечего.</p>

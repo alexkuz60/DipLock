@@ -10,6 +10,7 @@ import type {
   JobCreated,
   JobStatus,
   MetaResponse,
+  PreprocessResult,
   RecordingMeta,
 } from './types'
 
@@ -132,4 +133,22 @@ export const api = {
     if (!response.ok) await failWithBody(response)
     return response.arrayBuffer()
   },
+
+  /**
+   * Запуск стадии предподготовки записи (срез 2.7): одна стадия = одна задача.
+   * Возвращает 202 + `job_id`; прогресс — `api.job`, результат — `api.preprocessResult`.
+   */
+  preprocessJob: (recordingId: string, form: FormData, signal?: AbortSignal) =>
+    request<JobCreated>(`${API_PREFIX}/recordings/${recordingId}/preprocess`, {
+      method: 'POST',
+      body: form,
+      signal,
+    }),
+
+  /** Результат завершённой стадии предподготовки. */
+  preprocessResult: (recordingId: string, jobId: string, signal?: AbortSignal) =>
+    request<PreprocessResult>(
+      `${API_PREFIX}/recordings/${recordingId}/preprocess/${jobId}`,
+      { signal },
+    ),
 }

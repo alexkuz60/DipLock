@@ -99,7 +99,16 @@ def load_edf(
     l_freq: float = 1.0,
     h_freq: float = 40.0,
     units: Optional[str] = None,
+    notch_hz: Optional[float] = None,
+    reference_channels: Optional[List[str]] = None,
 ) -> mne.io.BaseRaw:
+    """Читает EDF, ставит монтаж 10-20, референс и применяет фильтры.
+
+    ``l_freq``/``h_freq`` — границы полосового фильтра; ``None`` в обоих —
+    «без фильтра» (пресет «Без фильтра» в UI предподготовки, срез 2.7).
+    ``notch_hz`` — сетевой фильтр (50/60 Гц), ``None`` — выключен.
+    ``reference_channels`` — референс по выбранным каналам вместо average.
+    """
     raw = _read_raw_edf(filepath, units)
     raw = _ensure_physical_units(raw, units)
 
@@ -122,10 +131,19 @@ def load_edf(
 
     raw.pick(available)
     _apply_standard_montage(raw)
-    # Average reference применяем сразу (projection=False): mne.fit_dipole
-    # требует applied average reference, а не отложенную проекцию.
-    raw.set_eeg_reference("average", projection=False)
-    raw.filter(l_freq, h_freq, fir_design="firwin")
+    # Референс применяем сразу (projection=False): mne.fit_dipole требует
+    # applied average reference, а не отложенную проекцию.
+    refs = [ch for ch in (reference_channels or []) if ch in raw.ch_names]
+    if refs:
+        raw.set_eeg_reference(refs, projection=False)
+    else:
+        raw.set_eeg_reference("average", projection=False)
+    # Полосовой фильтр — только если заданы границы; нарезка эпох и артефакты
+    # идут после, чтобы FIR-фильтр работал на continuous-сигнале.
+    if l_freq is not None or h_freq is not None:
+        raw.filter(l_freq, h_freq, fir_design="firwin")
+    if notch_hz:
+        raw.notch_filter(notch_hz, fir_design="firwin")
     # Даунсэмплинг до 500 Гц только если запись чаще (экономия памяти/времени)
     if raw.info["sfreq"] > 500.0:
         raw.resample(500.0)
