@@ -349,3 +349,30 @@ describe('слои результата вьюера', () => {
   })
 })
 
+/**
+ * Экспорт окна (срез 2.8) — кнопки в полосе вьюера. Проверяем связку
+ * «видимые каналы → доступность кнопки»: без данных экспортировать нечего,
+ * и вьюер не запускает никаких запросов (экспорт клиентский).
+ */
+describe('экспорт окна вьюера', () => {
+  beforeEach(() => {
+    uplotCharts().length = 0
+    localStorage.clear()
+  })
+
+  it('держит кнопки PNG и CSV в полосе окна и включает их при видимых каналах', () => {
+    paramsState({ visibleChannels: ['F3', 'F4'] })
+    const { unmount } = renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    expect(screen.getByRole('button', { name: 'Скачать PNG окна' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Скачать CSV окна' })).toBeEnabled()
+    unmount()
+
+    paramsState({ visibleChannels: [] })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    expect(screen.getByRole('button', { name: 'Скачать PNG окна' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Скачать CSV окна' })).toBeDisabled()
+  })
+})
+

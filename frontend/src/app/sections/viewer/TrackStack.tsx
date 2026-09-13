@@ -16,7 +16,12 @@
  * Поверх треков — **слои результата** (срез 2.6, `viewerLayers.ts` + `TrackLayers.tsx`):
  * зоны артефактов (клик → детали: тип, интервал, каналы), границы эпох с номерами и
  * штриховка отброшенных эпох. Слои — DOM поверх canvas, поэтому зум пересчитывает
- * только их позиции. Пока стадии не подключены к серверу, данные слоёв — фикстура.
+ * только их позиции. До первого расчёта слои — демо-фикстура, после кнопок стадий
+ * (`EdfRecalcButtons`, срез 2.7) — результат задачи.
+ *
+ * Экспорт окна (срез 2.8, `ExportActions` + `shared/lib/exportWindow.ts`): PNG-снапшот
+ * склеивается из canvas'ов треков вместе с подписями, зонами и сеткой эпох, CSV — из
+ * того же кадра, что виден в окне. Экспорт клиентский: сервер не пересчитывает экран.
  *
  * Чартам отключены собственные жесты (pointer-events: none): окном управляет
  * обёртка, чтобы drag/колесо работали одинаково на всех треках.
@@ -49,6 +54,7 @@ import {
   LayersLegend,
   SelectedZoneCard,
 } from './TrackLayers'
+import { ExportActions } from './ExportActions'
 
 // Цвета холста: canvas не читает CSS-токены, значения синхронизированы с темой
 // (styles/index.css: --color-accent #4da3ff, --color-fg-2 #8695a8, --color-border).
@@ -63,9 +69,10 @@ const LABEL_WIDTH = 56
 export type TrackStackProps = {
   signal: SignalFrame
   /**
-   * Слои результата (зоны артефактов, отброшенные эпохи). По умолчанию —
-   * детерминированная фикстура (срез 2.6); в срезе 2.7 сюда придёт результат
-   * задачи предподготовки.
+   * Слои результата (зоны артефактов, отброшенные эпохи). Приходят из стора
+   * записи: до первого расчёта — демо-фикстура (`source: 'demo'`), после кнопок
+   * стадий — результат задачи (`source: 'result'`, срез 2.7). Без пропа вьюер
+   * рисует фикстуру — так он остаётся самостоятельным для отладки.
    */
   layers?: EdfViewerLayers
 }
@@ -140,6 +147,8 @@ type TrackRowProps = {
   amplitudeScaleUv: number
   showXAxis: boolean
   onLabelClick: (name: string, solo: boolean) => void
+  /** Отдаёт наружу canvas трека: из них собирается PNG-снапшот (срез 2.8) */
+  onCanvas: (name: string, canvas: HTMLCanvasElement | null) => void
 }
 
 function TrackRow({
@@ -151,6 +160,7 @@ function TrackRow({
   amplitudeScaleUv,
   showXAxis,
   onLabelClick,
+  onCanvas,
 }: TrackRowProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<uPlot | null>(null)
@@ -187,9 +197,12 @@ function TrackRow({
       host,
     )
     chartRef.current = chart
+    // uPlot рисует сигнал в canvas — только его можно склеить в PNG-снапшот
+    onCanvas(name, chart.ctx?.canvas ?? null)
     return () => {
       chart.destroy()
       chartRef.current = null
+      onCanvas(name, null)
     }
     // Пересоздаём при смене канала/ширины/режима шкалы; ось времени обновляется ниже
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -236,6 +249,16 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const [centerSec, setCenterSec] = useState(() => signal.durationSec / 2)
   const [cursor, setCursor] = useState<{ xPx: number; timeSec: number } | null>(null)
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
+  /**
+   * Canvas'ы треков (срез 2.8): uPlot рисует сигнал только в canvas, поэтому
+   * PNG-снапшот склеивается из них. Держим в ref, а не в состоянии: регистрация
+   * холста не должна перерисовывать вьюер, а актуальность обеспечивается тем,
+   * что читаем мы её в момент нажатия кнопки экспорта.
+   */
+  const canvasesRef = useRef<Record<string, HTMLCanvasElement | null>>({})
+  const registerCanvas = useCallback((name: string, canvas: HTMLCanvasElement | null) => {
+    canvasesRef.current[name] = canvas
+  }, [])
 
   // Слои результата: пока стадии не подключены — детерминированная фикстура.
   // Ключ — источник сигнала (запись/демо) и каналы, а не объект кадра: при зуме
@@ -403,10 +426,30 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
           {signal.level > 0 ? `огибающая, ${pointsPerChannel} т/канал` : 'полный сигнал'}
         </span>
         {hasLayers ? (
-          <StatusPill tone="neutral" title="Срез 2.6: слои строятся из детерминированной фикстуры — стадии артефактов и эпох ещё не подключены к серверу (срез 2.7)">
+          <StatusPill
+            tone="neutral"
+            title={
+              layers.source === 'demo'
+                ? 'Слои из демо-фикстуры (срез 2.6): результат появится после кнопок стадий в шапке раздела'
+                : 'Слои из результата задачи предподготовки: зоны артефактов и отброшенные эпохи (срез 2.7)'
+            }
+          >
             слои: {layers.source === 'demo' ? 'демо-фикстура' : 'результат расчёта'}
           </StatusPill>
         ) : null}
+        <ExportActions
+          frame={signal}
+          window={window}
+          channels={visible}
+          trackWidth={width}
+          canvases={canvasesRef.current}
+          zones={visibleZoneList}
+          epochs={epochs}
+          showEpochBoundaries={params.epochBoundaries}
+          showDroppedEpochs={params.droppedEpochsHatched}
+          amplitudeMode={params.amplitudeMode}
+          amplitudeScaleUv={params.amplitudeScaleUv}
+        />
         <span className="ml-auto truncate">
           Колесо — зум · drag — панорама · клик по каналу — скрыть · Ctrl+клик — только этот
         </span>
@@ -458,6 +501,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 amplitudeScaleUv={params.amplitudeScaleUv}
                 showXAxis={index === visible.length - 1}
                 onLabelClick={handleLabelClick}
+                onCanvas={registerCanvas}
               />
             ))
           )}

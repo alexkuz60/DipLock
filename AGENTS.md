@@ -115,7 +115,9 @@ HTTP-клиент и разбор ошибок, контролы правой п
 (`EdfSection`), вьюер треков (`viewer/TrackStack` — с моком uPlot, математика окна/огибающей в
 `viewerMath.test.ts`, разбор контейнера сигналов в `signalFrame.test.ts`, энкодер для тестов —
 `test/signalBlob.ts`) и тулс-хедер раздела (`EdfToolActions` +
-`EdfRecalcButtons`, диалог паспорта `SessionPassportDialog`, стор записи `edfRecording.test.ts`).
+`EdfRecalcButtons`, диалог паспорта `SessionPassportDialog`, стор записи `edfRecording.test.ts`),
+экспорт окна (`exportWindow.test.ts` — CSV/имя файла/шкала/геометрия снапшота, `download.test.ts` —
+ссылка и кодирование canvas, `viewer/ExportActions` — кнопки, содержимое файлов, ошибка PNG).
 **Правило:** новый сервис/багфикс → тест (backend → pytest, frontend → Vitest).
 
 ## Правила безопасности
@@ -160,3 +162,12 @@ HTTP-клиент и разбор ошибок, контролы правой п
   (`stageSignature` + `markStageApplied(stage, signature)`), ошибка стадии показывается текстом.
   Детектор артефактов возвращает `zones` с каналами — аннотации MNE их не хранят. Пирамида сигналов
   пока «сырая»: перевод её на отфильтрованный сигнал — отдельный срез, а не тихая подмена данных.
+- Экспорт окна (2.8) — **клиентский, без запросов**: данные уже в браузере, сервер не пересчитывает
+  экран. Чистые модули `shared/lib/exportWindow.ts` (CSV, имя файла, деления шкалы, раскладка и сборка
+  снапшота) и `shared/lib/download.ts` (Blob → ссылка → скачивание); кнопки — `viewer/ExportActions.tsx`
+  в полосе вьюера, т.к. им нужны окно/каналы/canvas'ы треков (регистрируются в `TrackStack` через
+  `canvasesRef`/`registerCanvas` — ref, а не состояние). CSV — длинный формат
+  `time_sec,channel,min_uv,max_uv` (строка на пару «корзина × канал»): кадр уровня ×k прорежен
+  сервером, выдавать его за полноразрешённый сигнал нельзя. PNG склеивается из canvas'ов uPlot плюс
+  свои подписи/шкала/зоны/эпохи; canvas не читает CSS-токены — цвета через `getComputedStyle` с
+  hex-fallback; отсутствие `toBlob` → текст ошибки, а не пустой файл.
