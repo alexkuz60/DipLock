@@ -1,6 +1,6 @@
 /**
- * Тесты состояния раздела EDF: паспорт сессии, запрос диалога выбора файла
- * и локальная валидация до отправки на сервер.
+ * Тесты состояния раздела EDF: паспорт сессии, запрос диалога выбора файла,
+ * локальная валидация до отправки на сервер и догрузка кадров сигналов (2.5).
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -9,6 +9,7 @@ import {
   useEdfRecording,
   validateEdfFile,
 } from '@/shared/state/edfRecording'
+import { mockApiFetch } from '@/test/apiMocks'
 import { recordingFixture } from '@/test/fixtures'
 
 /** Файл с заданным именем и «весом» (байты не аллоцируем — важен только size). */
@@ -27,6 +28,9 @@ describe('состояние раздела EDF', () => {
       uploadError: null,
       passport: { ...EMPTY_PASSPORT },
       fileDialogRequest: 0,
+      signalFrames: {},
+      signalsPending: 0,
+      signalsError: null,
     })
   })
 
@@ -75,5 +79,56 @@ describe('состояние раздела EDF', () => {
     acceptEdfFile(null)
 
     expect(useEdfRecording.getState().uploadError).toBeNull()
+  })
+
+  it('loadSignals кэширует уровень: повторный вызов не делает запрос', async () => {
+    const fetchMock = mockApiFetch()
+    useEdfRecording.getState().finishUpload(recordingFixture)
+
+    await useEdfRecording.getState().loadSignals(1)
+    const frame = useEdfRecording.getState().signalFrames[1]
+    expect(frame?.sourceId).toBe(recordingFixture.recording_id)
+    expect(frame?.channels).toEqual(recordingFixture.channels)
+    expect(useEdfRecording.getState().signalsPending).toBe(0)
+    expect(useEdfRecording.getState().signalsError).toBeNull()
+
+    await useEdfRecording.getState().loadSignals(1)
+    const signalsCalls = fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('/signals'),
+    )
+    expect(signalsCalls).toHaveLength(1)
+    expect(String(signalsCalls[0][0])).toContain('level=1')
+  })
+
+  it('loadSignals без записи ничего не делает', async () => {
+    const fetchMock = mockApiFetch()
+
+    await useEdfRecording.getState().loadSignals(1)
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(useEdfRecording.getState().signalFrames).toEqual({})
+  })
+
+  it('loadSignals сохраняет ошибку сервера и снимает индикатор', async () => {
+    mockApiFetch({ signalsFail: true })
+    useEdfRecording.getState().finishUpload(recordingFixture)
+
+    await useEdfRecording.getState().loadSignals(1)
+
+    expect(useEdfRecording.getState().signalFrames).toEqual({})
+    expect(useEdfRecording.getState().signalsError).toMatch(/не найдена/)
+    expect(useEdfRecording.getState().signalsPending).toBe(0)
+  })
+
+  it('смена записи сбрасывает кэш кадров сигналов и ошибку', () => {
+    useEdfRecording.setState({
+      signalFrames: { 1: { level: 1 } as never },
+      signalsError: 'старая ошибка',
+    })
+
+    useEdfRecording.getState().finishUpload(recordingFixture)
+
+    expect(useEdfRecording.getState().signalFrames).toEqual({})
+    expect(useEdfRecording.getState().signalsError).toBeNull()
   })
 })

@@ -168,6 +168,10 @@ export type MetaResponse = {
   standard_channels: string[]
   epoch_lengths_ms: number[]
   freq_bands: Record<string, number[]>
+  /** Уровни пирамиды сигналов вьюера (множители зума ×1…×16) */
+  signal_levels: number[]
+  /** Точек на канал на уровне ×1 (2 × ширина вьюпорта) */
+  signal_base_points: number
   artifact_thresholds: ArtifactThresholds
   dipole_fit_decim: number
   dipole_fit_max_epochs: number

@@ -85,6 +85,35 @@ class RecordingMeta(BaseModel):
     created_at: datetime
 
 
+class RecordingSignalsHeader(BaseModel):
+    """Заголовок бинарного ответа ``GET /recordings/{id}/signals``.
+
+    Ответ — не JSON, а компактный контейнер float32 (иначе 64k точек × 18
+    каналов не влезают в разумный payload):
+
+    ``magic 'DPS1'`` | ``uint32 LE len(header)`` | ``header`` (JSON UTF-8) |
+    ``payload`` float32 LE, channel-major: для каждого канала из ``channels``
+    сначала ``min`` (только при ``decimated``), затем ``max``.
+
+    Минимумы и максимумы считаются по временным корзинам (огибающая), поэтому
+    пики артефактов не теряются при прореживании — это требование вьюера
+    (docs/ui.md §8). При ``decimated=false`` каждая корзина содержит один
+    отсчёт и ``min`` не передаётся: ``min == max``.
+    """
+
+    recording_id: str
+    level: int = Field(description="Уровень пирамиды (множитель зума ×1…×16)")
+    channels: List[str] = Field(description="Каналы в порядке отрисовки (как в паспорте записи)")
+    sfreq: float = Field(description="Частота дискретизации огибающей, Гц")
+    duration_sec: float
+    n_points: int = Field(description="Точек на канал (по одной корзине)")
+    decimated: bool = Field(description="true — корзинное усреднение min/max")
+    arrays_per_channel: int = Field(description="1 = только max, 2 = min и max")
+    dtype: Literal["float32"] = "float32"
+    byte_order: Literal["little"] = "little"
+    layout: Literal["channel-major"] = "channel-major"
+
+
 class PipelineInfo(BaseModel):
     """Провенанс результата: чем и с какими параметрами посчитано (F16)."""
 
@@ -244,6 +273,12 @@ class MetaResponse(BaseModel):
     standard_channels: List[str]
     epoch_lengths_ms: List[float]
     freq_bands: Dict[str, List[float]]
+    signal_levels: List[int] = Field(
+        default_factory=list, description="Уровни пирамиды сигналов для вьюера (×1…×16)"
+    )
+    signal_base_points: int = Field(
+        default=4000, description="Точек на канал на уровне ×1 (2 × ширина вьюпорта)"
+    )
     artifact_thresholds: ArtifactThresholds
     dipole_fit_decim: int
     dipole_fit_max_epochs: int

@@ -64,6 +64,9 @@ describe('рабочая область раздела EDF', () => {
       uploadProgress: null,
       uploadError: null,
       demo: null,
+      signalFrames: {},
+      signalsPending: 0,
+      signalsError: null,
     })
   })
 
@@ -96,6 +99,26 @@ describe('рабочая область раздела EDF', () => {
     expect(requests[0].url).toContain('/recordings')
     expect(requests[0].body?.get('file')).toBeInstanceOf(File)
     expect(useEdfRecording.getState().uploadError).toBeNull()
+  })
+
+  it('рисует треки записи из её сигналов: уровень ×1 грузится сразу', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    stubUpload()
+    renderWithProviders(<EdfSection />)
+
+    await user.upload(screen.getByLabelText('Выбрать файл EDF'), edfFile())
+
+    // Догрузка уровня ×1 в стор идёт асинхронно — ждём её, а не только паспорт
+    await waitFor(() => expect(useEdfRecording.getState().signalFrames[1]).toBeTruthy())
+
+    const signalsCalls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/signals'))
+    expect(signalsCalls).toHaveLength(1)
+    expect(signalsCalls[0]).toContain(`/recordings/${recordingFixture.recording_id}/signals?level=1`)
+    // Кадр записи (а не демо) уходит во вьюер: первый канал монтage получает трек
+    expect(await screen.findByTestId(`track-${recordingFixture.channels[0]}`)).toBeInTheDocument()
   })
 
   it('сообщает об ошибке сервера и не оставляет запись', async () => {

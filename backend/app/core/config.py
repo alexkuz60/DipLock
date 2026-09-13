@@ -1,8 +1,9 @@
 """Настройки DipLock через Pydantic Settings."""
 from pathlib import Path
-from pydantic import Field
-from pydantic_settings import BaseSettings
-from typing import Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, NoDecode
 
 # Каталог backend/ и корень репозитория — чтобы дефолтные пути не зависели от CWD.
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
@@ -36,6 +37,31 @@ class Settings(BaseSettings):
     # каталоги удаляются с диска при обращении к реестру).
     recordings_history_limit: int = Field(default=10, env="RECORDINGS_HISTORY_LIMIT")
     recordings_ttl_hours: int = Field(default=24, env="RECORDINGS_TTL_HOURS")
+
+    # Пирамида сигналов для вьюера треков (docs/ui.md §8): уровни зума
+    # x1…x16 и бюджет точек на канал на уровне x1 (2 × ширина вьюпорта).
+    # Уровень k отдаёт не больше `signal_base_points * k` точек на канал,
+    # поэтому размер ответа не зависит от длины записи.
+    signal_levels: Annotated[List[int], NoDecode] = Field(
+        default=[1, 2, 4, 8, 16], env="SIGNAL_LEVELS"
+    )
+    signal_base_points: int = Field(default=4000, env="SIGNAL_BASE_POINTS")
+
+    @field_validator("signal_levels", mode="before")
+    @classmethod
+    def _parse_signal_levels(cls, value: Any) -> Any:
+        """Принимает и ``1,2,4``, и ``[1,2,4]``: в .env список пишут через запятую.
+
+        Без этого правила pydantic-settings требует JSON и падает при старте на
+        «человеческом» значении из `.env.example` (JSON-декодирование идёт
+        раньше валидации, поэтому декодирование отключено через ``NoDecode``).
+        """
+        if isinstance(value, str):
+            cleaned = value.strip().strip("[]")
+            if not cleaned:
+                return []
+            return [int(part) for part in cleaned.replace(";", ",").split(",") if part.strip()]
+        return value
 
     # База данных
     database_url: str = Field(

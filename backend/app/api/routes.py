@@ -39,10 +39,15 @@ from app.schemas.analysis import (
     JobStatus,
     MetaResponse,
     RecordingMeta,
+    RecordingSignalsHeader,
     SurfaceOut,
     SurfaceRef,
 )
 from app.services.job_manager import ProgressCallback, job_manager
+from app.services.recording_signals import (
+    SignalBuildError,
+    build_signal_blob,
+)
 from app.services.recordings import recording_registry
 from app.services.surface_cache import (
     asset_version,
@@ -462,6 +467,46 @@ async def get_recording(recording_id: str) -> RecordingMeta:
     return RecordingMeta(**recording.meta)
 
 
+@router.get(
+    "/recordings/{recording_id}/signals",
+    response_class=Response,
+    responses={200: {"model": RecordingSignalsHeader, "content": {"application/octet-stream": {}}}},
+    summary="Сигналы записи: float32-огибающая уровня зума (ETag)",
+)
+async def get_recording_signals(
+    recording_id: str,
+    level: int = Query(default=1, ge=1, description="Уровень пирамиды (множитель зума ×1…×16)"),
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """Огибающая сигналов для вьюера треков (срез 2.5, docs/ui.md §8).
+
+    Ответ — бинарный контейнер float32 (см. ``RecordingSignalsHeader``):
+    ``DPS1`` | ``uint32 LE len(header)`` | JSON-заголовок | payload каналов.
+    Минимумы/максимумы считаются по временным корзинам, поэтому пики артефактов
+    не теряются при прореживании. Уровень отдаётся с ``ETag``: повторный запрос
+    с тем же ``If-None-Match`` получает 304, а сам уровень кэшируется на диске.
+    """
+    recording = recording_registry.get(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
+        )
+    try:
+        data, version = await asyncio.to_thread(build_signal_blob, recording, level, settings)
+    except SignalBuildError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    headers = {
+        "ETag": f'"{version}"',
+        # Запись живёт по TTL реестра, поэтому кэшируем приватно и недолго
+        "Cache-Control": "private, max-age=3600",
+        "X-Signal-Level": str(level),
+    }
+    if if_none_match and version in if_none_match:
+        return Response(status_code=304, headers=headers)
+    return Response(content=data, media_type="application/octet-stream", headers=headers)
+
+
 @router.post(
     "/jobs", status_code=202, response_model=JobCreated,
     summary="Запустить анализ фоновой задачей (с прогрессом)",
@@ -678,6 +723,8 @@ async def get_meta() -> MetaResponse:
             name: [float(fmin), float(fmax)]
             for name, (fmin, fmax) in settings.freq_bands.items()
         },
+        signal_levels=[int(level) for level in settings.signal_levels],
+        signal_base_points=settings.signal_base_points,
         artifact_thresholds=ArtifactThresholds(
             z_score_threshold=settings.z_score_threshold,
             peak_to_peak_threshold_uv=settings.peak_to_peak_threshold_uv,

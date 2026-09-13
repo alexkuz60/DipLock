@@ -96,9 +96,22 @@ def read_recording_meta(path: str, cfg: Settings, filename: str) -> Dict[str, An
     }
 
 
+def _drop_signal_cache(recording_id: str) -> None:
+    """Удаляет кэш пирамиды сигналов записи (2.5) вместе с самой записью.
+
+    Импорт локальный: ``recording_signals`` импортирует ``recordings``, и
+    модульный импорт дал бы цикл. Кэш — только оптимизация, поэтому сбой и не
+    должен ронять очистку реестра.
+    """
+    try:
+        from app.services.recording_signals import clear_signal_cache
+    except ImportError:  # pragma: no cover — модуль всегда есть
+        return
+    clear_signal_cache(settings, recording_id)
+
+
 class RecordingRegistry:
     """In-memory реестр записей с TTL-очисткой каталогов и лимитом истории."""
-
     def __init__(self, max_recordings: int, ttl_hours: float) -> None:
         self._max = max(1, max_recordings)
         self._ttl_sec = ttl_hours * 3600.0
@@ -141,12 +154,14 @@ class RecordingRegistry:
         """Сброс реестра (тесты): каталоги записей удаляются с диска."""
         for rec in self._items.values():
             shutil.rmtree(rec.upload_dir, ignore_errors=True)
+            _drop_signal_cache(rec.recording_id)
         self._items.clear()
 
     def _drop(self, recording_id: str) -> None:
         rec = self._items.pop(recording_id, None)
         if rec is not None:
             shutil.rmtree(rec.upload_dir, ignore_errors=True)
+            _drop_signal_cache(rec.recording_id)
 
     def _drop_expired(self) -> None:
         if self._ttl_sec <= 0:

@@ -26,6 +26,8 @@ export const metaFixture: MetaResponse = {
   standard_channels: ['Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', 'O1', 'O2'],
   epoch_lengths_ms: [250, 500, 750, 1000, 1250, 1500, 1750, 2000],
   freq_bands: { delta: [1, 4], theta: [4, 8], alpha: [8, 13], beta: [13, 30], gamma: [30, 40] },
+  signal_levels: [1, 2, 4, 8, 16],
+  signal_base_points: 4000,
   artifact_thresholds: {
     z_score_threshold: 5,
     peak_to_peak_threshold_uv: 100,

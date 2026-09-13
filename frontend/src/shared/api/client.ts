@@ -48,16 +48,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError('Сервер недоступен (проверьте, запущен ли backend)', 0, cause)
   }
 
+  if (!response.ok) await failWithBody(response)
+  return (await parseBody(response)) as T
+}
+
+/** Ошибка по телу ответа: FastAPI кладёт понятное человеку объяснение в `detail`. */
+async function failWithBody(response: Response): Promise<never> {
   const body = await parseBody(response)
-  if (!response.ok) {
-    const detail = (body as { detail?: unknown } | undefined)?.detail ?? body
-    throw new ApiError(
-      typeof detail === 'string' ? detail : `Ошибка запроса (HTTP ${response.status})`,
-      response.status,
-      detail,
-    )
-  }
-  return body as T
+  const detail = (body as { detail?: unknown } | undefined)?.detail ?? body
+  throw new ApiError(
+    typeof detail === 'string' ? detail : `Ошибка запроса (HTTP ${response.status})`,
+    response.status,
+    detail,
+  )
 }
 
 /** Текстовое пояснение ошибки для UI (учитывает detail от FastAPI). */
@@ -109,4 +112,24 @@ export const api = {
   /** Паспорт загруженной записи (метаданные, без обработки). */
   recording: (recordingId: string, signal?: AbortSignal) =>
     request<RecordingMeta>(`${API_PREFIX}/recordings/${recordingId}`, { signal }),
+
+  /**
+   * Сигналы записи для вьюера: бинарный контейнер float32 (срез 2.5).
+   * `level` — множитель зума из `signal_levels` (`/meta`).
+   */
+  recordingSignals: async (
+    recordingId: string,
+    level: number,
+    signal?: AbortSignal,
+  ): Promise<ArrayBuffer> => {
+    const path = `${API_PREFIX}/recordings/${recordingId}/signals?level=${level}`
+    let response: Response
+    try {
+      response = await fetch(path, { signal })
+    } catch (cause) {
+      throw new ApiError('Сервер недоступен (проверьте, запущен ли backend)', 0, cause)
+    }
+    if (!response.ok) await failWithBody(response)
+    return response.arrayBuffer()
+  },
 }

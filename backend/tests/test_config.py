@@ -25,3 +25,24 @@ def test_env_override(monkeypatch):
     """Переменные окружения имеют приоритет над дефолтами."""
     monkeypatch.setenv("APP_NAME", "TestApp")
     assert Settings().app_name == "TestApp"
+
+
+def test_signal_levels_accepts_csv_and_json(monkeypatch):
+    """SIGNAL_LEVELS пишут и через запятую (как в .env.example), и JSON-списком."""
+    monkeypatch.setenv("SIGNAL_LEVELS", "1,2,4")
+    assert Settings().signal_levels == [1, 2, 4]
+
+    monkeypatch.setenv("SIGNAL_LEVELS", "[1, 8, 16]")
+    assert Settings().signal_levels == [1, 8, 16]
+
+    monkeypatch.setenv("SIGNAL_LEVELS", "1; 2 ;4")
+    assert Settings().signal_levels == [1, 2, 4]
+
+
+def test_signal_levels_default_and_base_points(monkeypatch):
+    """Дефолт уровней согласован с дискретным зумом UI ×1…×16."""
+    assert settings.signal_levels == [1, 2, 4, 8, 16]
+    assert settings.signal_base_points > 0
+
+    monkeypatch.setenv("SIGNAL_BASE_POINTS", "2000")
+    assert Settings().signal_base_points == 2000

@@ -4,7 +4,11 @@
  * Обработки здесь нет: загрузка возвращает только паспорт записи
  * (`POST /api/v1/recordings`), поэтому пользователь сначала видит сигнал как он
  * есть и уже по картинке решает, нужна ли обработка артефактов и шума.
- * Вьюер пока работает на демо-сигнале: эндпоинт сигналов записи — срез 2.5.
+ *
+ * Треки берутся из эндпоинта сигналов (`GET /recordings/{id}/signals?level=`,
+ * срез 2.5): уровень зума — индекс в `TIME_LEVELS`, кадры кэшируются в сторе
+ * записи. Пока нужный уровень грузится, показывается самый подробный из уже
+ * загруженных — переключение зума не мигает пустотой.
  *
  * Диалог выбора EDF один на раздел: его открывают и кнопка в зоне загрузки,
  * и иконка «Загрузить EDF» в тулс-хедере (через `fileDialogRequest`).
@@ -15,12 +19,14 @@ import { useEffect, useRef, useState, type DragEvent, type RefObject } from 'rea
 import { api } from '@/shared/api/client'
 import type { RecordingMeta } from '@/shared/api/types'
 import { DEMO_CHANNELS } from '@/shared/lib/demoSignal'
+import { selectFrame, resolveSignalLevel } from '@/shared/lib/signalFrame'
 import { acceptEdfFile, useEdfRecording } from '@/shared/state/edfRecording'
+import { TIME_LEVELS, useEdfParams } from '@/shared/state/edfParams'
 import { Button } from '@/shared/ui/Button'
 import { cx } from '@/shared/ui/cx'
 import { Panel } from '@/shared/ui/Panel'
 import { StatusPill } from '@/shared/ui/StatusPill'
-import { ErrorBlock, InfoRow } from '@/shared/ui/StateViews'
+import { ErrorBlock, InfoRow, LoadingBlock } from '@/shared/ui/StateViews'
 import { TrackStack } from './viewer/TrackStack'
 
 /** Скрытый input записи: открывается кнопкой тулс-хедера или зоны загрузки. */
@@ -159,13 +165,73 @@ function RecordingCard({ recording, onClose }: { recording: RecordingMeta; onClo
   )
 }
 
+/** Треки записи: догрузка уровня пирамиды + состояния loading/error/stale. */
+function RecordingTracks({
+  recording,
+  levels,
+}: {
+  recording: RecordingMeta
+  /** Доступные уровни пирамиды (множители зума из `/meta`) */
+  levels: number[]
+}) {
+  const frames = useEdfRecording((state) => state.signalFrames)
+  const pending = useEdfRecording((state) => state.signalsPending)
+  const signalsError = useEdfRecording((state) => state.signalsError)
+  const loadSignals = useEdfRecording((state) => state.loadSignals)
+  const levelIndex = useEdfParams((state) => state.params.timeLevel)
+  const level = resolveSignalLevel(TIME_LEVELS[levelIndex] ?? 1, levels)
+  const baseLevel = resolveSignalLevel(levels[0] ?? 1, levels)
+
+  // Уровень ×1 — мгновенный вид «вся сессия»: грузим его сразу, ещё до того,
+  // как пользователь начнёт зумить (docs/ui.md §8).
+  useEffect(() => {
+    void loadSignals(baseLevel)
+  }, [loadSignals, baseLevel, recording.recording_id])
+
+  useEffect(() => {
+    void loadSignals(level)
+  }, [loadSignals, level, recording.recording_id])
+
+  const frame = selectFrame(frames, level)
+  const loaded = Boolean(frames[level])
+
+  return (
+    <Panel title="Треки записи" className="flex min-h-0 flex-1 flex-col">
+      {signalsError && !frame ? (
+        <ErrorBlock
+          title="Не удалось получить сигналы записи"
+          message={signalsError}
+          onRetry={() => void loadSignals(level)}
+        />
+      ) : !frame ? (
+        <LoadingBlock label={`Чтение сигналов записи (уровень ×${level})…`} />
+      ) : (
+        <>
+          {signalsError ? (
+            <ErrorBlock
+              title="Уровень не догрузился"
+              message={signalsError}
+              onRetry={() => void loadSignals(level)}
+            />
+          ) : null}
+          <TrackStack signal={frame} />
+          <p className="tnum px-2 pb-1 text-xs text-fg-2">
+            {pending > 0 && !loaded
+              ? `Уровень ×${level} догружается — пока показывается ${frame.level > 0 ? `уровень ×${frame.level}` : 'полный сигнал'}`
+              : `Уровень ×${level}: ${frame.times.length} точек на канал, огибающая min/max`}
+          </p>
+        </>
+      )}
+    </Panel>
+  )
+}
+
 export function EdfSection() {
   const recording = useEdfRecording((state) => state.recording)
   const demo = useEdfRecording((state) => state.demo)
   const uploadProgress = useEdfRecording((state) => state.uploadProgress)
   const uploadError = useEdfRecording((state) => state.uploadError)
   const requestFileDialog = useEdfRecording((state) => state.fileDialogRequest)
-  const openDemo = useEdfRecording((state) => state.openDemo)
   const closeDemo = useEdfRecording((state) => state.closeDemo)
   const closeRecording = useEdfRecording((state) => state.closeRecording)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -179,6 +245,8 @@ export function EdfSection() {
 
   // Каналы для демо-режима: запись → монтаж из /meta → фикстурный набор
   const demoChannels = recording?.channels ?? meta.data?.standard_channels ?? DEMO_CHANNELS
+  // Уровни пирамиды сигналов: источник — /meta, фолбэк — дискретные ×1…×16 UI
+  const signalLevels = meta.data?.signal_levels?.length ? meta.data.signal_levels : [...TIME_LEVELS]
 
   if (demo) {
     return (
@@ -187,8 +255,8 @@ export function EdfSection() {
         <div className="flex items-center gap-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
           <FlaskConical className="size-4 shrink-0" aria-hidden />
           <span>
-            Демо-сигнал (синтетика): вьюер отлаживается без сервера. Сигналы записи появятся после
-            эндпоинта сигналов (срез 2.5).
+            Демо-сигнал (синтетика): вьюер отлаживается без сервера. Для реальной записи загрузите
+            EDF — треки придут из её сигналов.
           </span>
           <Button className="ml-auto" icon={<X className="size-4" />} onClick={closeDemo}>
             Закрыть демо
@@ -207,25 +275,13 @@ export function EdfSection() {
       {recording ? (
         <>
           <RecordingCard recording={recording} onClose={closeRecording} />
-          <Panel title="Треки записи">
-            <p className="text-sm text-fg-2">
-              Отрисовка каналов записи появится после эндпоинта сигналов (срез 2.5); вьюер, зум и
-              паспорт сессии уже работают в шапке раздела. Пока треки можно посмотреть на
-              демо-сигнале:
-            </p>
-            <Button
-              className="mt-2"
-              icon={<FlaskConical className="size-4" />}
-              onClick={() => openDemo(demoChannels)}
-            >
-              Открыть демо-треки
-            </Button>
-          </Panel>
+          <div className="flex min-h-[320px] flex-1 flex-col">
+            <RecordingTracks recording={recording} levels={signalLevels} />
+          </div>
         </>
       ) : (
         <>
           <Dropzone channels={demoChannels} uploading={uploadProgress} inputRef={inputRef} />
-
         </>
       )}
     </div>

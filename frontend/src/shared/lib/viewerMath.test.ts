@@ -1,15 +1,29 @@
-/** Тесты математики вьюера: окна, дискретный зум, min/max-огибающая. */
+/** Тесты математики вьюера: окна, дискретный зум, min/max-огибающая кадра. */
 import { describe, expect, it } from 'vitest'
 import {
   anchoredCenter,
   clampCenter,
-  envelopeOf,
+  frameEnvelope,
   fullWindow,
   panByPixels,
   pointsBudget,
   windowCenter,
   zoomWindow,
 } from '@/shared/lib/viewerMath'
+
+/** Кадр: линейно растущие времена и огибающая min/max по каналу. */
+function frame(nPoints: number, durationSec: number, valueOf: (i: number) => [number, number]) {
+  const times = new Float32Array(nPoints)
+  const min = new Float32Array(nPoints)
+  const max = new Float32Array(nPoints)
+  for (let i = 0; i < nPoints; i++) {
+    times[i] = ((i + 0.5) * durationSec) / nPoints
+    const [lo, hi] = valueOf(i)
+    min[i] = lo
+    max[i] = hi
+  }
+  return { times, min, max }
+}
 
 describe('временные окна', () => {
   it('fullWindow — вся запись', () => {
@@ -52,41 +66,43 @@ describe('временные окна', () => {
   })
 })
 
-describe('min/max-огибающая', () => {
-  it('без прореживания возвращает исходные отсчёты окна', () => {
-    const data = new Float32Array([0, 1, 2, 3, 4, 5])
-    const env = envelopeOf(data, 100, { t0: 0.01, t1: 0.04 }, 10)
+describe('min/max-огибающая кадра', () => {
+  it('без прореживания возвращает корзины окна как есть', () => {
+    // 6 корзин по 0.1 с: времена 0.05, 0.15, …, 0.55
+    const { times, min, max } = frame(6, 0.6, (i) => [i, i + 0.5])
+    const env = frameEnvelope(times, min, max, { t0: 0.1, t1: 0.4 }, 10)
 
     expect(env.decimated).toBe(false)
     expect(Array.from(env.min)).toEqual([1, 2, 3])
-    expect(Array.from(env.max)).toEqual([1, 2, 3])
-    expect(env.times[0]).toBeCloseTo(0.01)
+    expect(Array.from(env.max)).toEqual([1.5, 2.5, 3.5])
+    expect(env.times[0]).toBeCloseTo(0.15)
   })
 
-  it('сохраняет пики артефактов при грубом зуме (главное требование)', () => {
-    // 10 000 отсчётов нулей с одним пиком 150 мкВ посередине
-    const data = new Float32Array(10_000)
-    data[5_000] = 150
-    data[4_999] = -120
+  it('сохраняет пики артефактов при агрегации (главное требование)', () => {
+    // 10 000 корзин нулей с пиком 150 / провалом −120
+    const { times, min, max } = frame(10_000, 10, (i) =>
+      i === 5_000 ? [-120, 150] : [0, 0],
+    )
 
-    const env = envelopeOf(data, 1000, { t0: 0, t1: 10 }, 100)
+    const env = frameEnvelope(times, min, max, { t0: 0, t1: 10 }, 100)
 
     expect(env.decimated).toBe(true)
     expect(env.times.length).toBe(100)
-    // пик не потерян: глобальный максимум и минимум попали в огибающую
+    // пик не потерян: глобальный max/min попали в огибающую
     expect(Math.max(...env.max)).toBe(150)
     expect(Math.min(...env.min)).toBe(-120)
     // остальные корзины — нули
-    expect(env.max.filter((v) => v === 0).length).toBe(99)
+    expect(Array.from(env.max).filter((value) => value === 0).length).toBe(99)
   })
 
-  it('покрывает окно без пропусков и не выходит за данные', () => {
-    const data = new Float32Array(10_000).map((_, i) => i)
-    const env = envelopeOf(data, 1000, { t0: 2, t1: 7 }, 200)
+  it('отбирает корзины окна и не выходит за кадр', () => {
+    const nPoints = 1_000
+    const { times, min, max } = frame(nPoints, 1, (i) => [i, i])
+    const env = frameEnvelope(times, min, max, { t0: 0.2, t1: 0.7 }, 5_000)
 
-    expect(env.times.length).toBe(200)
-    expect(env.min[0]).toBe(2_000)
-    expect(env.max[199]).toBe(6_999)
+    expect(env.times.length).toBe(500)
+    expect(env.max[0]).toBe(200)
+    expect(env.max[env.max.length - 1]).toBe(699)
     // монотонные времена
     for (let i = 1; i < env.times.length; i++) {
       expect(env.times[i]).toBeGreaterThan(env.times[i - 1])
@@ -94,9 +110,16 @@ describe('min/max-огибающая', () => {
   })
 
   it('пустое окно не падает', () => {
-    const env = envelopeOf(new Float32Array(0), 1000, { t0: 0, t1: 1 }, 100)
+    const { times, min, max } = frame(0, 0, () => [0, 0])
+    const env = frameEnvelope(times, min, max, { t0: 0, t1: 1 }, 100)
     expect(env.times.length).toBe(0)
     expect(env.decimated).toBe(false)
+  })
+
+  it('окно за пределами кадра возвращает пустую огибающую', () => {
+    const { times, min, max } = frame(10, 1, (i) => [i, i])
+    const env = frameEnvelope(times, min, max, { t0: 5, t1: 6 }, 100)
+    expect(env.times.length).toBe(0)
   })
 })
 

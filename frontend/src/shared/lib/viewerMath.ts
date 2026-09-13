@@ -71,56 +71,84 @@ export type Envelope = {
   decimated: boolean
 }
 
+/** Индекс первого элемента, который не меньше ``value`` (времена возрастают). */
+function lowerBound(times: Float32Array, value: number): number {
+  let lo = 0
+  let hi = times.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if ((times[mid] as number) < value) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+/** Индекс первого элемента, который больше ``value``. */
+function upperBound(times: Float32Array, value: number): number {
+  let lo = 0
+  let hi = times.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if ((times[mid] as number) <= value) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
 /**
- * Min/max-огибающая окна: корзины по ``maxPoints`` штук на канал.
+ * Min/max-огибающая окна для кадра сигнала: корзины по ``maxPoints`` штук.
  *
- * Не «пропуск точек», а агрегация: пики артефактов не исчезают при зуме
- * (это принципиальное требование docs/ui.md — артефакт должен быть виден
- * на любом уровне). Если окно влезает в бюджет — возвращаются исходные
- * отсчёты (min == max).
+ * Кадр приходит по уровням зума (docs/ui.md §8): ``times`` — времена центров
+ * корзин, ``min``/``max`` — границы огибающей по каналу. Функция отбирает
+ * корзины, попавшие в окно, и, если их больше бюджета области, агрегирует
+ * **min по min и max по max** — пики артефактов не исчезают ни на каком зуме.
+ *
+ * ``sourceDecimated`` отмечает, был ли кадр уже прорежен сервером: это нужно
+ * только для подписи «огибающая» в UI, на данные не влияет.
  */
-export function envelopeOf(
-  data: ArrayLike<number>,
-  sfreq: number,
+export function frameEnvelope(
+  times: Float32Array,
+  min: ArrayLike<number>,
+  max: ArrayLike<number>,
   window: TimeWindow,
   maxPoints: number,
+  sourceDecimated = false,
 ): Envelope {
-  const from = Math.max(0, Math.floor(window.t0 * sfreq))
-  const to = Math.min(data.length, Math.ceil(window.t1 * sfreq))
-  const n = Math.max(to - from, 0)
   const budget = Math.max(1, Math.floor(maxPoints))
+  const from = lowerBound(times, window.t0)
+  const to = Math.max(from, upperBound(times, window.t1))
+  const count = to - from
 
-  if (n <= budget) {
-    const times = new Float32Array(n)
-    const min = new Float32Array(n)
-    const max = new Float32Array(n)
-    for (let i = 0; i < n; i++) {
-      times[i] = (from + i) / sfreq
-      min[i] = data[from + i] as number
-      max[i] = data[from + i] as number
+  if (count <= budget) {
+    const outTimes = times.slice(from, to)
+    return {
+      times: outTimes,
+      min: Float32Array.from({ length: count }, (_, i) => min[from + i] as number),
+      max: Float32Array.from({ length: count }, (_, i) => max[from + i] as number),
+      decimated: sourceDecimated,
     }
-    return { times, min, max, decimated: false }
   }
 
-  const times = new Float32Array(budget)
-  const min = new Float32Array(budget)
-  const max = new Float32Array(budget)
-  const perBucket = n / budget
+  const outTimes = new Float32Array(budget)
+  const outMin = new Float32Array(budget)
+  const outMax = new Float32Array(budget)
+  const perBucket = count / budget
   for (let b = 0; b < budget; b++) {
     const start = from + Math.floor(b * perBucket)
     const end = Math.min(to, from + Math.floor((b + 1) * perBucket))
     let lo = Infinity
     let hi = -Infinity
     for (let i = start; i < end; i++) {
-      const value = data[i] as number
-      if (value < lo) lo = value
-      if (value > hi) hi = value
+      const valueMin = min[i] as number
+      const valueMax = max[i] as number
+      if (valueMin < lo) lo = valueMin
+      if (valueMax > hi) hi = valueMax
     }
-    times[b] = (start + end - 1) / (2 * sfreq)
-    min[b] = lo
-    max[b] = hi
+    outTimes[b] = times[Math.min(end - 1, start)] as number
+    outMin[b] = lo
+    outMax[b] = hi
   }
-  return { times, min, max, decimated: true }
+  return { times: outTimes, min: outMin, max: outMax, decimated: true }
 }
 
 /** Число точек на канал при заданной ширине области: бюджет 2× ширины. */

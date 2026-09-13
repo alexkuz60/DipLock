@@ -3,7 +3,11 @@
  *
  * Один чарт на канал (дешёвый пересчёт при панорамировании), общая ось
  * времени у нижнего трека, огибающая min/max как band — пики артефактов
- * видны на любом уровне зума (см. `viewerMath.envelopeOf`).
+ * видны на любом уровне зума (см. `viewerMath.frameEnvelope`).
+ *
+ * Данные приходят кадром `SignalFrame`: огибающая уровня пирамиды от сервера
+ * (срез 2.5, `GET /recordings/{id}/signals?level=`) или демо-фикстура. Вьюеру
+ * не важно, откуда кадр: он не хранит сырые отсчёты и не декодирует EDF.
  *
  * Интеракции: колесо — дискретный зум ×1…×16 (якорь в точке курсора),
  * drag — панорамирование, движение мыши — курсор со временем,
@@ -15,15 +19,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import type { SignalData } from '@/shared/lib/demoSignal'
 import {
   anchoredCenter,
-  envelopeOf,
+  frameEnvelope,
   panByPixels,
   pointsBudget,
   zoomWindow,
   type TimeWindow,
 } from '@/shared/lib/viewerMath'
+import type { SignalFrame } from '@/shared/lib/signalFrame'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue } from '@/shared/state/edfParams'
 
 // Цвета холста: canvas не читает CSS-токены, значения синхронизированы с темой
@@ -37,7 +41,7 @@ const TRACK_HEIGHT = 64
 const LABEL_WIDTH = 56
 
 export type TrackStackProps = {
-  signal: SignalData
+  signal: SignalFrame
 }
 
 function formatTick(spanSec: number, value: number): string {
@@ -103,8 +107,7 @@ function makeTrackOptions(
 
 type TrackRowProps = {
   name: string
-  data: ArrayLike<number>
-  sfreq: number
+  frame: SignalFrame
   window: TimeWindow
   width: number
   amplitudeMode: 'shared' | 'per_channel'
@@ -115,8 +118,7 @@ type TrackRowProps = {
 
 function TrackRow({
   name,
-  data,
-  sfreq,
+  frame,
   window,
   width,
   amplitudeMode,
@@ -128,8 +130,16 @@ function TrackRow({
   const chartRef = useRef<uPlot | null>(null)
 
   const env = useMemo(
-    () => envelopeOf(data, sfreq, window, pointsBudget(width)),
-    [data, sfreq, window, width],
+    () =>
+      frameEnvelope(
+        frame.times,
+        frame.min[name] ?? [],
+        frame.max[name] ?? [],
+        window,
+        pointsBudget(width),
+        frame.decimated,
+      ),
+    [frame, name, window, width],
   )
   const yRange = useMemo(() => {
     let lo = Infinity
@@ -198,11 +208,13 @@ export function TrackStack({ signal }: TrackStackProps) {
   const [centerSec, setCenterSec] = useState(() => signal.durationSec / 2)
   const [cursor, setCursor] = useState<{ xPx: number; timeSec: number } | null>(null)
 
-  // Новая запись/демо — возвращаемся к «вся сессия»
+  // Новая запись/демо — возвращаемся к «вся сессия». Зависимость именно от
+  // источника, а не от объекта кадра: при зуме сервер отдаёт новый кадр того же
+  // сигнала, и сброс окна по нему ломал бы якорь зума и панорамирование.
   useEffect(() => {
     setCenterSec(signal.durationSec / 2)
     setCursor(null)
-  }, [signal])
+  }, [signal.sourceId, signal.durationSec])
 
   // Ширина области треков (без колонки подписей)
   useEffect(() => {
@@ -307,8 +319,10 @@ export function TrackStack({ signal }: TrackStackProps) {
 
   // Порядок отображения — порядок каналов сигнала (монтаж), а не порядок кликов
   const visible = signal.channels.filter(
-    (name) => params.visibleChannels.includes(name) && signal.data[name],
+    (name) => params.visibleChannels.includes(name) && signal.max[name],
   )
+
+  const pointsPerChannel = signal.times.length
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="track-stack">
@@ -317,6 +331,9 @@ export function TrackStack({ signal }: TrackStackProps) {
           Окно {window.t0.toFixed(2)}–{window.t1.toFixed(2)} с
         </span>
         <span>×{factor}</span>
+        <span data-testid="signal-source">
+          {signal.level > 0 ? `огибающая, ${pointsPerChannel} т/канал` : 'полный сигнал'}
+        </span>
         <span className="ml-auto truncate">
           Колесо — зум · drag — панорама · клик по каналу — скрыть · Ctrl+клик — только этот
         </span>
@@ -351,8 +368,7 @@ export function TrackStack({ signal }: TrackStackProps) {
             <TrackRow
               key={name}
               name={name}
-              data={signal.data[name]}
-              sfreq={signal.sfreq}
+              frame={signal}
               window={window}
               width={width}
               amplitudeMode={params.amplitudeMode}

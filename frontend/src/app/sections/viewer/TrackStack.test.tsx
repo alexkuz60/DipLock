@@ -9,6 +9,7 @@ import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SignalData } from '@/shared/lib/demoSignal'
+import { frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
 import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
 import { uplotCharts } from '@/test/uplot'
 
@@ -16,7 +17,7 @@ import { TrackStack } from './TrackStack'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 /** Короткий сигнал: 3 канала, 10 с, 100 Гц — арифметика в тестах проверяема. */
-function signalFixture(): SignalData {
+function signalDataFixture(): SignalData {
   const sfreq = 100
   const durationSec = 10
   const n = sfreq * durationSec
@@ -30,6 +31,42 @@ function signalFixture(): SignalData {
     sfreq,
     durationSec,
     data: { F3: make(0), F4: make(1), C3: make(2) },
+  }
+}
+
+/** Кадр «полный сигнал»: min == max, уровень 0 (как демо-фикстура). */
+function frameFixture(): SignalFrame {
+  return frameFromSignalData(signalDataFixture())
+}
+
+/** Кадр огибающей: 100 корзин за 10 с, min = −amp, max = +amp (уровень ×1). */
+function decimatedFrameFixture(): SignalFrame {
+  const nPoints = 100
+  const durationSec = 10
+  const times = new Float32Array(nPoints)
+  for (let i = 0; i < nPoints; i++) times[i] = ((i + 0.5) * durationSec) / nPoints
+  const min: Record<string, Float32Array> = {}
+  const max: Record<string, Float32Array> = {}
+  for (const name of ['F3', 'F4', 'C3']) {
+    const lo = new Float32Array(nPoints)
+    const hi = new Float32Array(nPoints)
+    for (let i = 0; i < nPoints; i++) {
+      // Каждая корзина: пик +60 мкВ по всем каналам — артефакт должен остаться
+      lo[i] = i === 50 ? -60 : -5
+      hi[i] = i === 50 ? 60 : 5
+    }
+    min[name] = lo
+    max[name] = hi
+  }
+  return {
+    sourceId: 'rec-1',
+    channels: ['F3', 'F4', 'C3'],
+    durationSec,
+    times,
+    min,
+    max,
+    decimated: true,
+    level: 1,
   }
 }
 
@@ -49,7 +86,7 @@ describe('вьюер треков', () => {
 
   it('рисует трек на каждый видимый канал в порядке монтажа', () => {
     paramsState({ visibleChannels: ['F3', 'F4', 'C3'] })
-    renderWithProviders(<TrackStack signal={signalFixture()} />)
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     expect(screen.getByTestId('track-F3')).toBeInTheDocument()
     expect(screen.getByTestId('track-F4')).toBeInTheDocument()
@@ -62,7 +99,7 @@ describe('вьюер треков', () => {
 
   it('не создаёт чарт для скрытого канала и показывает подсказку, если скрыто всё', () => {
     paramsState({ visibleChannels: [] })
-    renderWithProviders(<TrackStack signal={signalFixture()} />)
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     expect(screen.queryByTestId('track-F3')).not.toBeInTheDocument()
     expect(screen.getByText(/Все каналы скрыты/)).toBeInTheDocument()
@@ -71,12 +108,12 @@ describe('вьюер треков', () => {
 
   it('по умолчанию показывает всю сессию, на уровне ×4 — окно вчетверо короче', () => {
     paramsState({ visibleChannels: ['F3'], timeLevel: 0 })
-    const { unmount } = renderWithProviders(<TrackStack signal={signalFixture()} />)
+    const { unmount } = renderWithProviders(<TrackStack signal={frameFixture()} />)
     expect(screen.getByText('Окно 0.00–10.00 с')).toBeInTheDocument()
     unmount()
 
     paramsState({ visibleChannels: ['F3'], timeLevel: 2 })
-    renderWithProviders(<TrackStack signal={signalFixture()} />)
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     expect(screen.getByText('Окно 3.75–6.25 с')).toBeInTheDocument()
     expect(screen.getByText('×4')).toBeInTheDocument()
@@ -85,7 +122,7 @@ describe('вьюер треков', () => {
   it('клик по подписи скрывает канал, Ctrl+клик оставляет только его', async () => {
     const user = userEvent.setup()
     paramsState({ visibleChannels: ['F3', 'F4', 'C3'] })
-    renderWithProviders(<TrackStack signal={signalFixture()} />)
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     await user.click(screen.getByTestId('track-F4').querySelector('button')!)
     expect(useEdfParams.getState().params.visibleChannels).toEqual(['F3', 'C3'])
@@ -103,7 +140,7 @@ describe('вьюер треков', () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
 
-    renderWithProviders(<TrackStack signal={signalFixture()} />)
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
     await user.click(screen.getByTestId('track-F3').querySelector('button')!)
 
     expect(fetchSpy).not.toHaveBeenCalled()
@@ -111,7 +148,7 @@ describe('вьюер треков', () => {
 
   it('ограничивает число точек на трек бюджетом по ширине (min/max-огибающая)', () => {
     paramsState({ visibleChannels: ['F3'] })
-    renderWithProviders(<TrackStack signal={signalFixture()} />)
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     expect(uplotCharts()).toHaveLength(1)
     const [[, min, max]] = uplotCharts()[0].setData.mock.calls.at(-1) as [
@@ -131,11 +168,46 @@ describe('вьюер треков', () => {
       [Float32Array, Float32Array, Float32Array],
       boolean,
     ]
-    // Окно 10/8 = 1.25 с → 126 отсчётов (границы включительно): бюджет шире
-    // окна, агрегация не нужна
-    expect(times.length).toBe(126)
-    expect(zoomedMin.length).toBe(126)
-    expect(zoomedMax.length).toBe(126)
+    // Окно 10/8 = 1.25 с (4.375–5.625) → 125 отсчётов 100 Гц: бюджет шире окна,
+    // агрегация не нужна
+    expect(times.length).toBe(125)
+    expect(zoomedMin.length).toBe(125)
+    expect(zoomedMax.length).toBe(125)
     expect(uplotCharts()[0].setScale).toHaveBeenCalledWith('x', { min: 4.375, max: 5.625 })
+  })
+
+  it('прореженный кадр растягивается бюджетом, но сохраняет пик артефакта', () => {
+    paramsState({ visibleChannels: ['F3'] })
+    renderWithProviders(<TrackStack signal={decimatedFrameFixture()} />)
+
+    // Полная сессия: 100 корзин меньше бюджета (2048) — огибающая как есть
+    let call = uplotCharts()[0].setData.mock.calls.at(-1) as [
+      [Float32Array, Float32Array, Float32Array],
+      boolean,
+    ]
+    expect(call[0][1].length).toBe(100)
+    expect(call[0][2][50]).toBe(60)
+    expect(call[0][1][50]).toBe(-60)
+
+    // Зум ×16: окно 0.625 с ≈ 6 корзин, агрегации нет — пик остаётся
+    act(() => {
+      useEdfParams.getState().setParams({ timeLevel: 4 })
+    })
+    call = uplotCharts()[0].setData.mock.calls.at(-1) as [
+      [Float32Array, Float32Array, Float32Array],
+      boolean,
+    ]
+    expect(call[0][2].length).toBe(6)
+    expect(Math.max(...call[0][2])).toBe(60)
+  })
+
+  it('подписывает источник: огибающая с числом точек против полного сигнала', () => {
+    paramsState({ visibleChannels: ['F3'] })
+    const { unmount } = renderWithProviders(<TrackStack signal={frameFixture()} />)
+    expect(screen.getByTestId('signal-source')).toHaveTextContent('полный сигнал')
+    unmount()
+
+    renderWithProviders(<TrackStack signal={decimatedFrameFixture()} />)
+    expect(screen.getByTestId('signal-source')).toHaveTextContent('огибающая, 100 т/канал')
   })
 })

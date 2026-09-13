@@ -10,11 +10,22 @@
  * загрузки или drag & drop), никаких авто-запросов.
  */
 import { create } from 'zustand'
-import { apiErrorText } from '@/shared/api/client'
+import { api, apiErrorText } from '@/shared/api/client'
 import type { RecordingMeta } from '@/shared/api/types'
 import { uploadRecording } from '@/shared/api/upload'
-import { makeDemoSignal, type SignalData } from '@/shared/lib/demoSignal'
+import { makeDemoSignal } from '@/shared/lib/demoSignal'
+import { decodeSignalFrame, frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
 import { useEdfParams, type EdfUnits } from './edfParams'
+
+/** Снимает отметку «уровень в полёте», не мутируя прежний объект состояния. */
+function releaseLevel(
+  inFlight: Record<number, boolean>,
+  level: number,
+): Record<number, boolean> {
+  const next = { ...inFlight }
+  delete next[level]
+  return next
+}
 
 /** Совпадает с MAX_UPLOAD_SIZE бэкенда (200 МБ) — проверяем до отправки */
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
@@ -51,8 +62,16 @@ export type EdfRecordingState = {
   uploadProgress: number | null
   /** Текст ошибки загрузки (для ErrorBlock) */
   uploadError: string | null
-  /** Демо-сигнал для отладки вьюера (без сервера) */
-  demo: SignalData | null
+  /** Демо-кадр сигнала для отладки вьюера (без сервера) */
+  demo: SignalFrame | null
+  /** Кадры пирамиды сигналов записи по уровням зума (срез 2.5) */
+  signalFrames: Record<number, SignalFrame>
+  /** Уровни, запрос которых уже в полёте (защита от дублей при двух эффектах) */
+  signalsInFlight: Record<number, boolean>
+  /** Сколько уровней сигнала грузится прямо сейчас (для индикатора) */
+  signalsPending: number
+  /** Текст ошибки загрузки сигналов (для ErrorBlock + «Повторить») */
+  signalsError: string | null
   /** Метаданные сессии для БД (в файл не пишутся) */
   passport: SessionPassport
   /**
@@ -68,6 +87,8 @@ export type EdfRecordingState = {
   openDemo: (channels?: string[]) => void
   /** Закрыть демо-режим */
   closeDemo: () => void
+  /** Догрузить уровень пирамиды сигналов записи (кэшируется в сторе) */
+  loadSignals: (level: number) => Promise<void>
   /** Правка паспорта сессии (данные для БД, файл не трогаем) */
   setPassport: (patch: Partial<SessionPassport>) => void
   /** Запросить открытие диалога выбора EDF (тулс-хедер → рабочая область) */
@@ -76,11 +97,15 @@ export type EdfRecordingState = {
   closeRecording: () => void
 }
 
-export const useEdfRecording = create<EdfRecordingState>()((set) => ({
+export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   recording: null,
   uploadProgress: null,
   uploadError: null,
   demo: null,
+  signalFrames: {},
+  signalsInFlight: {},
+  signalsPending: 0,
+  signalsError: null,
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
 
@@ -93,18 +118,51 @@ export const useEdfRecording = create<EdfRecordingState>()((set) => ({
       uploadProgress: null,
       uploadError: null,
       demo: null,
+      // Пирамида сигналов принадлежит записи: новая запись — пустой кэш кадров
+      signalFrames: {},
+      signalsInFlight: {},
+      signalsPending: 0,
+      signalsError: null,
       // Паспорт принадлежит сессии: новая запись — чистый паспорт
       passport: { ...EMPTY_PASSPORT, title: meta.filename },
     }),
 
   openDemo: (channels) => {
     const signal = makeDemoSignal(channels)
-    set({ demo: signal })
+    set({ demo: frameFromSignalData(signal) })
     // Демо-каналы становятся «доступными»: вьюер и блок «Каналы» работают
     // с реальным выбором пользователя, а не с отдельной веткой логики.
     useEdfParams.getState().setAvailableChannels(signal.channels)
   },
   closeDemo: () => set({ demo: null }),
+
+  loadSignals: async (level) => {
+    const { recording, signalFrames, signalsInFlight } = get()
+    // Кадр уже есть или запрос в полёте: второй раз не грузим. Эффекты
+    // «предзагрузка ×1» и «текущий уровень» на старте совпадают, и без этой
+    // проверки уровень ×1 запрашивался бы дважды.
+    if (!recording || signalFrames[level] || signalsInFlight[level]) return
+    set((state) => ({
+      signalsInFlight: { ...state.signalsInFlight, [level]: true },
+      signalsPending: state.signalsPending + 1,
+      signalsError: null,
+    }))
+    try {
+      const buffer = await api.recordingSignals(recording.recording_id, level)
+      const frame = decodeSignalFrame(buffer)
+      set((state) => ({
+        signalFrames: { ...state.signalFrames, [level]: frame },
+        signalsInFlight: releaseLevel(state.signalsInFlight, level),
+        signalsPending: Math.max(0, state.signalsPending - 1),
+      }))
+    } catch (error) {
+      set((state) => ({
+        signalsInFlight: releaseLevel(state.signalsInFlight, level),
+        signalsPending: Math.max(0, state.signalsPending - 1),
+        signalsError: apiErrorText(error),
+      }))
+    }
+  },
 
   setPassport: (patch) => set((state) => ({ passport: { ...state.passport, ...patch } })),
 
@@ -116,6 +174,10 @@ export const useEdfRecording = create<EdfRecordingState>()((set) => ({
       uploadProgress: null,
       uploadError: null,
       demo: null,
+      signalFrames: {},
+      signalsInFlight: {},
+      signalsPending: 0,
+      signalsError: null,
       passport: { ...EMPTY_PASSPORT },
     })
     // Выбор каналов и результат предподготовки привязаны к записи
