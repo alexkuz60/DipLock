@@ -1,0 +1,107 @@
+/**
+ * DipLock UI — токены тёмной темы и базовые стили (Tailwind CSS v4).
+ *
+ * Принципы (см. docs/ui.md):
+ *  - тёмная тема, крупный базовый шрифт, системный шрифт ОС;
+ *  - только десктоп: минимальная ширина 1366px, мобильного адаптива нет;
+ *  - скролл — только внутри рабочих областей (body не скроллится).
+ */
+@import 'tailwindcss';
+
+@theme {
+  /* Фон и разделители (от самого тёмного к самому светлому) */
+  --color-bg-0: #0b1017;
+  --color-bg-1: #121a24;
+  --color-bg-2: #18222e;
+  --color-bg-3: #22303f;
+  --color-border: #2c3a4d;
+
+  /* Текст */
+  --color-fg-0: #eef3f9;
+  --color-fg-1: #b8c4d3;
+  --color-fg-2: #8695a8;
+
+  /* Акценты и статусы */
+  --color-accent: #4da3ff;
+  --color-accent-soft: #17324f;
+  --color-ok: #48d17f;
+  --color-warn: #ffb454;
+  --color-danger: #ff6b6b;
+
+  /* Типы артефактов (цвета зон в разделе EDF) */
+  --color-artifact-zscore: #ff7b72;
+  --color-artifact-pp: #ffb454;
+  --color-artifact-flat: #8b949e;
+  --color-artifact-ica: #a78bfa;
+
+  /* Системный шрифт пользователя, без веб-загрузок */
+  --font-sans:
+    system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, 'Noto Sans', sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Consolas, monospace;
+}
+
+@layer base {
+  html {
+    /* Крупный базовый кегль: UI рассчитан на десктоп */
+    font-size: 17px;
+  }
+
+  html[data-font-scale='normal'] {
+    font-size: 16px;
+  }
+
+  html[data-font-scale='large'] {
+    font-size: 18px;
+  }
+
+  html[data-font-scale='xlarge'] {
+    font-size: 20px;
+  }
+
+  body {
+    margin: 0;
+    /* Только десктоп: никаких мобильных компромиссов */
+    min-width: 1366px;
+    height: 100vh;
+    overflow: hidden;
+    background-color: var(--color-bg-0);
+    color: var(--color-fg-0);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  html[data-density='compact'] .ui-list-row {
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--color-bg-1);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-bg-3);
+    border-radius: 6px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-border);
+  }
+}
+
+@layer utilities {
+  /* Табличные цифры: колонки чисел не «пляшут» при обновлении */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}

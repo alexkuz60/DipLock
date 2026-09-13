@@ -6,7 +6,19 @@ from typing import Tuple, Dict
 from app.core.config import Settings
 
 
-def detect_artifacts(raw, settings, z_threshold=5.0, pp_threshold_uv=100.0) -> Tuple[mne.Annotations, dict]:
+def detect_artifacts(
+    raw,
+    settings,
+    z_threshold: float = 5.0,
+    pp_threshold_uv: float = 100.0,
+    run_ica: bool = True,
+) -> Tuple[mne.Annotations, dict]:
+    """Детекция артефактов: z-score, peak-to-peak, flat-line, ICA-EOG.
+
+    ``run_ica=False`` полностью пропускает ICA-ветку (быстрый профиль);
+    ICA применяется только при наличии EOG-подобных каналов, факт применения
+    возвращается в ``stats["ica_applied"]``.
+    """
     annotations = mne.Annotations(onset=[], duration=[], description=[])
     stats = {"zscore_outlier": 0, "peak_to_peak": 0, "flat_line": 0, "ica_eog": 0}
 
@@ -60,16 +72,18 @@ def detect_artifacts(raw, settings, z_threshold=5.0, pp_threshold_uv=100.0) -> T
                 )
                 stats["flat_line"] += 1
 
-    # 4. ICA EOG
+    # 4. ICA EOG (только если запрошена и в записи есть EOG-подобные каналы)
     eog_like = [ch for ch in raw.ch_names if "eog" in ch.lower()]
-    if eog_like:
+    ica_applied = False
+    if run_ica and eog_like:
         try:
             ica = mne.preprocessing.ICA(n_components=min(18, len(raw.ch_names)), random_state=42, max_iter="auto")
             ica.fit(raw)
             bads, _ = ica.find_bads_eog(raw)
             stats["ica_eog"] = len(bads)
+            ica_applied = True
         except Exception:
             pass
 
     total = sum(stats.values())
-    return annotations, {"total": total, "by_type": stats}
+    return annotations, {"total": total, "by_type": stats, "ica_applied": ica_applied}

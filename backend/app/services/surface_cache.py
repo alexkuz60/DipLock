@@ -1,0 +1,168 @@
+"""Кэш статических ассетов fsaverage (F6).
+
+Меш `lh/rh.inflated` и атлас `PALS_B12_Brodmann` не меняются между запусками,
+поэтому:
+
+* версия ассета считается по «отпечатку» файлов (размер + mtime) — O(1), без чтения данных;
+* JSON строится один раз и кладётся на диск в ``settings.cache_dir/surface``;
+* готовые байты держим в памяти (``lru_cache``) — отдача без парсинга и сериализации.
+
+Итог: вместо 2.86 МБ и ~1.6 с пересчёта на каждый запрос — мгновенный кэшируемый
+ассет; тяжёлые индексы вершин Brodmann (≈2 МБ) вынесены в отдельный эндпоинт.
+"""
+import hashlib
+import json
+import logging
+import os
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Dict, List, Optional, Tuple
+
+from app.core.config import Settings
+from app.utils.brain_export import export_fsaverage_surface
+
+logger = logging.getLogger(__name__)
+
+# Файлы, по которым определяется версия ассета (меш + атлас)
+_STAMP_RELATIVE = (
+    "fsaverage/surf/lh.inflated",
+    "fsaverage/surf/rh.inflated",
+    "fsaverage/label/lh.PALS_B12_Brodmann.annot",
+    "fsaverage/label/rh.PALS_B12_Brodmann.annot",
+)
+
+
+@dataclass(frozen=True)
+class _AssetCtx:
+    """Хэшируемый контекст ассета (ключ кэша вместо самого Settings)."""
+
+    subjects_dir: str
+    cache_dir: str
+    api_prefix: str
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "_AssetCtx":
+        return cls(
+            subjects_dir=str(settings.subjects_dir),
+            cache_dir=str(settings.cache_dir),
+            api_prefix=str(settings.api_prefix),
+        )
+
+
+def surface_version(ctx: _AssetCtx) -> str:
+    """Версия ассета по «отпечатку» файлов fsaverage (используется как ETag)."""
+    digest = hashlib.sha256()
+    digest.update(ctx.subjects_dir.encode("utf-8"))
+    for rel in _STAMP_RELATIVE:
+        path = os.path.join(ctx.subjects_dir, rel)
+        try:
+            stat = os.stat(path)
+            digest.update(f"{rel}:{stat.st_size}:{int(stat.st_mtime)}".encode("utf-8"))
+        except OSError:
+            digest.update(f"{rel}:missing".encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
+def _cache_paths(ctx: _AssetCtx, version: str) -> Tuple[str, str]:
+    """Пути файлов кэша: (меш, индексы Brodmann)."""
+    base = os.path.join(ctx.cache_dir, "surface")
+    return (
+        os.path.join(base, f"surface-{version}.json"),
+        os.path.join(base, f"brodmann-{version}.json"),
+    )
+
+
+def _read_cached(path: str) -> Optional[bytes]:
+    try:
+        with open(path, "rb") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+def _write_cached(path: str, data: bytes) -> None:
+    """Атомарная запись кэша; сбой не критичен (кэш — только оптимизация)."""
+    tmp = f"{path}.tmp"
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(tmp, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except OSError as exc:
+        logger.warning("Кэш поверхности не записан (%s): %s", path, exc)
+
+
+@lru_cache(maxsize=4)
+def _build_assets(ctx: _AssetCtx) -> Tuple[bytes, bytes, str]:
+    """Строит байты меша и BA-индексов (или берёт их с диска) + версию ассета."""
+    version = surface_version(ctx)
+    mesh_path, ba_path = _cache_paths(ctx, version)
+    mesh_cached, ba_cached = _read_cached(mesh_path), _read_cached(ba_path)
+    if mesh_cached is not None and ba_cached is not None:
+        logger.info("Поверхность fsaverage взята из кэша (version=%s)", version)
+        return mesh_cached, ba_cached, version
+
+    payload = export_fsaverage_surface(ctx)
+    ba_labels: Dict[str, Dict] = payload.pop("ba_labels", {}) or {}
+
+    mesh_payload = {
+        "version": version,
+        "lh": payload["lh"],
+        "rh": payload["rh"],
+        "n_brodmann_areas": len(ba_labels),
+        "brodmann_url": f"{ctx.api_prefix}/surface/brodmann",
+    }
+    ba_payload = {
+        "version": version,
+        "areas": {name: {"name": name, **values} for name, values in ba_labels.items()},
+    }
+    mesh_bytes = json.dumps(mesh_payload, separators=(",", ":")).encode("utf-8")
+    ba_bytes = json.dumps(ba_payload, separators=(",", ":")).encode("utf-8")
+
+    _write_cached(mesh_path, mesh_bytes)
+    _write_cached(ba_path, ba_bytes)
+    logger.info(
+        "Поверхность fsaverage построена (version=%s, меш=%.2f МБ, BA=%.2f МБ)",
+        version, len(mesh_bytes) / 1e6, len(ba_bytes) / 1e6,
+    )
+    return mesh_bytes, ba_bytes, version
+
+
+@lru_cache(maxsize=2)
+def _parsed_brodmann(ctx: _AssetCtx) -> Dict[str, Dict]:
+    """Распаренные BA-метки (парсим кэш один раз на версию ассета)."""
+    _, ba_bytes, _ = _build_assets(ctx)
+    return json.loads(ba_bytes).get("areas", {})
+
+
+def asset_version(settings: Settings) -> str:
+    """Версия ассета без построения данных (O(1), для /meta и SurfaceRef)."""
+    return surface_version(_AssetCtx.from_settings(settings))
+
+
+def get_surface_bytes(settings: Settings) -> Tuple[bytes, str]:
+    """Байты JSON меша fsaverage + версия ассета (для ETag/Cache-Control)."""
+    mesh_bytes, _, version = _build_assets(_AssetCtx.from_settings(settings))
+    return mesh_bytes, version
+
+
+def get_brodmann_bytes(settings: Settings) -> Tuple[bytes, str]:
+    """Байты JSON всех полей Бродмана + версия ассета."""
+    _, ba_bytes, version = _build_assets(_AssetCtx.from_settings(settings))
+    return ba_bytes, version
+
+
+def get_brodmann_area(settings: Settings, name: str) -> Optional[Dict]:
+    """Индексы вершин одного поля Бродмана (или None, если метки нет)."""
+    return _parsed_brodmann(_AssetCtx.from_settings(settings)).get(name)
+
+
+def brodmann_area_names(settings: Settings) -> List[str]:
+    """Имена всех доступных полей Бродмана (лёгкий ответ для UI)."""
+    return sorted(_parsed_brodmann(_AssetCtx.from_settings(settings)))
+
+
+def clear_asset_cache() -> None:
+    """Сбрасывает in-memory кэш (используется в тестах)."""
+    _build_assets.cache_clear()
+    _parsed_brodmann.cache_clear()

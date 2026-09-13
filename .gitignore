@@ -72,8 +72,20 @@ ehthumbs.db
 *.db-wal
 
 # --- Локальные данные и результаты анализа ---
-# test.edf хранится в репо как тестовый файдук
+# test.edf хранится в репо как тестовый файл, а каталоги загрузок (uuid) — нет
+data/edf/*/
 data/results/
+# Кэш тяжёлых ассетов (меш fsaverage, атлас Brodmann) — пересчитывается автоматически
+data/cache/
+backend/data/cache/
+
+# --- Сборка frontend (генерируется командой `npm run build`) ---
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+# Собранный UI раздаётся FastAPI из /ui/; в git не храним,
+# т.к. пересобирается одной командой: cd frontend && npm run build
+backend/app/static/ui/
 
 # --- Logs ---
 *.log

@@ -1,0 +1,6 @@
+# Frontend (Vite + React)
+node_modules/
+dist/
+coverage/
+*.local
+.vite/

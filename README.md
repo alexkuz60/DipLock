@@ -22,41 +22,39 @@
 DipLock/
 ├── backend/
 │   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py
-│   │   ├── core/
-│   │   │   ├── __init__.py
-│   │   │   └── config.py
-│   │   ├── api/
-│   │   │   ├── __init__.py
-│   │   │   └── routes.py
+│   │   ├── main.py            # FastAPI entry: CORS, gzip, /ui (сборка frontend), /init-status
+│   │   ├── core/config.py     # Pydantic Settings — единый источник конфигурации
+│   │   ├── api/routes.py      # /analyze, /jobs, /surface, /brodmann-labels, /meta
+│   │   ├── schemas/analysis.py# Pydantic-контракт ответов (→ TypeScript-типы UI)
 │   │   ├── services/
-│   │   │   ├── __init__.py
 │   │   │   ├── edf_loader.py
 │   │   │   ├── artifact_detector.py
 │   │   │   ├── epoch_segmenter.py
 │   │   │   ├── bandpass_filter.py
-│   │   │   └── dipole_fitter.py
-│   │   ├── models/
-│   │   │   ├── __init__.py
-│   │   │   └── db.py
-│   │   ├── utils/
-│   │   │   ├── __init__.py
-│   │   │   └── brain_export.py
+│   │   │   ├── dipole_fitter.py
+│   │   │   ├── job_manager.py     # фоновые задачи: этапы, прогресс, семафор
+│   │   │   └── surface_cache.py   # кэш меша fsaverage и BA-меток (ETag/304)
+│   │   ├── models/db.py
+│   │   ├── utils/             # brain_export.py, versions.py
 │   │   └── static/
-│   │       └── index.html
-│   ├── requirements.txt
+│   │       ├── index.html     # legacy-страница (доступна по /legacy)
+│   │       └── ui/            # сборка frontend (npm run build) — раздаётся по /ui/
+│   ├── tests/                 # pytest: контракт API, job-API, поверхность, сервисы
+│   ├── requirements.txt / requirements-dev.txt
 │   ├── Dockerfile
-│   ├── .env              ← НЕ коммитится (см. .env.example)
-│   └── .env.example      ← шаблон конфигурации
-├── data/                 ← локальные данные
-│   ├── edf/              ← test.edf в репо
-│   └── results/          ← результаты анализа (игнорируются)
-├── docker-compose.yml
-├── init_db.sql
-├── setup.sh
-├── .gitignore
-└── README.md
+│   └── .env.example           # шаблон конфигурации (реальный .env не коммитится)
+├── frontend/                  # UI: Vite + React + TypeScript + Tailwind
+│   ├── src/app/               # каркас (layout) и разделы (sections)
+│   ├── src/shared/            # api-клиент, zustand-стор, UI-примитивы
+│   └── vite.config.ts         # base '/ui/', proxy на :8000, сборка в backend/app/static/ui
+├── docs/
+│   └── ui.md                  # функциональная спецификация UI и дорожная карта фаз
+├── data/                      # локальные данные
+│   ├── edf/                   # test.edf в репо
+│   ├── results/               # результаты анализа (игнорируются)
+│   └── cache/                 # кэш меша/BA (игнорируется, пересчитывается)
+├── AGENTS.md / audit.md / todo.md
+└── docker-compose.yml / init_db.sql / setup.sh
 ```
 
 ---
@@ -79,7 +77,30 @@ python -c "import mne; mne.datasets.fsaverage.data_path(download=True)"
 # Старт сервера
 uvicorn app.main:app --reload --port 8000
 # → Swagger UI: http://localhost:8000/docs
+# → UI (если собран): http://localhost:8000/ui/
 ```
+
+## 🖥 Пользовательский интерфейс
+
+```bash
+# Режим разработки (HMR, прокси /api → :8000, CORS не нужен)
+cd frontend
+npm install
+npm run dev        # → http://localhost:5173/ui/
+
+# Проверки качества и продакшн-сборка
+npm run typecheck  # tsc --noEmit
+npm run lint       # ESLint
+npm run test       # Vitest (jsdom)
+npm run build      # → backend/app/static/ui, раздаётся FastAPI по /ui/
+```
+
+Разделы: **Главная**, **EDF** (просмотр записи и подготовка эпох), **Диполи** (3 проекции, анимация),
+**Таблица локализации**, **Групповой анализ**; внизу рейла — **Настройки** и **Состояние сервера**
+(туда перенесена информация о готовности компонентов, ранее отображавшаяся на стартовой странице).
+Legacy-страница с прогрессом инициализации осталась доступна по `/legacy`.
+Статус фаз, принципы интерфейса и план работ — `docs/ui.md`.
+
 
 ---
 
@@ -97,24 +118,55 @@ docker-compose up --build
 
 ## 📤 Пример API-запроса
 
+Синхронный вариант (скрипты, curl):
+
 ```bash
 curl -X POST "http://localhost:8000/api/v1/analyze" \
   -F "file=@/path/to/recording.edf" \
   -F "epoch_length_ms=500" \
   -F "freq_band=alpha" \
-  -F "single_freq=7.83" \
-  -F "bandwidth_hz=0.5"
+  -F "single_freq=7.83"
 ```
 
-**Ответ:** JSON с `session_id`, `dipoles` (trajectory + best_fit + локализация), `surface` (mesh + BA labels), `frequency_powers`
+Асинхронный вариант — то, что использует UI (прогресс по этапам, результат переживает обрыв соединения):
+
+```bash
+JOB=$(curl -s -X POST "http://localhost:8000/api/v1/jobs" \
+  -F "file=@/path/to/recording.edf" -F "epoch_length_ms=2000" \
+  | python -c "import sys,json; print(json.load(sys.stdin)['job_id'])")
+curl -s "http://localhost:8000/api/v1/jobs/$JOB"          # статус, этап, прогресс 0..1
+curl -s "http://localhost:8000/api/v1/jobs/$JOB/result"   # результат по схеме AnalyzeResponse
+```
+
+**Ответ анализа:** `session_id`, метаданные записи, `n_epochs_total`/`n_epochs_used`/`n_epochs_dropped`,
+`artifact_types`, `frequency_powers`, `dipoles` (траектория по времени + `best_fit` + локализация),
+`best_fit_dipoles` (компактно, для таблицы), ссылка на кэшируемый меш `surface`
+(`version`/`url`/`brodmann_url`) и блок `pipeline` (версии MNE/numpy/Python, пороги, `decim`,
+время расчёта) — provenance результата.
+
+**Статические 3D-ассеты** отдаются отдельно и кэшируются:
+`GET /api/v1/surface` (меш, ETag/304) · `GET /api/v1/surface/brodmann` (индексы BA) ·
+`GET /api/v1/surface/brodmann/{ba}` (одна область) · `GET /api/v1/brodmann-labels` (имена меток) ·
+`GET /api/v1/meta` (версии, пути, активные параметры).
+
 
 ---
 
 ## 🔧 Исправления по сравнению с исходным черновиком
 
-1. `mne.read_labels_from_mgovt` → `mne.read_labels_from_parc` (правильный метод)
-2. `brain_export.py` — функция `export_fsaverage_surface` теперь корректно использует `settings` как параметр и импорт по умолчанию
-3. `mne.vertex_map` (не существует) → заменён на поиск ближайшей метки BA через координаты вершин
-4. Добавлен `trimesh` в `requirements.txt` (для децимации surface-мешей)
-5. `docker-compose.yml` — исправлен путь к `.env` файлу (`./backend/.env`)
+1. `mne.read_labels_from_mgovt` → `mne.read_labels_from_annot` (атлас `PALS_B12_Brodmann`)
+2. `brain_export.py` — `export_fsaverage_surface` корректно принимает `settings` параметром
+3. `mne.vertex_map` (не существует) → поиск ближайшей метки BA через координаты вершин
+4. Добавлен `trimesh` в `requirements.txt` (децимация surface-мешей)
+5. `docker-compose.yml` — исправлен путь к `.env` (`./backend/.env`)
 6. Добавлен `setup.sh` для создания структуры папок
+7. **Фаза 0 (13.09.2026):** Pydantic-контракт ответов, кэш меша/BA (ETag/304, gzip), job-API
+   с прогрессом, санитизация и очистка загрузок, `GET /api/v1/meta`, CORS для Vite (5173)
+8. **Фаза 1 (13.09.2026):** UI-каркас (Vite + React + TypeScript) — рейл разделов, тулс-хедеры,
+   схлопываемый правый сайдбар, Главная-заставка, «Настройки» и «Состояние сервера», тесты Vitest,
+   сборка в `backend/app/static/ui`
+9. **Фаза 2, срезы 2.0/2.1 (13.09.2026):** контролы правой панели (`FieldRow`, `SegmentedControl`,
+   `SelectField`, `NumberField`, `CheckboxRow`, `StatusPill`) и параметры раздела EDF
+   (`shared/state/edfParams.ts`: дефолты из `/meta`, выбор каналов, признак «результат устарел»).
+   Правило: **обработка запускается только по кнопке** — правка параметров не делает ни одного
+   запроса и ничего не пересчитывает; вьюер треков и задачи — следующие срезы (`docs/ui.md`)

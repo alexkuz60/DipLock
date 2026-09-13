@@ -1,13 +1,36 @@
 """Настройки DipLock через Pydantic Settings."""
+from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings
 from typing import Dict, List, Optional
+
+# Каталог backend/ и корень репозитория — чтобы дефолтные пути не зависели от CWD.
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_REPO_DIR = _BACKEND_DIR.parent
 
 
 class Settings(BaseSettings):
     # FastAPI
     app_name: str = "DipLock"
+    app_version: str = "0.1.0"
+    api_prefix: str = "/api/v1"
     debug: bool = True
+
+    # CORS: origins, которым разрешён доступ к API (без "*" + credentials).
+    # 5173 — Vite dev-server, 3000 — CRA, 8000 — сам backend.
+    cors_origins: str = Field(
+        default=(
+            "http://localhost:5173,http://127.0.0.1:5173,"
+            "http://localhost:3000,http://127.0.0.1:3000,"
+            "http://localhost:8000,http://127.0.0.1:8000"
+        ),
+        env="CORS_ORIGINS",
+    )
+
+    # Фоновые задачи (job API): сколько анализов может идти одновременно
+    # и сколько записей хранить в истории задач.
+    max_concurrent_jobs: int = Field(default=2, env="MAX_CONCURRENT_JOBS")
+    jobs_history_limit: int = Field(default=50, env="JOBS_HISTORY_LIMIT")
 
     # База данных
     database_url: str = Field(
@@ -34,6 +57,11 @@ class Settings(BaseSettings):
         default="/app/data/results",
         env="RESULTS_DIR",
     )
+    # Кэш тяжёлых статических ассетов (меш fsaverage, метки Brodmann)
+    cache_dir: str = Field(
+        default=str(_REPO_DIR / "data" / "cache"),
+        env="CACHE_DIR",
+    )
 
     # Единицы EDF: None = автоопределение MNE + эвристика масштаба (см. edf_loader)
     edf_units: Optional[str] = Field(default=None, env="EDF_UNITS")
@@ -50,6 +78,10 @@ class Settings(BaseSettings):
     peak_to_peak_threshold_uv: float = 100.0
     flat_line_threshold_uv: float = 5.0
     flat_line_min_duration_ms: float = 200.0
+    # Порог reject при нарезке эпох (мкВ): эпохи выше порога отбрасываются MNE.
+    # Отдельно от peak_to_peak_threshold_uv: детекция артефактов и reject-фильтр
+    # решают разные задачи (первая — аннотации, второй — отбраковка эпох).
+    reject_threshold_uv: float = Field(default=150.0, env="REJECT_THRESHOLD_UV")
 
     # Нарезка эпох (без overlap)
     epoch_lengths_ms: List[float] = [250, 500, 750, 1000, 1250, 1500, 1750, 2000]
