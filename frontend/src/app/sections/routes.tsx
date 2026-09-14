@@ -11,12 +11,12 @@ import { EdfPanel } from './EdfPanel'
 import { EdfSection } from './EdfSection'
 import { EdfToolHeaderActions } from './EdfToolActions'
 import { EdfZoomSelect } from './EdfZoomSelect'
+import { DipolesPanel } from './dipoles/DipolesPanel'
+import { DipolesSection } from './dipoles/DipolesSection'
 import { HomeSection } from './HomeSection'
 import { ServerStatusSection } from './ServerStatusSection'
 import { SettingsSection } from './SettingsSection'
 import {
-  DipolesPanel,
-  DipolesSection,
   GroupAnalysisPanel,
   GroupAnalysisSection,
   LocalizationTablePanel,

@@ -32,10 +32,13 @@ src/
 │   ├── lib/         # чистая логика: viewerMath (окна/огибающая), signalFrame (контейнер DPS1),
 │   │                # viewerLayers (слои: зоны артефактов, сетка эпох, фикстура), artifacts
 │   │                # (типы/цвета артефактов), demoSignal, exportWindow (CSV/PNG окна),
-│   │                # download (доставка файла в браузере)
+│   │                # download (доставка файла в браузере), mriProjections (геометрия
+│   │                # проекций мозга), dipolePoints (точки и векторы диполей),
+│   │                # theme (токены темы для canvas/SVG)
 │   ├── state/       # zustand-сторы: uiStore (настройки UI), edfParams (параметры раздела EDF),
-│                    # edfRecording (запись, сигналы вьюера, слои, задачи стадий предподготовки)
-│   └── ui/          # Tooltip, IconButton, Button, Panel, Placeholder, StateViews,
+│                    # edfRecording (запись, сигналы вьюера, слои, задачи стадий предподготовки),
+│                    # dipoleParams (раздел «Диполи»: слои, срезы MNI, референс-точка)
+│   └── ui/          # Tooltip, IconButton, Button, Panel, Placeholder, StateViews, SliceScrubber,
 │                    # контролы: FieldRow, SegmentedControl, SelectField, NumberField,
 │                    #           CheckboxRow, StatusPill
 └── styles/          # токены тёмной темы (Tailwind v4 @theme) и базовые стили
@@ -134,3 +137,34 @@ UI **не запускает расчёт сам**. Правка парамет�
 Форматы и геометрия — в чистом `shared/lib/exportWindow.ts` (без React и zustand, DOM трогает только
 `drawSnapshot`), доставка файла — в `shared/lib/download.ts`. Оба покрыты тестами
 (`exportWindow.test.ts`, `download.test.ts`, `viewer/ExportActions.test.tsx`).
+
+## Раздел «Диполи»: проекции мозга (срез 3.1)
+
+Раздел показывает **геометрию, а не результат**: силуэт головы, схему среза MNI, поля Бродмана и
+(пока пустой) слой точек диполей. Расчёт — отдельная задача по кнопке (следующий срез), поэтому здесь
+ничего не считается и не запрашивается: правка параметров меняет только отрисовку — то же правило,
+что и в EDF.
+
+- **SVG, а не canvas.** Цвета берутся токенами темы прямо в атрибутах
+  (`stroke="var(--color-mri-dipole)"`, токены `--color-mri-*`), поэтому тема меняется без правок
+  геометрии. Canvas понадобится только под пиксельную заливку реального тома МРТ (`docs/ui.md` §3.3).
+  Там, где цвет нужен в JS (canvas-снапшот), — `shared/lib/theme.ts` (`themeColor` через
+  `getComputedStyle` с hex-fallback, `withAlpha`).
+- **Одна геометрия на все проекции** (`shared/lib/mriProjections.ts`): оси масштабируются независимо,
+  `x = 0` — срединная сагитталь, `y = 0` / `z = 0` — через AC–PC, поэтому границы `MNI_BRAIN_BOUNDS`
+  асимметричны и центр фигуры не совпадает с началом координат. Клик по фигуре даёт точку **в
+  плоскости своего среза** (`pointFromProjectionClick`), а наводит все три — `applyPointToSlices`;
+  срез «прилипает» к именованным (`snapSlice`, допуск `SLICE_SNAP_TOLERANCE_MM`). Компоненты
+  математику не дублируют, второго «невидимого» слоя для мыши нет: попадание в поле Бродмана
+  считается по тем же эллипсам, что нарисованы (`brodmannAreaAt`).
+- **Слои** `head` / `mni` / `brodmann` / `dipoles` включаются чекбоксами панели (порядок и подписи —
+  `shared/state/dipoleParams.ts`); выключенный слой **не рисуется**, а не прячется прозрачностью.
+  Срез наводится кликом (на глаз, с прилипанием) и `shared/ui/SliceScrubber.tsx` в панели (точно, с
+  маркерами `x = 0`).
+- **Фикстуры детерминированы** (`demoHeadContours`, `demoSliceStructures`, `demoBrodmannAreas` — без
+  ГПСЧ): картинка одинакова между рендерами, тестами и повторным монтированием. Реальный контур даст
+  fsaverage, реальные поля — `PALS_B12_Brodmann` (`backend/app/services/surface_cache.py`).
+- **Слой диполей пуст по замыслу**: раздел не имитирует расчёт, панель пишет «расчёт не подключён».
+  Тип `DipolePoint` (MNI, момент, амплитуда, GOF, BA), `dipoleVectorLength`/`dipoleMarker` и
+  хит-тесты готовы — подключение результата станет сменой источника данных. `demoDipoleLayer` — только
+  для тестов и отладки отрисовки.

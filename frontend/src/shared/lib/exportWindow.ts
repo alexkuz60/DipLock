@@ -15,15 +15,21 @@
  * подписи каналов, шкала времени, зоны артефактов и сетка эпох: снапшот окна
  * должен повторять то, что пользователь видит, а не только линии сигнала.
  * Canvas не умеет читать CSS-токены (`color-mix` тем более), поэтому цвета
- * разрешаются через `getComputedStyle` с hex-fallback из `styles/index.css`.
+ * разрешаются через `getComputedStyle` с hex-fallback — общий резолвер
+ * `shared/lib/theme.ts` (срез 3.1, общий с проекциями мозга).
  *
  * Модуль чистый: без React и zustand; DOM трогает только `drawSnapshot`, и лишь
  * тот документ, который ему передали. Поэтому арифметика экспорта тестируема.
  */
 import { ARTIFACT_SHORT_LABELS, type ArtifactKind } from './artifacts'
 import type { SignalFrame } from './signalFrame'
+import { themeColor, withAlpha } from './theme'
 import { frameEnvelope, timeToX, type TimeWindow } from './viewerMath'
 import { isEpochBlocked, type ArtifactZone, type EpochCell } from './viewerLayers'
+
+// Резолвер цветов темы общий с проекциями мозга (срез 3.1) — реэкспорт, чтобы
+// прежние импорты `withAlpha` из экспорта продолжали работать.
+export { themeColor, withAlpha } from './theme'
 
 /** Заголовок CSV. Длинный формат: одна строка на (корзина × канал). */
 export const CSV_HEADER = 'time_sec,channel,min_uv,max_uv'
@@ -267,25 +273,9 @@ export function epochMarks(
   return { boundaries, dropped }
 }
 
-/** Цвет темы внутри canvas: токены резолвим через getComputedStyle (hex-fallback). */
-function themeColor(doc: Document, token: string, fallback: string): string {
-  const view = doc.defaultView
-  if (!view) return fallback
-  const value = view.getComputedStyle(doc.documentElement).getPropertyValue(token)
-  return value.trim() || fallback
-}
-
-/** `#rrggbb` + alpha → `rgba(...)`: canvas не понимает `color-mix` из токенов. */
-export function withAlpha(color: string, alpha: number): string {
-  const hex = color.trim().replace(/^#/, '')
-  if (!/^[0-9a-f]{6}$/i.test(hex)) return color
-  const r = parseInt(hex.slice(0, 2), 16)
-  const g = parseInt(hex.slice(2, 4), 16)
-  const b = parseInt(hex.slice(4, 6), 16)
-  return `rgba(${r}, ${g}, ${b}, ${Math.min(1, Math.max(0, alpha))})`
-}
-
-/** Цвета зон для canvas: токены темы те же, что у DOM-слоёв (без дублирования hex). */
+/**
+ * Цвета зон для canvas: токены темы те же, что у DOM-слоёв (без дублирования hex).
+ */
 const ZONE_TOKENS: Record<ArtifactKind, { token: string; fallback: string }> = {
   zscore_outlier: { token: '--color-artifact-zscore', fallback: '#ff7b72' },
   peak_to_peak: { token: '--color-artifact-pp', fallback: '#ffb454' },
@@ -332,7 +322,11 @@ function snapshotTheme(doc: Document) {
  * то место, где стоит падать.
  */
 export function drawSnapshot(scene: SnapshotScene, doc: Document = document): HTMLCanvasElement {
-  const layout = snapshotLayout(scene.tracks.length, scene.trackWidth, scene.sizes ?? SNAPSHOT_SIZES)
+  const layout = snapshotLayout(
+    scene.tracks.length,
+    scene.trackWidth,
+    scene.sizes ?? SNAPSHOT_SIZES,
+  )
   const canvas = doc.createElement('canvas')
   canvas.width = layout.width
   canvas.height = layout.height
@@ -426,7 +420,8 @@ export function drawSnapshot(scene: SnapshotScene, doc: Document = document): HT
     : []
   let x = layout.padding
   ctx.textBaseline = 'middle'
-  const legendY = layout.headerHeight + scene.tracks.length * layout.trackHeight - layout.footerHeight / 2 - 4
+  const legendY =
+    layout.headerHeight + scene.tracks.length * layout.trackHeight - layout.footerHeight / 2 - 4
   for (const kind of legendKinds) {
     const token = ZONE_TOKENS[kind]
     const color = themeColor(doc, token.token, token.fallback)

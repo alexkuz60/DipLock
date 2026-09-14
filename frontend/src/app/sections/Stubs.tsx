@@ -3,7 +3,7 @@
  * реализуется в следующих фазах — планы перечислены в `docs/ui.md`.
  */
 import type { ReactNode } from 'react'
-import { Layers, Radar, Table2 } from 'lucide-react'
+import { Layers, Table2 } from 'lucide-react'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { Panel } from '@/shared/ui/Panel'
 
@@ -44,39 +44,6 @@ function StubPanel({ title, options }: { title: string; options: string[] }) {
         ))}
       </ul>
     </Panel>
-  )
-}
-
-export function DipolesSection() {
-  return (
-    <StubSection
-      phase="Фаза 3: расчёт диполей и локализация"
-      icon={<Radar className="size-12" />}
-      title="Расчёт диполей и локализация"
-      description="Частотная фильтрация, фитинг диполей по эпохам, 3 проекции и анимация траектории."
-      planned={[
-        'Форма фильтров: δ/θ/α/β/γ, custom range, одиночная частота (7.83 Гц)',
-        'Фоновая задача с прогрессом по этапам и возможностью дождаться результата',
-        'Три проекции: axial / sagittal / coronal + 3D-меш (GLB, кэш)',
-        'Timeline-playback: воспроизведение траектории, скорость, покадрово',
-        'График GOF по времени, фильтр эпох по GOF, подсветка Brodmann-областей',
-      ]}
-    />
-  )
-}
-
-export function DipolesPanel() {
-  return (
-    <StubPanel
-      title="Параметры расчёта"
-      options={[
-        'Частотный диапазон и одиночная частота',
-        'Порог GOF для отбора эпох',
-        'Профиль: fast (превью) / accurate',
-        'Подсветка ROI и полей Бродмана',
-        'Слои: меш, траектория, эпоха-фокус',
-      ]}
-    />
   )
 }
 

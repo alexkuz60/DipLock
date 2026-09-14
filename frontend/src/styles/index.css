@@ -34,6 +34,14 @@
   --color-artifact-flat: #8b949e;
   --color-artifact-ica: #a78bfa;
 
+  /* Слои проекций мозга (раздел «Диполи», срез 3.1): силуэт головы, MNI-срез,
+     поля Бродмана, точки диполей с векторами. Цвета читает и canvas
+     (через `getComputedStyle`, `shared/lib/theme.ts`), и DOM-оверлей диполей. */
+  --color-mri-outline: #8695a8;
+  --color-mri-slice: #4da3ff;
+  --color-mri-brodmann: #48d17f;
+  --color-mri-dipole: #ffb454;
+
   /* Системный шрифт пользователя, без веб-загрузок */
   --font-sans:
     system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, Cantarell, 'Noto Sans', sans-serif;
