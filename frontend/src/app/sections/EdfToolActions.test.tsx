@@ -52,6 +52,7 @@ describe('тулс-хедер раздела EDF', () => {
       uploadError: null,
       passport: { ...EMPTY_PASSPORT },
       fileDialogRequest: 0,
+      navRequest: null,
       stageJobs: {},
     })
   })
@@ -72,6 +73,28 @@ describe('тулс-хедер раздела EDF', () => {
     // Диалог открывает тот же скрытый input, что и кнопка зоны загрузки
     expect(screen.getByLabelText('Выбрать файл EDF')).toBeInTheDocument()
     expect(clickSpy).toHaveBeenCalled()
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('кнопка «Закрыть запись» выключена без записи и сбрасывает её состояние', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderSection()
+
+    expect(screen.getByRole('button', { name: 'Закрыть запись' })).toBeDisabled()
+
+    act(() => {
+      useEdfRecording.setState({ recording: recordingFixture })
+    })
+    const closeButton = screen.getByRole('button', { name: 'Закрыть запись' })
+    expect(closeButton).toBeEnabled()
+
+    const callsBefore = fetchMock.mock.calls.length
+    await user.click(closeButton)
+
+    // Возврат к зоне загрузки и никаких запросов: закрытие — локальное действие
+    expect(useEdfRecording.getState().recording).toBeNull()
+    expect(screen.getByText('Файл записи не загружен')).toBeInTheDocument()
     expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 
@@ -129,6 +152,29 @@ describe('тулс-хедер раздела EDF', () => {
 
     expect(useEdfParams.getState().params.timeLevel).toBe(2)
     expect(screen.getByRole('option', { name: '×1 (вся сессия)' })).toBeInTheDocument()
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('кнопки листания окна выключены при ×1 и кладут команду в стор (срез 2.9)', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderSection()
+
+    const callsBefore = fetchMock.mock.calls.length
+    // При ×1 видна вся запись — листать нечего
+    expect(screen.getByRole('button', { name: 'Следующее окно' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'В конец записи' })).toBeDisabled()
+
+    await user.selectOptions(screen.getByLabelText('Зум отрисовки ЭЭГ'), '2')
+    const nextButton = screen.getByRole('button', { name: 'Следующее окно' })
+    expect(nextButton).toBeEnabled()
+
+    await user.click(nextButton)
+    expect(useEdfRecording.getState().navRequest).toEqual({ command: 'next', seq: 1 })
+
+    await user.click(screen.getByRole('button', { name: 'В начало записи' }))
+    expect(useEdfRecording.getState().navRequest).toEqual({ command: 'start', seq: 2 })
+    // Навигация — только перерисовка окна: сервер не пересчитывает экран
     expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 

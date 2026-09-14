@@ -100,7 +100,7 @@ describe('рабочая область раздела EDF', () => {
     expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
   })
 
-  it('загружает выбранный файл и показывает паспорт записи', async () => {
+  it('загружает выбранный файл: запись в сторе и треки вместо зоны загрузки', async () => {
     const user = userEvent.setup()
     mockApiFetch()
     const requests = stubUpload()
@@ -108,8 +108,11 @@ describe('рабочая область раздела EDF', () => {
 
     await user.upload(screen.getByLabelText('Выбрать файл EDF'), edfFile())
 
-    expect(await screen.findByText(recordingFixture.filename)).toBeInTheDocument()
-    expect(useEdfRecording.getState().recording).toEqual(recordingFixture)
+    // Данные записи показываются в диалоге «Паспорт» (тулс-хедер), а не в области:
+    // здесь достаточно, что запись загружена и треки встали на место dropzone.
+    await waitFor(() => expect(useEdfRecording.getState().recording).toEqual(recordingFixture))
+    expect(await screen.findByTestId('track-stack')).toBeInTheDocument()
+    expect(screen.queryByText('Файл записи не загружен')).not.toBeInTheDocument()
     // Каналы записи попадают в параметры раздела
     expect(useEdfParams.getState().availableChannels).toEqual(recordingFixture.channels)
     expect(requests[0].url).toContain('/recordings')

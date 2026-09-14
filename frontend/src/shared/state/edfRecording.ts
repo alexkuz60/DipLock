@@ -177,6 +177,9 @@ export type StageJob = {
   error: string | null
 }
 
+/** Команды навигации по окну вьюера из тулс-хедера (срез 2.9) */
+export type EdfNavCommand = 'start' | 'prev' | 'next' | 'end'
+
 export type EdfRecordingState = {
   /** Паспорт загруженной записи (null — не загружена) */
   recording: RecordingMeta | null
@@ -213,6 +216,12 @@ export type EdfRecordingState = {
    * области, поэтому диалог открывается через состояние, а не через ref.
    */
   fileDialogRequest: number
+  /**
+   * Запрос навигации по окну вьюера (`<<` `<` `>` `>>` из тулс-хедера, срез 2.9):
+   * центр окна — локальное состояние вьюера, а кнопки живут в шапке, поэтому
+   * команда передаётся через состояние с монотонным `seq` (как `fileDialogRequest`).
+   */
+  navRequest: { command: EdfNavCommand; seq: number } | null
   beginUpload: () => void
   setUploadProgress: (ratio: number) => void
   failUpload: (message: string) => void
@@ -232,6 +241,8 @@ export type EdfRecordingState = {
   setPassport: (patch: Partial<SessionPassport>) => void
   /** Запросить открытие диалога выбора EDF (тулс-хедер → рабочая область) */
   requestFileDialog: () => void
+  /** Запросить навигацию по окну вьюера (тулс-хедер → вьюер, срез 2.9) */
+  requestNav: (command: EdfNavCommand) => void
   /** Закрыть запись (вернуться к пустому состоянию) */
   closeRecording: () => void
 }
@@ -249,6 +260,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   stageJobs: {},
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
+  navRequest: null,
 
   beginUpload: () => set({ uploadProgress: 0, uploadError: null, demo: null }),
   setUploadProgress: (ratio) => set({ uploadProgress: Math.min(1, Math.max(0, ratio)) }),
@@ -390,6 +402,9 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   },
 
   requestFileDialog: () => set((state) => ({ fileDialogRequest: state.fileDialogRequest + 1 })),
+
+  requestNav: (command) =>
+    set((state) => ({ navRequest: { command, seq: (state.navRequest?.seq ?? 0) + 1 } })),
 
   closeRecording: () => {
     // Отменяем поллинг: ответы прежних стадий не должны трогать новое состояние

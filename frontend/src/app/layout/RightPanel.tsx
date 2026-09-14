@@ -47,7 +47,7 @@ export function RightPanel({ section, children }: RightPanelProps) {
           onClick={() => setRightPanel(section.id, false)}
         />
       </div>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3">{children}</div>
+      <div className="scroll-y-always min-h-0 flex-1 space-y-3 p-3">{children}</div>
     </aside>
   )
 }

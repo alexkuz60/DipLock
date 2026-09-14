@@ -105,30 +105,14 @@ describe('панель раздела EDF', () => {
     expect(screen.getByText(/Поиск артефактов — не рассчитано/)).toBeInTheDocument()
   })
 
-  it('в секции «Запись» — краткая инфа о файле вместо поясняющего текста', () => {
+  it('в панели нет данных записи — они перенесены в диалог «Паспорт»', () => {
     mockApiFetch()
     useEdfRecording.setState({ recording: recordingFixture, passport: { ...EMPTY_PASSPORT } })
     renderWithProviders(<EdfPanel />)
 
-    expect(screen.getByText(recordingFixture.filename)).toBeInTheDocument()
-    expect(screen.getByText('Каналов')).toBeInTheDocument()
-    expect(screen.getByText(`${recordingFixture.sfreq} Гц`)).toBeInTheDocument()
-    expect(screen.getByText(`${recordingFixture.duration_sec} с`)).toBeInTheDocument()
+    expect(screen.queryByText(recordingFixture.filename)).not.toBeInTheDocument()
+    expect(screen.queryByText('Единицы в БД')).not.toBeInTheDocument()
     expect(screen.queryByText(/Загрузка EDF — в рабочей области раздела/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/Каналы 10-20/)).not.toBeInTheDocument()
-  })
-
-  it('единицы для БД правятся в паспорте и не делают запросов', async () => {
-    const user = userEvent.setup()
-    const fetchMock = mockApiFetch()
-    useEdfRecording.setState({ recording: recordingFixture, passport: { ...EMPTY_PASSPORT } })
-    renderWithProviders(<EdfPanel />)
-
-    const callsBefore = fetchMock.mock.calls.length
-    await user.selectOptions(screen.getByLabelText('Единицы в БД'), 'uV')
-
-    expect(useEdfRecording.getState().passport.units).toBe('uV')
-    expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 
   it('легенда артефактов: цветные метки типов и тумблер видимости без запросов', async () => {

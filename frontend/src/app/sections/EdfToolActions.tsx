@@ -1,11 +1,12 @@
 /**
- * Тулс-хедер раздела EDF: загрузка записи, перерасчёт по стадиям, паспорт сессии.
+ * Тулс-хедер раздела EDF: загрузка записи, перерасчёт по стадиям, паспорт сессии,
+ * закрытие записи.
  *
  * Кнопки — иконки с тултипами (`IconButton`); все действия идут строго по нажатию:
  * тулс-хедер не делает ни одного запроса сам, он только ставит состояние, которое
  * подхватывает рабочая область (диалог выбора EDF) или панель (паспорт).
  */
-import { IdCard, Upload } from 'lucide-react'
+import { IdCard, Upload, X } from 'lucide-react'
 import { useState } from 'react'
 import { EdfRecalcButtons } from './EdfRecalcButtons'
 import { SessionPassportDialog } from './SessionPassportDialog'
@@ -70,6 +71,7 @@ export function EdfToolHeaderActions() {
   const demo = useEdfRecording((state) => state.demo)
   const uploadProgress = useEdfRecording((state) => state.uploadProgress)
   const requestFileDialog = useEdfRecording((state) => state.requestFileDialog)
+  const closeRecording = useEdfRecording((state) => state.closeRecording)
   const needsRecalc = useEdfNeedsRecalc()
   const [passportOpen, setPassportOpen] = useState(false)
 
@@ -114,6 +116,14 @@ export function EdfToolHeaderActions() {
         disabled={recording === null}
         onClick={() => setPassportOpen(true)}
         icon={<IdCard className="size-5" />}
+      />
+
+      <IconButton
+        tooltip="Закрыть запись: вернуться к зоне загрузки (файл на сервере живёт до TTL)"
+        label="Закрыть запись"
+        disabled={recording === null}
+        onClick={closeRecording}
+        icon={<X className="size-5" />}
       />
 
       <SessionPassportDialog open={passportOpen} onClose={() => setPassportOpen(false)} />

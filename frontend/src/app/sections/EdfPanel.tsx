@@ -25,7 +25,6 @@ import {
   useEdfParamsValue,
   useEdfRecalcStatus,
   type AmplitudeMode,
-  type EdfUnits,
   type FilterPresetId,
   type ReferenceMode,
 } from '@/shared/state/edfParams'
@@ -37,7 +36,6 @@ import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { StatusPill } from '@/shared/ui/StatusPill'
-import { InfoRow, LoadingBlock } from '@/shared/ui/StateViews'
 
 const AMPLITUDE_MODES: { value: AmplitudeMode; label: string; title: string }[] = [
   { value: 'shared', label: 'Общий', title: 'Одна шкала мкВ/дел для всех каналов' },
@@ -68,8 +66,6 @@ export function EdfPanel() {
   const recording = useEdfRecording((state) => state.recording)
   const demo = useEdfRecording((state) => state.demo)
   const stageJobs = useEdfRecording((state) => state.stageJobs)
-  const passport = useEdfRecording((state) => state.passport)
-  const setPassport = useEdfRecording((state) => state.setPassport)
   const recalc = useEdfRecalcStatus()
 
   const meta = useQuery({
@@ -111,46 +107,6 @@ export function EdfPanel() {
 
   return (
     <>
-      <Panel title="Запись">
-        {meta.isPending ? <LoadingBlock label="Чтение параметров сервера…" /> : null}
-        {recording ? (
-          <>
-            <InfoRow label="Файл" value={recording.filename} mono />
-            <InfoRow label="Каналов" value={recording.n_channels} />
-            <InfoRow label="Частота дискретизации" value={`${recording.sfreq} Гц`} mono />
-            <InfoRow label="Длина сессии" value={`${recording.duration_sec} с`} mono />
-            {recording.units_autoscaled ? (
-              <div className="mt-2">
-                <StatusPill tone="warn">Единицы масштабированы в µV автоматически</StatusPill>
-              </div>
-            ) : null}
-            {demo ? <InfoRow label="Рабочая область" value="демо-сигнал (синтетика)" /> : null}
-            {recording.warnings.length ? (
-              <div className="mt-2 space-y-1">
-                {recording.warnings.map((warning) => (
-                  <StatusPill key={warning} tone="warn">
-                    {warning}
-                  </StatusPill>
-                ))}
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <InfoRow label="Файл" value="не загружен" />
-        )}
-
-        <div className="mt-2">
-          <SelectField
-            label="Единицы в БД"
-            value={passport.units}
-            options={EDF_UNITS_OPTIONS}
-            disabled={recording === null}
-            hint="Формат амплитуды при занесении данных в БД: EDF-файл не перезаписывается."
-            onChange={(value: EdfUnits) => setPassport({ units: value })}
-          />
-        </div>
-      </Panel>
-
       <Panel title="Фильтры и референс">
         <SelectField
           label="Полоса"

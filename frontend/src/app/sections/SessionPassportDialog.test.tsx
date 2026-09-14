@@ -45,6 +45,38 @@ describe('диалог паспорта сессии', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('показывает число каналов 10-20 и предупреждения записи', () => {
+    // Свое число каналов монтажа — чтобы «8» не совпало с n_channels (иначе
+    // getByText не различил бы значения двух строк «Каналов» и «Каналов 10-20»).
+    const channels = recordingFixture.channels.slice(0, 8)
+    useEdfRecording.setState({
+      recording: {
+        ...recordingFixture,
+        channels,
+        warnings: ['2 канала без позиций пропущены'],
+      },
+      passport: { ...EMPTY_PASSPORT },
+    })
+    renderWithProviders(<SessionPassportDialog open onClose={vi.fn()} />)
+
+    expect(screen.getByText('Каналов 10-20')).toBeInTheDocument()
+    expect(screen.getByText(String(channels.length))).toBeInTheDocument()
+    expect(screen.getByText('2 канала без позиций пропущены')).toBeInTheDocument()
+  })
+
+  it('единицы для БД правятся в черновике и сохраняются без запросов', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<SessionPassportDialog open onClose={vi.fn()} />)
+
+    await user.selectOptions(screen.getByLabelText('Единицы в БД'), 'uV')
+
+    // До сохранения стор не тронут: правка идёт в черновик
+    expect(useEdfRecording.getState().passport.units).toBe('auto')
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+    expect(useEdfRecording.getState().passport.units).toBe('uV')
+  })
+
   it('«Отмена» и Esc закрывают диалог без записи в стор', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()

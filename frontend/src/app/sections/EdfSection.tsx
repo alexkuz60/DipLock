@@ -25,8 +25,7 @@ import { TIME_LEVELS, useEdfParams } from '@/shared/state/edfParams'
 import { Button } from '@/shared/ui/Button'
 import { cx } from '@/shared/ui/cx'
 import { Panel } from '@/shared/ui/Panel'
-import { StatusPill } from '@/shared/ui/StatusPill'
-import { ErrorBlock, InfoRow, LoadingBlock } from '@/shared/ui/StateViews'
+import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { TrackStack } from './viewer/TrackStack'
 
 /** Скрытый input записи: открывается кнопкой тулс-хедера или зоны загрузки. */
@@ -132,39 +131,6 @@ function Dropzone({
   )
 }
 
-function RecordingCard({ recording, onClose }: { recording: RecordingMeta; onClose: () => void }) {
-  return (
-    <Panel
-      title="Запись"
-      hint="Файл на сервере живёт до TTL записей; расчёт не запускался — треки показываются как в файле."
-    >
-      <div className="grid grid-cols-2 gap-x-6">
-        <InfoRow label="Файл" value={recording.filename} mono />
-        <InfoRow label="Каналов в файле" value={recording.n_channels} />
-        <InfoRow label="Каналы 10-20" value={`${recording.channels.length}`} />
-        <InfoRow label="Частота" value={`${recording.sfreq} Гц`} mono />
-        <InfoRow label="Длительность" value={`${recording.duration_sec} с`} mono />
-        <InfoRow
-          label="Единицы"
-          value={recording.units_autoscaled ? 'µV (авто-пересчёт)' : (recording.edf_units ?? 'из файла')}
-        />
-      </div>
-      {recording.warnings.length ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {recording.warnings.map((warning) => (
-            <StatusPill key={warning} tone="warn">
-              {warning}
-            </StatusPill>
-          ))}
-        </div>
-      ) : null}
-      <Button className="mt-3" variant="ghost" icon={<X className="size-4" />} onClick={onClose}>
-        Закрыть запись
-      </Button>
-    </Panel>
-  )
-}
-
 /** Треки записи: догрузка уровня пирамиды + состояния loading/error/stale. */
 function RecordingTracks({
   recording,
@@ -234,7 +200,6 @@ export function EdfSection() {
   const uploadError = useEdfRecording((state) => state.uploadError)
   const requestFileDialog = useEdfRecording((state) => state.fileDialogRequest)
   const closeDemo = useEdfRecording((state) => state.closeDemo)
-  const closeRecording = useEdfRecording((state) => state.closeRecording)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const meta = useQuery({
@@ -269,21 +234,14 @@ export function EdfSection() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
+    <div className="flex h-full min-h-0 flex-col gap-3 p-3">
       <FileDialogInput inputRef={inputRef} request={requestFileDialog} />
       {uploadError ? <ErrorBlock title="Загрузка не удалась" message={uploadError} /> : null}
 
       {recording ? (
-        <>
-          <RecordingCard recording={recording} onClose={closeRecording} />
-          <div className="flex min-h-[320px] flex-1 flex-col">
-            <RecordingTracks recording={recording} levels={signalLevels} />
-          </div>
-        </>
+        <RecordingTracks recording={recording} levels={signalLevels} />
       ) : (
-        <>
-          <Dropzone channels={demoChannels} uploading={uploadProgress} inputRef={inputRef} />
-        </>
+        <Dropzone channels={demoChannels} uploading={uploadProgress} inputRef={inputRef} />
       )}
     </div>
   )

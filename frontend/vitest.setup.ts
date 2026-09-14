@@ -6,13 +6,14 @@ import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 
 /**
- * jsdom не реализует ResizeObserver, а вьюер треков измеряет им ширину области.
- * Заглушка сразу сообщает ширину, иначе чарты в тестах не создаются.
+ * jsdom не реализует ResizeObserver, а вьюер треков измеряет им размер области
+ * (ширину окна и высоту, по которой разворачивается трек). Заглушка сразу
+ * сообщает размер, иначе чарты в тестах не создаются.
  */
 class ResizeObserverStub {
   constructor(callback: ResizeObserverCallback) {
     callback(
-      [{ contentRect: { width: 1024 } } as unknown as ResizeObserverEntry],
+      [{ contentRect: { width: 1024, height: 600 } } as unknown as ResizeObserverEntry],
       this as unknown as ResizeObserver,
     )
   }

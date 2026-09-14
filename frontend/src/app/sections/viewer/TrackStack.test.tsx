@@ -2,8 +2,9 @@
  * Тесты вьюера треков (срез 2.3).
  *
  * uPlot подменён моком (см. `vitest.setup.ts`): тесты проверяют логику стека —
- * состав и порядок треков, окно времени, реакцию на клики по подписям каналов,
- * а не пиксели. Математика окна/огибающей покрыта в `viewerMath.test.ts`.
+ * состав и порядок треков, окно времени, разворот трека по названию канала,
+ * листание окна по команде из шапки и курсор по клику, а не пиксели.
+ * Математика окна/огибающей покрыта в `viewerMath.test.ts`.
  */
 import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -12,6 +13,7 @@ import type { SignalData } from '@/shared/lib/demoSignal'
 import { frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
 import type { EdfViewerLayers } from '@/shared/lib/viewerLayers'
 import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
+import { useEdfRecording } from '@/shared/state/edfRecording'
 import { uplotCharts } from '@/test/uplot'
 
 import { TrackStack } from './TrackStack'
@@ -122,19 +124,89 @@ describe('вьюер треков', () => {
     expect(screen.getByText('×4')).toBeInTheDocument()
   })
 
-  it('клик по подписи скрывает канал, Ctrl+клик оставляет только его', async () => {
+  it('клик по названию канала разворачивает трек, повторный — сворачивает (срез 2.9)', async () => {
     const user = userEvent.setup()
     paramsState({ visibleChannels: ['F3', 'F4', 'C3'] })
     renderWithProviders(<TrackStack signal={frameFixture()} />)
 
-    await user.click(screen.getByTestId('track-F4').querySelector('button')!)
-    expect(useEdfParams.getState().params.visibleChannels).toEqual(['F3', 'C3'])
+    const label = screen.getByTestId('track-label-F4')
+    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '64px' })
 
-    await user.keyboard('{Control>}')
-    await user.click(screen.getByTestId('track-F3').querySelector('button')!)
-    await user.keyboard('{/Control}')
+    await user.click(label)
 
-    expect(useEdfParams.getState().params.visibleChannels).toEqual(['F3'])
+    // Высота области — 600 px (заглушка ResizeObserver), трек занимает её минус отступы
+    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '592px' })
+    expect(label).toHaveAttribute('data-expanded', 'true')
+    // Развёрнутый трек не скрывает соседей: видимость каналов — только у панели «Каналы»
+    expect(useEdfParams.getState().params.visibleChannels).toEqual(['F3', 'F4', 'C3'])
+    expect(screen.getByTestId('track-F3')).toBeInTheDocument()
+
+    // Клик по другой подписи переключает разворот, повторный по той же — сворачивает
+    await user.click(screen.getByTestId('track-label-F3'))
+    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '64px' })
+    expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '592px' })
+
+    await user.click(screen.getByTestId('track-label-F3'))
+    expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '64px' })
+    expect(screen.getByTestId('track-label-F3')).toHaveAttribute('data-expanded', 'false')
+  })
+
+  it('скрытый в панели канал сбрасывает разворот трека', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3', 'F4'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    await user.click(screen.getByTestId('track-label-F4'))
+    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '592px' })
+
+    act(() => useEdfParams.getState().toggleChannel('F4'))
+    expect(screen.queryByTestId('track-F4')).not.toBeInTheDocument()
+
+    act(() => useEdfParams.getState().toggleChannel('F4'))
+    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '64px' })
+  })
+
+  it('клик по треку ставит курсор, а не гонится за мышью (срез 2.9)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], timeLevel: 0 })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    const region = screen.getByRole('region', { name: 'Треки ЭЭГ' })
+    region.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 1024, height: 600, right: 1024, bottom: 600 }) as DOMRect
+
+    expect(screen.queryByText(/^\d+\.\d{3} с$/)).not.toBeInTheDocument()
+
+    // Колонка подписей 56 px + зазор 4 px: clientX 300 → 240/960 = четверть окна 10 с
+    await user.pointer({ keys: '[MouseLeft]', target: region, coords: { clientX: 300, clientY: 40 } })
+
+    expect(screen.getByText('2.500 с')).toBeInTheDocument()
+
+    // Курсор остаётся на месте: мышь уходит, линия не следует за ней
+    await user.hover(screen.getByTestId('track-F3'))
+    expect(screen.getByText('2.500 с')).toBeInTheDocument()
+  })
+
+  it('команда навигации из шапки листает окно без запросов к серверу (срез 2.9)', () => {
+    paramsState({ visibleChannels: ['F3'], timeLevel: 2 })
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    expect(screen.getByText('Окно 3.75–6.25 с')).toBeInTheDocument()
+
+    act(() => useEdfRecording.getState().requestNav('end'))
+    expect(screen.getByText('Окно 7.50–10.00 с')).toBeInTheDocument()
+
+    // «Назад на ширину окна»: 8.75 − 2.5 = 6.25 → 5.00–7.50 с
+    act(() => useEdfRecording.getState().requestNav('prev'))
+    expect(screen.getByText('Окно 5.00–7.50 с')).toBeInTheDocument()
+
+    act(() => useEdfRecording.getState().requestNav('start'))
+    expect(screen.getByText('Окно 0.00–2.50 с')).toBeInTheDocument()
+
+    // Навигация — только перерисовка окна: данные уже в браузере
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('правка параметров вьюера не запускает обработку (только состояние)', async () => {
@@ -144,8 +216,10 @@ describe('вьюер треков', () => {
     vi.stubGlobal('fetch', fetchSpy)
 
     renderWithProviders(<TrackStack signal={frameFixture()} />)
-    await user.click(screen.getByTestId('track-F3').querySelector('button')!)
+    await user.click(screen.getByTestId('track-label-F3'))
 
+    // Разворот трека — тоже параметр отрисовки: обработку он не запускает
+    expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '592px' })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 

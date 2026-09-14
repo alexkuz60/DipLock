@@ -10,8 +10,10 @@
  * не важно, откуда кадр: он не хранит сырые отсчёты и не декодирует EDF.
  *
  * Интеракции: колесо — дискретный зум ×1…×16 (якорь в точке курсора),
- * drag — панорамирование, движение мыши — курсор со временем,
- * клик по подписи канала — скрыть/показать, Ctrl+клик — только этот канал.
+ * drag — панорамирование, клик — поставить курсор (время под точкой клика,
+ * курсор живёт до следующего клика), клик по подписи канала — развернуть трек
+ * на всю высоту области (повторный клик — свернуть). Каналы включаются и
+ * выключаются только чекбоксами панели «Каналы».
  *
  * Поверх треков — **слои результата** (срез 2.6, `viewerLayers.ts` + `TrackLayers.tsx`):
  * зоны артефактов (клик → детали: тип, интервал, каналы), границы эпох с номерами и
@@ -26,11 +28,12 @@
  * Чартам отключены собственные жесты (pointer-events: none): окном управляет
  * обёртка, чтобы drag/колесо работали одинаково на всех треках.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import {
   anchoredCenter,
+  clampCenter,
   frameEnvelope,
   panByPixels,
   pointsBudget,
@@ -47,6 +50,7 @@ import {
   type EdfViewerLayers,
 } from '@/shared/lib/viewerLayers'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue } from '@/shared/state/edfParams'
+import { useEdfRecording } from '@/shared/state/edfRecording'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import {
   ArtifactZoneLayer,
@@ -97,13 +101,14 @@ function yRangeFor(
 
 function makeTrackOptions(
   width: number,
+  height: number,
   window: TimeWindow,
   yRange: [number, number],
   showXAxis: boolean,
 ): uPlot.Options {
   return {
     width,
-    height: TRACK_HEIGHT,
+    height,
     legend: { show: false },
     cursor: { show: false },
     padding: [4, 4, 0, 0],
@@ -143,10 +148,15 @@ type TrackRowProps = {
   frame: SignalFrame
   window: TimeWindow
   width: number
+  /** Высота трека: обычная или высота видимой области у развёрнутого (срез 2.9) */
+  height: number
+  /** Трек развёрнут на всю высоту области */
+  expanded: boolean
   amplitudeMode: 'shared' | 'per_channel'
   amplitudeScaleUv: number
   showXAxis: boolean
-  onLabelClick: (name: string, solo: boolean) => void
+  /** Клик по подписи канала — развернуть/свернуть трек */
+  onLabelClick: (name: string) => void
   /** Отдаёт наружу canvas трека: из них собирается PNG-снапшот (срез 2.8) */
   onCanvas: (name: string, canvas: HTMLCanvasElement | null) => void
 }
@@ -156,6 +166,8 @@ function TrackRow({
   frame,
   window,
   width,
+  height,
+  expanded,
   amplitudeMode,
   amplitudeScaleUv,
   showXAxis,
@@ -192,7 +204,7 @@ function TrackRow({
     const host = hostRef.current
     if (!host || width <= 0) return
     const chart = new uPlot(
-      makeTrackOptions(width, window, yRange === 'auto' ? [-1, 1] : yRange, showXAxis),
+      makeTrackOptions(width, height, window, yRange === 'auto' ? [-1, 1] : yRange, showXAxis),
       [[], [], []] as uPlot.AlignedData,
       host,
     )
@@ -204,9 +216,9 @@ function TrackRow({
       chartRef.current = null
       onCanvas(name, null)
     }
-    // Пересоздаём при смене канала/ширины/режима шкалы; ось времени обновляется ниже
+    // Пересоздаём при смене канала/ширины/высоты/режима шкалы; ось времени обновляется ниже
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, width, showXAxis, amplitudeMode, amplitudeScaleUv])
+  }, [name, width, height, showXAxis, amplitudeMode, amplitudeScaleUv])
 
   useEffect(() => {
     chartRef.current?.setData([env.times, env.min, env.max] as uPlot.AlignedData, false)
@@ -220,12 +232,18 @@ function TrackRow({
   }, [yRange])
 
   return (
-    <div className="flex items-stretch gap-1" data-testid={`track-${name}`}>
+    <div
+      className="flex items-stretch gap-1"
+      data-testid={`track-${name}`}
+      style={{ height }}
+    >
       <button
         type="button"
         data-testid={`track-label-${name}`}
-        title="Клик — скрыть канал; Ctrl+клик — показать только этот"
-        onClick={(event) => onLabelClick(name, event.ctrlKey || event.metaKey)}
+        data-expanded={expanded}
+        aria-pressed={expanded}
+        title={expanded ? 'Свернуть трек' : 'Развернуть трек на всю высоту'}
+        onClick={() => onLabelClick(name)}
         className="tnum w-14 shrink-0 cursor-pointer self-center rounded text-right font-mono text-xs text-fg-2 hover:text-fg-0"
         style={{ width: LABEL_WIDTH }}
       >
@@ -239,16 +257,26 @@ function TrackRow({
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */
 export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const params = useEdfParamsValue()
-  const setParams = useEdfParams((state) => state.setParams)
-  const toggleChannel = useEdfParams((state) => state.toggleChannel)
   const toggleArtifactVisibility = useEdfParams((state) => state.toggleArtifactVisibility)
-  const availableChannels = useEdfParams((state) => state.availableChannels)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  /** Высота видимой области треков — по ней разворачивается трек (срез 2.9) */
+  const [viewportHeight, setViewportHeight] = useState(0)
   const [centerSec, setCenterSec] = useState(() => signal.durationSec / 2)
   const [cursor, setCursor] = useState<{ xPx: number; timeSec: number } | null>(null)
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
+  /**
+   * Развёрнутый трек (срез 2.9) — локальное состояние вьюера: клик по подписи
+   * канала занимает всю высоту области, соседи остаются доступными скроллом.
+   * Изменение — только отрисовка, расчёт от него не устаревает.
+   */
+  const [expandedChannel, setExpandedChannel] = useState<string | null>(null)
+  /**
+   * Было ли смещение при drag-панорамировании: после перетаскивания клик не
+   * должен ставить курсор (иначе курсор прыгал бы в конце каждого сдвига).
+   */
+  const draggedRef = useRef(false)
   /**
    * Canvas'ы треков (срез 2.8): uPlot рисует сигнал только в canvas, поэтому
    * PNG-снапшот склеивается из них. Держим в ref, а не в состоянии: регистрация
@@ -302,20 +330,63 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     setCursor(null)
   }, [signal.sourceId, signal.durationSec])
 
-  // Ширина области треков (без колонки подписей)
+  // Размер области треков: ширина окна (без колонки подписей) и высота,
+  // по которой разворачивается трек (срез 2.9)
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
     const observer = new ResizeObserver((entries) => {
-      const next = entries[0]?.contentRect.width ?? 0
-      setWidth(Math.max(0, next - LABEL_WIDTH - 8))
+      const rect = entries[0]?.contentRect
+      setWidth(Math.max(0, (rect?.width ?? 0) - LABEL_WIDTH - 8))
+      setViewportHeight(Math.max(0, rect?.height ?? 0))
     })
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
 
+  // Канал скрыли в панели «Каналы» — развёрнутый трек тоже сворачиваем
+  useEffect(() => {
+    if (expandedChannel && !params.visibleChannels.includes(expandedChannel)) {
+      setExpandedChannel(null)
+    }
+  }, [expandedChannel, params.visibleChannels])
+
   const factor = TIME_LEVELS[params.timeLevel] ?? 1
   const window = zoomWindow(signal.durationSec, factor, centerSec)
+
+  /*
+    Навигация из тулс-хедера (`<<` `<` `>` `>>`, срез 2.9): кнопки живут в шапке,
+    поэтому команда приходит через стор (`navRequest`) с монотонным `seq` —
+    реагируем только на новую команду, а не на каждую перерисовку.
+  */
+  const navRequest = useEdfRecording((state) => state.navRequest)
+  /**
+   * Последняя обработанная команда. Инициализируется текущим `seq`: если вьюер
+   * смонтировался уже после команды (переключение раздела и обратно), прокручивать
+   * окно к старой цели не нужно — прыжок был бы неожиданным.
+   */
+  const handledNavSeqRef = useRef<number | null>(navRequest?.seq ?? null)
+  useEffect(() => {
+    if (!navRequest) return
+    const { command, seq } = navRequest
+    if (seq === handledNavSeqRef.current) return
+    handledNavSeqRef.current = seq
+    const level = useEdfParams.getState().params.timeLevel
+    const widthSec = signal.durationSec / (TIME_LEVELS[level] ?? 1)
+    setCursor(null)
+    setCenterSec((current) => {
+      const target =
+        command === 'start'
+          ? widthSec / 2
+          : command === 'end'
+            ? signal.durationSec - widthSec / 2
+            : command === 'prev'
+              ? current - widthSec
+              : current + widthSec
+      return clampCenter(target, widthSec, signal.durationSec)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navRequest?.seq])
 
   // Колесо = дискретный зум (нативный слушатель: React вешает wheel как passive,
   // а нам нужен preventDefault, чтобы колесо не скроллило область)
@@ -358,6 +429,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return
       dragging = true
+      draggedRef.current = false
       lastX = event.clientX
       // Захват указателя — необязательное улучшение (drag за пределами области);
       // в jsdom этих методов нет, поэтому вызываем защищённо.
@@ -368,6 +440,8 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
       if (!dragging) return
       const dx = event.clientX - lastX
       lastX = event.clientX
+      // Смещение больше порога — это панорамирование, а не клик
+      if (Math.abs(dx) > 3) draggedRef.current = true
       const state = useEdfParams.getState()
       const win = zoomWindow(
         signal.durationSec,
@@ -394,14 +468,32 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     }
   }, [signal, centerSec])
 
-  function handleLabelClick(name: string, solo: boolean) {
-    if (solo) {
-      const only = params.visibleChannels.length === 1 && params.visibleChannels[0] === name
-      const restore = availableChannels.length ? availableChannels : signal.channels
-      setParams({ visibleChannels: only ? [...restore] : [name] })
-      return
-    }
-    toggleChannel(name)
+  /** Клик по подписи канала: развернуть трек на всю высоту / свернуть */
+  function handleLabelClick(name: string) {
+    setExpandedChannel((current) => (current === name ? null : name))
+  }
+
+  /**
+   * Клик по области треков ставит курсор в точку клика (срез 2.9): линия больше
+   * не гоняется за мышью, а живёт на месте до следующего клика. Клики по кнопкам
+   * (подписи каналов, зоны артефактов) и клики после перетаскивания игнорируются.
+   */
+  function handleTrackClick(event: MouseEvent<HTMLDivElement>) {
+    const el = wrapRef.current
+    if (!el || draggedRef.current) return
+    if ((event.target as HTMLElement).closest('button')) return
+    const rect = el.getBoundingClientRect()
+    const xPx = event.clientX - rect.left - LABEL_WIDTH - 4
+    const trackWidth = rect.width - LABEL_WIDTH - 8
+    if (trackWidth <= 0 || xPx < 0 || xPx > trackWidth) return
+    setCursor({ xPx: xPx + LABEL_WIDTH + 4, timeSec: xToTime(xPx, window, trackWidth) })
+  }
+
+  /** Высота трека: развёрнутый занимает видимую область, обычный — TRACK_HEIGHT. */
+  function trackHeight(name: string): number {
+    if (name !== expandedChannel) return TRACK_HEIGHT
+    // viewportHeight = 0 в средах без раскладки (jsdom) — оставляем обычную высоту
+    return viewportHeight > 0 ? Math.max(TRACK_HEIGHT, viewportHeight - 8) : TRACK_HEIGHT
   }
 
   // Зоны/эпохи живут в пикселях области треков — та же геометрия, что у курсора
@@ -451,7 +543,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
           amplitudeScaleUv={params.amplitudeScaleUv}
         />
         <span className="ml-auto truncate">
-          Колесо — зум · drag — панорама · клик по каналу — скрыть · Ctrl+клик — только этот
+          Колесо — зум · drag — панорама · клик — курсор · клик по названию — развернуть трек
         </span>
       </div>
 
@@ -468,21 +560,8 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         ref={wrapRef}
         role="region"
         aria-label="Треки ЭЭГ"
-        className="relative min-h-0 flex-1 cursor-crosshair overflow-x-hidden overflow-y-auto rounded-lg border border-border bg-bg-1 py-1 pr-2 select-none"
-        onMouseMove={(event) => {
-          const el = wrapRef.current
-          if (!el) return
-          const rect = el.getBoundingClientRect()
-          const xPx = event.clientX - rect.left - LABEL_WIDTH - 4
-          const trackWidth = rect.width - LABEL_WIDTH - 8
-          if (xPx < 0 || xPx > trackWidth) {
-            setCursor(null)
-            return
-          }
-          const timeSec = xToTime(xPx, window, trackWidth)
-          setCursor({ xPx: xPx + LABEL_WIDTH + 4, timeSec })
-        }}
-        onMouseLeave={() => setCursor(null)}
+        className="scroll-y-always relative min-h-0 flex-1 cursor-crosshair overflow-x-hidden rounded-lg border border-border bg-bg-1 py-1 pr-2 select-none"
+        onClick={handleTrackClick}
       >
         <div className="relative">
           {visible.length === 0 ? (
@@ -497,6 +576,8 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 frame={signal}
                 window={window}
                 width={width}
+                height={trackHeight(name)}
+                expanded={name === expandedChannel}
                 amplitudeMode={params.amplitudeMode}
                 amplitudeScaleUv={params.amplitudeScaleUv}
                 showXAxis={index === visible.length - 1}

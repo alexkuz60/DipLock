@@ -104,4 +104,22 @@
   .tnum {
     font-variant-numeric: tabular-nums;
   }
+
+  /*
+    Неотключаемый вертикальный скроллбар с нативным пропорциональным ползунком
+    (срез 2.9). `scroll-y-always` вместо `overflow-y-auto`: трек виден всегда,
+    даже когда контент влезает, — в вьюере положение ползунка показывает долю
+    окна в записи, а в панели опций ширина полосы не «дёргается» при смене
+    раздела. `scrollbar-gutter: stable` резервирует место под полосу, поэтому
+    контент не смещается. Цвета/толщина заданы и для Firefox
+    (`scrollbar-color`/`scrollbar-width`), и для Chrome/WebKit — но у WebKit
+    они перебивают глобальный `::-webkit-scrollbar` в `@layer base`, поэтому
+    выглядят одинаково во всех браузерах.
+  */
+  .scroll-y-always {
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-bg-3) var(--color-bg-1);
+  }
 }

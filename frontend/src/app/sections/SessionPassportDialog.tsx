@@ -1,5 +1,6 @@
 /**
- * Диалог «Паспорт» раздела EDF: просмотр и правка метаданных сессии.
+ * Диалог «Паспорт» раздела EDF: единственное место, где показаны данные записи
+ * (файл, каналы, частота, единицы, предупреждения) и правится паспорт сессии.
  *
  * Паспорт — данные для БД (таблица `sessions`), а не для EDF-файла: правка не
  * меняет исходник, не делает запросов и не запускает обработку. Пока анализ не
@@ -10,9 +11,11 @@
  */
 import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { EDF_UNITS_OPTIONS, type EdfUnits } from '@/shared/state/edfParams'
 import { useEdfRecording, type SessionPassport } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
 import { FieldRow } from '@/shared/ui/FieldRow'
+import { StatusPill } from '@/shared/ui/StatusPill'
 import { InfoRow } from '@/shared/ui/StateViews'
 
 export type SessionPassportDialogProps = {
@@ -95,6 +98,7 @@ export function SessionPassportDialog({ open, onClose }: SessionPassportDialogPr
         <div className="mt-3 rounded-lg border border-border bg-bg-2 px-3 py-2">
           <InfoRow label="Файл" value={recording?.filename ?? 'не загружен'} mono />
           <InfoRow label="Каналов" value={recording?.n_channels ?? null} />
+          <InfoRow label="Каналов 10-20" value={recording ? recording.channels.length : null} />
           <InfoRow label="Частота дискретизации" value={recording ? `${recording.sfreq} Гц` : null} mono />
           <InfoRow label="Длина сессии" value={recording ? `${recording.duration_sec} с` : null} mono />
           <InfoRow
@@ -108,6 +112,21 @@ export function SessionPassportDialog({ open, onClose }: SessionPassportDialogPr
             }
           />
         </div>
+
+        {recording?.warnings.length ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {recording.warnings.map((warning) => (
+              <StatusPill key={warning} tone="warn">
+                {warning}
+              </StatusPill>
+            ))}
+          </div>
+        ) : null}
+
+        <p className="mt-2 text-xs text-fg-2">
+          Файл на сервере живёт до TTL записей и удаляется автоматически. Расчёт не запускался —
+          треки показываются как в файле.
+        </p>
 
         <div className="mt-3">
           {FIELDS.map((field, index) => (
@@ -133,6 +152,26 @@ export function SessionPassportDialog({ open, onClose }: SessionPassportDialogPr
               )}
             </FieldRow>
           ))}
+          <FieldRow
+            label="Единицы в БД"
+            htmlFor="passport-units"
+            hint="Формат амплитуды при занесении данных в БД: EDF-файл не перезаписывается."
+          >
+            <select
+              id="passport-units"
+              aria-label="Единицы в БД"
+              className={INPUT_CLASS}
+              value={draft.units}
+              disabled={recording === null}
+              onChange={(event) => setDraft({ ...draft, units: event.target.value as EdfUnits })}
+            >
+              {EDF_UNITS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </FieldRow>
         </div>
 
         <div className="mt-4 flex justify-end gap-2">
