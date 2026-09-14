@@ -13,10 +13,16 @@ import {
   artifactCounts,
   artifactZoneText,
   buildEpochCells,
+  cellAtTime,
   demoLayers,
   formatSecondsRange,
+  gridEpochLength,
+  isEpochBlocked,
+  manualVerdict,
+  toggleEpochMark,
   visibleZones,
   type ArtifactZone,
+  type EdfViewerLayers,
 } from '@/shared/lib/viewerLayers'
 
 const VISIBLE_ALL = { zscore_outlier: true, peak_to_peak: true, flat_line: true, ica_eog: true }
@@ -62,6 +68,106 @@ describe('сетка эпох', () => {
     // 0.5 мс на 10 минут = 1.2 млн эпох: потолок обязателен
     expect(buildEpochCells(600, 0.5)).toHaveLength(MAX_EPOCH_CELLS)
     expect(buildEpochCells(600, 0)).toHaveLength(MAX_EPOCH_CELLS)
+  })
+
+  it('раскладывает ручные пометки по сетке пересечением', () => {
+    // Пометка «1.0–2.0 с» накрывает эпохи 2 и 3 сетки 500 мс
+    const marks = [{ onsetSec: 1, durationSec: 1, blocked: true }]
+    const cells = buildEpochCells(3, 500, [], marks)
+
+    expect(cells.map((cell) => cell.manual)).toEqual([
+      null,
+      null,
+      'blocked',
+      'blocked',
+      null,
+      null,
+    ])
+    // Вердикт алгоритма пометки не подменяет: rejected остаётся нулевым
+    expect(cells.some((cell) => cell.rejected)).toBe(false)
+  })
+})
+
+describe('нарезка эпох и ручные пометки (срез 2.10)', () => {
+  it('gridEpochLength берёт длину из результата, у фикстуры — параметр панели', () => {
+    const result: EdfViewerLayers = {
+      artifacts: [],
+      rejectedEpochs: [],
+      epochLengthMs: 2000,
+      source: 'result',
+    }
+    expect(gridEpochLength(result, 500)).toBe(2000)
+    // Результат без длины (пустая стадия) — сетка по параметру
+    expect(gridEpochLength({ ...result, epochLengthMs: null }, 500)).toBe(500)
+    // Демо-фикстура ни к какому расчёту не привязана
+    expect(gridEpochLength({ ...result, epochLengthMs: 2000, source: 'demo' }, 500)).toBe(500)
+  })
+
+  it('штриховка остаётся на своём участке записи при смене длины эпохи', () => {
+    // Результат нарезан по 2000 мс, отброшена эпоха 4 (8–10 с)
+    const layers: EdfViewerLayers = {
+      artifacts: [],
+      rejectedEpochs: [4],
+      epochLengthMs: 2000,
+      source: 'result',
+    }
+    const length = gridEpochLength(layers, 250)
+    const cells = buildEpochCells(30, length, layers.rejectedEpochs)
+
+    const rejected = cells.filter((cell) => cell.rejected)
+    expect(rejected).toHaveLength(1)
+    // Тот же участок таймлайна, а не «пятая эпоха» новой сетки
+    expect([rejected[0]!.onsetSec, rejected[0]!.durationSec]).toEqual([8, 2])
+    expect(rejected[0]!.index).toBe(4)
+  })
+
+  it('toggleEpochMark блокирует эпоху, принятую алгоритмом, и снимает правку', () => {
+    const interval = { onsetSec: 2, durationSec: 0.5 }
+
+    const blocked = toggleEpochMark([], interval, false)
+    expect(blocked).toEqual([{ onsetSec: 2, durationSec: 0.5, blocked: true }])
+    expect(manualVerdict(blocked, interval)).toBe('blocked')
+    expect(isEpochBlocked(false, manualVerdict(blocked, interval))).toBe(true)
+
+    // Повторный Ctrl+двойной клик возвращает вердикт алгоритма
+    expect(toggleEpochMark(blocked, interval, false)).toEqual([])
+  })
+
+  it('toggleEpochMark снимает блокировку reject-фильтра и ставит её обратно', () => {
+    const interval = { onsetSec: 0, durationSec: 2 }
+
+    const allowed = toggleEpochMark([], interval, true)
+    expect(allowed).toEqual([{ onsetSec: 0, durationSec: 2, blocked: false }])
+    expect(isEpochBlocked(true, manualVerdict(allowed, interval))).toBe(false)
+
+    // «Включение» блокировки у отброшенной эпохи — это просто снятие ручной правки
+    expect(toggleEpochMark(allowed, interval, true)).toEqual([])
+  })
+
+  it('правка одной эпохи не стирает пометки соседних', () => {
+    const marks = toggleEpochMark([], { onsetSec: 0, durationSec: 4 }, false)
+    // Внутри заблокированного блока разблокируем центральную секунду
+    const after = toggleEpochMark(marks, { onsetSec: 1, durationSec: 1 }, false)
+
+    // Края прежней пометки остались: снята только вырезанная часть
+    expect(after).toEqual([
+      { onsetSec: 0, durationSec: 1, blocked: true },
+      { onsetSec: 2, durationSec: 2, blocked: true },
+    ])
+    expect(manualVerdict(after, { onsetSec: 0, durationSec: 1 })).toBe('blocked')
+    expect(manualVerdict(after, { onsetSec: 1, durationSec: 1 })).toBeNull()
+    expect(manualVerdict(after, { onsetSec: 3, durationSec: 1 })).toBe('blocked')
+  })
+
+  it('cellAtTime находит эпоху под курсором, включая хвост последней', () => {
+    const cells = buildEpochCells(5, 2000) // эпохи 0–2 с и 2–4 с и хвост 4–5 с
+
+    expect(cellAtTime(cells, 0)?.index).toBe(0)
+    expect(cellAtTime(cells, 1.999)?.index).toBe(0)
+    expect(cellAtTime(cells, 2)?.index).toBe(1)
+    expect(cellAtTime(cells, 5)?.index).toBe(2)
+    expect(cellAtTime(cells, 5.5)).toBeNull()
+    expect(cellAtTime([], 1)).toBeNull()
   })
 })
 

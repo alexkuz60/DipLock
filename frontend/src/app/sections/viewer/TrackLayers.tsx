@@ -11,7 +11,14 @@
  */
 import { ARTIFACT_COLORS, ARTIFACT_KINDS, ARTIFACT_SHORT_LABELS, artifactFill } from '@/shared/lib/artifacts'
 import { timeToX, type TimeWindow } from '@/shared/lib/viewerMath'
-import { artifactZoneText, formatSecondsRange, type ArtifactZone, type EpochCell } from '@/shared/lib/viewerLayers'
+import {
+  artifactZoneText,
+  epochMarkTitle,
+  formatSecondsRange,
+  isEpochBlocked,
+  type ArtifactZone,
+  type EpochCell,
+} from '@/shared/lib/viewerLayers'
 import { cx } from '@/shared/ui/cx'
 
 export type LayerGeometry = {
@@ -77,7 +84,20 @@ export function ArtifactZoneLayer({
 /** Порог, после которого номера эпох перестают помещаться и остаются только линии. */
 const EPOCH_NUMBER_MIN_PX = 26
 
-/** Границы эпох с номерами и штриховка отброшенных reject-фильтром эпох. */
+/** Косая штриховка «эпоха не пойдёт в расчёт»: цвет — токен темы, не hex в JS. */
+function hatchImage(density: number): string {
+  return `repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-danger) ${density}%, transparent) 0 2px, transparent 2px 7px)`
+}
+
+/**
+ * Границы эпох с номерами и штриховка эпох, исключённых из расчёта.
+ *
+ * Штриховка рисуется по итоговому вердикту (`isEpochBlocked`): решение
+ * reject-фильтра плюс ручная правка пользователя (срез 2.10). Правка видна
+ * даже при выключенном тумблере «штриховка отброшенных» — это действие
+ * пользователя, а не слой результата: `manual: 'blocked'` даёт свою штриховку
+ * с акцентной границей, `manual: 'allowed'` — пунктирный контур «разблокировано».
+ */
 export function EpochLayer({
   cells,
   geometry,
@@ -96,37 +116,49 @@ export function EpochLayer({
       : Infinity
   const showNumbers = spacing >= EPOCH_NUMBER_MIN_PX
 
+  const marks = cells.filter(
+    (cell) => cell.manual !== null || (showHatch && isEpochBlocked(cell.rejected, cell.manual)),
+  )
+
   return (
     <>
-      {showHatch
-        ? cells
-            .filter((cell) => cell.rejected)
-            .map((cell) => {
-              const left = timeToX(cell.onsetSec, geometry.window, geometry.trackWidth)
-              const right = timeToX(
-                cell.onsetSec + cell.durationSec,
-                geometry.window,
-                geometry.trackWidth,
-              )
-              if (right <= 0 || left >= geometry.trackWidth) return null
-              const clippedLeft = Math.max(0, left)
-              return (
-                <div
-                  key={`hatch-${cell.index}`}
-                  aria-hidden
-                  data-testid={`epoch-hatch-${cell.index}`}
-                  className="pointer-events-none absolute inset-y-0"
-                  style={{
-                    left: clippedLeft,
-                    width: Math.max(1, Math.min(geometry.trackWidth, right) - clippedLeft),
-                    // Косая штриховка «отброшено»: цвет — токен темы, без hex в JS
-                    backgroundImage:
-                      'repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-danger) 34%, transparent) 0 2px, transparent 2px 7px)',
-                  }}
-                />
-              )
-            })
-        : null}
+      {marks.map((cell) => {
+        const left = timeToX(cell.onsetSec, geometry.window, geometry.trackWidth)
+        const right = timeToX(
+          cell.onsetSec + cell.durationSec,
+          geometry.window,
+          geometry.trackWidth,
+        )
+        if (right <= 0 || left >= geometry.trackWidth) return null
+        const clippedLeft = Math.max(0, left)
+        const title = epochMarkTitle(cell)
+        const manual = cell.manual
+        return (
+          <div
+            key={`hatch-${cell.index}`}
+            data-testid={`epoch-hatch-${cell.index}`}
+            data-manual={manual ?? undefined}
+            {...(manual === null
+              ? { 'aria-hidden': true }
+              : { role: 'img' as const, 'aria-label': title, title })}
+            className="pointer-events-none absolute inset-y-0"
+            style={{
+              left: clippedLeft,
+              width: Math.max(1, Math.min(geometry.trackWidth, right) - clippedLeft),
+              backgroundImage: isEpochBlocked(cell.rejected, manual)
+                ? hatchImage(manual === 'blocked' ? 58 : 34)
+                : undefined,
+              // Ручные пометки должны читаться и без штриховки: контур — свой у каждой
+              borderLeft:
+                manual === 'blocked'
+                  ? '2px solid var(--color-danger)'
+                  : manual === 'allowed'
+                    ? '2px dashed var(--color-ok)'
+                    : undefined,
+            }}
+          />
+        )
+      })}
 
       {showBoundaries
         ? cells.map((cell) => {

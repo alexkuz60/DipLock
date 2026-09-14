@@ -45,6 +45,7 @@ describe('состояние раздела EDF', () => {
       signalsPending: 0,
       signalsError: null,
       layers: null,
+      epochMarks: [],
       stageJobs: {},
     })
     useEdfParams.setState({
@@ -66,6 +67,33 @@ describe('состояние раздела EDF', () => {
     useEdfRecording.getState().closeRecording()
     expect(useEdfRecording.getState().passport).toEqual(EMPTY_PASSPORT)
     expect(useEdfRecording.getState().recording).toBeNull()
+  })
+
+  it('ручные пометки эпох принадлежат записи: переключаются, сбрасываются и не текут в новую', () => {
+    const interval = { onsetSec: 2, durationSec: 2 }
+
+    // Ctrl+двойной клик по эпохе, которую алгоритм не отбрасывал — блокировка
+    useEdfRecording.getState().toggleEpochBlock(interval, false)
+    expect(useEdfRecording.getState().epochMarks).toEqual([
+      { onsetSec: 2, durationSec: 2, blocked: true },
+    ])
+
+    // Повторный Ctrl+двойной клик возвращает вердикт reject-фильтра
+    useEdfRecording.getState().toggleEpochBlock(interval, false)
+    expect(useEdfRecording.getState().epochMarks).toEqual([])
+
+    useEdfRecording.getState().toggleEpochBlock(interval, false)
+    useEdfRecording.getState().clearEpochMarks()
+    expect(useEdfRecording.getState().epochMarks).toEqual([])
+
+    // Правки не переезжают на следующую запись и не переживают закрытие раздела
+    useEdfRecording.getState().toggleEpochBlock(interval, false)
+    useEdfRecording.getState().finishUpload(recordingFixture)
+    expect(useEdfRecording.getState().epochMarks).toEqual([])
+
+    useEdfRecording.getState().toggleEpochBlock(interval, false)
+    useEdfRecording.getState().closeRecording()
+    expect(useEdfRecording.getState().epochMarks).toEqual([])
   })
 
   it('requestFileDialog считает запросы тулс-хедара к рабочей области', () => {
@@ -206,15 +234,20 @@ describe('стадии предподготовки (срез 2.7)', () => {
         },
       ],
       rejectedEpochs: [5],
+      epochLengthMs: 500,
       source: 'result' as const,
     }
 
     const afterEpochs = layersFromResult(preprocessResultFixture('epochs'), previous)
     expect(afterEpochs.rejectedEpochs).toEqual([2, 7])
+    // Индексы отброшенных эпох имеют смысл только с длиной своей нарезки (срез 2.10)
+    expect(afterEpochs.epochLengthMs).toBe(2000)
     expect(afterEpochs.artifacts).toEqual(previous.artifacts)
 
     const afterArtifacts = layersFromResult(preprocessResultFixture('artifacts'), afterEpochs)
     expect(afterArtifacts.rejectedEpochs).toEqual([2, 7])
+    // Стадия артефактов не трогает нарезку эпох: длина остаётся прежней
+    expect(afterArtifacts.epochLengthMs).toBe(2000)
     expect(afterArtifacts.artifacts.map((zone) => zone.kind)).toEqual([
       'zscore_outlier',
       'peak_to_peak',
@@ -234,6 +267,7 @@ describe('стадии предподготовки (срез 2.7)', () => {
         },
       ],
       rejectedEpochs: [1],
+      epochLengthMs: null,
       source: 'demo' as const,
     }
 
@@ -241,6 +275,8 @@ describe('стадии предподготовки (срез 2.7)', () => {
 
     expect(result.source).toBe('result')
     expect(result.rejectedEpochs).toEqual([])
+    // Фикстура не расчёт: её длина эпохи не переезжает в слой результата
+    expect(result.epochLengthMs).toBeNull()
     expect(result.artifacts).toHaveLength(2)
   })
 })

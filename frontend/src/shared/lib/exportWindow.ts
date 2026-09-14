@@ -23,7 +23,7 @@
 import { ARTIFACT_SHORT_LABELS, type ArtifactKind } from './artifacts'
 import type { SignalFrame } from './signalFrame'
 import { frameEnvelope, timeToX, type TimeWindow } from './viewerMath'
-import type { ArtifactZone, EpochCell } from './viewerLayers'
+import { isEpochBlocked, type ArtifactZone, type EpochCell } from './viewerLayers'
 
 /** Заголовок CSV. Длинный формат: одна строка на (корзина × канал). */
 export const CSV_HEADER = 'time_sec,channel,min_uv,max_uv'
@@ -234,9 +234,11 @@ export type EpochMarks = {
 }
 
 /**
- * Сетка эпох для снапшота. Границы — линии, отброшенные — заливка; обе части
- * зависят от тумблеров вьюера, поэтому в снапшоте не может быть того, что
- * пользователь выключил.
+ * Сетка эпох для снапшота. Границы — линии, исключённые из расчёта эпохи —
+ * заливка; обе части зависят от тумблеров вьюера, поэтому в снапшоте не может
+ * быть того, что пользователь выключил. Ручные пометки (срез 2.10) попадают в
+ * снапшот по итоговому вердикту `isEpochBlocked`: заблокированная вручную эпоха
+ * штрихуется, разблокированная — нет.
  */
 export function epochMarks(
   cells: readonly EpochCell[],
@@ -251,7 +253,10 @@ export function epochMarks(
     if (options.boundaries && index > 0 && cell.onsetSec > window.t0 && cell.onsetSec < window.t1) {
       boundaries.push(timeToX(cell.onsetSec, window, trackWidth))
     }
-    if (!options.dropped || !cell.rejected) return
+    // Снапшот повторяет экран: ручная правка пользователя видна всегда, а
+    // алгоритмическая штриховка — только при включённом тумблере
+    if (!isEpochBlocked(cell.rejected, cell.manual)) return
+    if (cell.manual === null && !options.dropped) return
     const rawLeft = timeToX(cell.onsetSec, window, trackWidth)
     const rawRight = timeToX(cell.onsetSec + cell.durationSec, window, trackWidth)
     if (rawRight <= 0 || rawLeft >= trackWidth) return

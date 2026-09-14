@@ -34,6 +34,7 @@ function cellsOf(patches: Partial<EpochCell>[] = []): EpochCell[] {
     onsetSec: index * 2,
     durationSec: 2,
     rejected: false,
+    manual: null,
     ...patch,
   }))
 }
@@ -129,9 +130,9 @@ describe('слой эпох', () => {
   it('рисует границы с номерами и не рисует линию начала записи', () => {
     // Эпохи по 5 с на 100 px → 50 px на эпоху: номера помещаются
     const cells: EpochCell[] = [
-      { index: 0, onsetSec: 0, durationSec: 5, rejected: false },
-      { index: 1, onsetSec: 5, durationSec: 3, rejected: false },
-      { index: 2, onsetSec: 8, durationSec: 2, rejected: false },
+      { index: 0, onsetSec: 0, durationSec: 5, rejected: false, manual: null },
+      { index: 1, onsetSec: 5, durationSec: 3, rejected: false, manual: null },
+      { index: 2, onsetSec: 8, durationSec: 2, rejected: false, manual: null },
     ]
     renderWithProviders(
       <EpochLayer cells={cells} geometry={GEOMETRY} showBoundaries showHatch={false} />,
@@ -150,6 +151,7 @@ describe('слой эпох', () => {
       onsetSec: index * 0.1,
       durationSec: 0.1,
       rejected: false,
+      manual: null,
     }))
     renderWithProviders(
       <EpochLayer cells={many} geometry={GEOMETRY} showBoundaries showHatch={false} />,

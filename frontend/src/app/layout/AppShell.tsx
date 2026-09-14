@@ -60,10 +60,17 @@ export function AppShell({ section, children, actions, headerExtra, panel }: App
   }, [navigate, section.hasRightPanel, section.id, toggleRightPanel])
 
   return (
-    <div className="grid h-screen grid-cols-[4.5rem_minmax(0,1fr)_auto] overflow-hidden bg-bg-0">
+    /*
+      Явная строка `minmax(0,1fr)` (а не авто-высота): без неё единственная
+      неявная строка растягивалась под содержимое (тысячи пикселей треков),
+      каркас вылезал за экран и резался `overflow-hidden` — внутренние скроллы
+      рабочих областей при этом не появлялись. Строка с минимумом 0 держит
+      колонки ровно в высоту окна, и скроллятся уже сами области.
+    */
+    <div className="grid h-screen grid-cols-[4.5rem_minmax(0,1fr)_auto] grid-rows-[minmax(0,1fr)] overflow-hidden bg-bg-0">
       <IconRail />
 
-      <div className="flex min-w-0 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-col">
         {section.hasToolHeader ? (
           <ToolHeader section={section} actions={actions} secondary={headerExtra} />
         ) : null}

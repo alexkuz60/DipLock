@@ -214,6 +214,25 @@ describe('раскладка и геометрия снапшота', () => {
     expect(marks.dropped[0]!.width).toBeCloseTo(50)
   })
 
+  it('учитывает ручные пометки эпох: заблокированная штрихуется, разблокированная — нет', () => {
+    const window = { t0: 0, t1: 10 }
+    // Пометки: эпоху 0 пользователь заблокировал, блокировку эпохи 1 снял
+    const marks = [
+      { onsetSec: 0, durationSec: 1, blocked: true },
+      { onsetSec: 1, durationSec: 1, blocked: false },
+    ]
+    const cells = buildEpochCells(10, 1000, [1], marks)
+    const snapshot = epochMarks(cells, window, 1000, { boundaries: false, dropped: true })
+
+    // Штриховка ровно по итоговому вердикту: своя правка вместо решения фильтра
+    expect(snapshot.dropped.map((rect) => rect.x)).toEqual([0])
+    const withoutMarks = epochMarks(buildEpochCells(10, 1000, [1]), window, 1000, {
+      boundaries: false,
+      dropped: true,
+    })
+    expect(withoutMarks.dropped.map((rect) => rect.x)).toEqual([100])
+  })
+
   it('withAlpha превращает токен темы в rgba и зажимает прозрачность', () => {
     expect(withAlpha('#ff7b72', 0.18)).toBe('rgba(255, 123, 114, 0.18)')
     expect(withAlpha('#ff7b72', 5)).toBe('rgba(255, 123, 114, 1)')

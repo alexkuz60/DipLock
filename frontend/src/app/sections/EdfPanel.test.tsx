@@ -24,7 +24,12 @@ describe('панель раздела EDF', () => {
       availableChannels: [],
       stageApplied: emptyStageSnapshot(),
     })
-    useEdfRecording.setState({ recording: null, layers: null, passport: { ...EMPTY_PASSPORT } })
+    useEdfRecording.setState({
+      recording: null,
+      layers: null,
+      epochMarks: [],
+      passport: { ...EMPTY_PASSPORT },
+    })
   })
 
   it('показывает пороги, длины эпох и каналы из конфигурации сервера', async () => {
@@ -157,5 +162,28 @@ describe('панель раздела EDF', () => {
 
     await user.click(screen.getByRole('button', { name: 'Все' }))
     expect(useEdfParams.getState().params.visibleChannels).toEqual(metaFixture.standard_channels)
+  })
+
+  it('показывает число ручных пометок эпох и снимает их кнопкой (срез 2.10)', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    expect(screen.getByText('Ручных пометок: 0')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Снять' })).toBeDisabled()
+
+    // Пометку ставит вьюер (Ctrl+двойной клик) — панель лишь отзывается на неё
+    const fetchMock = mockApiFetch()
+    act(() =>
+      useEdfRecording.getState().toggleEpochBlock({ onsetSec: 0, durationSec: 2 }, false),
+    )
+
+    expect(screen.getByText('Ручных пометок: 1')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Снять' }))
+    expect(useEdfRecording.getState().epochMarks).toEqual([])
+    expect(screen.getByText('Ручных пометок: 0')).toBeInTheDocument()
   })
 })

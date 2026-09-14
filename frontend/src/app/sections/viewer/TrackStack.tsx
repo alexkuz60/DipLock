@@ -45,7 +45,9 @@ import type { SignalFrame } from '@/shared/lib/signalFrame'
 import {
   artifactCounts,
   buildEpochCells,
+  cellAtTime,
   demoLayers,
+  gridEpochLength,
   visibleZones,
   type EdfViewerLayers,
 } from '@/shared/lib/viewerLayers'
@@ -258,6 +260,9 @@ function TrackRow({
 export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const params = useEdfParamsValue()
   const toggleArtifactVisibility = useEdfParams((state) => state.toggleArtifactVisibility)
+  /** Ручные пометки эпох живут при записи: они относятся к конкретной сессии */
+  const epochMarks = useEdfRecording((state) => state.epochMarks)
+  const toggleEpochBlock = useEdfRecording((state) => state.toggleEpochBlock)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -302,25 +307,41 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     [layers.artifacts, params.artifactVisibility],
   )
   const counts = useMemo(() => artifactCounts(layers.artifacts), [layers.artifacts])
-  const epochs = useMemo(
-    () =>
-      params.epochBoundaries || params.droppedEpochsHatched
-        ? buildEpochCells(signal.durationSec, params.epochLengthMs, layers.rejectedEpochs)
-        : [],
-    [
-      signal.durationSec,
-      params.epochBoundaries,
-      params.droppedEpochsHatched,
-      params.epochLengthMs,
-      layers.rejectedEpochs,
-    ],
+  /**
+   * Длина эпохи сетки вьюера (срез 2.10): у слоя-результата — своя, у фикстуры —
+   * параметр панели. Индексы отброшенных эпох живут только внутри своей нарезки,
+   * поэтому смена длины эпохи в панели больше не «переезжает» штриховкой на
+   * другой участок записи — она помечает слой как устаревший (пилюля в полосе).
+   */
+  const epochLengthMs = useMemo(
+    () => gridEpochLength(layers, params.epochLengthMs),
+    [layers, params.epochLengthMs],
   )
+  const epochs = useMemo(
+    () => buildEpochCells(signal.durationSec, epochLengthMs, layers.rejectedEpochs, epochMarks),
+    [signal.durationSec, epochLengthMs, layers.rejectedEpochs, epochMarks],
+  )
+  /** Сколько эпох пользователь поправил руками (Ctrl+двойной клик) */
+  const manualMarkCount = useMemo(
+    () => epochs.reduce((total, cell) => (cell.manual === null ? total : total + 1), 0),
+    [epochs],
+  )
+  /** Сетка результата не совпадает с длиной эпохи в панели — разметка не пересчитана */
+  const staleEpochGrid =
+    layers.source === 'result' &&
+    layers.epochLengthMs !== null &&
+    layers.epochLengthMs !== params.epochLengthMs
   const selectedZone = useMemo(
     () => visibleZoneList.find((zone) => zone.id === selectedZoneId) ?? null,
     [visibleZoneList, selectedZoneId],
   )
   const hasLayers =
-    visibleZoneList.length > 0 || (params.epochBoundaries && epochs.length > 1) || params.droppedEpochsHatched
+    visibleZoneList.length > 0 ||
+    (params.epochBoundaries && epochs.length > 1) ||
+    params.droppedEpochsHatched ||
+    // Ручная пометка эпохи — решение пользователя: она видна всегда, даже если
+    // штриховку и границы он выключил
+    manualMarkCount > 0
 
   // Новая запись/демо — возвращаемся к «вся сессия». Зависимость именно от
   // источника, а не от объекта кадра: при зуме сервер отдаёт новый кадр того же
@@ -489,6 +510,28 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     setCursor({ xPx: xPx + LABEL_WIDTH + 4, timeSec: xToTime(xPx, window, trackWidth) })
   }
 
+  /**
+   * Ctrl+двойной клик по треку (срез 2.10): инверсия блокировки эпохи, в
+   * таймлайн которой попадает точка клика. Так пользователь правит и решение
+   * reject-фильтра (снимает штриховку), и своё собственное (ставит её заново).
+   * Пометка — интервал на таймлайне, поэтому смена длины эпохи её не сдвигает.
+   */
+  function handleTrackDoubleClick(event: MouseEvent<HTMLDivElement>) {
+    if (!event.ctrlKey) return
+    const el = wrapRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const trackWidth = rect.width - LABEL_WIDTH - 8
+    const xPx = event.clientX - rect.left - LABEL_WIDTH - 4
+    if (trackWidth <= 0 || xPx < 0 || xPx > trackWidth) return
+    const cell = cellAtTime(epochs, xToTime(xPx, window, trackWidth))
+    if (!cell) return
+    toggleEpochBlock(
+      { onsetSec: cell.onsetSec, durationSec: cell.durationSec },
+      cell.rejected,
+    )
+  }
+
   /** Высота трека: развёрнутый занимает видимую область, обычный — TRACK_HEIGHT. */
   function trackHeight(name: string): number {
     if (name !== expandedChannel) return TRACK_HEIGHT
@@ -529,6 +572,22 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
             слои: {layers.source === 'demo' ? 'демо-фикстура' : 'результат расчёта'}
           </StatusPill>
         ) : null}
+        {staleEpochGrid ? (
+          <StatusPill
+            tone="warn"
+            title={`Разметка эпох построена по нарезке результата — ${layers.epochLengthMs} мс; в панели выбрано ${params.epochLengthMs} мс. Нажмите «Нарезка эпох» в шапке, чтобы пересчитать и разложить эпохи заново.`}
+          >
+            разметка эпох: {layers.epochLengthMs} мс
+          </StatusPill>
+        ) : null}
+        {manualMarkCount > 0 ? (
+          <StatusPill
+            tone="warn"
+            title="Эпохи с ручной пометкой: Ctrl+двойной клик по треку переключает блокировку эпохи под курсором, «Снять пометки» — в панели «Эпохи»"
+          >
+            ручных пометок: {manualMarkCount}
+          </StatusPill>
+        ) : null}
         <ExportActions
           frame={signal}
           window={window}
@@ -543,7 +602,8 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
           amplitudeScaleUv={params.amplitudeScaleUv}
         />
         <span className="ml-auto truncate">
-          Колесо — зум · drag — панорама · клик — курсор · клик по названию — развернуть трек
+          Колесо — зум · drag — панорама · клик — курсор · клик по названию — развернуть трек ·
+          Ctrl+двойной клик — блокировка эпохи
         </span>
       </div>
 
@@ -562,6 +622,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         aria-label="Треки ЭЭГ"
         className="scroll-y-always relative min-h-0 flex-1 cursor-crosshair overflow-x-hidden rounded-lg border border-border bg-bg-1 py-1 pr-2 select-none"
         onClick={handleTrackClick}
+        onDoubleClick={handleTrackDoubleClick}
       >
         <div className="relative">
           {visible.length === 0 ? (

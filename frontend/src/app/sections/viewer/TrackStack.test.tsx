@@ -6,7 +6,7 @@
  * листание окна по команде из шапки и курсор по клику, а не пиксели.
  * Математика окна/огибающей покрыта в `viewerMath.test.ts`.
  */
-import { act, screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SignalData } from '@/shared/lib/demoSignal'
@@ -300,6 +300,8 @@ describe('слои результата вьюера', () => {
   beforeEach(() => {
     uplotCharts().length = 0
     localStorage.clear()
+    // Ручные пометки эпох живут в сторе записи: тесты не должны видеть чужие
+    useEdfRecording.setState({ epochMarks: [] })
   })
 
   /** Слои: две зоны в начале сессии и отброшенные эпохи 1 и 3 (10 с, 2 с/эпоха). */
@@ -317,6 +319,7 @@ describe('слои результата вьюера', () => {
         { id: 'flat_line-1', kind: 'flat_line', onsetSec: 5, durationSec: 0.5, channels: [] },
       ],
       rejectedEpochs: [1, 3],
+      epochLengthMs: null,
     }
   }
 
@@ -420,6 +423,88 @@ describe('слои результата вьюера', () => {
     renderWithProviders(<TrackStack signal={frameFixture()} layers={layers} />)
 
     expect(screen.getByText('слои: результат расчёта')).toBeInTheDocument()
+  })
+
+  it('Ctrl+двойной клик блокирует эпоху под курсором, повторный — снимает правку', () => {
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000 })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    const region = screen.getByRole('region', { name: 'Треки ЭЭГ' })
+    region.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 1024, height: 600, right: 1024, bottom: 600 }) as DOMRect
+
+    // Без Ctrl правки не ставим: одиночный клик — это курсор
+    fireEvent.doubleClick(region, { clientX: 492, clientY: 40 })
+    expect(useEdfRecording.getState().epochMarks).toEqual([])
+
+    // 10 с, 2 с/эпоха: clientX 492 → 4.5 с — эпоха 2 (4–6 с), алгоритм её не отбрасывал
+    fireEvent.doubleClick(region, { ctrlKey: true, clientX: 492, clientY: 40 })
+
+    expect(useEdfRecording.getState().epochMarks).toEqual([
+      { onsetSec: 4, durationSec: 2, blocked: true },
+    ])
+    expect(screen.getByTestId('epoch-hatch-2')).toHaveAttribute('data-manual', 'blocked')
+    expect(screen.getByText('ручных пометок: 1')).toBeInTheDocument()
+
+    // Повторный Ctrl+двойной клик возвращает вердикт алгоритма: правки нет,
+    // штриховки тоже (эпоху алгоритм не отбрасывал)
+    fireEvent.doubleClick(region, { ctrlKey: true, clientX: 492, clientY: 40 })
+    expect(useEdfRecording.getState().epochMarks).toEqual([])
+    expect(screen.queryByTestId('epoch-hatch-2')).not.toBeInTheDocument()
+    expect(screen.queryByText('ручных пометок: 1')).not.toBeInTheDocument()
+  })
+
+  it('Ctrl+двойной клик снимает штриховку эпохи, отброшенной reject-фильтром', () => {
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000 })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    const region = screen.getByRole('region', { name: 'Треки ЭЭГ' })
+    region.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 1024, height: 600, right: 1024, bottom: 600 }) as DOMRect
+
+    // Эпоха 1 (2–4 с) отброшена фикстурой результата — штриховка есть
+    expect(screen.getByTestId('epoch-hatch-1')).toBeInTheDocument()
+
+    // clientX 252 → 2.0 с — ровно начало эпохи 1
+    fireEvent.doubleClick(region, { ctrlKey: true, clientX: 252, clientY: 40 })
+
+    expect(useEdfRecording.getState().epochMarks).toEqual([
+      { onsetSec: 2, durationSec: 2, blocked: false },
+    ])
+    const hatch = screen.getByTestId('epoch-hatch-1')
+    expect(hatch).toHaveAttribute('data-manual', 'allowed')
+    // Разблокировано вручную — штриховки нет, остался только контур правки
+    expect(hatch.style.backgroundImage).toBe('')
+  })
+
+  it('ручная пометка видна, даже когда штриховка эпох выключена', () => {
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000, droppedEpochsHatched: false })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    // Пока правок нет, слой эпох молчит: тумблеры не включены
+    expect(screen.queryByTestId('epoch-hatch-1')).not.toBeInTheDocument()
+
+    act(() => useEdfRecording.getState().toggleEpochBlock({ onsetSec: 0, durationSec: 2 }, false))
+
+    expect(screen.getByTestId('epoch-hatch-0')).toHaveAttribute('data-manual', 'blocked')
+  })
+
+  it('сетка эпох берётся из результата, а не из параметра панели (срез 2.10)', () => {
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 500, droppedEpochsHatched: true })
+    const layers: EdfViewerLayers = {
+      ...layersFixture(),
+      source: 'result',
+      rejectedEpochs: [4],
+      epochLengthMs: 2000,
+    }
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layers} />)
+
+    // Результат нарезан по 2 с: штриховка осталась на интервале 8–10 с,
+    // а не «переехала» на пятую эпоху сетки 500 мс (2.0–2.5 с)
+    expect(screen.getByTestId('epoch-hatch-4')).toBeInTheDocument()
+    expect(screen.queryByTestId('epoch-hatch-8')).not.toBeInTheDocument()
+    // И вьюер честно говорит, что разметка построена по другой длине эпохи
+    expect(screen.getByText('разметка эпох: 2000 мс')).toBeInTheDocument()
   })
 })
 

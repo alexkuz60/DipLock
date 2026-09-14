@@ -16,7 +16,13 @@ import { uploadRecording } from '@/shared/api/upload'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
 import { makeDemoSignal } from '@/shared/lib/demoSignal'
 import { decodeSignalFrame, frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
-import { DEMO_LAYERS_SEED, demoLayers, type EdfViewerLayers } from '@/shared/lib/viewerLayers'
+import {
+  DEMO_LAYERS_SEED,
+  demoLayers,
+  toggleEpochMark,
+  type EdfViewerLayers,
+  type EpochMark,
+} from '@/shared/lib/viewerLayers'
 import {
   FILTER_PRESETS,
   stageSignature,
@@ -104,7 +110,7 @@ export function layersFromResult(
   const base: EdfViewerLayers =
     previous && previous.source === 'result'
       ? previous
-      : { artifacts: [], rejectedEpochs: [], source: 'result' }
+      : { artifacts: [], rejectedEpochs: [], epochLengthMs: null, source: 'result' }
   const next: EdfViewerLayers = { ...base, source: 'result' }
 
   if (result.stage === 'artifacts') {
@@ -118,6 +124,9 @@ export function layersFromResult(
   }
   if (result.stage === 'epochs') {
     next.rejectedEpochs = result.rejected_epochs
+    // Индексы отброшенных эпох имеют смысл только вместе с длиной нарезки, в
+    // которой они получены: вьюер строит по ней свою сетку (срез 2.10).
+    next.epochLengthMs = result.epoch_length_ms > 0 ? result.epoch_length_ms : null
   }
   return next
 }
@@ -204,6 +213,13 @@ export type EdfRecordingState = {
    */
   layers: EdfViewerLayers | null
   /**
+   * Ручные пометки эпох (срез 2.10): интервалы на таймлайне записи, которые
+   * пользователь заблокировал или, наоборот, разблокировал поверх решения
+   * reject-фильтра (Ctrl+двойной клик по треку). Живут при записи, а не в
+   * `edfParams`: правка относится к конкретной сессии и в localStorage не уходит.
+   */
+  epochMarks: EpochMark[]
+  /**
    * Задачи предподготовки по стадиям (срез 2.7): прогресс и ошибка каждой.
    * Хранится отдельно от снимков параметров (`stageApplied`): снимок говорит
    * «результат соответствует параметрам», а это — «задача сейчас идёт».
@@ -243,6 +259,16 @@ export type EdfRecordingState = {
   requestFileDialog: () => void
   /** Запросить навигацию по окну вьюера (тулс-хедер → вьюер, срез 2.9) */
   requestNav: (command: EdfNavCommand) => void
+  /**
+   * Инверсия блокировки эпохи (Ctrl+двойной клик, срез 2.10). `interval` — эпоха
+   * под курсором, `rejectedByAlgorithm` — её вердикт из результата стадии.
+   */
+  toggleEpochBlock: (
+    interval: { onsetSec: number; durationSec: number },
+    rejectedByAlgorithm: boolean,
+  ) => void
+  /** Снять все ручные пометки эпох (вернуться к вердиктам алгоритма) */
+  clearEpochMarks: () => void
   /** Закрыть запись (вернуться к пустому состоянию) */
   closeRecording: () => void
 }
@@ -257,6 +283,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   signalsPending: 0,
   signalsError: null,
   layers: null,
+  epochMarks: [],
   stageJobs: {},
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
@@ -280,6 +307,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       layers: demoLayers(meta.duration_sec, meta.channels, DEMO_LAYERS_SEED),
       // Задачи прежней записи не переносим на новую
       stageJobs: {},
+      // Ручные пометки эпох относятся к конкретной записи — начинаем с чистых
+      epochMarks: [],
       // Паспорт принадлежит сессии: новая запись — чистый паспорт
       passport: { ...EMPTY_PASSPORT, title: meta.filename },
     }),
@@ -289,12 +318,13 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     set({
       demo: frameFromSignalData(signal),
       layers: demoLayers(signal.durationSec, signal.channels, DEMO_LAYERS_SEED),
+      epochMarks: [],
     })
     // Демо-каналы становятся «доступными»: вьюер и блок «Каналы» работают
     // с реальным выбором пользователя, а не с отдельной веткой логики.
     useEdfParams.getState().setAvailableChannels(signal.channels)
   },
-  closeDemo: () => set({ demo: null, layers: null }),
+  closeDemo: () => set({ demo: null, layers: null, epochMarks: [] }),
 
   loadSignals: async (level) => {
     const { recording, signalFrames, signalsInFlight } = get()
@@ -406,6 +436,13 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   requestNav: (command) =>
     set((state) => ({ navRequest: { command, seq: (state.navRequest?.seq ?? 0) + 1 } })),
 
+  toggleEpochBlock: (interval, rejectedByAlgorithm) =>
+    set((state) => ({
+      epochMarks: toggleEpochMark(state.epochMarks, interval, rejectedByAlgorithm),
+    })),
+
+  clearEpochMarks: () => set({ epochMarks: [] }),
+
   closeRecording: () => {
     // Отменяем поллинг: ответы прежних стадий не должны трогать новое состояние
     stageRunToken += 1
@@ -420,6 +457,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       signalsError: null,
       // Слои результата тоже принадлежат записи — сбрасываем вместе с ней
       layers: null,
+      epochMarks: [],
       stageJobs: {},
       passport: { ...EMPTY_PASSPORT },
     })

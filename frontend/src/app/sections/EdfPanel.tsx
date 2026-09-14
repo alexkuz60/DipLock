@@ -66,6 +66,9 @@ export function EdfPanel() {
   const recording = useEdfRecording((state) => state.recording)
   const demo = useEdfRecording((state) => state.demo)
   const stageJobs = useEdfRecording((state) => state.stageJobs)
+  /** Ручные пометки эпох живут при записи (Ctrl+двойной клик во вьюере, срез 2.10) */
+  const manualMarks = useEdfRecording((state) => state.epochMarks)
+  const clearEpochMarks = useEdfRecording((state) => state.clearEpochMarks)
   const recalc = useEdfRecalcStatus()
 
   const meta = useQuery({
@@ -192,7 +195,7 @@ export function EdfPanel() {
 
       <Panel
         title="Эпохи"
-        hint="Границы рисуются по выбранной длине эпохи; отброшенные эпохи помечаются штриховкой по результату стадии (срез 2.6 — демо-фикстура)."
+        hint="Границы рисуются по длине эпохи результата (до расчёта — по выбранной в панели). Штриховка — эпохи, исключённые из расчёта: решение reject-фильтра и ваши правки. Ctrl+двойной клик по треку переключает блокировку эпохи под курсором: так снимается штриховка алгоритма и ставится своя."
       >
         <SelectField
           label="Длина эпохи"
@@ -216,6 +219,19 @@ export function EdfPanel() {
           checked={params.droppedEpochsHatched}
           onChange={(checked) => setParams({ droppedEpochsHatched: checked })}
         />
+        <div className="mt-2 flex items-center gap-2">
+          <StatusPill tone={manualMarks.length ? 'warn' : 'neutral'}>
+            Ручных пометок: {manualMarks.length}
+          </StatusPill>
+          <Button
+            variant="ghost"
+            disabled={manualMarks.length === 0}
+            title="Вернуть разметку эпох к решению reject-фильтра"
+            onClick={clearEpochMarks}
+          >
+            Снять
+          </Button>
+        </div>
       </Panel>
 
       <Panel

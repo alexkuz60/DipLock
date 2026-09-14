@@ -95,4 +95,18 @@ describe('каркас приложения', () => {
       ).toBeInTheDocument(),
     )
   })
+
+  it('держит рабочую область в высоте окна, а не в высоте содержимого', () => {
+    // Каркас — grid со строкой `minmax(0,1fr)`: без неё неявная строка
+    // растягивалась под треки, и внутренние скроллы не появлялись (срез 2.10)
+    renderApp('/')
+
+    const shell = document.querySelector('.grid.h-screen')
+    expect(shell).not.toBeNull()
+    expect(shell?.className).toContain('grid-rows-[minmax(0,1fr)]')
+
+    const column = shell?.querySelector(':scope > div')
+    expect(column?.className).toContain('min-h-0')
+    expect(screen.getByRole('main')).toHaveClass('min-h-0')
+  })
 })
