@@ -321,11 +321,18 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     () => buildEpochCells(signal.durationSec, epochLengthMs, layers.rejectedEpochs, epochMarks),
     [signal.durationSec, epochLengthMs, layers.rejectedEpochs, epochMarks],
   )
-  /** Сколько эпох пользователь поправил руками (Ctrl+двойной клик) */
-  const manualMarkCount = useMemo(
-    () => epochs.reduce((total, cell) => (cell.manual === null ? total : total + 1), 0),
-    [epochs],
-  )
+  /**
+   * Сколько ручных пометок поставил пользователь (Ctrl+двойной клик).
+   *
+   * Считаем **правки**, а не ячейки сетки (срез 2.11): пометка — интервал на
+   * таймлайне, поэтому после смены длины эпохи одна правка накрывает несколько
+   * эпох новой нарезки, а их штриховки сливаются в одну видимую пометку. Счёт по
+   * ячейкам показывал «ручных пометок: 6» там, где пользователь поставил три, и
+   * расходился с панелью «Эпохи» (там тот же `epochMarks.length`).
+   */
+  const manualMarkCount = epochMarks.length
+  /** Есть ли правки, видимые в текущей сетке: от этого зависит рендер слоёв */
+  const hasManualEdit = useMemo(() => epochs.some((cell) => cell.manual !== null), [epochs])
   /** Сетка результата не совпадает с длиной эпохи в панели — разметка не пересчитана */
   const staleEpochGrid =
     layers.source === 'result' &&
@@ -341,7 +348,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     params.droppedEpochsHatched ||
     // Ручная пометка эпохи — решение пользователя: она видна всегда, даже если
     // штриховку и границы он выключил
-    manualMarkCount > 0
+    hasManualEdit
 
   // Новая запись/демо — возвращаемся к «вся сессия». Зависимость именно от
   // источника, а не от объекта кадра: при зуме сервер отдаёт новый кадр того же
@@ -583,7 +590,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         {manualMarkCount > 0 ? (
           <StatusPill
             tone="warn"
-            title="Эпохи с ручной пометкой: Ctrl+двойной клик по треку переключает блокировку эпохи под курсором, «Снять пометки» — в панели «Эпохи»"
+            title="Пометки пользователя: интервалы на таймлайне записи (Ctrl+двойной клик по треку переключает блокировку эпохи под курсором). Пометка живёт на таймлайне, поэтому после смены длины эпохи она накрывает несколько эпох новой нарезки — штриховок может быть больше, чем пометок. «Снять» — в панели «Эпохи»."
           >
             ручных пометок: {manualMarkCount}
           </StatusPill>
@@ -624,7 +631,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         onClick={handleTrackClick}
         onDoubleClick={handleTrackDoubleClick}
       >
-        <div className="relative">
+        <div className="relative" data-testid="viewer-content">
           {visible.length === 0 ? (
             <p className="p-4 text-sm text-fg-2">
               Все каналы скрыты — включите их в панели «Каналы» справа.
@@ -674,31 +681,53 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
               />
             </div>
           ) : null}
-        </div>
 
-        {selectedZone ? (
-          <SelectedZoneCard
-            zone={selectedZone}
-            onClose={() => setSelectedZoneId(null)}
-            className="absolute top-1 right-2 z-10 max-w-xs"
-          />
-        ) : null}
+          {/*
+            Курсор — линия на всю высоту стека треков. Живёт внутри прокручиваемого
+            контента (срез 2.11): раньше он был ребёнком самого скролл-контейнера,
+            и при прокрутке вниз линия «уезжала» вверх и обрывалась на середине
+            стека — выглядело как «позиционер не перерисовывается». Подпись
+            времени — `sticky`: линия едет с треками, а время остаётся у верха
+            видимой области и читается при любой прокрутке.
+          */}
+          {cursor ? (
+            <>
+              <div
+                aria-hidden
+                data-testid="cursor-line"
+                className="pointer-events-none absolute inset-y-0 w-px bg-fg-2/70"
+                style={{ left: cursor.xPx }}
+              />
+              <div className="pointer-events-none absolute inset-0">
+                <div className="sticky top-1 h-0">
+                  <div
+                    data-testid="cursor-time"
+                    className="tnum absolute rounded bg-bg-3 px-1.5 py-0.5 text-xs text-fg-0"
+                    style={{ left: cursor.xPx + 6 }}
+                  >
+                    {cursor.timeSec.toFixed(3)} с
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : null}
 
-        {cursor ? (
-          <>
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-y-0 w-px bg-fg-2/70"
-              style={{ left: cursor.xPx }}
-            />
-            <div
-              className="tnum pointer-events-none absolute top-1 rounded bg-bg-3 px-1.5 py-0.5 text-xs text-fg-0"
-              style={{ left: cursor.xPx + 6 }}
-            >
-              {cursor.timeSec.toFixed(3)} с
+          {/*
+            Панель выделенной зоны: тот же `sticky`, что у подписи курсора — детали
+            зоны не уезжают за верх области, когда пользователь прокручивает треки.
+          */}
+          {selectedZone ? (
+            <div className="pointer-events-none absolute inset-0">
+              <div className="sticky top-1 flex justify-end pr-2">
+                <SelectedZoneCard
+                  zone={selectedZone}
+                  onClose={() => setSelectedZoneId(null)}
+                  className="pointer-events-auto z-10 max-w-xs"
+                />
+              </div>
             </div>
-          </>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </div>
   )

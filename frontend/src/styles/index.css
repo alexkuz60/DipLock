@@ -111,15 +111,47 @@
     даже когда контент влезает, — в вьюере положение ползунка показывает долю
     окна в записи, а в панели опций ширина полосы не «дёргается» при смене
     раздела. `scrollbar-gutter: stable` резервирует место под полосу, поэтому
-    контент не смещается. Цвета/толщина заданы и для Firefox
-    (`scrollbar-color`/`scrollbar-width`), и для Chrome/WebKit — но у WebKit
-    они перебивают глобальный `::-webkit-scrollbar` в `@layer base`, поэтому
-    выглядят одинаково во всех браузерах.
+    контент не смещается.
+
+    Ширина полосы — 20 px (срез 2.11): замечание ручного просмотра — «тонкую»
+    полосу (10 px, `scrollbar-width: thin`) трудно хватать мышью. Ширину задаём
+    только через `::-webkit-scrollbar`: стандартные `scrollbar-width`/
+    `scrollbar-color` (Chrome 121+) отключают legacy-псевдоэлементы, поэтому для
+    Firefox они вынесены в `@supports (-moz-appearance: none)` — Chrome такого
+    условия не понимает и блок пропускает, а ширина полосы в нём остаётся
+    штатной (вмешиваться в неё стандартными средствами нельзя). Глобальные полосы
+    (`::-webkit-scrollbar` в `@layer base`: прокрутка рабочей области, диалог
+    паспорта) остаются 12 px — замечание касалось областей вьюера и панели опций.
   */
   .scroll-y-always {
     overflow-y: scroll;
     scrollbar-gutter: stable;
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-bg-3) var(--color-bg-1);
+  }
+
+  .scroll-y-always::-webkit-scrollbar {
+    width: 20px;
+  }
+
+  .scroll-y-always::-webkit-scrollbar-track {
+    background: var(--color-bg-1);
+    border-radius: 10px;
+  }
+
+  .scroll-y-always::-webkit-scrollbar-thumb {
+    background: var(--color-bg-3);
+    /* Прозрачная окантовка цвета фона: ползунок читается как «полоса в полосе» */
+    border: 3px solid var(--color-bg-1);
+    border-radius: 10px;
+  }
+
+  .scroll-y-always::-webkit-scrollbar-thumb:hover {
+    background: var(--color-border);
+  }
+
+  @supports (-moz-appearance: none) {
+    .scroll-y-always {
+      scrollbar-width: auto;
+      scrollbar-color: var(--color-bg-3) var(--color-bg-1);
+    }
   }
 }

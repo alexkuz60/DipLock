@@ -187,6 +187,31 @@ describe('вьюер треков', () => {
     expect(screen.getByText('2.500 с')).toBeInTheDocument()
   })
 
+  it('курсор тянется на весь стек и живёт в прокручиваемом контенте (срез 2.11)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3', 'F4', 'C3'], timeLevel: 0 })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    const region = screen.getByRole('region', { name: 'Треки ЭЭГ' })
+    region.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 1024, height: 600, right: 1024, bottom: 600 }) as DOMRect
+
+    await user.pointer({ keys: '[MouseLeft]', target: region, coords: { clientX: 300, clientY: 40 } })
+
+    const content = screen.getByTestId('viewer-content')
+    const line = screen.getByTestId('cursor-line')
+    // Линия — ребёнок прокручиваемого контента, а не самого скролл-контейнера:
+    // иначе при прокрутке треков вниз она «уезжала» на высоту видимой области
+    // и обрывалась на середине стека (замечание ручного просмотра)
+    expect(line.parentElement).toBe(content)
+    expect(line.className).toContain('inset-y-0')
+
+    // Подпись времени липнет к верху видимой области: время видно при скролле
+    const label = screen.getByTestId('cursor-time')
+    expect(content.contains(label)).toBe(true)
+    expect(label.parentElement?.className).toContain('sticky')
+  })
+
   it('команда навигации из шапки листает окно без запросов к серверу (срез 2.9)', () => {
     paramsState({ visibleChannels: ['F3'], timeLevel: 2 })
     const fetchSpy = vi.fn()
@@ -505,6 +530,44 @@ describe('слои результата вьюера', () => {
     expect(screen.queryByTestId('epoch-hatch-8')).not.toBeInTheDocument()
     // И вьюер честно говорит, что разметка построена по другой длине эпохи
     expect(screen.getByText('разметка эпох: 2000 мс')).toBeInTheDocument()
+  })
+
+  it('счётчик ручных пометок считает пометки, а не ячейки сетки (срез 2.11)', () => {
+    // Сетка 500 мс, а пометки поставлены на нарезке 2 с: одна правка накрывает
+    // четыре эпохи новой нарезки, но штриховки сливаются в одну видимую полосу
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 500, droppedEpochsHatched: true })
+    act(() =>
+      useEdfRecording.setState({
+        epochMarks: [
+          { onsetSec: 2, durationSec: 2, blocked: true },
+          { onsetSec: 6, durationSec: 2, blocked: true },
+        ],
+      }),
+    )
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    const hatched = screen
+      .getByRole('region', { name: 'Треки ЭЭГ' })
+      .querySelectorAll('[data-testid^="epoch-hatch"][data-manual]')
+    // Ячеек со штриховкой восемь, а пометок две — счётчик не «размножает» правки
+    expect(hatched).toHaveLength(8)
+    expect(screen.getByText('ручных пометок: 2')).toBeInTheDocument()
+    expect(screen.queryByText('ручных пометок: 8')).not.toBeInTheDocument()
+  })
+
+  it('детали зоны не уезжают за верх области при прокрутке треков (срез 2.11)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    await user.click(screen.getByTestId('zone-zscore_outlier-1'))
+
+    const details = screen.getByTestId('zone-details')
+    expect(screen.getByTestId('viewer-content').contains(details)).toBe(true)
+    // Карточка «липнет» к верху области, а её кнопки остаются кликабельными:
+    // контейнер событий не ловит, карточка — ловит
+    expect(details.parentElement?.className).toContain('sticky')
+    expect(details.className).toContain('pointer-events-auto')
   })
 })
 
