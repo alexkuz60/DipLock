@@ -1,26 +1,37 @@
 /**
- * Тесты рабочей области раздела «Диполи» (срез 3.1).
+ * Тесты рабочей области раздела «Диполи» (срез 3.1, срез МРТ — 3.2).
  *
  * Проверяют главное правило раздела: UI показывает геометрию и **ничего не
- * запускает** (расчёт — отдельная задача), а клик по проекции наводит все три
- * среза на выбранную точку.
+ * запускает** (расчёт — отдельная задача; из запросов допустимы только
+ * метаданные), а клик по проекции наводит все три среза на выбранную точку.
  */
 import { fireEvent, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defaultSlices } from '@/shared/lib/mriProjections'
+import {
+  PROJECTION_PLANES,
+  defaultSlices,
+  projectionBox,
+  type ProjectionPlane,
+} from '@/shared/lib/mriProjections'
 import {
   DIPOLE_PARAM_DEFAULTS,
   EMPTY_SELECTION,
   useDipoleParams,
 } from '@/shared/state/dipoleParams'
+import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { DipolesSection } from './DipolesSection'
 
+/** Метка среза МРТ по умолчанию: аксиальный через AC–PC. */
+const MRI_HREF = '/api/v1/surface/mri/slice/axial/0.png?v=mri12345678'
+
 /** Подмена размеров фигуры: клики считаются в координатах viewBox. */
-function stubFigure(plane: string, size = 320) {
+function stubFigure(plane: ProjectionPlane) {
   const svg = screen.getByTestId(`projection-svg-${plane}`)
+  // Фигура прямоугольная (единый масштаб мм/пиксель): подменяем её же размеры
+  const { width, height } = projectionBox(plane)
   svg.getBoundingClientRect = () =>
-    ({ left: 0, top: 0, width: size, height: size, right: size, bottom: size }) as DOMRect
+    ({ left: 0, top: 0, width, height, right: width, bottom: height }) as DOMRect
   return svg
 }
 
@@ -31,6 +42,7 @@ describe('рабочая область раздела «Диполи»', () => 
       params: { ...DIPOLE_PARAM_DEFAULTS, slices: defaultSlices() },
       selection: EMPTY_SELECTION,
     })
+    vi.stubGlobal('fetch', mockApiFetch())
   })
 
   it('показывает три проекции и честный статус пустого слоя диполей', () => {
@@ -41,6 +53,24 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(screen.getByTestId('projection-coronal')).toBeInTheDocument()
     expect(screen.getByText('Расчёт диполей не подключён — слой пуст')).toBeInTheDocument()
     expect(screen.getByText(/Срезы: z = 0\.0 мм · x = 0\.0 мм · y = 0\.0 мм/)).toBeInTheDocument()
+  })
+
+  it('держит общий экранный масштаб: колонки пропорциональны ширинам фигур', () => {
+    renderWithProviders(<DipolesSection />)
+
+    // Фигуры прямоугольные (единый мм/пиксель внутри `projectionBox`), поэтому
+    // колонки заданы пропорционально их ширине: коэффициент растяжения SVG
+    // (`колонка / ширина фигуры`) у всех трёх одинаков, и 1 мм на экране — это
+    // одна и та же длина во всех проекциях.
+    const grow = PROJECTION_PLANES.map((plane) =>
+      Number(screen.getByTestId(`projection-${plane}`).style.flexGrow),
+    )
+
+    expect(grow).toEqual(PROJECTION_PLANES.map((plane) => projectionBox(plane).width))
+    // Аксиальная вытянута по y (196 мм), сагиттальная — по y тоже, но выше:
+    // самая широкая колонка именно у сагиттальной проекции
+    expect(grow[1]).toBeGreaterThan(grow[0])
+    expect(grow[1]).toBeGreaterThan(grow[2])
   })
 
   it('клик по проекции наводит срезы на точку и ставит перекрестие', () => {
@@ -75,14 +105,42 @@ describe('рабочая область раздела «Диполи»', () => 
     }
   })
 
-  it('ничего не запрашивает у сервера: раздел не запускает обработку', () => {
-    const fetchSpy = vi.fn()
-    vi.stubGlobal('fetch', fetchSpy)
+  it('запрашивает только метаданные и никогда не запускает обработку', () => {
+    const fetchMock = mockApiFetch()
+    vi.stubGlobal('fetch', fetchMock)
     renderWithProviders(<DipolesSection />)
     const svg = stubFigure('coronal')
 
     fireEvent.click(svg, { clientX: 140, clientY: 180 })
 
-    expect(fetchSpy).not.toHaveBeenCalled()
+    const paths = fetchMock.mock.calls.map(([path]) => String(path))
+    expect(paths.every((path) => path.startsWith('/api/v1/meta'))).toBe(true)
+    expect(paths.some((path) => /jobs|preprocess|analyze|recordings/.test(path))).toBe(false)
+  })
+
+  it('рисует реальный срез МРТ картинкой с версией ассета', async () => {
+    renderWithProviders(<DipolesSection />)
+
+    const image = await screen.findByTestId('layer-mri-axial')
+    expect(image).toHaveAttribute('href', MRI_HREF)
+    // Сагиттальная проекция наводится по оси x — своя картинка того же тома
+    expect(screen.getByTestId('layer-mri-sagittal')).toHaveAttribute(
+      'href',
+      '/api/v1/surface/mri/slice/sagittal/0.png?v=mri12345678',
+    )
+    expect(screen.getByText('МРТ: срез T1, сетка 1 мм')).toBeInTheDocument()
+  })
+
+  it('без метаданных слой МРТ не рисуется и статус честный', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('сервер недоступен')
+      }),
+    )
+    renderWithProviders(<DipolesSection />)
+
+    expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
+    expect(await screen.findByText('МРТ: метаданные недоступны')).toBeInTheDocument()
   })
 })

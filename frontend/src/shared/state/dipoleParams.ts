@@ -32,12 +32,13 @@ import {
 } from '@/shared/lib/mriProjections'
 
 /** Фоновые слои проекций мозга: что рисуется поверх «подложки» фигуры. */
-export type DipoleLayerId = 'head' | 'mni' | 'brodmann' | 'dipoles'
+export type DipoleLayerId = 'mri' | 'head' | 'mni' | 'brodmann' | 'dipoles'
 
 /** Порядок слоёв = порядок отрисовки снизу вверх (и порядок чекбоксов в панели). */
-export const DIPOLE_LAYERS: DipoleLayerId[] = ['head', 'mni', 'brodmann', 'dipoles']
+export const DIPOLE_LAYERS: DipoleLayerId[] = ['mri', 'head', 'mni', 'brodmann', 'dipoles']
 
 export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
+  mri: 'Срез МРТ (T1)',
   head: 'Силуэт головы',
   mni: 'Срезы MNI',
   brodmann: 'Поля Бродмана',
@@ -45,6 +46,7 @@ export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
 }
 
 export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
+  mri: 'Реальный срез тома fsaverage: картинка квантуется шагом 1 мм, снаружи мозга прозрачна',
   head: 'Условная граница черепа на текущем срезе',
   mni: 'Анатомическая схема среза и линии секущих плоскостей',
   brodmann: 'Поля Бродмана, попадающие в текущий срез',
@@ -54,6 +56,7 @@ export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
 /** Слои, которые рисуются по умолчанию (точки диполей — тоже, но их пока нет). */
 export const DIPOLE_PARAM_DEFAULTS = {
   layerVisibility: {
+    mri: true,
     head: true,
     mni: true,
     brodmann: true,

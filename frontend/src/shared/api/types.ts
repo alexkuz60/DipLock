@@ -212,6 +212,21 @@ export type MetaResponse = {
   dipole_fit_max_epochs: number
   max_concurrent_jobs: number
   cors_origins: string[]
+  /** Срезы МРТ для проекций мозга: версия ассета, базовый URL, шаг сетки */
+  mri_slices: MriSliceRef
+}
+
+/**
+ * Ссылка на срезы МРТ (T1) на MNI-сетке (срез 3.2): картинки отдаёт
+ * `GET {slice_url}/{plane}/{mm}.png`, версия — ключ кэша браузера.
+ */
+export type MriSliceRef = {
+  /** Версия ассета тома: меняется вместе с данными fsaverage */
+  version: string
+  /** Базовый URL срезов: `/api/v1/surface/mri/slice` */
+  slice_url: string
+  /** Шаг сетки срезов, мм: картинка существует только на этих значениях */
+  spacing_mm: number
 }
 
 /** Статусы проверок готовности (GET /init-status) */

@@ -16,7 +16,6 @@ import {
   PLANE_HORIZONTAL_SIGN,
   PLANE_VERTICAL_SIGN,
   PROJECTION_PADDING,
-  PROJECTION_SIZE,
   projectPoint,
   type MniPoint2,
   type MniVector,
@@ -118,10 +117,9 @@ export type DipoleMarker = {
 export function dipoleMarker(
   plane: ProjectionPlane,
   point: DipolePoint,
-  size = PROJECTION_SIZE,
   padding = PROJECTION_PADDING,
 ): DipoleMarker {
-  const at = projectPoint(plane, point.position, size, padding)
+  const at = projectPoint(plane, point.position, padding)
   const direction = dipoleVectorDirection(plane, point.orientation)
   const vectorPx = dipoleVectorLength(point.amplitudeNaM)
   if (direction.u === 0 && direction.v === 0) return { at, end: null, vectorPx: 0 }

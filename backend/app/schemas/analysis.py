@@ -249,6 +249,36 @@ class BrodmannLabelsOut(BaseModel):
     version: str
 
 
+class MriPlaneOut(BaseModel):
+    """Плоскость срезов МРТ: ось наведения, диапазон значений и число срезов."""
+
+    axis: str = Field(description="Ось MNI, по которой наводится срез (x/y/z)")
+    range_mm: List[float] = Field(description="Диапазон значений среза, мм")
+    count: int = Field(description="Число срезов на сетке тома")
+
+
+class MriSliceRef(BaseModel):
+    """Ссылка на срезы МРТ (для ``/meta``): считается без сборки тома, O(1)."""
+
+    version: str = Field(description="Версия ассета — для кэша картинок и ETag")
+    slice_url: str = Field(description="Базовый URL срезов: ``/slice/{plane}/{mm}.png``")
+    spacing_mm: float = Field(description="Шаг сетки срезов, мм")
+
+
+class MriSlicesOut(BaseModel):
+    """GET /api/v1/surface/mri — метаданные срезов МРТ (T1) на MNI-сетке."""
+
+    version: str
+    encoding: str = Field(description="Формат картинки среза (png-gray8-alpha)")
+    spacing_mm: float
+    bounds: Dict[str, List[float]] = Field(description="Границы тома по осям MNI, мм")
+    intensity_window: List[float] = Field(
+        description="Окно яркости: перцентили внутри маски мозга, в единицах тома"
+    )
+    planes: Dict[str, MriPlaneOut] = Field(description="Плоскости: axial/sagittal/coronal")
+    slice_url: str
+
+
 class AnalyzeResponse(BaseModel):
     """POST /api/v1/analyze (и результат job) — итог полного пайплайна."""
 
@@ -346,4 +376,7 @@ class MetaResponse(BaseModel):
     dipole_fit_max_epochs: int
     max_concurrent_jobs: int
     cors_origins: List[str]
+    mri_slices: MriSliceRef = Field(
+        description="Срезы МРТ (T1) для проекций: версия, базовый URL, шаг сетки"
+    )
 

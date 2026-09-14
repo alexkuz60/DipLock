@@ -6,7 +6,7 @@
  * нормали) и детерминированность фикстуры для тестов.
  */
 import { describe, expect, it } from 'vitest'
-import { PROJECTION_PADDING, PROJECTION_SIZE, projectPoint } from './mriProjections'
+import { projectPoint } from './mriProjections'
 import {
   VECTOR_MAX_PX,
   VECTOR_MIN_PX,
@@ -56,9 +56,7 @@ describe('слой диполей', () => {
     const alongNormal = dipoleMarker('sagittal', { ...POINT, orientation: { x: 1, y: 0, z: 0 } })
     expect(alongNormal.end).toBeNull()
     expect(alongNormal.vectorPx).toBe(0)
-    expect(alongNormal.at).toEqual(
-      projectPoint('sagittal', POINT.position, PROJECTION_SIZE, PROJECTION_PADDING),
-    )
+    expect(alongNormal.at).toEqual(projectPoint('sagittal', POINT.position))
 
     const inPlane = dipoleMarker('sagittal', POINT)
     expect(inPlane.end).not.toBeNull()

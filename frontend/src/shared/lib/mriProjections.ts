@@ -24,8 +24,14 @@
  * знаков (`planeEdgeLabels`), поэтому разметка не может разойтись с геометрией.
  * Текущая раскладка: вверх всегда растёт вертикальная ось MNI (z — верх, y — перед);
  * горизонталь аксиальной и коронарной инвертирована, поэтому слева на экране —
- * левое полушарие (x > 0), сагиттальная показывает перед (нос) справа. Зеркальная
+ * правое полушарие (x > 0): это радиологическая раскладка, она же получается при
+ * взгляде на аксиальный срез снизу, а на коронарный — спереди. Сагиттальная
+ * показывает перед (нос) справа — вид со стороны правого полушария. Зеркальная
  * раскладка — смена знака в константе, а не правка отрисовки.
+ *
+ * Масштаб осей **единый** (`PROJECTION_SCALE`): фигуры прямоугольные, анатомия не
+ * растягивается. Всё, что живёт в нормализованных координатах (фикстуры слоёв,
+ * сетка, следы срезов), получает этот масштаб через `normalizedToPx`.
  *
  * Цвета слоёв — токены темы (`--color-mri-*` в `styles/index.css`): фигуры
  * рисуются SVG, поэтому цвета берутся классами/`var(--color-mri-*)` напрямую
@@ -39,7 +45,10 @@ export type ProjectionPlane = 'axial' | 'sagittal' | 'coronal'
 
 export const PROJECTION_PLANES: ProjectionPlane[] = ['axial', 'sagittal', 'coronal']
 
-/** Оси MNI. Порядок и знаки — как в `mne`: x — влево, y — вперёд, z — вверх. */
+/**
+ * Оси MNI. Знаки — как в `mne`/FreeSurfer (RAS): x — **вправо** (правое
+ * полушарие, x > 0), y — вперёд (перед), z — вверх.
+ */
 export type MniAxis = 'x' | 'y' | 'z'
 
 /** Точка в MNI (мм). Это же представление уходит в контракт диполей. */
@@ -81,7 +90,8 @@ export const PLANE_AXES: Record<ProjectionPlane, [MniAxis, MniAxis]> = {
 /**
  * Знак горизонтальной оси на экране. У аксиальной и коронарной проекций −1:
  * горизонталь — ось x, и в радиологической ориентации левая часть экрана
- * показывает правое полушарие (подписи линейки дают фактические значения MNI).
+ * показывает правое полушарие (x > 0 — правое: левое в fsaverage/MNI лежит при
+ * x < 0). Подписи линейки дают фактические значения MNI.
  */
 export const PLANE_HORIZONTAL_SIGN: Record<ProjectionPlane, 1 | -1> = {
   axial: -1,
@@ -98,7 +108,7 @@ export const PLANE_VERTICAL_SIGN: Record<ProjectionPlane, 1 | -1> = {
 
 /** Подписи осей для линейки координат. */
 export const AXIS_LABELS: Record<MniAxis, string> = {
-  x: 'x, мм (влево +)',
+  x: 'x, мм (вправо +)',
   y: 'y, мм (вперёд +)',
   z: 'z, мм (вверх +)',
 }
@@ -122,23 +132,35 @@ export const SLICE_ORIENTATION_PRESETS: Record<
 
 export const SLICE_ORIENTATIONS = Object.keys(SLICE_ORIENTATION_PRESETS) as MniSliceOrientation[]
 
-/** Границы головы (условные, мм MNI): стартовые, пока нет тома томографии. */
+/** Границы тома (мм MNI): рамка, в которую вписываются все проекции. */
 export type MniBrainBounds = Record<MniAxis, [number, number]>
 
 /**
- * Условные границы головы в MNI: по ним считаются размах фигуры, диапазоны
- * срезов и клиппинг. Значения — консервативная оценка размера головы взрослого
- * (x — ширина, y — перед–зад, z — верх–низ). Реальный объём придёт с томом
- * (`brainmask`), тогда эти числа станут его bounding box.
+ * Границы тома МРТ в MNI (мм): объём мозга вместе с мозжечком и стволом по маске
+ * `brainmask` fsaverage (pial-поверхность кроет только кору и на 30 мм выше).
+ * По ним считаются размах фигуры, диапазоны срезов и клиппинг, и ровно на этот
+ * прямоугольник накрывает картинка среза МРТ: значения обязаны совпадать с
+ * `MRI_BOUNDS` бэкенда (`app/services/mri_slices.py`) — совпадение проверяется
+ * тестом `backend/tests/test_mri_slices.py::test_geometry_matches_frontend`.
  */
 export const MNI_BRAIN_BOUNDS: MniBrainBounds = {
-  x: [-72, 72],
-  y: [-104, 70],
-  z: [-46, 80],
+  x: [-80, 80],
+  y: [-116, 80],
+  z: [-82, 90],
 }
 
-/** Размер фигуры проекции в CSS-пикселях (квадрат: поля одинаковы по осям). */
-export const PROJECTION_SIZE = 320
+/**
+ * Пикселей на миллиметр фигуры: **одна шкала у всех проекций**.
+ *
+ * Пока каждая ось растягивалась на свой размах, квадрат 284×284 px показывал
+ * анатомию с искажением: в аксиальной проекции 160 мм по x и 196 мм по y ложились
+ * в одну и ту же ширину (до 22% разницы), поэтому мозг выглядел сплюснутым, а
+ * сетка MNI по 20 мм не выдавала подмену (шаг клеток одинаков, мм/пиксель — нет).
+ * Теперь масштаб общий и изотропный, поэтому фигуры прямоугольные:
+ * axial 240×294, sagittal 294×258, coronal 240×258 px. Множитель 1.5 даёт целые
+ * пиксели на размахах осей (160/172/196 мм), дробных размеров SVG не любит.
+ */
+export const PROJECTION_SCALE = 1.5
 
 /** Поле фигуры: контур головы не должен касаться рамки. */
 export const PROJECTION_PADDING = 18
@@ -175,6 +197,39 @@ export function planeExtent(plane: ProjectionPlane): {
 /** Допустимый диапазон значения среза: внутри границ головы. */
 export function planeSliceRange(plane: ProjectionPlane): [number, number] {
   return MNI_BRAIN_BOUNDS[PLANE_AXIS[plane]]
+}
+
+/**
+ * Размеры фигуры проекции в пикселях: прямоугольник плоскости плюс поля
+ * (подписи краёв) и вместе с тем — прямоугольник картинки среза.
+ */
+export type ProjectionBox = {
+  /** Ширина фигуры (SVG) вместе с полями */
+  width: number
+  /** Высота фигуры (SVG) вместе с полями */
+  height: number
+  /** Ширина прямоугольника плоскости — её накрывает картинка среза */
+  innerWidth: number
+  innerHeight: number
+}
+
+/**
+ * Размеры фигуры проекции: размах каждой оси плоскости в едином масштабе.
+ *
+ * Только эта функция превращает миллиметры в пиксели: остальная геометрия живёт
+ * в нормализованных координатах (−1…+1 по размаху оси), поэтому фигура растёт
+ * вместе с масштабом, а не «пересчитывается» в каждом компоненте.
+ */
+export function projectionBox(plane: ProjectionPlane, padding = PROJECTION_PADDING): ProjectionBox {
+  const { horizontal, vertical } = planeExtent(plane)
+  const innerWidth = horizontal.half * 2 * PROJECTION_SCALE
+  const innerHeight = vertical.half * 2 * PROJECTION_SCALE
+  return {
+    innerWidth,
+    innerHeight,
+    width: innerWidth + padding * 2,
+    height: innerHeight + padding * 2,
+  }
 }
 
 /** Оси плоскости для подписей линейки: [горизонталь, вертикаль]. */
@@ -273,10 +328,11 @@ export function defaultSlices(): SliceTriplet {
 /**
  * Точка → нормализованные координаты фигуры.
  *
- * Масштаб осей независимый: каждая ось растянута на полный размах своей границы,
- * поэтому фигуры трёх проекций сопоставимы по размеру, а не по «сырым» мм (иначе
- * аксиальная была бы сплюснута: голова в MNI вытянута по y). Обратное
- * преобразование — `normalizedToMni`.
+ * Нормализованная координата — доля размаха своей оси (−1…+1), поэтому у трёх
+ * проекций она означает разное число миллиметров. В пиксели её переводит
+ * `normalizedToPx` **единым масштабом мм/пиксель** — именно там, и только там,
+ * оси получают равный вес (см. `PROJECTION_SCALE`). Обратное преобразование —
+ * `normalizedToMni`.
  */
 export function mniToNormalized(plane: ProjectionPlane, point: MniVector): MniPoint2 {
   const [horizontal, vertical] = PLANE_AXES[plane]
@@ -306,33 +362,38 @@ export function normalizedToMni(
 }
 
 /**
- * Нормализованные координаты → пиксели фигуры. Преобразование чисто двумерное
- * (плоскость уже учтена знаками при переводе из MNI), поэтому фигуру можно
- * масштабировать без пересчёта геометрии.
+ * Нормализованные координаты → пиксели фигуры (плоскость задаёт прямоугольник).
+ *
+ * Преобразование чисто двумерное (плоскость уже учтена знаками при переводе из
+ * MNI), но **не изотропное по нормализованным единицам**: 1 единица u — это
+ * половина размаха горизонтальной оси, 1 единица v — вертикальной. В пикселях же
+ * обе оси идут в одном масштабе (`PROJECTION_SCALE` px/мм), поэтому анатомия не
+ * растягивается: круг в MNI остаётся кругом.
  */
 export function normalizedToPx(
   point: MniPoint2,
-  size = PROJECTION_SIZE,
+  plane: ProjectionPlane,
   padding = PROJECTION_PADDING,
 ): PixelPoint {
-  const inner = size - padding * 2
+  const box = projectionBox(plane, padding)
   return {
-    x: padding + ((point.u + 1) / 2) * inner,
-    y: padding + ((1 - point.v) / 2) * inner,
+    x: padding + ((point.u + 1) / 2) * box.innerWidth,
+    y: padding + ((1 - point.v) / 2) * box.innerHeight,
   }
 }
 
 /** Пиксели фигуры → нормализованные координаты (обратная к `normalizedToPx`). */
 export function pxToNormalized(
   point: PixelPoint,
-  size = PROJECTION_SIZE,
+  plane: ProjectionPlane,
   padding = PROJECTION_PADDING,
 ): MniPoint2 {
-  const inner = size - padding * 2
-  const scale = inner > 0 ? inner : 1
+  const box = projectionBox(plane, padding)
+  const width = box.innerWidth > 0 ? box.innerWidth : 1
+  const height = box.innerHeight > 0 ? box.innerHeight : 1
   return {
-    u: ((point.x - padding) / scale) * 2 - 1,
-    v: 1 - ((point.y - padding) / scale) * 2,
+    u: ((point.x - padding) / width) * 2 - 1,
+    v: 1 - ((point.y - padding) / height) * 2,
   }
 }
 
@@ -340,10 +401,9 @@ export function pxToNormalized(
 export function projectPoint(
   plane: ProjectionPlane,
   point: MniVector,
-  size = PROJECTION_SIZE,
   padding = PROJECTION_PADDING,
 ): PixelPoint {
-  return normalizedToPx(mniToNormalized(plane, point), size, padding)
+  return normalizedToPx(mniToNormalized(plane, point), plane, padding)
 }
 
 /**
@@ -358,10 +418,9 @@ export function pointFromProjectionClick(
   plane: ProjectionPlane,
   sliceMm: number,
   clickPx: PixelPoint,
-  size = PROJECTION_SIZE,
   padding = PROJECTION_PADDING,
 ): MniVector {
-  return normalizedToMni(plane, sliceMm, pxToNormalized(clickPx, size, padding))
+  return normalizedToMni(plane, sliceMm, pxToNormalized(clickPx, plane, padding))
 }
 
 /** Результат наведения срезов точкой: новые срезы + «прилипшие» ориентации. */
@@ -512,9 +571,9 @@ export type MniGridLine = {
 /**
  * Координатная сетка проекции: деления по обеим осям плоскости.
  *
- * Оси плоскости имеют разный размах (аксиальная вытянута по y), поэтому сетка
- * строится независимо по каждой оси: «линии через каждые N мм», а не по
- * пропорции от делений другой оси.
+ * Линии идут «через каждые N мм» по каждой оси независимо, а поскольку масштаб
+ * мм/пиксель общий, клетки сетки получаются квадратными — по ним и видно, что
+ * проекция не растянута (сравните с `PROJECTION_SCALE`).
  */
 export function planeGridLines(plane: ProjectionPlane, stepMm = COORD_TICK_MM): MniGridLine[] {
   const [horizontal, vertical] = PLANE_AXES[plane]
@@ -574,7 +633,12 @@ export function sliceOrientationMarks(plane: ProjectionPlane): SliceOrientationM
  */
 export const CONTOUR_SAMPLES = 96
 
-/** Условные оси эллипса-силуэта в нормализованных координатах каждой плоскости. */
+/** Условные оси эллипса-силуэта в нормализованных координатах каждой плоскости.
+ *
+ * Полурадиусы заданы долями размаха своей оси: анатомию это не искажает — в
+ * пиксели их переводит единый масштаб мм/пиксель (`normalizedToPx`), поэтому
+ * вытянутая по y голова в аксиальной проекции получается вытянутой и на экране.
+ */
 const DEMO_HEAD_SHAPE: Record<
   ProjectionPlane,
   { semiU: number; semiV: number; centerU: number; centerV: number }
@@ -685,14 +749,14 @@ export function brodmannAreaAt(
 
 /** Направления оси MNI на экране: какой край фигуры что показывает. */
 export const AXIS_DIRECTION_LABELS: Record<MniAxis, { positive: string; negative: string }> = {
-  x: { positive: 'L', negative: 'R' },
+  x: { positive: 'R', negative: 'L' },
   y: { positive: 'A', negative: 'P' },
   z: { positive: 'S', negative: 'I' },
 }
 
 /** Полные пояснения направлений осей (подписи краёв и тултипы). */
 export const AXIS_DIRECTION_HINTS: Record<MniAxis, { positive: string; negative: string }> = {
-  x: { positive: 'левое полушарие, x > 0', negative: 'правое полушарие, x < 0' },
+  x: { positive: 'правое полушарие, x > 0', negative: 'левое полушарие, x < 0' },
   y: { positive: 'перед, anterior, y > 0', negative: 'зад, posterior, y < 0' },
   z: { positive: 'верх, superior, z > 0', negative: 'низ, inferior, z < 0' },
 }
@@ -706,7 +770,7 @@ export type PlaneEdgeLabel = { text: string; hint: string }
  * Выводятся из знаков осей (`PLANE_HORIZONTAL_SIGN`/`PLANE_VERTICAL_SIGN`), а не
  * записаны таблицей: разметка краёв не может разойтись с геометрией — поменяли
  * знак оси (зеркальная раскладка) и подписи поменялись вместе с ней. Поэтому
- * пользователь всегда видит, где у проекции левое полушарие, а где перед.
+ * пользователь всегда видит, какое полушарие у проекции слева, а какое справа.
  */
 export function planeEdgeLabels(plane: ProjectionPlane): {
   right: PlaneEdgeLabel

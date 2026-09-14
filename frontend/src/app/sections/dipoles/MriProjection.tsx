@@ -1,28 +1,32 @@
 /**
- * Проекция мозга: срез с фоновыми слоями и точками диполей (срез 3.1).
+ * Проекция мозга: срез с фоновыми слоями и точками диполей (срез 3.1, срез МРТ — 3.2).
  *
  * Фигура — **SVG, а не canvas**: цвета берутся напрямую токенами темы
- * (`var(--color-mri-*)`), геометрия — из `shared/lib/mriProjections.ts`, поэтому
- * отрисовка не дублирует ни цвета, ни математику. Canvas понадобится только там,
- * где нужна пиксельная заливка реального тома МРТ (см. `docs/ui.md` §3.3).
+ * (`var(--color-mri-*)`), геометрия — из `shared/lib/mriProjections.ts`, а срез
+ * томографии приходит готовым PNG и вставляется как `<image>` (браузер сам
+ * кэширует картинки по URL — пиксели не проходят через JS).
  *
  * Слои снизу вверх (порядок и подписи — в `shared/state/dipoleParams.ts`):
- * `head` — силуэт головы на срезе, `mni` — схема среза с координатной сеткой и
- * следами соседних срезов, `brodmann` — поля Бродмана, `dipoles` — точки диполей
- * с векторами моментов. Каждый слой включается отдельно; выключенный слой не
- * рисуется вовсе, а не прячется прозрачностью.
+ * `mri` — реальный срез T1, `head` — силуэт головы на срезе, `mni` — сетка и
+ * схема среза, `brodmann` — поля Бродмана, `dipoles` — точки диполей с векторами
+ * моментов. Каждый слой включается отдельно; выключенный слой не рисуется вовсе,
+ * а не прячется прозрачностью.
  *
- * Компонент **не управляет состоянием раздела**: срезы, видимость слоёв и
- * референс-точка приходят пропсами из `DipolesSection`, а клик отдаётся наверх
- * через `onPick`. В локальном состоянии живёт только «точка под курсором» — она
- * нужна текущей отрисовке и не переживает выход из раздела.
+ * Схема среза (`demoSliceStructures`) — фикстура анатомии: она показывается только
+ * без реального тома, иначе рисовала бы «вторую» анатомию поверх настоящей.
+ * Силуэт головы остаётся: это граница черепа (в маске МРТ её нет), а не имитация
+ * среза.
+ *
+ * Компонент **не управляет состоянием раздела**: срезы, видимость слоёв,
+ * ссылка на срезы МРТ и референс-точка приходят пропсами из `DipolesSection`, а
+ * клик отдаётся наверх через `onPick`. В локальном состоянии живёт «точка под
+ * курсором» и признак недоступной картинки — они нужны текущей отрисовке.
  */
-import { useMemo, useState, type MouseEvent } from 'react'
+import { useMemo, useState, type CSSProperties, type MouseEvent } from 'react'
 import {
   PROJECTION_HINTS,
   PROJECTION_LABELS,
   PROJECTION_PADDING,
-  PROJECTION_SIZE,
   brodmannAreaAt,
   coordsLabel,
   demoBrodmannAreas,
@@ -33,6 +37,7 @@ import {
   planeGridLines,
   pointFromProjectionClick,
   projectPoint,
+  projectionBox,
   pxToNormalized,
   sliceGuides,
   sliceLabel,
@@ -42,6 +47,8 @@ import {
   type ProjectionPlane,
   type SliceTriplet,
 } from '@/shared/lib/mriProjections'
+import { MRI_SLICE_UNAVAILABLE, mriSliceRect, mriSliceUrl } from '@/shared/lib/mriSlices'
+import type { MriSliceRef } from '@/shared/api/types'
 import {
   dipoleMarker,
   dipolePointTitle,
@@ -66,10 +73,16 @@ export type MriProjectionProps = {
   selectedArea?: string | null
   /** Референс-точка сессии (перекрестие на всех проекциях) */
   reference?: MniVector | null
+  /**
+   * Ссылка на срезы МРТ из `/meta` (срез 3.2). Без неё слой `mri` просто не
+   * рисуется: раздел не догадывается о версии тома сам, её объявляет сервер.
+   */
+  mri?: MriSliceRef | null
   /** Клик по срезу: точка MNI в плоскости среза + поле Бродмана под кликом */
   onPick?: (point: MniVector, area: string | null) => void
-  size?: number
   className?: string
+  /** Внешние размеры фигуры в раскладке раздела (ширина колонки задаётся снаружи) */
+  style?: CSSProperties
 }
 
 export function MriProjection({
@@ -79,23 +92,46 @@ export function MriProjection({
   points = emptyDipoleLayer(),
   selectedArea = null,
   reference = null,
+  mri = null,
   onPick,
-  size = PROJECTION_SIZE,
   className,
+  style,
 }: MriProjectionProps) {
   const sliceMm = slices[plane]
   /** «Точка под курсором» — только для текущей отрисовки (в стор не уходит) */
   const [hover, setHover] = useState<MniVector | null>(null)
+  /**
+   * URL картинки, которая не загрузилась. Держим именно URL, а не флаг: смена
+   * среза — новый URL, и попытка повторяется (сервер мог вернуться).
+   */
+  const [failedHref, setFailedHref] = useState<string | null>(null)
 
-  const half = (size - PROJECTION_PADDING * 2) / 2
+  /**
+   * Размеры фигуры: прямоугольник плоскости плюс поля. Раньше фигура была
+   * квадратной, и каждая ось растягивалась на свой размах — анатомия искажалась
+   * (аксиальная до 22%). Масштаб берётся из геометрии, компонент его не считает.
+   */
+  const box = projectionBox(plane)
+  /** Полуоси прямоугольника плоскости: полурадиусы эллипсов заданы в долях размаха */
+  const halfWidth = box.innerWidth / 2
+  const halfHeight = box.innerHeight / 2
+
+  /**
+   * Слой МРТ: включён, ссылка есть и картинка ещё не падала. Пока он показан,
+   * схема среза не рисуется — реальная анатомия вместо фикстуры.
+   */
+  const mriHref = mri && layerVisible(visibility, 'mri') ? mriSliceUrl(mri, plane, sliceMm) : null
+  const mriShown = mriHref !== null && mriHref !== failedHref
+  const mriFailed = mriHref !== null && mriHref === failedHref
+  const imageRect = mriSliceRect(plane)
 
   const contour = useMemo(
     () =>
       demoHeadContours(plane, sliceMm)
-        .map((point) => normalizedToPx(point, size, PROJECTION_PADDING))
+        .map((point) => normalizedToPx(point, plane))
         .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
         .join(' '),
-    [plane, sliceMm, size],
+    [plane, sliceMm],
   )
 
   const structures = useMemo(() => demoSliceStructures(plane, sliceMm), [plane, sliceMm])
@@ -108,13 +144,13 @@ export function MriProjection({
     () =>
       points.points.map((point) => ({
         point,
-        marker: dipoleMarker(plane, point, size, PROJECTION_PADDING),
+        marker: dipoleMarker(plane, point),
       })),
-    [plane, points, size],
+    [plane, points],
   )
 
-  const referencePx = reference ? projectPoint(plane, reference, size, PROJECTION_PADDING) : null
-  const hoverPx = hover ? projectPoint(plane, hover, size, PROJECTION_PADDING) : null
+  const referencePx = reference ? projectPoint(plane, reference) : null
+  const hoverPx = hover ? projectPoint(plane, hover) : null
 
   /**
    * Координаты курсора в пикселях фигуры. `getBoundingClientRect` нужен, потому
@@ -124,12 +160,17 @@ export function MriProjection({
    */
   const pxOf = (event: MouseEvent<SVGSVGElement>): PixelPoint => {
     const rect = event.currentTarget.getBoundingClientRect()
-    const scaleX = rect.width > 0 ? size / rect.width : 1
-    const scaleY = rect.height > 0 ? size / rect.height : 1
-    const limit = size - PROJECTION_PADDING
+    const scaleX = rect.width > 0 ? box.width / rect.width : 1
+    const scaleY = rect.height > 0 ? box.height / rect.height : 1
     return {
-      x: Math.min(limit, Math.max(PROJECTION_PADDING, (event.clientX - rect.left) * scaleX)),
-      y: Math.min(limit, Math.max(PROJECTION_PADDING, (event.clientY - rect.top) * scaleY)),
+      x: Math.min(
+        box.width - PROJECTION_PADDING,
+        Math.max(PROJECTION_PADDING, (event.clientX - rect.left) * scaleX),
+      ),
+      y: Math.min(
+        box.height - PROJECTION_PADDING,
+        Math.max(PROJECTION_PADDING, (event.clientY - rect.top) * scaleY),
+      ),
     }
   }
 
@@ -138,22 +179,28 @@ export function MriProjection({
     const px = pxOf(event)
     // Поле Бродмана ищем по той же геометрии, что нарисована: попадание в эллипс
     onPick(
-      pointFromProjectionClick(plane, sliceMm, px, size, PROJECTION_PADDING),
-      brodmannAreaAt(plane, sliceMm, pxToNormalized(px, size, PROJECTION_PADDING)),
+      pointFromProjectionClick(plane, sliceMm, px),
+      brodmannAreaAt(plane, sliceMm, pxToNormalized(px, plane)),
     )
   }
 
   const handleHover = (event: MouseEvent<SVGSVGElement>) => {
-    setHover(pointFromProjectionClick(plane, sliceMm, pxOf(event), size, PROJECTION_PADDING))
+    setHover(pointFromProjectionClick(plane, sliceMm, pxOf(event)))
   }
 
   // Текст подписи над фигурой: под курсором — координаты точки, иначе пояснение
-  const footnote = hover ? coordsLabel(hover) : PROJECTION_HINTS[plane]
+  // плоскости; недоступная картинка среза важнее пояснения — о ней надо сказать.
+  const footnote = hover
+    ? coordsLabel(hover)
+    : mriFailed
+      ? MRI_SLICE_UNAVAILABLE
+      : PROJECTION_HINTS[plane]
 
   return (
     <figure
       data-testid={`projection-${plane}`}
       className={cx('flex min-w-0 flex-col gap-1', className)}
+      style={style}
     >
       <figcaption className="flex items-baseline justify-between gap-2">
         <span className="text-sm font-semibold text-fg-0">{PROJECTION_LABELS[plane]}</span>
@@ -162,7 +209,7 @@ export function MriProjection({
 
       <svg
         data-testid={`projection-svg-${plane}`}
-        viewBox={`0 0 ${size} ${size}`}
+        viewBox={`0 0 ${box.width} ${box.height}`}
         width="100%"
         role="img"
         aria-label={`${PROJECTION_LABELS[plane]} проекция, ${sliceLabel(plane, sliceMm)}: ${PROJECTION_HINTS[plane]}`}
@@ -187,6 +234,25 @@ export function MriProjection({
             <path d="M0,0 L6,3 L0,6 z" fill="var(--color-mri-dipole)" />
           </marker>
         </defs>
+        {/*
+          Срез МРТ — подложка: рисуется первым, чтобы сетка, поля и диполи легли
+          поверх. Прямоугольник картинки равен прямоугольнику плоскости, а масштаб
+          мм/пиксель у фигуры общий, поэтому `preserveAspectRatio="none"` ничего не
+          растягивает: пиксель PNG и пиксель фигуры — один и тот же миллиметр.
+        */}
+        {mriShown ? (
+          <image
+            data-testid={`layer-mri-${plane}`}
+            href={mriHref ?? undefined}
+            x={imageRect.x}
+            y={imageRect.y}
+            width={imageRect.width}
+            height={imageRect.height}
+            preserveAspectRatio="none"
+            onError={() => setFailedHref(mriHref)}
+          />
+        ) : null}
+
         {layerVisible(visibility, 'head') ? (
           <polygon
             data-testid={`layer-head-${plane}`}
@@ -205,7 +271,7 @@ export function MriProjection({
             {grid.map((line) => {
               const zero = line.valueMm === 0
               if (line.orientation === 'vertical') {
-                const x = xOfNormalized(line.at, size)
+                const x = xOfNormalized(plane, line.at)
                 return (
                   <line
                     key={`grid-v-${line.valueMm}`}
@@ -213,21 +279,21 @@ export function MriProjection({
                     x1={x}
                     y1={PROJECTION_PADDING}
                     x2={x}
-                    y2={size - PROJECTION_PADDING}
+                    y2={box.height - PROJECTION_PADDING}
                     stroke="var(--color-mri-slice)"
                     strokeOpacity={zero ? 0.45 : 0.16}
                     strokeDasharray={zero ? undefined : '3 4'}
                   />
                 )
               }
-              const y = yOfNormalized(line.at, size)
+              const y = yOfNormalized(plane, line.at)
               return (
                 <line
                   key={`grid-h-${line.valueMm}`}
                   data-testid={`grid-${plane}-h-${line.valueMm}`}
                   x1={PROJECTION_PADDING}
                   y1={y}
-                  x2={size - PROJECTION_PADDING}
+                  x2={box.width - PROJECTION_PADDING}
                   y2={y}
                   stroke="var(--color-mri-slice)"
                   strokeOpacity={zero ? 0.45 : 0.16}
@@ -236,25 +302,29 @@ export function MriProjection({
               )
             })}
 
-            {/* Схема среза: желудочки, мозолистое тело, ствол — фикстура тома */}
-            {structures.map((structure) => {
-              const center = normalizedToPx(structure.center, size, PROJECTION_PADDING)
-              return (
-                <ellipse
-                  key={structure.id}
-                  data-testid={`slice-structure-${plane}-${structure.id}`}
-                  cx={center.x}
-                  cy={center.y}
-                  rx={structure.radius.u * half}
-                  ry={structure.radius.v * half}
-                  fill={structure.hollow ? 'none' : 'var(--color-mri-slice)'}
-                  fillOpacity={structure.hollow ? 0 : 0.12 * structure.alpha}
-                  stroke="var(--color-mri-slice)"
-                  strokeOpacity={0.5 * structure.alpha}
-                  strokeWidth={1.1}
-                />
-              )
-            })}
+            {/* Схема среза: желудочки, мозолистое тело, ствол — фикстура тома.
+                Показывается только без реального среза: иначе поверх настоящей
+                анатомии рисовалась бы «вторая», условная. */}
+            {mriShown
+              ? null
+              : structures.map((structure) => {
+                  const center = normalizedToPx(structure.center, plane)
+                  return (
+                    <ellipse
+                      key={structure.id}
+                      data-testid={`slice-structure-${plane}-${structure.id}`}
+                      cx={center.x}
+                      cy={center.y}
+                      rx={structure.radius.u * halfWidth}
+                      ry={structure.radius.v * halfHeight}
+                      fill={structure.hollow ? 'none' : 'var(--color-mri-slice)'}
+                      fillOpacity={structure.hollow ? 0 : 0.12 * structure.alpha}
+                      stroke="var(--color-mri-slice)"
+                      strokeOpacity={0.5 * structure.alpha}
+                      strokeWidth={1.1}
+                    />
+                  )
+                })}
 
             {/* Следы срезов соседних проекций: только когда сосед стоит на оси */}
             {guides.map((guide) =>
@@ -262,10 +332,10 @@ export function MriProjection({
                 <line
                   key={guide.label}
                   data-testid={`guide-${plane}-${guide.orientation}`}
-                  x1={xOfNormalized(guide.at, size)}
+                  x1={xOfNormalized(plane, guide.at)}
                   y1={PROJECTION_PADDING}
-                  x2={xOfNormalized(guide.at, size)}
-                  y2={size - PROJECTION_PADDING}
+                  x2={xOfNormalized(plane, guide.at)}
+                  y2={box.height - PROJECTION_PADDING}
                   stroke="var(--color-mri-slice)"
                   strokeOpacity={0.4}
                   strokeDasharray="6 4"
@@ -275,9 +345,9 @@ export function MriProjection({
                   key={guide.label}
                   data-testid={`guide-${plane}-${guide.orientation}`}
                   x1={PROJECTION_PADDING}
-                  y1={yOfNormalized(guide.at, size)}
-                  x2={size - PROJECTION_PADDING}
-                  y2={yOfNormalized(guide.at, size)}
+                  y1={yOfNormalized(plane, guide.at)}
+                  x2={box.width - PROJECTION_PADDING}
+                  y2={yOfNormalized(plane, guide.at)}
                   stroke="var(--color-mri-slice)"
                   strokeOpacity={0.4}
                   strokeDasharray="6 4"
@@ -289,7 +359,7 @@ export function MriProjection({
         {layerVisible(visibility, 'brodmann') ? (
           <g data-testid={`layer-brodmann-${plane}`}>
             {areas.map((area) => {
-              const center = normalizedToPx(area.center, size, PROJECTION_PADDING)
+              const center = normalizedToPx(area.center, plane)
               const active = selectedArea === area.name
               return (
                 <g
@@ -300,8 +370,8 @@ export function MriProjection({
                   <ellipse
                     cx={center.x}
                     cy={center.y}
-                    rx={area.radius.u * half}
-                    ry={area.radius.v * half}
+                    rx={area.radius.u * halfWidth}
+                    ry={area.radius.v * halfHeight}
                     fill="var(--color-mri-brodmann)"
                     fillOpacity={(active ? 0.32 : 0.13) * area.alpha}
                     stroke="var(--color-mri-brodmann)"
@@ -396,28 +466,28 @@ export function MriProjection({
           testId={`edge-${plane}-left`}
           label={edges.left}
           x={PROJECTION_PADDING / 2}
-          y={size / 2}
+          y={box.height / 2}
           anchor="middle"
         />
         <EdgeLabel
           testId={`edge-${plane}-right`}
           label={edges.right}
-          x={size - PROJECTION_PADDING / 2}
-          y={size / 2}
+          x={box.width - PROJECTION_PADDING / 2}
+          y={box.height / 2}
           anchor="middle"
         />
         <EdgeLabel
           testId={`edge-${plane}-top`}
           label={edges.top}
-          x={size / 2}
+          x={box.width / 2}
           y={PROJECTION_PADDING / 2}
           anchor="middle"
         />
         <EdgeLabel
           testId={`edge-${plane}-bottom`}
           label={edges.bottom}
-          x={size / 2}
-          y={size - PROJECTION_PADDING / 2}
+          x={box.width / 2}
+          y={box.height - PROJECTION_PADDING / 2}
           anchor="middle"
         />
       </svg>
@@ -464,11 +534,11 @@ function EdgeLabel({
 }
 
 /** Пиксельная горизонталь по нормализованной координате: сетка и следы срезов. */
-function xOfNormalized(u: number, size: number): number {
-  return normalizedToPx({ u, v: 0 }, size, PROJECTION_PADDING).x
+function xOfNormalized(plane: ProjectionPlane, u: number): number {
+  return normalizedToPx({ u, v: 0 }, plane).x
 }
 
 /** Пиксельная вертикаль по нормализованной координате (ось v растёт вверх). */
-function yOfNormalized(v: number, size: number): number {
-  return normalizedToPx({ u: 0, v }, size, PROJECTION_PADDING).y
+function yOfNormalized(plane: ProjectionPlane, v: number): number {
+  return normalizedToPx({ u: 0, v }, plane).y
 }

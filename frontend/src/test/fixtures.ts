@@ -46,6 +46,11 @@ export const metaFixture: MetaResponse = {
   dipole_fit_max_epochs: 0,
   max_concurrent_jobs: 2,
   cors_origins: ['http://localhost:5173'],
+  mri_slices: {
+    version: 'mri12345678',
+    slice_url: '/api/v1/surface/mri/slice',
+    spacing_mm: 1,
+  },
 }
 
 export const initStatusFixture: InitStatus = {

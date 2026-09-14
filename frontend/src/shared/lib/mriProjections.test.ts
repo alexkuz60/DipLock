@@ -7,9 +7,13 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  AXIS_DIRECTION_HINTS,
+  AXIS_DIRECTION_LABELS,
+  AXIS_LABELS,
   CONTOUR_SAMPLES,
   PROJECTION_PADDING,
   PROJECTION_PLANES,
+  PROJECTION_SCALE,
   PLANE_AXIS,
   SLICE_ORIENTATION_PRESETS,
   applyPointToSlices,
@@ -23,10 +27,13 @@ import {
   mniToNormalized,
   normalizedToMni,
   normalizedToPx,
+  planeEdgeLabels,
+  planeExtent,
   planeGridLines,
   planeSliceRange,
   pointFromProjectionClick,
   projectPoint,
+  projectionBox,
   pxToNormalized,
   sliceGuides,
   sliceLabel,
@@ -50,7 +57,17 @@ describe('геометрия проекций мозга', () => {
     }
   })
 
-  it('отражает раскладку осей: x > 0 уходит влево, z > 0 — вверх', () => {
+  it('держит знаки осей MNI: +x — правое полушарие (RAS), подписи краёв за ним', () => {
+    // Ошибка «+x = L» называла полушария наоборот: в fsaverage/MNI левое полушарие
+    // лежит при x < 0. Знаки фиксируем тестом — от них зависят подписи краёв.
+    expect(AXIS_DIRECTION_LABELS.x).toEqual({ positive: 'R', negative: 'L' })
+    expect(AXIS_DIRECTION_HINTS.x.positive).toContain('правое полушарие')
+    expect(AXIS_LABELS.x).toBe('x, мм (вправо +)')
+    expect(planeEdgeLabels('axial')).toMatchObject({ left: { text: 'R' }, right: { text: 'L' } })
+    expect(planeEdgeLabels('coronal')).toMatchObject({ left: { text: 'R' }, right: { text: 'L' } })
+  })
+
+  it('отражает раскладку осей: x > 0 (правое полушарие) уходит влево, z > 0 — вверх', () => {
     const left = mniToNormalized('axial', { ...POINT, z: 0 })
     expect(left.u).toBeLessThan(0)
 
@@ -61,18 +78,54 @@ describe('геометрия проекций мозга', () => {
     expect(up.v).toBeGreaterThan(0)
   })
 
-  it('центр фигуры — начало координат плоскости, pxToNormalized обратна normalizedToPx', () => {
-    const center = normalizedToPx({ u: 0, v: 0 })
-    expect(pxToNormalized(center)).toEqual({ u: 0, v: 0 })
+  it('держит единый масштаб мм/пиксель: фигуры прямоугольные, анатомия не растянута', () => {
+    // Ключевое свойство раскладки после среза 3.3: 1 мм по любой оси — это одно и
+    // то же число пикселей, поэтому круг в MNI остаётся кругом, а мозг не
+    // «сплющивается» в аксиальной проекции (было до 22% разницы между осями).
+    expect(PROJECTION_SCALE).toBe(1.5)
+    for (const plane of PROJECTION_PLANES) {
+      const box = projectionBox(plane)
+      const { horizontal, vertical } = planeExtent(plane)
+      const pxPerMmH = box.innerWidth / (horizontal.half * 2)
+      const pxPerMmV = box.innerHeight / (vertical.half * 2)
 
-    const corner = normalizedToPx({ u: -1, v: 1 })
-    expect(corner.x).toBeCloseTo(PROJECTION_PADDING, 6)
-    expect(pxToNormalized(corner).v).toBeCloseTo(1, 6)
+      expect(pxPerMmH).toBeCloseTo(PROJECTION_SCALE, 6)
+      expect(pxPerMmV).toBeCloseTo(PROJECTION_SCALE, 6)
+      // Пиксель по обеим осям — один миллиметр, и размеры фигуры целые
+      expect(box.innerWidth).toBe(horizontal.half * 2 * pxPerMmV)
+      expect(Number.isInteger(box.width) && Number.isInteger(box.height)).toBe(true)
+    }
+
+    // Квадратные фигуры остались только у совпадающих размахов; аксиальная и
+    // сагиттальная вытянуты по своей длинной оси.
+    expect(projectionBox('axial')).toEqual({
+      innerWidth: 240,
+      innerHeight: 294,
+      width: 240 + PROJECTION_PADDING * 2,
+      height: 294 + PROJECTION_PADDING * 2,
+    })
+    expect(projectionBox('sagittal')).toMatchObject({ innerWidth: 294, innerHeight: 258 })
+    expect(projectionBox('coronal')).toMatchObject({ innerWidth: 240, innerHeight: 258 })
+  })
+
+  it('центр фигуры — начало координат плоскости, pxToNormalized обратна normalizedToPx', () => {
+    for (const plane of PROJECTION_PLANES) {
+      const center = normalizedToPx({ u: 0, v: 0 }, plane)
+      expect(pxToNormalized(center, plane)).toEqual({ u: 0, v: 0 })
+
+      const corner = normalizedToPx({ u: -1, v: 1 }, plane)
+      expect(corner.x).toBeCloseTo(PROJECTION_PADDING, 6)
+      expect(pxToNormalized(corner, plane).v).toBeCloseTo(1, 6)
+    }
   })
 
   it('клик даёт точку в плоскости своего среза: нормаль берётся из среза', () => {
-    const center = pointFromProjectionClick('sagittal', 24, normalizedToPx({ u: 0, v: 0 }))
-    const click = pointFromProjectionClick('sagittal', 24, normalizedToPx({ u: 0.5, v: -0.25 }))
+    const center = pointFromProjectionClick('sagittal', 24, normalizedToPx({ u: 0, v: 0 }, 'sagittal'))
+    const click = pointFromProjectionClick(
+      'sagittal',
+      24,
+      normalizedToPx({ u: 0.5, v: -0.25 }, 'sagittal'),
+    )
 
     // Нормаль сагиттального среза — ось x: её значение берётся из среза, не из клика
     expect(click.x).toBe(24)
@@ -159,7 +212,7 @@ describe('геометрия проекций мозга', () => {
     expect(sliceLabel('axial', 12)).toBe('z = 12.0 мм')
     expect(slicesSummary(defaultSlices())).toBe('z = 0.0 мм · x = 0.0 мм · y = 0.0 мм')
 
-    const figureCenter = normalizedToPx({ u: 0, v: 0 })
+    const figureCenter = normalizedToPx({ u: 0, v: 0 }, 'axial')
     // Аксиальная фигура — плоскость x/y: x = 0 даёт середину по горизонтали,
     // а y = 0 лежит выше середины (диапазон y смещён назад)
     const axialOrigin = projectPoint('axial', { x: 0, y: 0, z: 0 })
@@ -168,7 +221,8 @@ describe('геометрия проекций мозга', () => {
 
     // Коронарная фигура — плоскость x/z: z = 0 лежит ниже середины (диапазон z смещён вверх)
     const coronalOrigin = projectPoint('coronal', { x: 0, y: 0, z: 0 })
-    expect(coronalOrigin.x).toBe(figureCenter.x)
-    expect(coronalOrigin.y).toBeGreaterThan(figureCenter.y)
+    const coronalCenter = normalizedToPx({ u: 0, v: 0 }, 'coronal')
+    expect(coronalOrigin.x).toBe(coronalCenter.x)
+    expect(coronalOrigin.y).toBeGreaterThan(coronalCenter.y)
   })
 })

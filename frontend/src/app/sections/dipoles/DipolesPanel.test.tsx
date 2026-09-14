@@ -38,6 +38,20 @@ describe('панель раздела «Диполи»', () => {
     expect(screen.getByLabelText('Силуэт головы')).toBeChecked()
   })
 
+  it('включает слой реального среза МРТ отдельно от схемы среза', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    const checkbox = screen.getByLabelText('Срез МРТ (T1)')
+    expect(checkbox).toBeChecked()
+
+    await user.click(checkbox)
+
+    expect(useDipoleParams.getState().params.layerVisibility.mri).toBe(false)
+    // Схема среза MNI — другой слой: её правка не следует за срезом МРТ
+    expect(useDipoleParams.getState().params.layerVisibility.mni).toBe(true)
+  })
+
   it('показывает линейку каждого среза с маркером именованной ориентации', () => {
     renderWithProviders(<DipolesPanel />)
 

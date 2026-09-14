@@ -38,6 +38,8 @@ from app.schemas.analysis import (
     JobCreated,
     JobStatus,
     MetaResponse,
+    MriSlicesOut,
+    MriSliceRef,
     PreprocessResult,
     PreprocessStage,
     RecordingMeta,
@@ -52,6 +54,11 @@ from app.services.recording_signals import (
     build_signal_blob,
 )
 from app.services.recordings import recording_registry
+from app.services.mri_slices import (
+    mri_meta,
+    slice_png as mri_slice_png,
+    slice_ref as mri_slice_ref,
+)
 from app.services.surface_cache import (
     asset_version,
     brodmann_area_names,
@@ -148,6 +155,11 @@ def _surface_ref() -> SurfaceRef:
         url=f"{prefix}/surface",
         brodmann_url=f"{prefix}/surface/brodmann",
     )
+
+
+def _mri_ref() -> MriSliceRef:
+    """Ссылка на срезы МРТ: версия по отпечатку тома, без его сборки (O(1))."""
+    return MriSliceRef(**mri_slice_ref(settings))
 
 
 def _run_analysis(
@@ -795,6 +807,59 @@ async def get_brodmann_one(area_name: str) -> Dict[str, Any]:
 
 
 @router.get(
+    "/surface/mri", response_model=MriSlicesOut,
+    summary="Метаданные срезов МРТ (T1, MNI-сетка)",
+)
+async def get_mri_slices() -> Dict[str, Any]:
+    """Границы, шаг сетки, плоскости и окно яркости срезов.
+
+    Первое обращение собирает том на MNI-сетке из ``T1.mgz`` + ``brainmask.mgz``
+    (≈0.7 с) и кладёт его в ``cache_dir/mri``; дальше ответ мгновенный. Сами срезы
+    отдаются картинками (``/surface/mri/slice/...``), а не в этом ответе.
+    """
+    try:
+        return mri_meta(settings)
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+
+
+@router.get(
+    "/surface/mri/slice/{plane}/{mm}.png",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+    summary="Срез МРТ картинкой (PNG, ETag)",
+)
+async def get_mri_slice(
+    plane: str,
+    mm: float,
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """PNG среза (серый + альфа) в раскладке проекций UI.
+
+    Значение среза квантуется сеткой тома (1 мм), фактическое значение возвращается
+    заголовком ``X-Mri-Slice-Mm`` — расхождение с дробным срезом UI видно сразу.
+    Неизвестная плоскость — 404, недоступный том — 503, повторный запрос с тем же
+    ``If-None-Match`` — 304.
+    """
+    try:
+        data, version, actual_mm = mri_slice_png(settings, plane, mm)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+
+    etag = f'"{version}-{plane}-{actual_mm:g}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "public, max-age=604800",
+        "X-Mri-Slice-Mm": f"{actual_mm:g}",
+    }
+    if if_none_match and etag in if_none_match:
+        return Response(status_code=304, headers=headers)
+    return Response(content=data, media_type="image/png", headers=headers)
+
+
+@router.get(
     "/brodmann-labels", response_model=BrodmannLabelsOut,
     summary="Имена доступных полей Бродмана",
 )
@@ -878,6 +943,7 @@ async def get_meta() -> MetaResponse:
         dipole_fit_max_epochs=settings.dipole_fit_max_epochs,
         max_concurrent_jobs=job_manager.max_concurrent,
         cors_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
+        mri_slices=_mri_ref(),
     )
 
 

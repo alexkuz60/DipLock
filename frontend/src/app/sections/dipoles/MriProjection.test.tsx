@@ -10,13 +10,17 @@ import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import {
   PROJECTION_HINTS,
+  PROJECTION_PADDING,
   PROJECTION_PLANES,
   defaultSlices,
   demoBrodmannAreas,
   normalizedToPx,
   planeEdgeLabels,
+  projectionBox,
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
+import { MRI_SLICE_UNAVAILABLE } from '@/shared/lib/mriSlices'
+import type { MriSliceRef } from '@/shared/api/types'
 import { demoDipoleLayer } from '@/shared/lib/dipolePoints'
 import { DIPOLE_PARAM_DEFAULTS, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { renderWithProviders } from '@/test/renderWithProviders'
@@ -25,6 +29,13 @@ import { MriProjection } from './MriProjection'
 /** Видимость слоёв с точечными правками: по умолчанию включены все. */
 function visible(overrides: Partial<Record<DipoleLayerId, boolean>> = {}) {
   return { ...DIPOLE_PARAM_DEFAULTS.layerVisibility, ...overrides }
+}
+
+/** Ссылка на срезы МРТ: в тестах версия фиксирована — URL читается глазами. */
+const MRI_REF: MriSliceRef = {
+  version: 'v1',
+  slice_url: '/api/v1/surface/mri/slice',
+  spacing_mm: 1,
 }
 
 function renderProjection(
@@ -37,21 +48,27 @@ function renderProjection(
 }
 
 /** Подмена размеров фигуры: клики в тестах считаются в координатах viewBox. */
-function stubFigure(plane: ProjectionPlane, size = 320) {
+function stubFigure(plane: ProjectionPlane) {
   const svg = screen.getByTestId(`projection-svg-${plane}`)
+  // Фигура прямоугольная: подменяем ровно её размеры, чтобы масштаб был 1:1
+  const { width, height } = projectionBox(plane)
   svg.getBoundingClientRect = () =>
-    ({ left: 0, top: 0, width: size, height: size, right: size, bottom: size }) as DOMRect
+    ({ left: 0, top: 0, width, height, right: width, bottom: height }) as DOMRect
   return svg
 }
 
-/** Ожидаемые буквы краёв: выводятся из знаков осей плоскости. */
+/**
+ * Ожидаемые буквы краёв: выводятся из знаков осей плоскости. Горизонталь
+ * аксиальной и коронарной проекций развёрнута (радиологическая раскладка):
+ * слева на экране правое полушарие (R, x > 0), справа — левое (L, x < 0).
+ */
 const EXPECTED_EDGES: Record<
   ProjectionPlane,
   { left: string; right: string; top: string; bottom: string }
 > = {
   sagittal: { left: 'P', right: 'A', top: 'S', bottom: 'I' },
-  axial: { left: 'L', right: 'R', top: 'A', bottom: 'P' },
-  coronal: { left: 'L', right: 'R', top: 'S', bottom: 'I' },
+  axial: { left: 'R', right: 'L', top: 'A', bottom: 'P' },
+  coronal: { left: 'R', right: 'L', top: 'S', bottom: 'I' },
 }
 
 describe('проекция мозга', () => {
@@ -139,8 +156,10 @@ describe('проекция мозга', () => {
       onPick,
     })
     const svg = stubFigure('sagittal')
+    const box = projectionBox('sagittal')
 
-    fireEvent.click(svg, { clientX: 160, clientY: 160 })
+    // Центр фигуры: y = 0 и z = 0 плоскости x/y/z дают начало координат
+    fireEvent.click(svg, { clientX: box.width / 2, clientY: box.height / 2 })
 
     expect(onPick).toHaveBeenCalledTimes(1)
     const [point] = onPick.mock.calls[0]
@@ -153,7 +172,7 @@ describe('проекция мозга', () => {
     renderProjection('axial', { onPick })
     const svg = stubFigure('axial')
     const area = demoBrodmannAreas('axial', 0)[0]
-    const px = normalizedToPx(area.center)
+    const px = normalizedToPx(area.center, 'axial')
 
     fireEvent.click(svg, { clientX: px.x, clientY: px.y })
 
@@ -176,5 +195,56 @@ describe('проекция мозга', () => {
 
     expect(screen.queryByTestId('hover-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('projection-readout-axial')).toHaveTextContent(PROJECTION_HINTS.axial)
+  })
+
+  it('рисует реальный срез МРТ и убирает условную схему среза', () => {
+    renderProjection('axial', { mri: MRI_REF })
+
+    const image = screen.getByTestId('layer-mri-axial')
+    expect(image).toHaveAttribute('href', '/api/v1/surface/mri/slice/axial/0.png?v=v1')
+    expect(image).toHaveAttribute('preserveAspectRatio', 'none')
+    // Картинка накрывает всю плоскость: прямоугольник фигуры без полей подписей.
+    // Прямоугольник не квадратный — масштаб осей единый (см. PROJECTION_SCALE).
+    const box = projectionBox('axial')
+    expect(image).toHaveAttribute('x', String(PROJECTION_PADDING))
+    expect(image).toHaveAttribute('y', String(PROJECTION_PADDING))
+    expect(image).toHaveAttribute('width', String(box.innerWidth))
+    expect(image).toHaveAttribute('height', String(box.innerHeight))
+    // Фикстура анатомии больше не рисуется — на срезе настоящий том
+    expect(screen.queryByTestId(/slice-structure-axial-/)).not.toBeInTheDocument()
+  })
+
+  it('без ссылки на срезы остаётся условная схема среза', () => {
+    renderProjection('axial')
+
+    expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId(/slice-structure-axial-/).length).toBeGreaterThan(0)
+  })
+
+  it('выключенный слой МРТ возвращает схему среза', () => {
+    renderProjection('axial', { mri: MRI_REF, visibility: visible({ mri: false }) })
+
+    expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId(/slice-structure-axial-/).length).toBeGreaterThan(0)
+  })
+
+  it('квантует срез картинки к сетке тома', () => {
+    renderProjection('axial', { mri: MRI_REF, slices: { axial: -3.5, sagittal: 0, coronal: 0 } })
+
+    // Сетка 1 мм и округление «половина вверх» — как в бэкенде
+    expect(screen.getByTestId('layer-mri-axial')).toHaveAttribute(
+      'href',
+      '/api/v1/surface/mri/slice/axial/-3.png?v=v1',
+    )
+  })
+
+  it('недоступная картинка среза сообщается текстом и возвращает схему', () => {
+    renderProjection('axial', { mri: MRI_REF })
+
+    fireEvent.error(screen.getByTestId('layer-mri-axial'))
+
+    expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('projection-readout-axial')).toHaveTextContent(MRI_SLICE_UNAVAILABLE)
+    expect(screen.getAllByTestId(/slice-structure-axial-/).length).toBeGreaterThan(0)
   })
 })
