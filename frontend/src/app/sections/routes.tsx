@@ -18,12 +18,9 @@ import { DipolesToolHeaderActions } from './dipoles/DipolesToolActions'
 import { HomeSection } from './HomeSection'
 import { ServerStatusSection } from './ServerStatusSection'
 import { SettingsSection } from './SettingsSection'
-import {
-  GroupAnalysisPanel,
-  GroupAnalysisSection,
-  LocalizationTablePanel,
-  LocalizationTableSection,
-} from './Stubs'
+import { LocalizationTablePanel } from './table/LocalizationTablePanel'
+import { LocalizationTableSection } from './table/LocalizationTableSection'
+import { GroupAnalysisPanel, GroupAnalysisSection } from './Stubs'
 import { getSection, type SectionId } from './registry'
 
 type SectionModule = {

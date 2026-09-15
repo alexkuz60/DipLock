@@ -1,9 +1,13 @@
 /**
- * Разделы-заглушки (Фаза 1): каркас и панель опций готовы, функционал
- * реализуется в следующих фазах — планы перечислены в `docs/ui.md`.
+ * Разделы-заглушки: каркас и панель опций готовы, функционал реализуется в
+ * следующих фазах — планы перечислены в `docs/ui.md`.
+ *
+ * Таблица локализации перестала быть заглушкой в срезе 4 и живёт в
+ * `sections/table/`; здесь остался только групповой анализ (Фаза 5, требует
+ * read-API и наполнения БД).
  */
 import type { ReactNode } from 'react'
-import { Layers, Table2 } from 'lucide-react'
+import { Layers } from 'lucide-react'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { Panel } from '@/shared/ui/Panel'
 
@@ -44,32 +48,6 @@ function StubPanel({ title, options }: { title: string; options: string[] }) {
         ))}
       </ul>
     </Panel>
-  )
-}
-
-export function LocalizationTableSection() {
-  return (
-    <StubSection
-      phase="Фаза 4: таблица результатов"
-      icon={<Table2 className="size-12" />}
-      title="Таблица локализации"
-      description="Виртуализованная таблица лучших диполей: MNI-координаты, амплитуда, GOF, ROI и поля Бродмана."
-      planned={[
-        'Сортировка, фильтры, поиск по всем колонкам',
-        'Группировка по полю Бродмана и полушарию',
-        'Клик по строке — фокус на диполе в разделе «Диполи»',
-        'Экспорт выборки в CSV / JSON',
-      ]}
-    />
-  )
-}
-
-export function LocalizationTablePanel() {
-  return (
-    <StubPanel
-      title="Настройки таблицы"
-      options={['Видимые колонки', 'Фильтр по GOF и амплитуде', 'Фильтр по BA/ROI', 'Экспорт выборки']}
-    />
   )
 }
 
