@@ -11,8 +11,10 @@ import { EdfPanel } from './EdfPanel'
 import { EdfSection } from './EdfSection'
 import { EdfToolHeaderActions } from './EdfToolActions'
 import { EdfZoomSelect } from './EdfZoomSelect'
+import { DipolesDrawer } from './dipoles/DipolesDrawer'
 import { DipolesPanel } from './dipoles/DipolesPanel'
 import { DipolesSection } from './dipoles/DipolesSection'
+import { DipolesToolHeaderActions } from './dipoles/DipolesToolActions'
 import { HomeSection } from './HomeSection'
 import { ServerStatusSection } from './ServerStatusSection'
 import { SettingsSection } from './SettingsSection'
@@ -32,6 +34,8 @@ type SectionModule = {
   ToolActions?: ComponentType
   /** Вторичные контролы тулс-хедера (правый край, перед кнопкой панели) */
   HeaderExtra?: ComponentType
+  /** Выдвижная панель раздела (полоса между шапкой и рабочей областью) */
+  Drawer?: ComponentType
 }
 
 const SECTION_MODULES: Record<SectionId, SectionModule> = {
@@ -42,7 +46,12 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
     ToolActions: EdfToolHeaderActions,
     HeaderExtra: EdfZoomSelect,
   },
-  dipoles: { Component: DipolesSection, Panel: DipolesPanel },
+  dipoles: {
+    Component: DipolesSection,
+    Panel: DipolesPanel,
+    ToolActions: DipolesToolHeaderActions,
+    Drawer: DipolesDrawer,
+  },
   table: { Component: LocalizationTableSection, Panel: LocalizationTablePanel },
   group: { Component: GroupAnalysisSection, Panel: GroupAnalysisPanel },
   settings: { Component: SettingsSection },
@@ -52,13 +61,14 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
 /** Раздел внутри каркаса: тулс-хедер + рабочая область + панель опций. */
 export function SectionRoute({ id }: { id: SectionId }) {
   const section = getSection(id)
-  const { Component, Panel, ToolActions, HeaderExtra } = SECTION_MODULES[id]
+  const { Component, Panel, ToolActions, HeaderExtra, Drawer } = SECTION_MODULES[id]
 
   return (
     <AppShell
       section={section}
       actions={ToolActions ? <ToolActions /> : undefined}
       headerExtra={HeaderExtra ? <HeaderExtra /> : undefined}
+      drawer={Drawer ? <Drawer /> : undefined}
       panel={Panel ? <Panel /> : undefined}
     >
       <Component />

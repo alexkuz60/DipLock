@@ -23,6 +23,7 @@ import {
   type ProjectionPlane,
 } from './mriProjections'
 import { mulberry32 } from './demoSignal'
+import type { DipoleScanResult } from '@/shared/api/types'
 
 /** Лучший диполь эпохи: позиция в MNI, момент (вектор) и метрики качества. */
 export type DipolePoint = {
@@ -63,6 +64,57 @@ export function emptyDipoleLayer(): DipoleLayer {
 export function dipoleLayerStatus(layer: DipoleLayer): string {
   if (layer.points.length === 0) return 'Расчёт диполей не подключён — слой пуст'
   return `Точек диполей: ${layer.points.length}`
+}
+
+/**
+ * Слой диполей из результата быстрого расчёта (срез 3.4).
+ *
+ * Точки без MNI (`mni_coords === null`, fsaverage недоступен) в слой **не
+ * попадают**: проекции рисуют MNI-координаты, и «нарисовать» точку в системе
+ * головы значило бы показать её не там. Такие точки сообщаются предупреждением
+ * задачи, а не подменой координат.
+ */
+export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
+  const points: DipolePoint[] = []
+  for (const point of result.points) {
+    const coords = point.mni_coords
+    if (!coords || coords.length !== 3) continue
+    const [x, y, z] = coords
+    if (![x, y, z].every(Number.isFinite)) continue
+    points.push({
+      id: `${point.epoch_index}-${Math.round(point.time_ms)}`,
+      epochIndex: point.epoch_index,
+      timeMs: point.time_ms,
+      position: { x, y, z },
+      orientation: {
+        x: point.moment[0] ?? 0,
+        y: point.moment[1] ?? 0,
+        z: point.moment[2] ?? 0,
+      },
+      amplitudeNaM: point.amplitude_nam,
+      gof: point.gof,
+      brodmannArea: point.brodmann_area,
+    })
+  }
+  return { points, source: 'result' }
+}
+
+/**
+ * Слой с порогом по моменту «КД ≥ X нАм»: слабые диполи скрываются.
+ *
+ * Порог — параметр **отображения**: он не меняет результат задачи (точки в слое
+ * остаются теми же), поэтому счётчик скрытых точек возвращается отдельно, и
+ * панель объясняет, что часть диполей не рисуется из-за порога.
+ */
+export function thresholdDipoleLayer(layer: DipoleLayer, minAmplitudeNaM: number): DipoleLayer {
+  if (!(minAmplitudeNaM > 0)) return layer
+  return { points: layer.points.filter((point) => point.amplitudeNaM >= minAmplitudeNaM), source: layer.source }
+}
+
+/** Сколько точек скрыто порогом (для пояснения в панели). */
+export function hiddenByThreshold(layer: DipoleLayer, minAmplitudeNaM: number): number {
+  if (!(minAmplitudeNaM > 0)) return 0
+  return layer.points.filter((point) => point.amplitudeNaM < minAmplitudeNaM).length
 }
 
 /** Масштаб вектора на проекции: пикселей на 1 нА·м момента. */

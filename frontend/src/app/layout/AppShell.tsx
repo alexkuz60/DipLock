@@ -27,11 +27,13 @@ export type AppShellProps = {
   actions?: ReactNode
   /** Вторичные действия тулс-хедера (у правого края) */
   headerExtra?: ReactNode
+  /** Выдвижная панель раздела: полоса между тулс-хедером и рабочей областью */
+  drawer?: ReactNode
   /** Содержимое правого сайдбара */
   panel?: ReactNode
 }
 
-export function AppShell({ section, children, actions, headerExtra, panel }: AppShellProps) {
+export function AppShell({ section, children, actions, headerExtra, drawer, panel }: AppShellProps) {
   const navigate = useNavigate()
   const toggleRightPanel = useUiStore((state) => state.toggleRightPanel)
 
@@ -74,6 +76,13 @@ export function AppShell({ section, children, actions, headerExtra, panel }: App
         {section.hasToolHeader ? (
           <ToolHeader section={section} actions={actions} secondary={headerExtra} />
         ) : null}
+        {/*
+          Выдвижная панель раздела — отдельная полоса между шапкой и рабочей
+          областью, а не часть прокручиваемого контента: её содержимое (топокарты,
+          гистограмма) не должно уезжать при прокрутке проекций, а `main` держит
+          прокрутку своей области (`min-h-0`).
+        */}
+        {drawer}
         <main className="min-h-0 flex-1 overflow-auto">{children}</main>
         <StatusBar section={section} />
       </div>

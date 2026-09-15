@@ -6,6 +6,7 @@
  * запускает: расчёт диполей появится отдельной задачей по кнопке тулс-хедера
  * (правило раздела — как в EDF, см. `docs/ui.md`).
  */
+import { useQuery } from '@tanstack/react-query'
 import { RotateCcw } from 'lucide-react'
 import {
   AXIS_LABELS,
@@ -18,7 +19,14 @@ import {
   sliceOrientationMarks,
   sliceTicks,
 } from '@/shared/lib/mriProjections'
-import { dipoleLayerStatus, emptyDipoleLayer } from '@/shared/lib/dipolePoints'
+import {
+  dipoleLayerFromScan,
+  dipoleLayerStatus,
+  emptyDipoleLayer,
+  hiddenByThreshold,
+  thresholdDipoleLayer,
+} from '@/shared/lib/dipolePoints'
+import { api } from '@/shared/api/client'
 import {
   DIPOLE_LAYERS,
   DIPOLE_LAYER_HINTS,
@@ -26,9 +34,17 @@ import {
   layerVisible,
   useDipoleParams,
 } from '@/shared/state/dipoleParams'
+import {
+  GRID_MM_RANGE,
+  THRESHOLD_NAM_RANGE,
+  calcJobSummary,
+  useDipoleCalc,
+} from '@/shared/state/dipoleCalc'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
+import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
+import { SelectField } from '@/shared/ui/SelectField'
 import { SliceScrubber } from '@/shared/ui/SliceScrubber'
 import { StatusPill } from '@/shared/ui/StatusPill'
 
@@ -42,6 +58,35 @@ export function DipolesPanel() {
   const setSlice = useDipoleParams((state) => state.setSlice)
   const resetSlices = useDipoleParams((state) => state.resetSlices)
   const resetAll = useDipoleParams((state) => state.resetAll)
+
+  const calcParams = useDipoleCalc((state) => state.params)
+  const calcJob = useDipoleCalc((state) => state.job)
+  const calcResult = useDipoleCalc((state) => state.result)
+  const spectrum = useDipoleCalc((state) => state.spectrum)
+  const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
+  const setEpochLengthMs = useDipoleCalc((state) => state.setEpochLengthMs)
+  const setGridMm = useDipoleCalc((state) => state.setGridMm)
+  const setRejectThresholdUv = useDipoleCalc((state) => state.setRejectThresholdUv)
+  const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
+  const resetCalc = useDipoleCalc((state) => state.reset)
+
+  // Длины эпох приходят из `/meta` (единственный источник — конфиг сервера):
+  // тот же запрос уже делает раздел EDF, поэтому кэш react-query общий
+  const meta = useQuery({
+    queryKey: ['meta'],
+    queryFn: ({ signal }) => api.meta(signal),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const epochLengths = meta.data?.epoch_lengths_ms ?? []
+  const epochOptions = (epochLengths.length ? epochLengths : [calcParams.epochLengthMs]).map((value) => ({
+    value: String(value),
+    label: `${value} мс`,
+  }))
+
+  const layer = calcResult ? dipoleLayerFromScan(calcResult) : EMPTY_DIPOLE_LAYER
+  const visibleLayer = thresholdDipoleLayer(layer, threshold)
+  const hidden = hiddenByThreshold(layer, threshold)
 
   return (
     <>
@@ -128,10 +173,99 @@ export function DipolesPanel() {
       </Panel>
 
       <Panel
-        title="Расчёт"
-        hint="Раздел пока показывает геометрию: задача расчёта диполей появится отдельной кнопкой в шапке раздела (следующий срез фазы 3)."
+        title="Расчёт диполей"
+        hint="Быстрый режим: одна точка на эпоху в пике GFP и перебор узлов объёмной сетки на сферической модели головы (не mne.fit_dipole). Точный режим — отдельный срез; результат помечен методом, а не выдаётся за точный."
       >
-        <StatusPill tone="neutral">{dipoleLayerStatus(EMPTY_DIPOLE_LAYER)}</StatusPill>
+        <div className="mb-2 flex flex-wrap gap-2">
+          <StatusPill
+            tone={
+              calcJob?.status === 'failed'
+                ? 'danger'
+                : calcJob?.status === 'running'
+                  ? 'accent'
+                  : calcResult
+                    ? 'ok'
+                    : 'neutral'
+            }
+          >
+            {calcJobSummary(calcJob)}
+          </StatusPill>
+          {calcResult ? (
+            <StatusPill tone="neutral" title={`Метод: ${calcResult.method}`}>
+              {`Эпох в расчёте: ${calcResult.n_epochs_used} из ${calcResult.n_epochs_total}`}
+            </StatusPill>
+          ) : null}
+          <StatusPill tone={spectrum ? 'ok' : 'neutral'}>
+            {spectrum ? `Спектр: диапазонов ${spectrum.bands.length}` : 'Спектр не рассчитан'}
+          </StatusPill>
+        </div>
+
+        <SelectField
+          label="Длина эпохи"
+          value={String(calcParams.epochLengthMs)}
+          options={epochOptions}
+          disabled={epochLengths.length === 0}
+          onChange={(value) => setEpochLengthMs(Number(value))}
+          hint="Длины эпох задаёт сервер (список нарезки): правка помечает расчёт устаревшим, но ничего не запускает."
+        />
+        <NumberField
+          label="Шаг сетки"
+          value={calcParams.gridMm}
+          min={GRID_MM_RANGE[0]}
+          max={GRID_MM_RANGE[1]}
+          step={1}
+          unit="мм"
+          onChange={setGridMm}
+          hint="Перебор узлов: мельче сетка — точнее позиция и заметно дольше расчёт."
+        />
+        <NumberField
+          label="Порог reject"
+          value={calcParams.rejectThresholdUv}
+          min={0}
+          max={1000}
+          step={10}
+          unit="мкВ"
+          onChange={setRejectThresholdUv}
+          hint="Эпохи выше порога в расчёт не попадают (тот же смысл, что у нарезки эпох)."
+        />
+        <NumberField
+          label="КД ≥"
+          value={threshold}
+          min={THRESHOLD_NAM_RANGE[0]}
+          max={THRESHOLD_NAM_RANGE[1]}
+          step={5}
+          unit="нАм"
+          onChange={setAmplitudeThreshold}
+          hint="Порог отображения: диполи слабее момента не рисуются на проекциях, но остаются в результате задачи."
+        />
+        {hidden > 0 ? (
+          <p className="mt-1 text-sm text-warn">
+            {`Скрыто порогом «КД ≥ ${threshold} нАм»: ${hidden} из ${layer.points.length}`}
+          </p>
+        ) : null}
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            icon={<RotateCcw className="size-4" />}
+            disabled={!calcResult && !spectrum}
+            onClick={resetCalc}
+            title="Убрать результат расчёта и спектр (параметры и слои остаются)"
+          >
+            Сбросить расчёт
+          </Button>
+        </div>
+        <p className="mt-2 text-sm text-fg-2">
+          Расчёт запускается кнопкой в шапке раздела, спектр — кнопкой в панели «Топокарты ритмов»:
+          правка параметров здесь ничего не запускает.
+        </p>
+        <p className="mt-2 text-sm text-fg-2">{dipoleLayerStatus(visibleLayer)}</p>
+        {calcResult?.warnings.length ? (
+          <ul className="mt-1 list-inside list-disc text-sm text-warn">
+            {calcResult.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        ) : null}
       </Panel>
     </>
   )

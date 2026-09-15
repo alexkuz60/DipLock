@@ -2,12 +2,16 @@
  * Фикстуры ответов бэкенда для тестов UI (совпадают по форме со схемами API).
  */
 import type {
+  DipoleScanPoint,
+  DipoleScanResult,
   InitStatus,
   JobStatus,
   MetaResponse,
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  SpectrumBandOut,
+  SpectrumResult,
 } from '@/shared/api/types'
 
 export const metaFixture: MetaResponse = {
@@ -96,6 +100,8 @@ export const jobFixture: JobStatus = {
   stage: 'dipoles',
   progress: 0.9,
   message: 'Фитинг диполей по эпохам',
+  epochs_done: 0,
+  epochs_total: 0,
   filename: 'rec.edf',
   session_id: null,
   created_at: '2026-09-13T09:00:00',
@@ -114,6 +120,8 @@ export const preprocessJobFixture: JobStatus = {
   stage: 'done',
   progress: 1,
   message: 'Найдено артефактов: 2',
+  epochs_done: 0,
+  epochs_total: 0,
   filename: 'probe.edf',
   session_id: null,
   created_at: '2026-09-13T09:00:00',
@@ -172,5 +180,114 @@ export function preprocessResultFixture(
     warnings: [],
     duration_sec_calc: 0.4,
     ...overrides,
+  }
+}
+
+/**
+ * Завершённая задача раздела «Диполи» (срез 3.4): её опрашивает стор расчёта.
+ * `epochs_done`/`epochs_total` — детальный прогресс по эпохам.
+ */
+export const calcJobFixture: JobStatus = {
+  job_id: 'job-calc-1',
+  kind: 'dipoles',
+  status: 'succeeded',
+  stage: 'done',
+  progress: 1,
+  message: 'Диполей: 4 (быстрый режим, сетка 7 мм)',
+  epochs_done: 4,
+  epochs_total: 4,
+  filename: 'probe.edf',
+  session_id: null,
+  created_at: '2026-09-15T09:00:00',
+  started_at: '2026-09-15T09:00:01',
+  finished_at: '2026-09-15T09:00:04',
+  elapsed_sec: 3.1,
+  error: null,
+  result_url: '/api/v1/recordings/rec-1/dipoles/job-calc-1',
+}
+
+/** Спектр по диапазонам: числа PSD + ссылки на топокарты (срез 3.4). */
+export function spectrumResultFixture(
+  overrides: Partial<SpectrumResult> = {},
+): SpectrumResult {
+  const bands: SpectrumBandOut[] = [
+    { name: 'delta', fmin: 1, fmax: 4, power_uv2: 2.5, topomap_url: topomapUrl('delta') },
+    { name: 'theta', fmin: 4, fmax: 8, power_uv2: 3.5, topomap_url: topomapUrl('theta') },
+    { name: 'alpha', fmin: 8, fmax: 13, power_uv2: 12.5, topomap_url: topomapUrl('alpha') },
+    { name: 'beta', fmin: 13, fmax: 30, power_uv2: 4.5, topomap_url: topomapUrl('beta') },
+    // γ вне узкой полосы фильтра: мощность «не измерена» — именно null, а не 0
+    { name: 'gamma', fmin: 30, fmax: 40, power_uv2: null, topomap_url: topomapUrl('gamma') },
+  ]
+  return {
+    recording_id: recordingFixture.recording_id,
+    channels: [...recordingFixture.channels],
+    missed_channels: [],
+    sfreq: recordingFixture.sfreq,
+    epoch_length_ms: 1000,
+    n_epochs: 4,
+    n_fft: 250,
+    filter_band_hz: [1, 40],
+    notch_hz: null,
+    reject_threshold_uv: 150,
+    freqs: [1, 4, 8, 10, 13, 30, 40],
+    psd_mean_uv2: [1, 2, 6, 12, 4, 2, 1],
+    bands,
+    topomap_version: 'spec1234abcd',
+    warnings: [],
+    duration_sec_calc: 0.6,
+    ...overrides,
+  }
+}
+
+/** URL топокарты диапазона — как его отдаёт бэкенд (версия добавляется клиентом). */
+export function topomapUrl(band: string): string {
+  return `/api/v1/recordings/${recordingFixture.recording_id}/spectrum/topomap/${band}.png`
+}
+
+/** Результат быстрого расчёта диполей: точки MNI с моментами (срез 3.4). */
+export function dipoleScanResultFixture(
+  overrides: Partial<DipoleScanResult> = {},
+): DipoleScanResult {
+  return {
+    recording_id: recordingFixture.recording_id,
+    method: 'fast_grid',
+    channels: [...recordingFixture.channels],
+    sfreq: recordingFixture.sfreq,
+    epoch_length_ms: 1000,
+    reject_threshold_uv: 150,
+    filter_band_hz: [1, 40],
+    notch_hz: null,
+    n_epochs_total: 4,
+    n_epochs_used: 4,
+    grid_mm: 7,
+    points: [
+      dipolePoint(0, 120, [12, -34.5, 18], 60),
+      dipolePoint(1, 140, [-20, 10, 42], 25),
+      dipolePoint(2, 60, [30, 5, 30], 90),
+      // Точка без MNI (fsaverage недоступен) — в слой проекций не попадёт
+      { ...dipolePoint(3, 200, [0, 0, 0], 80), mni_coords: null },
+    ],
+    warnings: [],
+    duration_sec_calc: 3.1,
+    ...overrides,
+  }
+}
+
+/** Одна точка результата расчёта: позиция MNI, момент (единичный) и метрики. */
+function dipolePoint(
+  epochIndex: number,
+  timeMs: number,
+  mni: [number, number, number],
+  amplitudeNaM: number,
+): DipoleScanPoint {
+  return {
+    epoch_index: epochIndex,
+    time_ms: timeMs,
+    head_coords: [mni[0], mni[1], mni[2]],
+    mni_coords: [...mni],
+    moment: [0, 1, 0],
+    amplitude_nam: amplitudeNaM,
+    gof: 0.91,
+    brodmann_area: 'BA17-lh',
   }
 }

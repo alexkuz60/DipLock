@@ -13,11 +13,13 @@ import {
   projectionBox,
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
+import { CALC_PARAM_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
 import {
   DIPOLE_PARAM_DEFAULTS,
   EMPTY_SELECTION,
   useDipoleParams,
 } from '@/shared/state/dipoleParams'
+import { dipoleScanResultFixture } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { DipolesSection } from './DipolesSection'
@@ -41,6 +43,17 @@ describe('рабочая область раздела «Диполи»', () => 
     useDipoleParams.setState({
       params: { ...DIPOLE_PARAM_DEFAULTS, slices: defaultSlices() },
       selection: EMPTY_SELECTION,
+    })
+    useDipoleCalc.setState({
+      params: { ...CALC_PARAM_DEFAULTS },
+      amplitudeThresholdNam: 0,
+      job: null,
+      result: null,
+      spectrumJob: null,
+      spectrum: null,
+      error: null,
+      spectrumError: null,
+      view: 'none',
     })
     vi.stubGlobal('fetch', mockApiFetch())
   })
@@ -142,5 +155,33 @@ describe('рабочая область раздела «Диполи»', () => 
 
     expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
     expect(await screen.findByText('МРТ: метаданные недоступны')).toBeInTheDocument()
+  })
+
+  it('рисует точки из результата расчёта и подчиняется порогу «КД» (срез 3.4)', () => {
+    // Фикстура: четыре точки, одна без MNI, амплитуды 60 / 25 / 90 нАм.
+    // Порог 60 пропускает на проекции две точки — слой фильтруется, но результат
+    // задачи остаётся нетронутым (порог — параметр отображения).
+    useDipoleCalc.setState({ result: dipoleScanResultFixture(), amplitudeThresholdNam: 60 })
+    renderWithProviders(<DipolesSection />)
+
+    for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
+      expect(screen.getAllByTestId(new RegExp(`^dipole-dot-${plane}-`))).toHaveLength(2)
+    }
+    expect(screen.getByText('Точек диполей: 2')).toBeInTheDocument()
+    expect(screen.getByText('Скрыто порогом «КД ≥ 60 нАм»: 1')).toBeInTheDocument()
+    expect(screen.getByText(/Быстрый режим, сетка 7 мм · эпох 4 из 4/)).toBeInTheDocument()
+    expect(
+      screen.getByText('Часть точек без MNI (fsaverage недоступен) — на проекции не попадают'),
+    ).toBeInTheDocument()
+  })
+
+  it('считает порог по слою, а не по задаче, и снимается нулём', () => {
+    useDipoleCalc.setState({ result: dipoleScanResultFixture(), amplitudeThresholdNam: 200 })
+    renderWithProviders(<DipolesSection />)
+
+    // Порог выше всех амплитуд: ни одной точки, но расчёт на месте
+    expect(screen.queryAllByTestId(/^dipole-dot-axial-/)).toHaveLength(0)
+    expect(screen.getByText('Скрыто порогом «КД ≥ 200 нАм»: 3')).toBeInTheDocument()
+    expect(screen.getByText(/Быстрый режим, сетка 7 мм/)).toBeInTheDocument()
   })
 })

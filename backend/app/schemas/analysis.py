@@ -279,6 +279,100 @@ class MriSlicesOut(BaseModel):
     slice_url: str
 
 
+# --- Спектр по диапазонам (срез 3.4) ---
+
+class SpectrumBandOut(BaseModel):
+    """Средняя мощность одного ритма (δ…γ) с ссылкой на топокарту.
+
+    Мощность — мкВ²/Гц (единицы `compute_psd`: при `units='uV'` MNE отдаёт
+    мкВ²/Гц), то есть величину можно читать как «плотность мощности».
+    """
+
+    name: str = Field(description="Ключ диапазона из `freq_bands` (delta…gamma)")
+    fmin: float
+    fmax: float
+    power_uv2: Optional[float] = Field(
+        default=None,
+        description="Средняя мощность в диапазоне, мкВ²/Гц; None — частоты не попали в полосу фильтра",
+    )
+    topomap_url: Optional[str] = Field(
+        default=None, description="URL топокарты диапазона (PNG, ETag); None — не построена"
+    )
+
+
+class SpectrumResult(BaseModel):
+    """Результат задачи спектра записи (``kind=spectrum``).
+
+    PSD считается по эпохам записи (Welch) и отдаётся **числами** — UI сам
+    рисует гистограмму по диапазонам. Топокарты — только картинки (PNG),
+    пиксели UI не считает: то же правило, что для срезов МРТ (срез 3.2).
+    """
+
+    recording_id: str
+    channels: List[str] = Field(description="Каналы, попавшие в расчёт (порядок монтажа)")
+    missed_channels: List[str] = Field(
+        default_factory=list, description="Каналы без позиции в монтаже — в топокарту не входят"
+    )
+    sfreq: float
+    epoch_length_ms: float
+    n_epochs: int = Field(description="Сколько эпох попало в PSD")
+    n_fft: int = Field(description="Длина окна Welch, отсчётов")
+    filter_band_hz: Optional[List[float]] = Field(
+        default=None, description="Полоса фильтра, на которой считался спектр; None — без фильтра"
+    )
+    notch_hz: Optional[float] = None
+    reject_threshold_uv: float = Field(
+        default=150.0, description="Порог reject эпох: входит в URL/ETag топокарты"
+    )
+    freqs: List[float] = Field(description="Частоты PSD, Гц")
+    psd_mean_uv2: List[float] = Field(description="PSD, усреднённый по каналам, мкВ²/Гц")
+    bands: List[SpectrumBandOut] = Field(default_factory=list)
+    topomap_version: str = Field(description="Версия топокарт (в URL — против «залипания» кэша)")
+    warnings: List[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
+
+
+# --- Быстрый расчёт диполей (срез 3.4) ---
+
+class DipoleScanPointOut(BaseModel):
+    """Один диполь быстрого расчёта (одна эпоха → одна точка в импульсе GFP).
+
+    Быстрый режим жертвует точностью ради времени: для эпохи берётся **один**
+    отсчёт (пик GFP) и положение диполя ищется перебором узлов объёмной сетки
+    на сферической модели головы — без BEM и без `mne.fit_dipole`.
+    """
+
+    epoch_index: int
+    time_ms: float = Field(description="Время пика GFP внутри эпохи, мс")
+    head_coords: List[float] = Field(description="Позиция в системе координат головы, мм")
+    mni_coords: Optional[List[float]] = Field(
+        default=None, description="MNI (мм); None — fsaverage недоступен, точка не наводится"
+    )
+    moment: List[float] = Field(description="Единичный вектор момента диполя (направление)")
+    amplitude_nam: float = Field(description="Амплитуда момента, нА·м")
+    gof: float = Field(description="Goodness of fit, 0..1")
+    brodmann_area: Optional[str] = Field(default=None, description="Поле Бродмана, например BA17-lh")
+
+
+class DipoleScanResult(BaseModel):
+    """Результат задачи быстрого расчёта диполей (``kind=dipoles``)."""
+
+    recording_id: str
+    method: str = Field(description="Метод расчёта: `fast_grid` — перебор сетки, сферическая модель")
+    channels: List[str]
+    sfreq: float
+    epoch_length_ms: float
+    reject_threshold_uv: float
+    filter_band_hz: Optional[List[float]] = None
+    notch_hz: Optional[float] = None
+    n_epochs_total: int = Field(description="Сколько эпох нарезано (включая отброшенные)")
+    n_epochs_used: int = Field(description="Сколько эпох прошло reject-фильтр")
+    grid_mm: float = Field(description="Шаг объёмной сетки поиска, мм")
+    points: List[DipoleScanPointOut] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
+
+
 class AnalyzeResponse(BaseModel):
     """POST /api/v1/analyze (и результат job) — итог полного пайплайна."""
 
@@ -315,11 +409,13 @@ class JobStatus(BaseModel):
     """GET /api/v1/jobs/{job_id} — состояние задачи (этап + прогресс 0..1)."""
 
     job_id: str
-    kind: str = Field(description="Тип задачи: analyze | preprocess")
+    kind: str = Field(description="Тип задачи: analyze | preprocess | spectrum | dipoles")
     status: JobState
     stage: str = Field(description="Текущий этап пайплайна")
     progress: float = Field(default=0.0, ge=0.0, le=1.0)
     message: str = ""
+    epochs_done: int = Field(default=0, description="Сколько эпох уже обработано (детальный прогресс)")
+    epochs_total: int = Field(default=0, description="Сколько эпох в текущем этапе (0 — этап без эпох)")
     filename: Optional[str] = None
     session_id: Optional[str] = None
     created_at: datetime

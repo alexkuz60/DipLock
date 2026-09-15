@@ -31,6 +31,7 @@ import {
   type EdfUnits,
   type RecalcStage,
 } from './edfParams'
+import { useDipoleCalc } from './dipoleCalc'
 
 /** Снимает отметку «уровень в полёте», не мутируя прежний объект состояния. */
 function releaseLevel(
@@ -292,7 +293,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   beginUpload: () => set({ uploadProgress: 0, uploadError: null, demo: null }),
   setUploadProgress: (ratio) => set({ uploadProgress: Math.min(1, Math.max(0, ratio)) }),
   failUpload: (message) => set({ uploadProgress: null, uploadError: message }),
-  finishUpload: (meta) =>
+  finishUpload: (meta) => {
     set({
       recording: meta,
       uploadProgress: null,
@@ -311,7 +312,11 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       epochMarks: [],
       // Паспорт принадлежит сессии: новая запись — чистый паспорт
       passport: { ...EMPTY_PASSPORT, title: meta.filename },
-    }),
+    })
+    // Расчёт диполей и спектр относятся к конкретной записи: результат прежней
+    // записи на новую не переносим — точки и топокарты сбрасываются.
+    useDipoleCalc.getState().reset()
+  },
 
   openDemo: (channels) => {
     const signal = makeDemoSignal(channels)
@@ -464,6 +469,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     // Выбор каналов и результат предподготовки привязаны к записи
     useEdfParams.getState().setAvailableChannels([])
     useEdfParams.getState().clearApplied()
+    // Результаты расчёта диполей и спектра принадлежат закрытой записи
+    useDipoleCalc.getState().reset()
   },
 }))
 

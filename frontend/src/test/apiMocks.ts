@@ -3,20 +3,25 @@
  */
 import { vi } from 'vitest'
 import {
+  calcJobFixture,
+  dipoleScanResultFixture,
   initStatusFixture,
   metaFixture,
   preprocessJobFixture,
   preprocessResultFixture,
   recordingFixture,
+  spectrumResultFixture,
 } from './fixtures'
 import { encodeSignalBlob } from './signalBlob'
 import type {
+  DipoleScanResult,
   InitStatus,
   JobStatus,
   MetaResponse,
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  SpectrumResult,
 } from '@/shared/api/types'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -24,6 +29,16 @@ function jsonResponse(body: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+/** 202-ответ запуска задачи расчёта (срез 3.4): id задачи и адреса поллинга. */
+function calcJobCreated(jobId: string, kind: 'spectrum' | 'dipoles'): Record<string, string> {
+  return {
+    job_id: jobId,
+    status: 'queued',
+    poll_url: `/api/v1/jobs/${jobId}`,
+    result_url: `/api/v1/recordings/${recordingFixture.recording_id}/${kind}/${jobId}`,
+  }
 }
 
 /**
@@ -82,6 +97,14 @@ export type MockApiOptions = {
   preprocessJob?: JobStatus
   /** Смоделировать отказ запуска стадии (404 записи) */
   preprocessStartFails?: boolean
+  /** Статус задачи расчёта раздела «Диполи» (спектр и диполи) — для поллинга */
+  calcJob?: JobStatus
+  /** Явный результат спектра по диапазонам */
+  spectrumResult?: SpectrumResult
+  /** Явный результат быстрого расчёта диполей */
+  dipoleScanResult?: DipoleScanResult
+  /** Смоделировать отказ запуска расчёта (404 записи) */
+  calcStartFails?: boolean
 }
 
 export function mockApiFetch(options: MockApiOptions = {}) {
@@ -120,8 +143,33 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         options.preprocessResult ?? preprocessResultFixture(requestedStage),
       )
     }
+    if (url.includes('/spectrum')) {
+      if (url.includes('/topomap/')) {
+        // Картинку топокарты в jsdom никто не декодирует — важно лишь, что URL живой
+        return new Response(new Uint8Array([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'Content-Type': 'image/png', ETag: '"mock-topomap"' },
+        })
+      }
+      if (method === 'POST') {
+        if (options.calcStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'spectrum'), 202)
+      }
+      return jsonResponse(options.spectrumResult ?? spectrumResultFixture())
+    }
+    if (url.includes('/dipoles')) {
+      if (method === 'POST') {
+        if (options.calcStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'dipoles'), 202)
+      }
+      return jsonResponse(options.dipoleScanResult ?? dipoleScanResultFixture())
+    }
     if (url.includes('/jobs/')) {
-      return jsonResponse(options.preprocessJob ?? preprocessJobFixture)
+      return jsonResponse(options.calcJob ?? options.preprocessJob ?? preprocessJobFixture)
     }
     if (url.includes('/signals')) {
       if (options.signalsFail) {

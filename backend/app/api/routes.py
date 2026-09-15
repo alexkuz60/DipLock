@@ -35,6 +35,7 @@ from app.schemas.analysis import (
     BrodmannAreaOut,
     BrodmannIndexOut,
     BrodmannLabelsOut,
+    DipoleScanResult,
     JobCreated,
     JobStatus,
     MetaResponse,
@@ -44,11 +45,18 @@ from app.schemas.analysis import (
     PreprocessStage,
     RecordingMeta,
     RecordingSignalsHeader,
+    SpectrumResult,
     SurfaceOut,
     SurfaceRef,
 )
+from app.services.dipole_scanner import DipoleScanParams, compute_dipole_scan
 from app.services.job_manager import ProgressCallback, job_manager
 from app.services.preprocess import PreprocessParams, run_preprocess
+from app.services.spectral import (
+    SpectrumParams,
+    cached_topomap,
+    compute_spectrum,
+)
 from app.services.recording_signals import (
     SignalBuildError,
     build_signal_blob,
@@ -396,11 +404,62 @@ def _job_status(job: Any) -> JobStatus:
     result_url: Optional[str] = None
     if job.status == "succeeded":
         recording_id = job.meta.get("recording_id")
-        if job.kind == "preprocess" and recording_id:
-            result_url = f"{prefix}/recordings/{recording_id}/preprocess/{job.job_id}"
+        # Задачи записи (предподготовка, спектр, диполи) держат результат рядом
+        # с записью: `/recordings/{id}/{kind}/{job_id}` — отдельные контракты
+        # (`PreprocessResult`, `SpectrumResult`, `DipoleScanResult`).
+        if recording_id and job.kind in ("preprocess", "spectrum", "dipoles"):
+            result_url = f"{prefix}/recordings/{recording_id}/{job.kind}/{job.job_id}"
         else:
             result_url = f"{prefix}/jobs/{job.job_id}/result"
     return JobStatus(**job.as_dict(), result_url=result_url)
+
+
+def _recording_job(recording_id: str, job_id: str, kind: str) -> Any:
+    """Задача записи нужного типа; 404/409 — как у результата предподготовки.
+
+    Общий разбор для «задач записи»: чужой job, незавершённая или упавшая задача
+    не должны отдавать результат, а UI показывает `detail` как есть.
+    """
+    job = job_manager.get(job_id)
+    if job is None or job.kind != kind or job.meta.get("recording_id") != recording_id:
+        raise HTTPException(
+            status_code=404, detail=f"Задача {kind} {job_id} для записи {recording_id} не найдена",
+        )
+    if job.status == "failed":
+        raise HTTPException(status_code=409, detail=f"Задача завершилась ошибкой: {job.error}")
+    if job.status != "succeeded" or job.result is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Задача ещё не завершена (этап {job.stage}, прогресс {job.progress:.0%})",
+        )
+    return job
+
+
+def _optional_band(band_min: Optional[float], band_max: Optional[float]) -> Optional[Tuple[float, float]]:
+    """Полоса фильтра из формы: пара значений либо «без фильтра».
+
+    Односторонняя полоса — ошибка: молча догадываться о второй границе нельзя,
+    фильтр меняет и спектр, и локализацию.
+    """
+    if band_min is None and band_max is None:
+        return None
+    if band_min is None or band_max is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Полоса задаётся парой band_min и band_max либо не задаётся вовсе",
+        )
+    if band_min >= band_max:
+        raise HTTPException(status_code=400, detail="band_min должен быть меньше band_max")
+    return (band_min, band_max)
+
+
+def _validate_epoch_length(epoch_length_ms: float) -> None:
+    """Проверка длины эпохи: только значения из `epoch_lengths_ms` (DRY с панелью)."""
+    if epoch_length_ms not in settings.epoch_lengths_ms:
+        raise HTTPException(
+            status_code=400,
+            detail=f"epoch_length_ms должен быть одним из {settings.epoch_lengths_ms}",
+        )
 
 
 def _preprocess_job_worker(
@@ -414,6 +473,24 @@ def _preprocess_job_worker(
     реестру просмотра и живёт по своему TTL.
     """
     return run_preprocess(recording, settings, params, progress)
+
+
+def _spectrum_job_worker(
+    progress: ProgressCallback,
+    recording: Any,
+    params: SpectrumParams,
+) -> Dict[str, Any]:
+    """Воркер задачи спектра (поток): Welch PSD + топокарты диапазонов."""
+    return compute_spectrum(recording, settings, params, progress)
+
+
+def _dipole_scan_job_worker(
+    progress: ProgressCallback,
+    recording: Any,
+    params: DipoleScanParams,
+) -> Dict[str, Any]:
+    """Воркер быстрого расчёта диполей (поток): перебор сетки по эпохам."""
+    return compute_dipole_scan(recording, settings, params, progress)
 
 
 
@@ -591,24 +668,10 @@ async def create_preprocess_job(
             status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
         )
 
-    band: Optional[tuple] = None
-    if band_min is not None or band_max is not None:
-        if band_min is None or band_max is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Полоса задаётся парой band_min и band_max либо не задаётся вовсе",
-            )
-        if band_min >= band_max:
-            raise HTTPException(
-                status_code=400, detail="band_min должен быть меньше band_max",
-            )
-        band = (band_min, band_max)
+    band = _optional_band(band_min, band_max)
 
-    if stage == "epochs" and epoch_length_ms not in settings.epoch_lengths_ms:
-        raise HTTPException(
-            status_code=400,
-            detail=f"epoch_length_ms должен быть одним из {settings.epoch_lengths_ms}",
-        )
+    if stage == "epochs":
+        _validate_epoch_length(epoch_length_ms)
 
     params = PreprocessParams(
         stage=stage,
@@ -659,6 +722,179 @@ async def get_preprocess_result(recording_id: str, job_id: str) -> PreprocessRes
             detail=f"Задача ещё не завершена (этап {job.stage}, прогресс {job.progress:.0%})",
         )
     return PreprocessResult(**job.result)
+
+
+@router.post(
+    "/recordings/{recording_id}/spectrum", status_code=202, response_model=JobCreated,
+    summary="Запустить расчёт спектра по диапазонам (Welch PSD)",
+)
+async def create_spectrum_job(
+    recording_id: str,
+    band_min: Optional[float] = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: Optional[float] = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: Optional[float] = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: Optional[str] = Form(None, description="Каналы референса через запятую"),
+    epoch_length_ms: float = Form(2000.0, description="Длина эпохи для PSD"),
+    reject_threshold_uv: float = Form(150.0, description="Порог reject: эпохи выше — не в спектр"),
+) -> JobCreated:
+    """Спектр записи по ритмам δ…γ — фоновой задачей (202 + ``job_id``).
+
+    Ответ задачи (``GET /recordings/{id}/spectrum/{job_id}``) содержит числа PSD
+    и ссылки на топокарты диапазонов; картинки отдаёт отдельный кэшируемый
+    эндпоинт ``/spectrum/topomap/{band}.png`` с ETag/304. Расчёт стартует только
+    этим запросом (правило «обработка — по кнопке», docs/ui.md).
+    """
+    recording = recording_registry.get(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
+        )
+    band = _optional_band(band_min, band_max)
+    _validate_epoch_length(epoch_length_ms)
+
+    params = SpectrumParams(
+        filter_band=band,
+        notch_hz=notch_hz,
+        epoch_length_ms=epoch_length_ms,
+        reference=reference,
+        reference_channels=_parse_reference_channels(reference_channels),
+        reject_threshold_uv=reject_threshold_uv,
+    )
+    job = job_manager.submit(
+        "spectrum", recording.filename, _spectrum_job_worker, recording, params,
+        meta={"recording_id": recording_id, "epoch_length_ms": epoch_length_ms},
+    )
+    prefix = settings.api_prefix
+    logger.info("Создана задача спектра %s (%s)", job.job_id, recording_id)
+    return JobCreated(
+        job_id=job.job_id,
+        status=job.status,
+        poll_url=f"{prefix}/jobs/{job.job_id}",
+        result_url=f"{prefix}/recordings/{recording_id}/spectrum/{job.job_id}",
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/spectrum/{job_id}", response_model=SpectrumResult,
+    summary="Результат расчёта спектра",
+)
+async def get_spectrum_result(recording_id: str, job_id: str) -> SpectrumResult:
+    """Числа PSD по диапазонам и ссылки на топокарты. 409 — задача идёт/упала."""
+    return SpectrumResult(**_recording_job(recording_id, job_id, "spectrum").result)
+
+
+@router.get(
+    "/recordings/{recording_id}/spectrum/topomap/{band}.png",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+    summary="Топокарта диапазона (PNG, ETag)",
+)
+async def get_spectrum_topomap(
+    recording_id: str,
+    band: str,
+    band_min: Optional[float] = Query(None, description="Полоса фильтра, нижняя граница, Гц"),
+    band_max: Optional[float] = Query(None, description="Полоса фильтра, верхняя граница, Гц"),
+    notch_hz: Optional[float] = Query(None, description="Сетевой фильтр, Гц"),
+    epoch_length_ms: float = Query(2000.0, description="Длина эпохи для PSD"),
+    reject_threshold_uv: float = Query(150.0, description="Порог reject"),
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """PNG топокарты ритма в раскладке скальпа; вне круга голова прозрачна.
+
+    Параметры фильтра и эпохи входят в ETag: картинка соответствует **своему**
+    расчёту, и смена фильтра не отдаёт старую. Кэш — дисковый, поэтому повторный
+    запрос не пересчитывает PSD, а промах кэша пересчитывает (как пирамида
+    сигналов, 2.5). Неизвестный диапазон — 400, чужая запись — 404.
+    """
+    recording = recording_registry.get(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
+        )
+    params = SpectrumParams(
+        filter_band=_optional_band(band_min, band_max),
+        notch_hz=notch_hz,
+        epoch_length_ms=epoch_length_ms,
+        reject_threshold_uv=reject_threshold_uv,
+    )
+    try:
+        data, version = await asyncio.to_thread(
+            cached_topomap, recording, settings, params, band,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    etag = f'"{version}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=86400",
+        "X-Spectrum-Band": band,
+    }
+    if if_none_match and etag in if_none_match:
+        return Response(status_code=304, headers=headers)
+    return Response(content=data, media_type="image/png", headers=headers)
+
+
+@router.post(
+    "/recordings/{recording_id}/dipoles", status_code=202, response_model=JobCreated,
+    summary="Быстрый расчёт диполей (перебор сетки, одна точка на эпоху)",
+)
+async def create_dipole_scan_job(
+    recording_id: str,
+    band_min: Optional[float] = Form(None, description="Нижняя граница полосы, Гц"),
+    band_max: Optional[float] = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: Optional[float] = Form(None, description="Сетевой фильтр 50/60 Гц"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: Optional[str] = Form(None, description="Каналы референса через запятую"),
+    epoch_length_ms: float = Form(1000.0, description="Длина эпохи для расчёта"),
+    reject_threshold_uv: float = Form(150.0, description="Порог reject эпох"),
+    grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг объёмной сетки поиска, мм"),
+) -> JobCreated:
+    """Быстрый режим («fast»): одна точка на эпоху в пике GFP на сетке узлов.
+
+    Точный фитинг (`mne.fit_dipole` на BEM) — отдельный профиль; здесь результат
+    помечен ``method='fast_grid'``, и UI показывает эту метку, а не выдаёт быстрый
+    расчёт за точный (`docs/ui.md` §12).
+    """
+    recording = recording_registry.get(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
+        )
+    band = _optional_band(band_min, band_max)
+    _validate_epoch_length(epoch_length_ms)
+
+    params = DipoleScanParams(
+        filter_band=band,
+        notch_hz=notch_hz,
+        epoch_length_ms=epoch_length_ms,
+        reject_threshold_uv=reject_threshold_uv,
+        reference=reference,
+        reference_channels=_parse_reference_channels(reference_channels),
+        grid_mm=grid_mm,
+    )
+    job = job_manager.submit(
+        "dipoles", recording.filename, _dipole_scan_job_worker, recording, params,
+        meta={"recording_id": recording_id, "epoch_length_ms": epoch_length_ms},
+    )
+    prefix = settings.api_prefix
+    logger.info("Создана задача расчёта диполей %s (%s)", job.job_id, recording_id)
+    return JobCreated(
+        job_id=job.job_id,
+        status=job.status,
+        poll_url=f"{prefix}/jobs/{job.job_id}",
+        result_url=f"{prefix}/recordings/{recording_id}/dipoles/{job.job_id}",
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/dipoles/{job_id}", response_model=DipoleScanResult,
+    summary="Результат быстрого расчёта диполей",
+)
+async def get_dipole_scan_result(recording_id: str, job_id: str) -> DipoleScanResult:
+    """Точки диполей (MNI, момент, амплитуда, GOF). 409 — задача идёт или упала."""
+    return DipoleScanResult(**_recording_job(recording_id, job_id, "dipoles").result)
 
 
 @router.post(

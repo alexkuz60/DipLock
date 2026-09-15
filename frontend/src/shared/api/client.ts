@@ -6,12 +6,14 @@
  */
 import type {
   AnalyzeResponse,
+  DipoleScanResult,
   InitStatus,
   JobCreated,
   JobStatus,
   MetaResponse,
   PreprocessResult,
   RecordingMeta,
+  SpectrumResult,
 } from './types'
 
 export const API_PREFIX = '/api/v1'
@@ -151,4 +153,38 @@ export const api = {
       `${API_PREFIX}/recordings/${recordingId}/preprocess/${jobId}`,
       { signal },
     ),
+
+  /**
+   * Запуск расчёта спектра по диапазонам (срез 3.4): 202 + `job_id`.
+   * Результат — `api.spectrumResult` (числа PSD + ссылки на топокарты).
+   */
+  spectrumJob: (recordingId: string, form: FormData, signal?: AbortSignal) =>
+    request<JobCreated>(`${API_PREFIX}/recordings/${recordingId}/spectrum`, {
+      method: 'POST',
+      body: form,
+      signal,
+    }),
+
+  /** Результат расчёта спектра: диапазоны, PSD и URL топокарт. */
+  spectrumResult: (recordingId: string, jobId: string, signal?: AbortSignal) =>
+    request<SpectrumResult>(`${API_PREFIX}/recordings/${recordingId}/spectrum/${jobId}`, {
+      signal,
+    }),
+
+  /**
+   * Запуск быстрого расчёта диполей (срез 3.4): одна точка на эпоху, сетка узлов.
+   * Точный профиль (`mne.fit_dipole`) — отдельный срез, здесь `method: 'fast_grid'`.
+   */
+  dipoleScanJob: (recordingId: string, form: FormData, signal?: AbortSignal) =>
+    request<JobCreated>(`${API_PREFIX}/recordings/${recordingId}/dipoles`, {
+      method: 'POST',
+      body: form,
+      signal,
+    }),
+
+  /** Результат быстрого расчёта: точки (MNI, момент, амплитуда, GOF). */
+  dipoleScanResult: (recordingId: string, jobId: string, signal?: AbortSignal) =>
+    request<DipoleScanResult>(`${API_PREFIX}/recordings/${recordingId}/dipoles/${jobId}`, {
+      signal,
+    }),
 }

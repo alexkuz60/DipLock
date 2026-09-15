@@ -81,6 +81,82 @@ export type PreprocessResult = {
   duration_sec_calc: number
 }
 
+/** Средняя мощность одного ритма (срез 3.4): число + ссылка на топокарту */
+export type SpectrumBandOut = {
+  /** Ключ диапазона из `/meta` (`delta`…`gamma`) */
+  name: string
+  fmin: number
+  fmax: number
+  /** мкВ²/Гц; `null` — частоты диапазона не попали в полосу фильтра («не измерено») */
+  power_uv2: number | null
+  /** URL топокарты (PNG, ETag) или `null`, если картинка не построена */
+  topomap_url: string | null
+}
+
+/**
+ * Результат расчёта спектра (`GET /recordings/{id}/spectrum/{job}`).
+ * Числа рисует UI (гистограмма), топокарты приходят картинками с сервера.
+ */
+export type SpectrumResult = {
+  recording_id: string
+  channels: string[]
+  /** Каналы без позиции в монтаже — в топокарты не попали */
+  missed_channels: string[]
+  sfreq: number
+  epoch_length_ms: number
+  n_epochs: number
+  n_fft: number
+  filter_band_hz: number[] | null
+  notch_hz: number | null
+  /** Порог reject эпох: входит в URL картинки топокарты (и в её ETag) */
+  reject_threshold_uv: number
+  freqs: number[]
+  psd_mean_uv2: number[]
+  bands: SpectrumBandOut[]
+  /** Версия топокарт: уходит в URL (`?v=`) против «залипания» кэша браузера */
+  topomap_version: string
+  warnings: string[]
+  duration_sec_calc: number
+}
+
+/** Один диполь быстрого расчёта (срез 3.4): одна эпоха → одна точка в пике GFP */
+export type DipoleScanPoint = {
+  epoch_index: number
+  time_ms: number
+  /** Позиция в системе координат головы, мм */
+  head_coords: number[]
+  /** MNI, мм; `null` — fsaverage недоступен, точка не наводится на проекции */
+  mni_coords: number[] | null
+  /** Единичный вектор момента диполя (направление луча на проекциях) */
+  moment: number[]
+  amplitude_nam: number
+  gof: number
+  brodmann_area: string | null
+}
+
+/**
+ * Результат быстрого расчёта диполей (`GET /recordings/{id}/dipoles/{job}`).
+ * `method: 'fast_grid'` — перебор сетки на сферической модели (не `mne.fit_dipole`):
+ * UI обязан показывать эту метку, а не выдавать быстрый режим за точный.
+ */
+export type DipoleScanResult = {
+  recording_id: string
+  method: string
+  channels: string[]
+  sfreq: number
+  epoch_length_ms: number
+  reject_threshold_uv: number
+  filter_band_hz: number[] | null
+  notch_hz: number | null
+  n_epochs_total: number
+  n_epochs_used: number
+  /** Шаг объёмной сетки поиска, мм */
+  grid_mm: number
+  points: DipoleScanPoint[]
+  warnings: string[]
+  duration_sec_calc: number
+}
+
 /** Паспорт загруженной для просмотра записи (срез 2.2, без обработки) */
 export type RecordingMeta = {
   recording_id: string
@@ -162,6 +238,9 @@ export type JobStatus = {
   stage: string
   progress: number
   message: string
+  /** Детальный прогресс этапа, где считаются эпохи (срез 3.4): «12 из 30» */
+  epochs_done: number
+  epochs_total: number
   filename: string | null
   session_id: string | null
   created_at: string

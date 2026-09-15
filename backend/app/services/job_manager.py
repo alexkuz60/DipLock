@@ -50,6 +50,10 @@ STAGE_TITLES: Dict[str, str] = {
     "band_power": "Спектральная мощность",
     "dipoles": "Фитинг диполей",
     "localize": "Локализация (анатомия + Brodmann)",
+    # Быстрый расчёт (срез 3.4): спектр по диапазонам и перебор сетки без BEM
+    "spectrum": "Спектр (Welch PSD)",
+    "topomaps": "Топокарты диапазонов",
+    "scan": "Поиск диполей по сетке",
     "done": "Готово",
 }
 
@@ -72,6 +76,10 @@ class Job:
     session_id: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     meta: Dict[str, Any] = field(default_factory=dict)
+    # Детальный прогресс этапов с эпохами (срез 3.4): «12 из 30 эпох» читается
+    # лучше, чем плавающая дробь 0.42 — UI рисует по ним прогресс-бар задачи.
+    epochs_done: int = 0
+    epochs_total: int = 0
     task: Optional[asyncio.Task] = field(default=None, repr=False)
 
     def mark_started(self) -> None:
@@ -80,9 +88,25 @@ class Job:
         self.started_at = datetime.utcnow()
         self.set_progress("load_edf", message="Чтение EDF и монтаж 10-20")
 
-    def set_progress(self, stage: str, progress: Optional[float] = None, message: str = "") -> None:
-        """Обновляет этап/прогресс. Вызывается из воркер-потока (атомарно по GIL)."""
+    def set_progress(
+        self,
+        stage: str,
+        progress: Optional[float] = None,
+        message: str = "",
+        epochs_done: Optional[int] = None,
+        epochs_total: Optional[int] = None,
+    ) -> None:
+        """Обновляет этап/прогресс. Вызывается из воркер-потока (атомарно по GIL).
+
+        ``epochs_done``/``epochs_total`` — необязательный детальный счётчик эпох:
+        воркеры с пакетной обработкой (спектр, перебор сетки) сообщают его, чтобы
+        UI показывал прогресс по эпохам, а не только по этапам.
+        """
         self.stage = stage
+        if epochs_total is not None:
+            self.epochs_total = max(0, int(epochs_total))
+        if epochs_done is not None:
+            self.epochs_done = max(0, int(epochs_done))
         if progress is not None:
             self.progress = max(0.0, min(1.0, float(progress)))
         elif stage in PIPELINE_STAGES:
@@ -93,10 +117,16 @@ class Job:
             self.message = STAGE_TITLES[stage]
 
     def progress_cb(self) -> ProgressCallback:
-        """Колбэк для воркера: ``cb(stage, progress=None, message="")``."""
+        """Колбэк для воркера: ``cb(stage, progress=None, message="", epochs_done=…, epochs_total=…)``."""
 
-        def _cb(stage: str, progress: Optional[float] = None, message: str = "") -> None:
-            self.set_progress(stage, progress, message)
+        def _cb(
+            stage: str,
+            progress: Optional[float] = None,
+            message: str = "",
+            epochs_done: Optional[int] = None,
+            epochs_total: Optional[int] = None,
+        ) -> None:
+            self.set_progress(stage, progress, message, epochs_done, epochs_total)
 
         return _cb
 
@@ -132,6 +162,8 @@ class Job:
             "stage": self.stage,
             "progress": self.progress,
             "message": self.message,
+            "epochs_done": self.epochs_done,
+            "epochs_total": self.epochs_total,
             "filename": self.filename,
             "session_id": self.session_id,
             "created_at": self.created_at,

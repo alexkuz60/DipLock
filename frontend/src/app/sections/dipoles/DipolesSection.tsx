@@ -1,21 +1,24 @@
 /**
- * Рабочая область раздела «Диполи» (срез 3.1, реальный срез МРТ — 3.2).
+ * Рабочая область раздела «Диполи» (срез 3.1, срез МРТ — 3.2, расчёт — 3.4).
  *
- * Раздел показывает **геометрию и анатомию**, а не результат: реальный срез T1
- * (картинка с сервера), силуэт головы, схема среза MNI, поля Бродмана и (пока
- * пустой) слой точек диполей. Расчёт — отдельная задача по кнопке (следующий
- * срез фазы 3), поэтому здесь ничего не считается и не запускается: правка
- * параметров лишь меняет отрисовку.
+ * Раздел показывает **геометрию и результат**: реальный срез T1 (картинка с
+ * сервера), силуэт головы, схему среза MNI, поля Бродмана и точки диполей из
+ * результата задачи (быстрый режим, `shared/lib/dipolePoints.ts`). Расчёт идёт
+ * **только по кнопке в шапке** (`POST /recordings/{id}/dipoles`), правка
+ * параметров панели ничего не запускает — она лишь скрывает/показывает уже
+ * посчитанные точки (порог «КД») и наводит срезы.
  *
- * Запрос один и только за статикой: `/meta` отдаёт ссылку на срезы (базовый URL,
- * шаг сетки, версию ассета). Сами картинки срезов браузер грузит и кэширует по
- * URL из `<image>` — это отображение данных, а не запуск обработки.
+ * Запросы раздела: `/meta` за ссылкой на срезы (статика) и — по кнопке — задачи
+ * расчёта. Порог «КД ≥ X нАм» — параметр отображения: он фильтрует слой перед
+ * отрисовкой, поэтому счётчик скрытых точек считается по слою, а не по результату
+ * задачи (в результате точки остаются).
  *
- * Состояние — в zustand-срезе `shared/state/dipoleParams.ts` (видимость слоёв,
- * срезы, референс-точка). Клик по любой проекции наводит все три среза на
- * выбранную точку (`applyPointToSlices`) — пользователь попадает в точку, которую
- * видит, а не настраивает каждый срез отдельно.
+ * Состояние — в zustand-срезах `shared/state/dipoleParams.ts` (слои, срезы,
+ * референс-точка) и `shared/state/dipoleCalc.ts` (параметры расчёта, порог КД,
+ * результаты задач). Клик по любой проекции наводит все три среза на выбранную
+ * точку (`applyPointToSlices`).
  */
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   PROJECTION_PLANES,
@@ -23,9 +26,16 @@ import {
   projectionBox,
   slicesSummary,
 } from '@/shared/lib/mriProjections'
-import { dipoleLayerStatus, emptyDipoleLayer } from '@/shared/lib/dipolePoints'
+import {
+  dipoleLayerFromScan,
+  dipoleLayerStatus,
+  emptyDipoleLayer,
+  hiddenByThreshold,
+  thresholdDipoleLayer,
+} from '@/shared/lib/dipolePoints'
 import { api } from '@/shared/api/client'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { MriProjection } from './MriProjection'
 
@@ -41,6 +51,9 @@ export function DipolesSection() {
   const selection = useDipoleParams((state) => state.selection)
   const selectPoint = useDipoleParams((state) => state.selectPoint)
 
+  const result = useDipoleCalc((state) => state.result)
+  const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
+
   const meta = useQuery({
     queryKey: ['meta'],
     queryFn: ({ signal }) => api.meta(signal),
@@ -49,12 +62,44 @@ export function DipolesSection() {
   })
   const mri = meta.data?.mri_slices ?? null
 
+  /**
+   * Слой диполей из результата задачи. Результат не пересчитывается на клиенте:
+   * смена порога «КД» меняет только **отрисовку** (какие точки рисовать), поэтому
+   * слой строится из результата и фильтруется порогом отдельной чистой функцией.
+   */
+  const layer = useMemo(
+    () => (result ? dipoleLayerFromScan(result) : EMPTY_DIPOLE_LAYER),
+    [result],
+  )
+  const visibleLayer = useMemo(
+    () => thresholdDipoleLayer(layer, threshold),
+    [layer, threshold],
+  )
+  const hidden = hiddenByThreshold(layer, threshold)
+  const mniMissing = result !== null && layer.points.length < result.points.length
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <StatusPill tone={EMPTY_DIPOLE_LAYER.points.length ? 'ok' : 'neutral'}>
-          {dipoleLayerStatus(EMPTY_DIPOLE_LAYER)}
+        <StatusPill tone={visibleLayer.points.length ? 'ok' : 'neutral'}>
+          {dipoleLayerStatus(visibleLayer)}
         </StatusPill>
+        {result ? (
+          <StatusPill tone="accent" title={`Метод расчёта: ${result.method}`}>
+            {`Быстрый режим, сетка ${result.grid_mm} мм · эпох ${result.n_epochs_used} из ${result.n_epochs_total}`}
+          </StatusPill>
+        ) : null}
+        {hidden > 0 ? (
+          <StatusPill tone="warn">{`Скрыто порогом «КД ≥ ${threshold} нАм»: ${hidden}`}</StatusPill>
+        ) : null}
+        {threshold > 0 ? (
+          <StatusPill tone="neutral">{`Порог КД: ≥ ${threshold} нАм`}</StatusPill>
+        ) : null}
+        {mniMissing ? (
+          <StatusPill tone="warn">
+            Часть точек без MNI (fsaverage недоступен) — на проекции не попадают
+          </StatusPill>
+        ) : null}
         <StatusPill tone="accent">Срезы: {slicesSummary(slices)}</StatusPill>
         <StatusPill tone={mri ? 'ok' : meta.isLoading ? 'neutral' : 'warn'}>
           {mri
@@ -81,7 +126,7 @@ export function DipolesSection() {
             plane={plane}
             slices={slices}
             visibility={visibility}
-            points={EMPTY_DIPOLE_LAYER}
+            points={visibleLayer}
             selectedArea={selection.area}
             reference={selection.point}
             mri={mri}
@@ -98,8 +143,10 @@ export function DipolesSection() {
         Клик по проекции наводит все три среза на выбранную точку, а попадание в поле Бродмана
         подсвечивает его во всех проекциях. Срез томографии рисуется из PNG сервера и квантуется
         шагом сетки тома (1 мм), поэтому подпись среза может отличаться от картинки на полшага.
-        Слои включаются в панели справа; расчёт диполей запускается отдельной задачей и в этот срез
-        ещё не подключён.
+        Слои включаются в панели справа. Диполи считает сервер по кнопке в шапке — быстрым режимом
+        (одна точка на эпоху в пике GFP, перебор узлов сетки), поэтому позиция точки кратна шагу
+        сетки, а не «миллиметр в миллиметр» как у точного фитинга; порог «КД ≥» скрывает слабые
+        диполи на проекциях, не меняя результат задачи.
       </p>
     </div>
   )

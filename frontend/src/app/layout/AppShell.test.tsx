@@ -1,12 +1,13 @@
 /**
  * Тесты каркаса: рейл, тулс-хедер, сворачивание правой панели, хоткеи.
  */
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { SECTION_ROUTES } from '@/app/sections/registry'
 import { SectionRoute } from '@/app/sections/routes'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useUiStore } from '@/shared/state/uiStore'
 import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
@@ -26,6 +27,8 @@ describe('каркас приложения', () => {
   beforeEach(() => {
     mockApiFetch()
     useUiStore.getState().resetUiState()
+    // Выдвижная панель — состояние сессии: тесты не должны влиять друг на друга
+    useDipoleCalc.setState({ view: 'none' })
   })
 
   it('рисует рейл разделов с доступными именами', () => {
@@ -108,5 +111,34 @@ describe('каркас приложения', () => {
     const column = shell?.querySelector(':scope > div')
     expect(column?.className).toContain('min-h-0')
     expect(screen.getByRole('main')).toHaveClass('min-h-0')
+  })
+
+  it('показывает выдвижную панель раздела между шапкой и рабочей областью (срез 3.4)', () => {
+    // Панель — полоса каркаса (`drawer`), а не часть прокручиваемого контента:
+    // она объявлена в реестре разделов и появляется только у того раздела, у
+    // которого она есть
+    useDipoleCalc.setState({ view: 'topomap' })
+
+    renderApp('/dipoles')
+
+    const drawer = screen.getByTestId('dipoles-drawer')
+    expect(drawer).toHaveAttribute('data-view', 'topomap')
+    // Сосед сверху — тулс-хедер, снизу — рабочая область: панель между ними
+    expect(drawer.previousElementSibling?.tagName).toBe('HEADER')
+    expect(drawer.nextElementSibling?.tagName).toBe('MAIN')
+  })
+
+  it('не подсовывает открытую панель диполей разделам без панели', () => {
+    // Панель объявлена в конфигурации раздела, а не в каркасе: открытая панель
+    // диполей не должна «протекать» в раздел EDF
+    useDipoleCalc.setState({ view: 'topomap' })
+    cleanup()
+
+    renderApp('/edf')
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'EDF — просмотр записи' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId('dipoles-drawer')).not.toBeInTheDocument()
   })
 })
