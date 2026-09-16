@@ -287,7 +287,7 @@ describe('рабочая область раздела «Диполи»', () => 
     renderWithProviders(<DipolesSection />)
 
     for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
-      expect(screen.getByTestId(`frame-${plane}`)).toBeInTheDocument()
+      expect(screen.getByTestId(`layer-playback-${plane}`)).toBeInTheDocument()
       expect(screen.getByTestId(`dipole-dot-${plane}-0-120`)).toHaveAttribute(
         'stroke-opacity',
         String(FRAME_DIM_OPACITY),
@@ -295,7 +295,7 @@ describe('рабочая область раздела «Диполи»', () => 
       // Шлейф идёт к кадру во всех трёх проекциях: к эпохе 1 ведёт один отрезок 0→1
       expect(screen.getAllByTestId(new RegExp(`^trail-segment-${plane}-`))).toHaveLength(1)
     }
-    expect(screen.getByTestId('frame-axial').querySelector('title')?.textContent).toContain(
+    expect(screen.getByTestId('layer-playback-axial').querySelector('title')?.textContent).toContain(
       'Кадр воспроизведения: Эпоха 2',
     )
     // Кадр — чистая перерисовка: раздел по-прежнему просит только статику
@@ -308,8 +308,40 @@ describe('рабочая область раздела «Диполи»', () => 
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
     renderWithProviders(<DipolesSection />)
 
-    expect(screen.queryByTestId('frame-axial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('layer-playback-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('dipole-dot-axial-0-120')).toHaveAttribute('stroke-opacity', '1')
+  })
+
+  it('убирает анимацию выключенным слоем «Кадр воспроизведения», не трогая облако', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 1 },
+    })
+    useDipoleParams.setState({
+      params: {
+        ...DIPOLE_PARAM_DEFAULTS,
+        layerVisibility: { ...DIPOLE_PARAM_DEFAULTS.layerVisibility, playback: false },
+      },
+    })
+    renderWithProviders(<DipolesSection />)
+
+    // Анимация — свой слой: выключили её, облако осталось в обычном виде
+    expect(screen.queryByTestId('layer-playback-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('dipole-dot-axial-0-120')).toHaveAttribute('stroke-opacity', '1')
+  })
+
+  /**
+   * Пояснения — в справке тулс-хедера (`DipolesHelpDialog`), а не абзацем под
+   * фигурами: рабочая область показывает данные и полосу состояния с числами.
+   */
+  it('не объясняет фигуры абзацем в рабочей области', () => {
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    renderWithProviders(<DipolesSection />)
+
+    expect(screen.queryByText(/подсвечивает их во всех проекциях/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/быстрым режимом \(одна точка на эпоху/)).not.toBeInTheDocument()
+    // Полоса состояния при этом на месте: текст ушёл, числа остались
+    expect(screen.getByTestId('projection-axial')).toBeInTheDocument()
   })
 
   /**

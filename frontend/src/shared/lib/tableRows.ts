@@ -13,9 +13,13 @@
  *   (x > 0 — правое, RAS-раскладка проекций, см. `mriProjections.ts`), и это
  *   сказано в подсказке колонки — производная величина не должна выглядеть как
  *   измеренная;
- * * ROI в результате пока нет (точка помечена полем Бродмана), поэтому колонки
- *   ROI в таблице не будет, пока нет данных: пустая колонка «ROI» читалась бы
- *   как «ROI не определён», хотя его просто не считали.
+ * * «структура» и «поле Бродмана» — **разные колонки**: структура читается
+ *   сервером из объёма `aparc+aseg` по координате точки (та же метка, что и
+ *   контуры срезов), а поле — производная разметка коры (`PALS_B12_Brodmann`).
+ *   Одинаковые подписи у них читались бы как одна величина, измеренная дважды;
+ * * ROI в результате пока нет (точка помечена полем Бродмана и структурой),
+ *   поэтому колонки ROI в таблице не будет, пока нет данных: пустая колонка «ROI»
+ *   читалась бы как «ROI не определён», хотя его просто не считали.
  *
  * Сортировка — **по номеру эпохи** (требование среза): основной ключ — номер,
  * вторичный — время пика GFP в ту же сторону, чтобы переключение направления
@@ -37,6 +41,7 @@ export type TableColumnKey =
   | 'y'
   | 'z'
   | 'hemisphere'
+  | 'structure'
   | 'amplitude'
   | 'gof'
   | 'area'
@@ -86,6 +91,13 @@ export const TABLE_COLUMNS: TableColumn[] = [
     width: 'w-32',
   },
   {
+    key: 'structure',
+    label: 'Структура',
+    hint: 'Структура атласа aparc+aseg по MNI-координате точки (тот же атлас, что и контуры срезов); «—» — координат нет или метки в узле нет',
+    numeric: false,
+    width: 'w-48',
+  },
+  {
     key: 'amplitude',
     label: 'Амплитуда, нАм',
     hint: 'Момент диполя, нА·м: порог «КД ≥» из раздела «Диполи» на таблицу не влияет',
@@ -132,6 +144,15 @@ export type LocalizationRow = {
   gof: number
   /** Поле Бродмана (`null` — не определено) */
   area: string | null
+  /**
+   * Анатомическая структура по MNI-координате (атлас `aparc+aseg`).
+   *
+   * Приходит **готовой от сервера** (`anatomical_structure`): координаты считает
+   * сервер, и «угадывать» структуру на клиенте по контурам срезов значило бы
+   * получить вторую, не совпадающую с расчётом анатомию. `null` — координат нет
+   * или метки в узле нет: в ячейке «—».
+   */
+  structure: string | null
 }
 
 /**
@@ -147,6 +168,7 @@ export function localizationRows(result: DipoleScanResult): LocalizationRow[] {
     amplitudeNaM: point.amplitude_nam,
     gof: point.gof,
     area: point.brodmann_area,
+    structure: point.anatomical_structure,
   }))
 }
 
@@ -189,6 +211,8 @@ export function cellText(row: LocalizationRow, key: TableColumnKey): string {
       return coordinateText(row.mni?.[2])
     case 'hemisphere':
       return hemisphereLabel(hemisphereOf(row.mni?.[0] ?? null))
+    case 'structure':
+      return row.structure ?? EM_DASH
     case 'amplitude':
       return Number.isFinite(row.amplitudeNaM) ? row.amplitudeNaM.toFixed(1) : EM_DASH
     case 'gof':
@@ -222,7 +246,8 @@ export function rowTooltip(row: LocalizationRow): string {
     ? `MNI ${row.mni.map((value) => value.toFixed(1)).join(' / ')}`
     : 'MNI нет (fsaverage недоступен) — на проекции точка не наводится'
   const area = row.area ? `, ${row.area}` : ''
-  return `Эпоха ${row.epochIndex + 1}, пик ${(row.timeMs / 1000).toFixed(3)} с: ${coords}${area}, ${row.amplitudeNaM.toFixed(1)} нАм, GOF ${(row.gof * 100).toFixed(1)} %`
+  const structure = row.structure ? `, ${row.structure}` : ''
+  return `Эпоха ${row.epochIndex + 1}, пик ${(row.timeMs / 1000).toFixed(3)} с: ${coords}${structure}${area}, ${row.amplitudeNaM.toFixed(1)} нАм, GOF ${(row.gof * 100).toFixed(1)} %`
 }
 
 /** Подпись сортировки для статуса раздела: направление всегда названо словами. */

@@ -49,6 +49,7 @@ export type DipoleLayerId =
   | 'brodmann'
   | 'dipoles'
   | 'vectors'
+  | 'playback'
 
 /** Порядок слоёв = порядок отрисовки снизу вверх (и порядок чекбоксов в панели). */
 export const DIPOLE_LAYERS: DipoleLayerId[] = [
@@ -59,6 +60,7 @@ export const DIPOLE_LAYERS: DipoleLayerId[] = [
   'brodmann',
   'dipoles',
   'vectors',
+  'playback',
 ]
 
 export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
@@ -69,6 +71,7 @@ export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
   brodmann: 'Поля Бродмана',
   dipoles: 'Точки диполей',
   vectors: 'Векторы моментов',
+  playback: 'Кадр воспроизведения',
 }
 
 export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
@@ -83,6 +86,8 @@ export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
     'Позиции диполей из результата: одна точка на эпоху в пике GFP (порог «КД» скрывает слабые). Кольца белые, фиксированного размера; клик по точке выделяет диполь и наводит срезы на его позицию',
   vectors:
     'Направление момента диполя: луч от позиции точки, длина и толщина — по силе момента, наконечник считается от длины луча',
+  playback:
+    'Анимация (срез 3.7) отдельным слоем: маркер кадра с гало, луч кадра и затухающий шлейф последних секунд. Пока слой включён, облако диполей показывается приглушённым, чтобы движение читалось; выключение слоя убирает анимацию целиком, не трогая облако',
 }
 
 /** Слои, которые рисуются по умолчанию (точки диполей — тоже, но их пока нет). */
@@ -95,6 +100,7 @@ export const DIPOLE_PARAM_DEFAULTS = {
     brodmann: true,
     dipoles: true,
     vectors: true,
+    playback: true,
   } as Record<DipoleLayerId, boolean>,
   slices: defaultSlices(),
 }

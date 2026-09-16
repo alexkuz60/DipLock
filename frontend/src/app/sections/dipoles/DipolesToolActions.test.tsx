@@ -6,7 +6,7 @@
  * отображение (без единого запроса), а кнопки панелей лишь открывают одну
  * выдвижную панель за раз.
  */
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
@@ -200,5 +200,37 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     expect(useDipoleCalc.getState().playback).toMatchObject({ playing: false, active: false })
     expect(screen.queryByText(/^Кадр: эпоха/)).not.toBeInTheDocument()
+  })
+
+  /**
+   * Справка (поправка ручной проверки): пояснения к фигурам читают один-два раза
+   * за сеанс, поэтому они открываются диалогом по кнопке, а не занимают рабочую
+   * область абзацем. Диалог — чистое состояние: ни одного запроса.
+   */
+  it('открывает справку кнопкой и закрывает её Esc — без запросов', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApiFetch()
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    expect(screen.queryByTestId('dipoles-help-dialog')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Справка' }))
+
+    const dialog = screen.getByTestId('dipoles-help-dialog')
+    // В справке названы и метод расчёта, и производность BA-разметки: UI не
+    // обещает точности, которой у быстрого режима нет
+    expect(within(dialog).getByText(/перебор узлов объёмной сетки/)).toBeInTheDocument()
+    expect(within(dialog).getByTestId('dipoles-help-note')).toHaveTextContent('nearest_cortex_vertex')
+    expect(within(dialog).getByText(/Кадр идёт по сетке эпох результата/)).toBeInTheDocument()
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('dipoles-help-dialog')).not.toBeInTheDocument()
+
+    // Повторное открытие и закрытие кнопкой — тоже без запросов
+    await user.click(screen.getByRole('button', { name: 'Справка' }))
+    await user.click(screen.getByRole('button', { name: 'Закрыть справку' }))
+    expect(screen.queryByTestId('dipoles-help-dialog')).not.toBeInTheDocument()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

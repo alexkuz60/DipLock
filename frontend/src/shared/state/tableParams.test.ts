@@ -28,7 +28,7 @@ describe('настройки таблицы локализации', () => {
 
     expect(params.sortDirection).toBe('asc')
     expect(Object.values(params.columnVisibility).every(Boolean)).toBe(true)
-    expect(Object.keys(params.columnVisibility)).toHaveLength(9)
+    expect(Object.keys(params.columnVisibility)).toHaveLength(10)
   })
 
   it('переключает направление сортировки', () => {

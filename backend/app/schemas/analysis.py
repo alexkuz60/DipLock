@@ -419,6 +419,13 @@ class DipoleScanPointOut(BaseModel):
     amplitude_nam: float = Field(description="Амплитуда момента, нА·м")
     gof: float = Field(description="Goodness of fit, 0..1")
     brodmann_area: Optional[str] = Field(default=None, description="Поле Бродмана, например BA17-lh")
+    anatomical_structure: Optional[str] = Field(
+        default=None,
+        description=(
+            "Анатомическая структура по MNI-координате (aparc+aseg — тот же атлас, "
+            "что и контуры срезов); None — координат/метки нет"
+        ),
+    )
 
 
 class DipoleScanResult(BaseModel):

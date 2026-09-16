@@ -227,6 +227,28 @@ def _localize_point(
     return [float(value) for value in mni], area
 
 
+def _structure_of(cfg: Settings, mni_coords: Optional[List[float]]) -> Optional[str]:
+    """Анатомическая структура по MNI-координате точки (``aparc+aseg``).
+
+    Берётся тем же атласом, что и контуры срезов (`services/atlas_contours.py`),
+    поэтому подпись структуры в таблице локализации совпадает с подписью
+    структуры под курсором на проекциях: это одна метка объёма, прочитанная в
+    двух местах, а не две разные «догадки» об анатомии.
+
+    ``None`` — координат нет, метки в узле нет или атлас недоступен. Отсутствие
+    анатомии **не отменяет** расчёт: в таблице будет «—», как у точки без MNI.
+    """
+    if mni_coords is None:
+        return None
+    try:
+        from app.services.atlas_contours import structure_at
+
+        return structure_at(cfg, mni_coords)
+    except Exception as exc:  # noqa: BLE001 — атлас не обязателен для расчёта
+        logger.info("Структура по MNI не определена: %s", exc)
+        return None
+
+
 def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParams) -> Any:
     """Читает запись и нарезает эпохи для расчёта (reject-порог из параметров)."""
     l_freq: Optional[float] = None
@@ -351,6 +373,7 @@ def compute_dipole_scan(
             "amplitude_nam": float(amplitude_am * 1e9),
             "gof": float(gof),
             "brodmann_area": area,
+            "anatomical_structure": _structure_of(cfg, mni_coords),
         })
         report(
             "scan",

@@ -35,6 +35,7 @@ function point(overrides: Partial<DipoleScanPoint> = {}): DipoleScanPoint {
     amplitude_nam: 60,
     gof: 0.91,
     brodmann_area: 'BA17-lh',
+    anatomical_structure: 'таламус (слева)',
     ...overrides,
   }
 }
@@ -137,6 +138,7 @@ describe('строки таблицы локализации', () => {
       'y',
       'z',
       'hemisphere',
+      'structure',
       'amplitude',
       'gof',
       'area',

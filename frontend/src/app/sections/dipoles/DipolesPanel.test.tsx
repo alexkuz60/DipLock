@@ -101,6 +101,21 @@ describe('панель раздела «Диполи»', () => {
     expect(screen.getByLabelText('Точки диполей')).toBeChecked()
   })
 
+  it('включает слой анимации отдельно от облака (поправка 3.9)', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    const playback = screen.getByLabelText('Кадр воспроизведения')
+    expect(playback).toBeChecked()
+
+    await user.click(playback)
+
+    expect(useDipoleParams.getState().params.layerVisibility.playback).toBe(false)
+    // Анимация — своя сущность: облако и его лучи не тронуты
+    expect(useDipoleParams.getState().params.layerVisibility.dipoles).toBe(true)
+    expect(useDipoleParams.getState().params.layerVisibility.vectors).toBe(true)
+  })
+
   it('показывает линейку каждого среза с маркером именованной ориентации', () => {
     renderWithProviders(<DipolesPanel />)
 

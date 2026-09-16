@@ -38,7 +38,7 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import mne
 import nibabel as nib
@@ -485,6 +485,65 @@ def load_volumes(ctx: _ContourCtx) -> ContourVolumes:
         area_labels={key: _area_label(name) for key, name in area_names.items()},
         version=version,
     )
+
+
+def _axis_index(axis: str, mm: float, spacing_mm: float) -> Optional[int]:
+    """Индекс узла сетки вдоль оси MNI: ближайший узел или ``None`` (точка вне тома).
+
+    Округление — «половина вверх», как у ``slice_index`` срезов МРТ
+    (``−3.5 → −3``): подпись структуры обязана совпадать с той анатомией, что
+    нарисована на срезе, а не округляться «банковски».
+    """
+    value = float(mm)
+    if not np.isfinite(value):
+        return None
+    low, _ = MRI_BOUNDS[axis]
+    index = int(np.floor((value - low) / spacing_mm + 0.5))
+    if index < 0 or index >= axis_count(axis, spacing_mm):
+        return None
+    return index
+
+
+def structure_id_at(volumes: ContourVolumes, mni_mm: Sequence[float]) -> int:
+    """Метка ``aparc+aseg`` в точке MNI (``0`` — метки нет или точка вне тома).
+
+    Функция чистая: объёмы приходят аргументом, поэтому её можно проверять на
+    синтетических метках (тесты) без чтения fsaverage.
+    """
+    if len(mni_mm) != 3:
+        return 0
+    indices = [
+        _axis_index(axis, value, volumes.spacing_mm)
+        for axis, value in zip(("x", "y", "z"), mni_mm)
+    ]
+    if any(index is None for index in indices):
+        return 0
+    x, y, z = (int(index) for index in indices)  # type: ignore[arg-type]
+    return int(volumes.structures[x, y, z])
+
+
+def structure_at(settings: Settings, mni_mm: Sequence[float]) -> Optional[str]:
+    """Анатомическая структура по MNI-координате точки — подпись для результата.
+
+    Тем же атласом (``aparc+aseg``), что и контуры срезов: подпись структуры в
+    таблице локализации и подпись под курсором на проекциях не должны
+    расходиться — это одна и та же метка объёма, прочитанная в двух местах.
+
+    ``None`` — координат нет, метки в узле нет или атлас недоступен: отсутствие
+    анатомии не должно отменять сам расчёт (в таблице будет «—»). Первое
+    обращение собирает объёмы (как и первый запрос контуров), дальше они
+    берутся из кэша процесса/диска.
+    """
+    try:
+        volumes = load_volumes(_ContourCtx.from_settings(settings))
+    except Exception as exc:  # noqa: BLE001 — атлас не обязателен для расчёта
+        logger.info("Структура по MNI недоступна: %s", exc)
+        return None
+
+    label_id = structure_id_at(volumes, mni_mm)
+    if label_id == 0:
+        return None
+    return volumes.structure_labels.get(label_id) or volumes.structure_names.get(label_id)
 
 
 def _slice_of(volume: np.ndarray, plane: str, index: int) -> np.ndarray:

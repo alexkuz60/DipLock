@@ -454,7 +454,7 @@ describe('проекция мозга', () => {
       'stroke',
       'var(--color-accent)',
     )
-    expect(screen.getByTestId('frame-axial').querySelector('title')?.textContent).toContain(
+    expect(screen.getByTestId('layer-playback-axial').querySelector('title')?.textContent).toContain(
       'Кадр воспроизведения: Эпоха 1',
     )
 
@@ -497,14 +497,15 @@ describe('проекция мозга', () => {
     )
   })
 
-  it('не рисует шлейф без кадра и при выключенных позициях', () => {
-    // Кадр не задействован — шлейф принадлежит кадру, а не облаку
+  it('не рисует шлейф без кадра: шлейф принадлежит анимации, а не облаку', () => {
+    // Кадр не задействован — шлейфа нет вовсе
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
     const idle = renderProjectionWithFrame('axial', { points: resultLayer() })
     expect(screen.queryByTestId('frame-trail-axial')).not.toBeInTheDocument()
     idle.unmount()
 
-    // Позиции выключены: луч кадра остаётся, а путь позиций — нет
+    // Кадр есть, а позиции выключены: шлейф остаётся — это свой слой анимации
+    // (путь **кадра**), а не часть облака точек
     useDipoleCalc.setState({
       result: dipoleScanResultFixture(),
       playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 2 },
@@ -514,16 +515,17 @@ describe('проекция мозга', () => {
       dimmed: true,
       visibility: visible({ dipoles: false }),
     })
-    expect(screen.queryByTestId('frame-trail-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('frame-trail-axial')).toBeInTheDocument()
+    expect(screen.queryByTestId('layer-dipoles-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('frame-vector-axial')).toBeInTheDocument()
   })
 
-  it('не рисует маркер кадра без кадра и уважает выключенные слои', () => {
+  it('не рисует маркер кадра без кадра и слушается своего слоя, а не слоёв облака', () => {
     // Результат есть, но кадр не задействован: облако в обычном виде (приглушение —
     // решение раздела, а не часов: `dimmed` приходит пропсом)
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
     const idle = renderProjectionWithFrame('axial', { points: resultLayer() })
-    expect(screen.queryByTestId('frame-axial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('layer-playback-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('dipole-dot-axial-1-140')).toHaveAttribute('stroke-opacity', '1')
     idle.unmount()
 
@@ -534,23 +536,25 @@ describe('проекция мозга', () => {
       playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 0 },
     })
 
-    // Позиции выключены — у кадра остаётся луч; векторы выключены — остаётся кольцо
-    const raysOnly = renderProjectionWithFrame('axial', {
+    // Анимация — отдельный слой: при выключенных позициях и векторах кадр со своим
+    // лучом остаётся (кадр — не облако), а вот выключенный слой анимации убирает всё
+    const withoutCloudLayers = renderProjectionWithFrame('axial', {
       points: resultLayer(),
       dimmed: true,
-      visibility: visible({ dipoles: false }),
+      visibility: visible({ dipoles: false, vectors: false }),
     })
-    expect(screen.queryByTestId('frame-dot-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('frame-dot-axial')).toBeInTheDocument()
     expect(screen.getByTestId('frame-vector-axial')).toBeInTheDocument()
-    raysOnly.unmount()
+    withoutCloudLayers.unmount()
 
     renderProjectionWithFrame('axial', {
       points: resultLayer(),
       dimmed: true,
-      visibility: visible({ vectors: false }),
+      visibility: visible({ playback: false }),
     })
-    expect(screen.getByTestId('frame-dot-axial')).toBeInTheDocument()
-    expect(screen.queryByTestId('frame-vector-axial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('layer-playback-axial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('frame-dot-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('layer-dipoles-axial')).toBeInTheDocument()
   })
 })
 

@@ -49,6 +49,7 @@ const POINT: DipolePoint = {
   amplitudeNaM: 40,
   gof: 0.92,
   brodmannArea: 'BA17',
+  structure: 'таламус (слева)',
 }
 
 describe('слой диполей', () => {
@@ -89,14 +90,17 @@ describe('слой диполей', () => {
     expect(dipoleVectorLength(20)).toBeGreaterThan(VECTOR_MIN_PX)
   })
 
-  it('подписывает точку для тултипа: эпоха, MNI, поле, амплитуда и GOF', () => {
+  it('подписывает точку для тултипа: эпоха, MNI, структура, поле, амплитуда и GOF', () => {
     const title = dipolePointTitle(POINT)
 
     expect(title).toContain('Эпоха 1, 0.040 с')
-    expect(title).toContain('MNI 20.0 / -10.0 / 30.0, BA17')
+    expect(title).toContain('MNI 20.0 / -10.0 / 30.0, таламус (слева), BA17')
     expect(title).toContain('40.0 нАм')
     expect(title).toContain('GOF 92.0 %')
     expect(dipolePointTitle({ ...POINT, brodmannArea: null })).not.toContain('BA17')
+    // Без анатомии подпись не «дорисовывает» структуру: нет данных — нет слов
+    const anonymous = dipolePointTitle({ ...POINT, structure: null, brodmannArea: null })
+    expect(anonymous).toContain('MNI 20.0 / -10.0 / 30.0, 40.0 нАм')
   })
 
   it('даёт детерминированную фикстуру для отрисовки', () => {
@@ -126,13 +130,13 @@ describe('отрисовка маркера диполя (срез 3.5)', () => 
     expect(dipoleForceFraction(Number.NaN)).toBe(0)
   })
 
-  it('держит геометрию маркера фиксированной: кольцо Ø 10 px, штрихи 2 px — при любой силе', () => {
+  it('держит геометрию маркера фиксированной: кольцо Ø 6 px, штрихи 2 px — при любой силе', () => {
     // Поправка ручной проверки: кольцо не зависит ни от амплитуды, ни от масштаба
     // фигуры (компенсация масштаба — в компоненте), сила диполя читается по лучу
-    expect(DIPOLE_DOT_RADIUS_PX * 2).toBe(10)
+    expect(DIPOLE_DOT_RADIUS_PX * 2).toBe(6)
     expect(DIPOLE_DOT_STROKE_PX).toBe(2)
     expect(DIPOLE_RAY_STROKE_PX).toBe(2)
-    // Хит-зона шире кольца: иначе в маркер диаметром 10 px мышью не попасть
+    // Хит-зона шире кольца: иначе в маркер диаметром 6 px мышью не попасть
     expect(DOT_HIT_RADIUS_PX).toBeGreaterThan(DIPOLE_DOT_RADIUS_PX)
   })
 
@@ -141,8 +145,9 @@ describe('отрисовка маркера диполя (срез 3.5)', () => 
     // позиции — одинаковые кольца»), а «сейчас» отмечаем вторым кольцом
     expect(DIPOLE_FRAME_HALO_RADIUS_PX).toBeGreaterThan(DIPOLE_DOT_RADIUS_PX)
     expect(DIPOLE_FRAME_HALO_STROKE_PX).toBe(2)
-    // Приглушение облака: точки видны, но не спорят с маркером за внимание
-    expect(FRAME_DIM_OPACITY).toBeGreaterThan(0)
+    // Приглушение облака: точки видны, но не спорят с маркером за внимание.
+    // 0.3 = 0.2 × 1.5 — поправка ручной проверки (облако под анимацией читается)
+    expect(FRAME_DIM_OPACITY).toBeCloseTo(0.2 * 1.5, 5)
     expect(FRAME_DIM_OPACITY).toBeLessThan(MARKER_OPACITY_MIN)
     // Шлейф — история того же диполя: одна толщина с лучом момента, а не своя
     expect(TRAIL_STROKE_PX).toBe(DIPOLE_RAY_STROKE_PX)

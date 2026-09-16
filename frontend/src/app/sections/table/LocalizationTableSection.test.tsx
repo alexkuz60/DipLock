@@ -7,7 +7,7 @@
  * включая точки без MNI (там прочерк), а порог «КД» из раздела «Диполи» таблицу
  * не фильтрует.
  */
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultColumnVisibility } from '@/shared/lib/tableRows'
 import { CALC_PARAM_DEFAULTS, type CalcJob, useDipoleCalc } from '@/shared/state/dipoleCalc'
@@ -132,10 +132,32 @@ describe('раздел «Таблица локализации»', () => {
     const row = screen.getByTestId('loc-row-3-200')
     expect(within(row).getByTestId('loc-cell-x-3-200')).toHaveTextContent('—')
     expect(within(row).getByTestId('loc-cell-hemisphere-3-200')).toHaveTextContent('—')
+    // Структуру сервер читает по MNI-координате: нет координат — нет структуры
+    expect(within(row).getByTestId('loc-cell-structure-3-200')).toHaveTextContent('—')
     expect(row.getAttribute('title')).toContain('MNI нет')
     expect(
       screen.getByText('Точек без MNI: 1 — координаты «—» (на проекции не наводятся)'),
     ).toBeInTheDocument()
+  })
+
+  it('показывает структуру атласа отдельной колонкой, не путая её с полем (срез 3.9)', () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    renderWithProviders(<LocalizationTableSection />)
+
+    // Структура — из объёма aparc+aseg по координате точки (поле Бродмана — своя
+    // колонка: производная разметка коры, это разные величины)
+    expect(screen.getByTestId('loc-cell-structure-0-120')).toHaveTextContent('таламус (слева)')
+    expect(screen.getByTestId('loc-cell-area-0-120')).toHaveTextContent('BA17-lh')
+    expect(screen.getByTestId('loc-col-structure')).toHaveAttribute(
+      'title',
+      expect.stringContaining('aparc+aseg'),
+    )
+    // Колонку можно скрыть, как любую другую: состав колонок — настройка показа
+    act(() => {
+      useTableParams.getState().setColumnVisible('structure', false)
+    })
+    expect(screen.queryByTestId('loc-col-structure')).not.toBeInTheDocument()
   })
 
   it('порог «КД» скрывает точки только на проекциях — в таблице остаются все', () => {

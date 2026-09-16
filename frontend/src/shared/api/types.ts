@@ -132,6 +132,11 @@ export type DipoleScanPoint = {
   amplitude_nam: number
   gof: number
   brodmann_area: string | null
+  /**
+   * Анатомическая структура по MNI-координате (атлас `aparc+aseg` — тот же, что
+   * и контуры срезов); `null` — координат/метки нет
+   */
+  anatomical_structure: string | null
 }
 
 /**

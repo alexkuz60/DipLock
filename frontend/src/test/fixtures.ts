@@ -337,7 +337,7 @@ export function dipoleScanResultFixture(
       dipolePoint(1, 140, [-20, 10, 42], 25),
       dipolePoint(2, 60, [30, 5, 30], 90),
       // Точка без MNI (fsaverage недоступен) — в слой проекций не попадёт
-      { ...dipolePoint(3, 200, [0, 0, 0], 80), mni_coords: null },
+      dipolePointWithoutMni,
     ],
     warnings: [],
     duration_sec_calc: 3.1,
@@ -361,5 +361,16 @@ function dipolePoint(
     amplitude_nam: amplitudeNaM,
     gof: 0.91,
     brodmann_area: 'BA17-lh',
+    anatomical_structure: 'таламус (слева)',
   }
+}
+
+/**
+ * Точка без MNI (fsaverage недоступен): координат нет — значит нет и структуры,
+ * которую по ним читает сервер. Такой точки анатомию не «достраиваем» на клиенте.
+ */
+export const dipolePointWithoutMni = {
+  ...dipolePoint(3, 200, [0, 0, 0], 80),
+  mni_coords: null,
+  anatomical_structure: null,
 }

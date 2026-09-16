@@ -156,6 +156,7 @@ def test_compute_dipole_scan_returns_point_per_epoch(tmp_path):
         assert np.isclose(np.linalg.norm(point["moment"]), 1.0, atol=1e-6)
         # MNI — либо координаты, либо честное отсутствие (fsaverage не установлен)
         assert point["mni_coords"] is None or len(point["mni_coords"]) == 3
+        assert "anatomical_structure" in point
     # Каналы без позиций в модель не входят и сообщаются предупреждением
     assert all(name in settings.standard_channels for name in result["channels"])
 

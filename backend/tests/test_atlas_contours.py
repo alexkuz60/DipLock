@@ -451,6 +451,100 @@ def test_real_brodmann_fields_are_in_known_hemispheres():
     )
 
 
+# --- Структура по MNI-координате точки (подпись для таблицы локализации) ---
+
+_STRUCTURE_BOUNDS = {"x": (-10.0, 10.0), "y": (-10.0, 10.0), "z": (-10.0, 10.0)}
+
+
+def _synthetic_volumes(marked: dict) -> ac.ContourVolumes:
+    """Синтетические объёмы 21³ на сетке 1 мм с метками по индексам узлов."""
+    structures = np.zeros((21, 21, 21), dtype=np.int16)
+    for index, label_id in marked.items():
+        structures[index] = label_id
+    return ac.ContourVolumes(
+        structures=structures,
+        areas=np.zeros_like(structures),
+        structure_names={7: "Left-Thalamus-Proper", 9: "Right-Thalamus-Proper"},
+        structure_labels={7: "таламус (слева)", 9: "таламус (справа)"},
+        area_names={},
+        area_labels={},
+        version="test",
+    )
+
+
+def test_structure_id_at_reads_nearest_mni_node(monkeypatch):
+    """Мм MNI → узел сетки: «половина вверх», как у срезов МРТ, и границы тома.
+
+    Подпись структуры обязана читать **тот же** узел, что нарисован на срезе:
+    если бы округление расходилось со ``slice_index`` МРТ, подпись под курсором и
+    структура в таблице расходились бы на миллиметр — на границе двух ядер это
+    разные структуры.
+    """
+    monkeypatch.setattr(ac, "MRI_BOUNDS", _STRUCTURE_BOUNDS)
+    monkeypatch.setattr(ac, "axis_count", lambda axis, spacing=1.0: 21)
+    # Узлы: индекс 10 — это мм 0, индекс 11 — мм 1, индекс 5 — мм −5.
+    volumes = _synthetic_volumes({(10, 10, 10): 7, (11, 10, 10): 9, (5, 10, 10): 9})
+
+    assert ac.structure_id_at(volumes, [0.0, 0.0, 0.0]) == 7
+    # 0.5 равноудалено от узлов 0 и 1: «половина вверх» берёт верхний
+    assert ac.structure_id_at(volumes, [0.5, 0.0, 0.0]) == 9
+    assert ac.structure_id_at(volumes, [1.4, 0.0, 0.0]) == 9
+    # −5.5 равноудалено от −6 и −5: округление вверх, а не «к нулю»
+    assert ac.structure_id_at(volumes, [-5.5, 0.0, 0.0]) == 9
+    assert ac.structure_id_at(volumes, [-4.0, -4.0, -4.0]) == 0  # метки нет
+    assert ac.structure_id_at(volumes, [40.0, 0.0, 0.0]) == 0  # точка вне тома
+    assert ac.structure_id_at(volumes, [0.0, 0.0, float("nan")]) == 0
+    assert ac.structure_id_at(volumes, [0.0, 0.0]) == 0  # не тройка координат
+
+
+def test_structure_at_returns_label_and_none_without_atlas(monkeypatch):
+    """Подпись структуры — русская метка атласа; без атласа — «нет», а не ошибка."""
+    monkeypatch.setattr(ac, "MRI_BOUNDS", _STRUCTURE_BOUNDS)
+    monkeypatch.setattr(ac, "axis_count", lambda axis, spacing=1.0: 21)
+    volumes = _synthetic_volumes({(10, 10, 10): 7, (11, 10, 10): 9})
+    monkeypatch.setattr(ac, "load_volumes", lambda ctx: volumes)
+
+    assert ac.structure_at(settings, [0.4, 0.2, 0.0]) == "таламус (слева)"
+    assert ac.structure_at(settings, [1.4, 0.2, 0.0]) == "таламус (справа)"
+    assert ac.structure_at(settings, [-9.0, 0.0, 0.0]) is None  # узел без метки
+
+    def _boom(ctx):
+        raise RuntimeError("нет атласа")
+
+    monkeypatch.setattr(ac, "load_volumes", _boom)
+    assert ac.structure_at(settings, [0.0, 0.0, 0.0]) is None
+
+
+@pytest.mark.integration
+@_skip_no_atlas
+def test_real_structure_at_reads_same_label_as_volume():
+    """Реальный атлас: подпись по MNI-координате совпадает с меткой объёма.
+
+    Узловая точка берётся **внутри** структуры (медианный воксель метки),
+    координата — её MNI через ``affine`` тома: это тот же путь, которым приходят
+    точки расчёта диполей (``head_to_mni`` → структура), и он должен давать
+    анатомию той структуры, а не соседней.
+    """
+    import nibabel as nib
+
+    image = nib.load(os.path.join(settings.subjects_dir, "fsaverage/mri/aparc+aseg.mgz"))
+    raw = np.asanyarray(image.dataobj)
+    affine = np.asarray(image.affine, dtype=float)
+
+    ac.clear_contour_cache()
+    volumes = ac.load_volumes(ac._ContourCtx.from_settings(settings))
+
+    for label_id, fragment in ((10, "таламус"), (4, "желудочек"), (17, "гиппокамп")):
+        voxels = np.argwhere(raw == label_id)
+        assert voxels.size, f"метка {label_id} не найдена в томе"
+        index = np.array(voxels[len(voxels) // 2], dtype=float)
+        mni = affine[:3, :3] @ index + affine[:3, 3]
+        label = ac.structure_at(settings, [float(value) for value in mni])
+        assert label is not None, f"метка {label_id}: структура не определена (MNI {np.round(mni, 1)})"
+        assert fragment in label.lower(), f"метка {label_id}: получено {label!r}"
+        assert ac.structure_id_at(volumes, mni) == label_id
+
+
 @pytest.mark.integration
 @_skip_no_atlas
 def test_real_volumes_are_cached_on_disk():

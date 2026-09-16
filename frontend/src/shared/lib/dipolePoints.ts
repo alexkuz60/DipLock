@@ -44,6 +44,11 @@ export type DipolePoint = {
   gof: number
   /** Поле Бродмана лучшей точки (`null` — не определено) */
   brodmannArea: string | null
+  /**
+   * Анатомическая структура по MNI-координате (`aparc+aseg`, тот же атлас, что и
+   * контуры срезов). `null` — координаты/метки нет: подпись не выдумывается.
+   */
+  structure: string | null
 }
 
 /** Слой диполей: точки + флаг источника («результат задачи» или фикстура). */
@@ -94,6 +99,7 @@ export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
       amplitudeNaM: point.amplitude_nam,
       gof: point.gof,
       brodmannArea: point.brodmann_area,
+      structure: point.anatomical_structure,
     })
   }
   return { points, source: 'result' }
@@ -154,12 +160,12 @@ export function dipoleForceFraction(amplitudeNaM: number): number {
 
 /**
  * Кольцо позиции диполя — фиксированный **экранный** размер (поправка ручной
- * проверки): диаметр 10 px и штрих 2 px при любом размере окна браузера. Фигура
+ * проверки): диаметр 6 px и штрих 2 px при любом размере окна браузера. Фигура
  * SVG растягивается по ширине колонки (`width: 100%`), поэтому компонент делит
  * эти пиксели на текущий масштаб `renderedWidth / viewBox.width` — размер кольца
  * на экране не зависит ни от масштаба фигуры, ни от силы диполя.
  */
-export const DIPOLE_DOT_RADIUS_PX = 5
+export const DIPOLE_DOT_RADIUS_PX = 3
 export const DIPOLE_DOT_STROKE_PX = 2
 
 /**
@@ -170,12 +176,12 @@ export const DIPOLE_DOT_STROKE_PX = 2
  */
 export const DIPOLE_RAY_STROKE_PX = 2
 /**
- * Маркер кадра воспроизведения (срез 3.7): кольцо позиции остаётся обычным (Ø 10
+ * Маркер кадра воспроизведения (срез 3.7): кольцо позиции остаётся обычным (Ø 6
  * px — размер позиции менять нельзя), а «выбранный сейчас» кадр отмечает **гало**
  * — тонкое кольцо большего радиуса. Так кадр отличается от кликового выделения,
  * не нарушая правило «все позиции — одинаковые кольца».
  */
-export const DIPOLE_FRAME_HALO_RADIUS_PX = 9
+export const DIPOLE_FRAME_HALO_RADIUS_PX = 7
 export const DIPOLE_FRAME_HALO_STROKE_PX = 2
 /**
  * Штрих шлейфа траектории: 2 px по экрану — как у луча момента. Шлейф — это
@@ -188,12 +194,17 @@ export const TRAIL_STROKE_PX = 2
  * Приглушение облака точек в режиме кадра: смотреть движение и видеть, что именно
  * движется, можно, только когда остальные точки не спорят с маркером за внимание.
  * Выделенный кликом диполь не приглушается — это осознанный выбор пользователя.
+ *
+ * Значение — прозрачность, во столько раз «слабее» обычной: 0.3 = 0.2 × 1.5
+ * (поправка ручной проверки — облако под анимацией должно читаться, а не
+ * угадываться; но и не конкурировать с кадром, поэтому выше `MARKER_OPACITY_MIN`
+ * оно не поднимается).
  */
-export const FRAME_DIM_OPACITY = 0.2
+export const FRAME_DIM_OPACITY = 0.3
 /** Слабый диполь всё равно виден: прозрачность луча ниже этой не опускается. */
 export const MARKER_OPACITY_MIN = 0.35
 /**
- * Радиус хит-зоны выделения, px: попасть в кольцо диаметром 10 px мышью трудно,
+ * Радиус хит-зоны выделения, px: попасть в кольцо диаметром 6 px мышью трудно,
  * а выделение диполя — основной способ «выбрать точку» в разделе.
  */
 export const DOT_HIT_RADIUS_PX = 9
@@ -322,11 +333,15 @@ export function dipoleMarker(
   }
 }
 
-/** Подпись точки для тултипа: эпоха, время, координаты, амплитуда и GOF. */
+/** Подпись точки для тултипа: эпоха, время, координаты, структура, амплитуда и GOF. */
 export function dipolePointTitle(point: DipolePoint): string {
   const [x, y, z] = [point.position.x, point.position.y, point.position.z]
-  const area = point.brodmannArea ? `, ${point.brodmannArea}` : ''
-  return `Эпоха ${point.epochIndex + 1}, ${(point.timeMs / 1000).toFixed(3)} с: MNI ${x.toFixed(1)} / ${y.toFixed(1)} / ${z.toFixed(1)}${area}, ${point.amplitudeNaM.toFixed(1)} нАм, GOF ${(point.gof * 100).toFixed(1)} %`
+  // Структура атласа и поле Бродмана — разные величины: первая читается из
+  // объёма `aparc+aseg` по координате, второе — производная разметка коры.
+  // Обе подписываются, иначе «где диполь» выглядело бы одним и тем же вопросом.
+  const anatomy = [point.structure, point.brodmannArea].filter(Boolean).join(', ')
+  const suffix = anatomy ? `, ${anatomy}` : ''
+  return `Эпоха ${point.epochIndex + 1}, ${(point.timeMs / 1000).toFixed(3)} с: MNI ${x.toFixed(1)} / ${y.toFixed(1)} / ${z.toFixed(1)}${suffix}, ${point.amplitudeNaM.toFixed(1)} нАм, GOF ${(point.gof * 100).toFixed(1)} %`
 }
 
 /**
@@ -357,6 +372,7 @@ export function demoDipoleLayer(seed = 42, count = 6): DipoleLayer {
       amplitudeNaM: Math.round(amplitudeNaM * 10) / 10,
       gof: Math.round((0.6 + rand() * 0.39) * 1000) / 1000,
       brodmannArea: null,
+      structure: null,
     })
   }
   return { points, source: 'demo' }

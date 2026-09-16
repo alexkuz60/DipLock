@@ -8,13 +8,14 @@
  *
  * Слои снизу вверх (порядок и подписи — в `shared/state/dipoleParams.ts`):
  * `mri` — реальный срез T1, `head` — силуэт головы на срезе, `mni` — сетка и
- * схема среза, `brodmann` — поля Бродмана, `dipoles` — позиции диполей,
- * `vectors` — векторы моментов. Каждый слой включается отдельно; выключенный
+ * схема среза, `brodmann` — поля Бродмана, `anatomy` — структуры атласа,
+ * `dipoles` — позиции диполей, `vectors` — векторы моментов, `playback` —
+ * анимация (кадр, его луч и шлейф). Каждый слой включается отдельно; выключенный
  * слой не рисуется вовсе, а не прячется прозрачностью. Позиции и векторы —
  * **разные слои** (срез 3.5): «где» и «куда» отвечают на разные вопросы, и при
  * плотном облаке точек лучи мешают читать позиции (и наоборот).
  *
- * Позиция диполя — белое кольцо **фиксированного экранного размера** (Ø 10 px,
+ * Позиция диполя — белое кольцо **фиксированного экранного размера** (Ø 6 px,
  * штрих 2 px при любом размере окна: фигура растягивается по ширине колонки,
  * поэтому геометрия кольца делится на масштаб `renderedWidth / viewBox.width`,
  * который отслеживает ResizeObserver). Выделенный диполь залит оранжево-жёлтым.
@@ -34,8 +35,10 @@
  *
  * Кадр воспроизведения (срез 3.7) рисуется отдельным компонентом `FrameMarker`:
  * он берёт кадр из контекста (`PlaybackFrame.tsx`) и потому обновляется сам, а
- * статичные слои при движении кадра не перерисовываются. В режиме кадра облако
- * приглушается (`dimmed`) — иначе сотни колец спорят с маркером за внимание.
+ * статичные слои при движении кадра не перерисовываются. Анимация — **свой слой**
+ * (`layer-playback`, поправка ручной проверки): кадр, его луч и шлейф не зависят
+ * от слоёв облака, а её выключение убирает анимацию целиком. В режиме кадра облако
+ * приглушается (`dimmed`, α 0.3) — иначе сотни колец спорят с маркером за внимание.
  *
  * Схема среза (`demoSliceStructures`) — фикстура анатомии: она показывается только
  * без реального тома, иначе рисовала бы «вторую» анатомию поверх настоящей.
@@ -181,7 +184,7 @@ export function MriProjection({
   /**
    * Масштаб фигуры: CSS-пикселей экрана на единицу viewBox. Фигура растягивается
    * по ширине колонки (`w-full`), а кольцо диполя обязано держать экранный
-   * размер (Ø 10 px, штрих 2 px) при любом размере окна — поэтому его геометрия
+   * размер (Ø 6 px, штрих 2 px) при любом размере окна — поэтому его геометрия
    * делится на этот масштаб. В jsdom раскладки нет (rect.width = 0): масштаб
    * остаётся 1, и тесты видят «честные» пиксели.
    */
@@ -602,7 +605,7 @@ export function MriProjection({
                   <title>{dipolePointTitle(point)}</title>
                   {/*
                     Кольцо позиции: белое, фиксированного экранного размера
-                    (Ø 10 px, штрих 2 px) — пиксели поделены на масштаб фигуры.
+                    (Ø 6 px, штрих 2 px) — пиксели поделены на масштаб фигуры.
                     Выделенный диполь залит оранжево-жёлтым; сила момента
                     читается по лучу, а не по размеру кольца.
                   */}
@@ -617,7 +620,7 @@ export function MriProjection({
                     strokeOpacity={selected ? 1 : dim}
                   />
                   {/*
-                    Хит-зона выделения: попасть в кольцо диаметром 10 px мышью
+                    Хит-зона выделения: попасть в кольцо диаметром 6 px мышью
                     трудно, поэтому клик принимает невидимый круг большего радиуса.
                     Он гасит всплытие, чтобы клик не обработался дважды (фигура
                     навела бы срезы на «сырую» точку клика у края хит-зоны), и сам
@@ -650,7 +653,8 @@ export function MriProjection({
           </g>
         ) : null}
 
-        {/* Маркер кадра воспроизведения — поверх слоёв: он и есть «сейчас» */}
+        {/* Анимация — свой слой (`layer-playback`, поправка ручной проверки):
+            кадр рисуется поверх остальных слоёв и не зависит от слоёв облака */}
         <FrameMarker plane={plane} visibility={visibility} pxPerUnit={pxPerUnit} />
 
         {referencePx ? (
@@ -786,22 +790,27 @@ function FrameMarker({
   const frame = usePlaybackFrame()
   const point = frame?.point ?? null
   if (!point) return null
+  /**
+   * Слой анимации (поправка ручной проверки): кадр, его луч и шлейф — **свой
+   * слой**, а не часть облака диполей и векторов. Иначе при выключенных позициях
+   * гало кадра исчезало бы вместе с облаком, хотя кадр — не облако, а шлейф
+   * пропадал бы вместе с лучами. Слой включён по умолчанию; его выключение убирает
+   * анимацию целиком и не трогает облако.
+   */
+  if (!layerVisible(visibility, 'playback')) return null
 
   const marker = dipoleMarker(plane, point)
   const visual = dipoleRayVisual(point.amplitudeNaM)
-  const showsDot = layerVisible(visibility, 'dipoles')
-  // Луч кадра — отдельным объектом: проверка слоя и наличия луча в одном месте,
-  // без «утверждений о непустоте» внутри разметки
+  // Луч кадра — отдельным объектом: проверка наличия луча в одном месте, без
+  // «утверждений о непустоте» внутри разметки
   const ray =
-    layerVisible(visibility, 'vectors') && marker.shaftEnd && marker.head
-      ? { end: marker.shaftEnd, head: marker.head }
-      : null
-  // Шлейф — в слое позиций: это путь **позиций** диполя, и он же скрывается вместе
-  // с точками (векторы отвечают на другой вопрос — «куда», а не «где был»)
-  const trail = showsDot ? (frame?.trail ?? []) : []
+    marker.shaftEnd && marker.head ? { end: marker.shaftEnd, head: marker.head } : null
+  // Шлейф принадлежит кадру (это история измерений, а не ещё один слой диполей):
+  // нет кадра — нет и шлейфа, а при выключенных позициях он остаётся
+  const trail = frame?.trail ?? []
 
   return (
-    <g data-testid={`frame-${plane}`}>
+    <g data-testid={`layer-playback-${plane}`}>
       <title>{`Кадр воспроизведения: ${dipolePointTitle(point)}`}</title>
       {trail.length > 0 ? (
         <g data-testid={`frame-trail-${plane}`}>
@@ -825,28 +834,26 @@ function FrameMarker({
           })}
         </g>
       ) : null}
-      {showsDot ? (
-        <>
-          <circle
-            data-testid={`frame-halo-${plane}`}
-            cx={marker.at.x}
-            cy={marker.at.y}
-            r={DIPOLE_FRAME_HALO_RADIUS_PX / pxPerUnit}
-            fill="none"
-            stroke="var(--color-accent)"
-            strokeWidth={DIPOLE_FRAME_HALO_STROKE_PX / pxPerUnit}
-          />
-          <circle
-            data-testid={`frame-dot-${plane}`}
-            cx={marker.at.x}
-            cy={marker.at.y}
-            r={DIPOLE_DOT_RADIUS_PX / pxPerUnit}
-            fill="var(--color-mri-dipole)"
-            stroke="var(--color-mri-dipole-point)"
-            strokeWidth={DIPOLE_DOT_STROKE_PX / pxPerUnit}
-          />
-        </>
-      ) : null}
+      {/* Кадр: гало акцентным цветом плюс кольцо позиции того же размера, что и у
+          облака (Ø 6 px) — размер позиции не зависит от того, «сейчас» это или нет */}
+      <circle
+        data-testid={`frame-halo-${plane}`}
+        cx={marker.at.x}
+        cy={marker.at.y}
+        r={DIPOLE_FRAME_HALO_RADIUS_PX / pxPerUnit}
+        fill="none"
+        stroke="var(--color-accent)"
+        strokeWidth={DIPOLE_FRAME_HALO_STROKE_PX / pxPerUnit}
+      />
+      <circle
+        data-testid={`frame-dot-${plane}`}
+        cx={marker.at.x}
+        cy={marker.at.y}
+        r={DIPOLE_DOT_RADIUS_PX / pxPerUnit}
+        fill="var(--color-mri-dipole)"
+        stroke="var(--color-mri-dipole-point)"
+        strokeWidth={DIPOLE_DOT_STROKE_PX / pxPerUnit}
+      />
       {ray ? (
         <>
           <line

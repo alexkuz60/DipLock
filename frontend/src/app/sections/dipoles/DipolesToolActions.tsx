@@ -18,11 +18,17 @@
  *   покадрово и скорость меняют состояние раздела, а сам кадр ведут часы в рабочей
  *   области (`PlaybackFrame.tsx`). Здесь же видно, какой кадр показан, и что
  *   интерполяция между эпохами — отображение, а не измерение.
+ *
+ * Справа, у края полосы, живёт кнопка «Справка»: пояснения к проекциям, слоям,
+ * расчёту и воспроизведению читают один-два раза за сеанс, поэтому они открываются
+ * диалогом (`DipolesHelpDialog`), а не занимают рабочую область абзацем.
  */
+import { useState } from 'react'
 import {
   ChartColumn,
   ChevronLeft,
   ChevronRight,
+  CircleHelp,
   Grid2x2,
   Loader2,
   Pause,
@@ -37,6 +43,7 @@ import { IconButton } from '@/shared/ui/IconButton'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { cx } from '@/shared/ui/cx'
+import { DipolesHelpDialog } from './DipolesHelpDialog'
 
 /** Пояснение к выключенной кнопке, когда записи ещё нет */
 const NO_RECORDING_HINT =
@@ -190,6 +197,7 @@ export function DipolesToolHeaderActions() {
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const toggleView = useDipoleCalc((state) => state.toggleView)
   const runCalculation = useDipoleCalc((state) => state.runCalculation)
+  const [helpOpen, setHelpOpen] = useState(false)
 
   const running = job?.status === 'running'
   const canRun = recording !== null && !running
@@ -260,6 +268,19 @@ export function DipolesToolHeaderActions() {
           {`Быстрый режим: ${result.points.length} точек`}
         </StatusPill>
       ) : null}
+
+      {/* Распорка: «Справка» прижата к правому краю полосы действий */}
+      <div className="flex-1" />
+
+      <IconButton
+        icon={<CircleHelp className="size-5" />}
+        label="Справка"
+        tooltip="Справка раздела: клик и срезы, слои и анатомия, расчёт и воспроизведение"
+        active={helpOpen}
+        onClick={() => setHelpOpen(true)}
+      />
+
+      <DipolesHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </>
   )
 }

@@ -40,6 +40,7 @@ function point(epochIndex: number, overrides: Partial<DipolePoint> = {}): Dipole
     amplitudeNaM: 10,
     gof: 0.9,
     brodmannArea: 'BA17-lh',
+    structure: 'таламус (слева)',
     ...overrides,
   }
 }

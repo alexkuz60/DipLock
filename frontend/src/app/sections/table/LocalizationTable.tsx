@@ -27,8 +27,9 @@ export function LocalizationTable({ rows, columns }: LocalizationTableProps) {
     >
       <table className="w-full border-collapse text-sm">
         <caption className="sr-only">
-          Точки диполей текущей записи: эпоха, время пика GFP, координаты MNI, амплитуда момента,
-          GOF и поле Бродмана. Порядок строк — по номеру эпохи.
+          Точки диполей текущей записи: эпоха, время пика GFP, координаты MNI, полушарие,
+          структура атласа, амплитуда момента, GOF и поле Бродмана. Порядок строк — по номеру
+          эпохи.
         </caption>
         <thead className="sticky top-0 z-10 bg-bg-2">
           <tr>
