@@ -2,8 +2,22 @@
 
 Запуск: cd backend && venv/bin/python -m pytest
 """
+import atexit
 import os
+import shutil
 import sys
+import tempfile
+
+# Каталоги данных уводим во временную папку ДО импорта настроек: иначе тесты
+# пишут в рабочий data/edf, а дедуп и TTL-уборка записей могли бы тронуть
+# реальные файлы пользователя (реестр их видит как каталоги загрузок).
+_TMP_DATA = tempfile.mkdtemp(prefix="diplock-tests-")
+os.environ["UPLOAD_DIR"] = os.path.join(_TMP_DATA, "edf")
+os.environ["CACHE_DIR"] = os.path.join(_TMP_DATA, "cache")
+os.environ["RESULTS_DIR"] = os.path.join(_TMP_DATA, "results")
+for _sub in ("edf", "cache", "results"):
+    os.makedirs(os.path.join(_TMP_DATA, _sub), exist_ok=True)
+atexit.register(shutil.rmtree, _TMP_DATA, True)
 
 # Гарантируем, что каталог backend/ в sys.path (import app.* работает при любом CWD)
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

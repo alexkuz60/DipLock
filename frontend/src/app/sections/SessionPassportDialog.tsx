@@ -113,6 +113,14 @@ export function SessionPassportDialog({ open, onClose }: SessionPassportDialogPr
           />
         </div>
 
+        {recording?.deduplicated ? (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <StatusPill tone="accent">
+              Файл уже был загружен — открыта существующая запись, копия не создана
+            </StatusPill>
+          </div>
+        ) : null}
+
         {recording?.warnings.length ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {recording.warnings.map((warning) => (

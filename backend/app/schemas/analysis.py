@@ -144,7 +144,16 @@ class RecordingMeta(BaseModel):
         default=None, description="Явные единицы из EDF_UNITS; None = автоопределение"
     )
     warnings: List[str] = Field(default_factory=list)
-    created_at: datetime
+    created_at: datetime = Field(
+        description="Время сессии просмотра; при повторной загрузке того же файла освежается"
+    )
+    deduplicated: bool = Field(
+        default=False,
+        description=(
+            "Файл уже был загружен ранее: открыта существующая запись, копия не создана. "
+            "Заполняется только ответом POST /recordings"
+        ),
+    )
 
 
 class RecordingSignalsHeader(BaseModel):

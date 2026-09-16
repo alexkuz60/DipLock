@@ -91,6 +91,7 @@ export const recordingFixture: RecordingMeta = {
   edf_units: null,
   warnings: [],
   created_at: '2026-09-13T09:00:00',
+  deduplicated: false,
 }
 
 export const jobFixture: JobStatus = {

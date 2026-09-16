@@ -6,6 +6,7 @@ fsaverage, атлас Brodmann) отдаются отдельными кэшир
 долгий анализ — фоновыми задачами с прогрессом по этапам (F7).
 """
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -61,7 +62,7 @@ from app.services.recording_signals import (
     SignalBuildError,
     build_signal_blob,
 )
-from app.services.recordings import recording_registry
+from app.services.recordings import Recording, recording_registry
 from app.services.mri_slices import (
     mri_meta,
     slice_png as mri_slice_png,
@@ -126,17 +127,23 @@ def _safe_edf_name(filename: Optional[str]) -> str:
     return base
 
 
-async def _save_upload(file: UploadFile, safe_name: str) -> Tuple[str, str]:
+async def _save_upload(
+    file: UploadFile, safe_name: str, with_digest: bool = False,
+) -> Tuple[str, str, Optional[str]]:
     """Сохраняет загрузку в отдельный каталог с контролем размера (F10).
 
-    Возвращает ``(путь_к_файлу, каталог_загрузки)``; каталог удаляет вызывающий
-    код (в ``finally``) — при ошибке/413 частичный файл не остаётся на диске.
+    Возвращает ``(путь_к_файлу, каталог_загрузки, sha256)``; каталог удаляет
+    вызывающий код (в ``finally``) — при ошибке/413 частичный файл не остаётся
+    на диске. ``with_digest`` считает отпечаток содержимого в том же проходе по
+    чанкам (нужен дедупу записей); ``/analyze`` и ``/jobs`` его не заказывают —
+    они удаляют файл сразу после чтения.
     """
     upload_dir = os.path.join(settings.upload_dir, str(uuid.uuid4()))
     os.makedirs(upload_dir, exist_ok=True)
     tmp_path = os.path.join(upload_dir, safe_name)
 
     size = 0
+    digest = hashlib.sha256() if with_digest else None
     try:
         with open(tmp_path, "wb") as out:
             while chunk := await file.read(_UPLOAD_CHUNK):
@@ -146,13 +153,25 @@ async def _save_upload(file: UploadFile, safe_name: str) -> Tuple[str, str]:
                         status_code=413,
                         detail=f"Файл слишком большой (макс {MAX_UPLOAD_SIZE // (1024 * 1024)} МБ)",
                     )
+                if digest is not None:
+                    digest.update(chunk)
                 out.write(chunk)
     except BaseException:
         shutil.rmtree(upload_dir, ignore_errors=True)
         raise
     finally:
         await file.close()
-    return tmp_path, upload_dir
+    return tmp_path, upload_dir, digest.hexdigest() if digest is not None else None
+
+
+def _meta_out(recording: Recording, deduplicated: bool = False) -> RecordingMeta:
+    """Паспорт записи для ответа.
+
+    Флаг ``deduplicated`` — факт ответа на загрузку («файл уже хранился, копия не
+    создана»), а не свойство файла: в сайдкар записи он не пишется, и обычная
+    выдача паспорта (`GET /recordings/{id}`) его не выставляет.
+    """
+    return RecordingMeta(**recording.meta, deduplicated=deduplicated)
 
 
 def _surface_ref() -> SurfaceRef:
@@ -515,7 +534,7 @@ async def analyze_eeg(
     """
     _validate_analysis_params(epoch_length_ms, freq_band, single_freq)
     safe_name = _safe_edf_name(file.filename)
-    tmp_path, upload_dir = await _save_upload(file, safe_name)
+    tmp_path, upload_dir, _digest = await _save_upload(file, safe_name)
 
     try:
         result = await asyncio.to_thread(
@@ -546,19 +565,26 @@ async def analyze_eeg(
     "/recordings", status_code=201, response_model=RecordingMeta,
     summary="Загрузить EDF для просмотра (без обработки)",
 )
-async def create_recording(file: UploadFile = File(...)) -> RecordingMeta:
+async def create_recording(
+    file: UploadFile = File(...), response: Response = None,  # noqa: RUF013 — FastAPI инжектит Response
+) -> RecordingMeta:
     """Сохраняет EDF и возвращает паспорт записи (каналы, sfreq, длительность).
 
     Артефакты/эпохи/диполи здесь не считаются: обработка стартует отдельной
     задачей по кнопке «Пересчитать предподготовку» (docs/ui.md). Файл остаётся
     в ``data/edf/<recording_id>/`` — его читают эндпоинты просмотра; устаревшие
     записи реестр удаляет по TTL и лимиту истории.
+
+    Копии не плодятся: если файл с таким же содержимым (sha256) уже хранится, в
+    том числе после рестарта процесса (отпечаток лежит в сайдкаре каталога),
+    возвращается **существующая** запись с ``deduplicated=true`` (200), а только
+    что записанная копия удаляется. Новая запись — 201.
     """
     safe_name = _safe_edf_name(file.filename)
-    tmp_path, upload_dir = await _save_upload(file, safe_name)
+    tmp_path, upload_dir, digest = await _save_upload(file, safe_name, with_digest=True)
     try:
         recording = await asyncio.to_thread(
-            recording_registry.register, tmp_path, upload_dir, safe_name, settings,
+            recording_registry.register, tmp_path, upload_dir, safe_name, settings, digest,
         )
     except ValueError as e:
         shutil.rmtree(upload_dir, ignore_errors=True)
@@ -567,7 +593,16 @@ async def create_recording(file: UploadFile = File(...)) -> RecordingMeta:
         shutil.rmtree(upload_dir, ignore_errors=True)
         logger.exception("Не удалось прочитать EDF %s", safe_name)
         raise HTTPException(status_code=400, detail=f"Не удалось прочитать EDF: {e}")
-    return RecordingMeta(**recording.meta)
+
+    if recording.deduplicated:
+        # Такой файл уже хранится: только что записанная копия не нужна
+        shutil.rmtree(upload_dir, ignore_errors=True)
+        if response is not None:
+            response.status_code = 200
+        logger.info(
+            "Загрузка %s: открыта существующая запись %s", safe_name, recording.recording_id,
+        )
+    return _meta_out(recording, recording.deduplicated)
 
 
 @router.get(
@@ -581,7 +616,7 @@ async def get_recording(recording_id: str) -> RecordingMeta:
         raise HTTPException(
             status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
         )
-    return RecordingMeta(**recording.meta)
+    return _meta_out(recording)
 
 
 @router.get(
@@ -919,7 +954,7 @@ async def create_analysis_job(
     """
     _validate_analysis_params(epoch_length_ms, freq_band, single_freq)
     safe_name = _safe_edf_name(file.filename)
-    tmp_path, upload_dir = await _save_upload(file, safe_name)
+    tmp_path, upload_dir, _digest = await _save_upload(file, safe_name)
 
     job = job_manager.submit(
         "analyze", safe_name, _analysis_job_worker,

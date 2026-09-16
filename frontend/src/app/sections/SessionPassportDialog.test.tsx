@@ -93,6 +93,22 @@ describe('диалог паспорта сессии', () => {
     expect(useEdfRecording.getState().passport.title).toBe('')
   })
 
+  it('помечает повторную загрузку: открыта существующая запись, копии нет', () => {
+    useEdfRecording.setState({
+      recording: { ...recordingFixture, deduplicated: true },
+      passport: { ...EMPTY_PASSPORT },
+    })
+    renderWithProviders(<SessionPassportDialog open onClose={vi.fn()} />)
+
+    expect(screen.getByText(/открыта существующая запись, копия не создана/)).toBeInTheDocument()
+  })
+
+  it('не показывает пометку дедупа для новой записи', () => {
+    renderWithProviders(<SessionPassportDialog open onClose={vi.fn()} />)
+
+    expect(screen.queryByText(/копия не создана/)).not.toBeInTheDocument()
+  })
+
   it('показывает, что запись не загружена, если паспорт открыт без неё', () => {
     useEdfRecording.setState({ recording: null, passport: { ...EMPTY_PASSPORT } })
     renderWithProviders(<SessionPassportDialog open onClose={vi.fn()} />)

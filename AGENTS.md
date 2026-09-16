@@ -52,7 +52,7 @@ backend/app/
 │   ├── epoch_segmenter.py
 │   ├── bandpass_filter.py
 │   ├── dipole_fitter.py     # точный фитинг: mne.fit_dipole по эпохам (медленно)
-│   ├── recordings.py      # реестр записей просмотра: паспорт, TTL (2.2)
+│   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
 │   ├── preprocess.py      # стадии предподготовки записи: filter/artifacts/epochs (2.7)
 │   ├── spectral.py        # спектр δ…γ (Welch) + топокарты PNG, кэш + ETag (3.4)
@@ -62,6 +62,7 @@ backend/app/
 │   └── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)
 ├── models/db.py       # SQLAlchemy модели (Session, Epoch, Dipole)
 └── utils/             # brain_export.py, versions.py, png.py (энкодер срезов)
+backend/scripts/       # dedupe_recordings.py — разовая чистка дублей в data/edf
 frontend/              # UI (Vite+React+TS), сборка → backend/app/static/ui
 data/                  # локальные данные (edf/results/cache) — НЕ коммитить
 docs/ui.md             # спецификация UI и дорожная карта фаз
@@ -110,7 +111,7 @@ cd frontend && npm run test                                    # Vitest (jsdom)
 Тесты быстрые (без сети): синтетический ЭЭГ (`backend/tests/conftest.py`) + `TestClient`; ветки с
 реальными данными (`~/mne_data`, `data/edf/test.edf`) помечаются маркером `integration` и скипаются
 без них. Покрывают: контракт API и Pydantic-схемы, job-API и прогресс, кэш поверхности (ETag/304),
-санитизацию загрузок, сигналы записи (формат `DPS1`, ETag/304, уровни, кэш), стадии предподготовки
+санитизацию и дедуп загрузок (sha256, сайдкар, 200/201), сигналы записи (формат `DPS1`, ETag/304, уровни, кэш), стадии предподготовки
 (`POST /recordings/{id}/preprocess`: 202 + задача, `result_url`, 400/404, зоны с каналами, отброшенные
 эпохи), config, bandpass_filter,
 epoch_segmenter, montage edf_loader; на UI — каркас
@@ -197,8 +198,9 @@ PSD, запуск спектра только по кнопке; `dipoles/Dipole
 маркером и приглушение облака во всех трёх проекциях, уважение выключенных слоёв, ноль запросов;
 `dipoles/DipolesToolActions.test.tsx`:
 кнопки кадра, скорость, подпись кадра; `app/layout/AppShell.test.tsx`: `Space` только в разделе «Диполи»).
-Всего **462 теста Vitest (41 файл) и 152 pytest** (из них
-26 — геометрия, укладка и кэш среза МРТ, 14 — спектр и быстрый расчёт). `mriProjections.test.ts`
+Всего **464 теста Vitest (41 файл) и 162 pytest** (из них
+26 — геометрия, укладка и кэш среза МРТ, 14 — спектр и быстрый расчёт, 10 — дедуп загрузок,
+сайдкар записи и чистка каталога от копий). `mriProjections.test.ts`
 дополнительно фиксирует знаки осей MNI, подписи краёв и единый масштаб проекций с пропорциями колонок
 раздела.
 **Правило:** новый сервис/багфикс → тест (backend → pytest, frontend → Vitest).
@@ -552,6 +554,18 @@ PSD, запуск спектра только по кнопке; `dipoles/Dipole
   `np.minimum/maximum.reduceat`, уровни вне `signal_levels` → 400. Формат меняется только синхронно в
   `backend/app/services/recording_signals.py`, `backend/app/schemas/analysis.py`
   (`RecordingSignalsHeader`) и `frontend/src/shared/lib/signalFrame.ts`.
+- **Записи просмотра не дублируются** (дедуп загрузок): `POST /recordings` считает sha256 содержимого
+  в том же проходе по чанкам (`_save_upload(..., with_digest=True)`), реестр ищет запись по отпечатку и
+  при совпадении **возвращает существующую** с `deduplicated=true` (200), а только что записанный каталог
+  удаляет — копий на диске не появляется. Отпечаток + паспорт лежат в сайдкаре `recording.json` каталога
+  записи (`write_sidecar`/`read_sidecar`), поэтому дедуп переживает рестарт: при первом обращении реестр
+  лениво поднимает записи с диска (`_ensure_index`, `owned=False` — такие каталоги `clear()`/`_drop` НЕ
+  удаляют, их сносит `prune_orphans` по TTL). Легаси-каталоги без сайдкара реестр не видит — их и дубли
+  чистит разовый скрипт `backend/scripts/dedupe_recordings.py` (dry-run по умолчанию, `--apply` удаляет,
+  попутно пишет сайдкары). Не заменяйте sha256 на «имя+размер»: копия с другим именем не поймается, а
+  разные записи одного размера склеятся; корневые файлы каталога загрузок (`data/edf/test.edf`) не
+  трогаются никогда — обход только по каталогам. Тесты: `backend/tests/test_recordings.py`
+  (дедуп, сайдкар, восстановление, prune), `backend/tests/test_recording_cleanup.py`.
 - Слои визуализации (огибающая треков) считаются min/max по корзине, а не «каждый N-й отсчёт»: иначе
   прореживание срезает пики артефактов — то, ради чего раздел существует. Пирамида сигналов строится
   лениво при первом запросе уровня и кэшируется на диске; уровни задаются `SIGNAL_LEVELS`, бюджет точек

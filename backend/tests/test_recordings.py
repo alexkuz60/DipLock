@@ -2,10 +2,17 @@
 import os
 import shutil
 
+import numpy as np
 import pytest
 
 from app.core.config import settings
-from app.services.recordings import RecordingRegistry, recording_registry
+from app.services.recordings import (
+    RecordingRegistry,
+    file_digest,
+    read_sidecar,
+    recording_registry,
+)
+from tests.conftest import write_minimal_edf
 
 
 def _upload_dirs() -> set[str]:
@@ -115,7 +122,7 @@ def _register_copy(registry, edf_file, tmp_path, name):
 
 
 def test_registry_evicts_oldest_over_limit(edf_file, tmp_path):
-    registry = RecordingRegistry(max_recordings=2, ttl_hours=24)
+    registry = RecordingRegistry(max_recordings=2, ttl_hours=24, upload_dir=str(tmp_path))
     first = _register_copy(registry, edf_file, tmp_path, "rec_a")
     second = _register_copy(registry, edf_file, tmp_path, "rec_b")
     third = _register_copy(registry, edf_file, tmp_path, "rec_c")
@@ -128,10 +135,127 @@ def test_registry_evicts_oldest_over_limit(edf_file, tmp_path):
 
 
 def test_registry_drops_expired_by_ttl(edf_file, tmp_path):
-    registry = RecordingRegistry(max_recordings=10, ttl_hours=1)
+    registry = RecordingRegistry(max_recordings=10, ttl_hours=1, upload_dir=str(tmp_path))
     rec = _register_copy(registry, edf_file, tmp_path, "old")
     rec.created_at -= 2 * 3600  # «записана» 2 часа назад
 
     assert registry.get(rec.recording_id) is None
     assert not os.path.exists(rec.upload_dir)
     assert registry.list() == []
+
+
+def _other_edf(tmp_path, name: str = "other.edf") -> str:
+    """Второй корректный EDF с другим содержимым (должен остаться другой записью)."""
+    path = tmp_path / name
+    ch_names = list(settings.standard_channels[:5])
+    sfreq = 200.0
+    t = np.arange(int(4 * sfreq)) / sfreq
+    data = np.vstack([np.sin(2 * np.pi * (7 + i) * t) * 15 for i in range(len(ch_names))])
+    write_minimal_edf(path, ch_names, data, sfreq)
+    return str(path)
+
+
+def test_upload_same_file_twice_reuses_recording_without_copy(client, edf_file):
+    """Повторная загрузка того же файла открывает прежнюю запись, а не пишет копию."""
+    first = _upload(client, edf_file)
+    assert first.status_code == 201, first.text
+    recording_id = first.json()["recording_id"]
+    before = _upload_dirs()
+    assert recording_id in before
+
+    second = _upload(client, edf_file)
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["recording_id"] == recording_id
+    assert body["deduplicated"] is True
+    # Копия не создана: каталогов столько же, и он один — каталог первой записи
+    assert _upload_dirs() == before
+
+    # Флаг относится к загрузке, а не к файлу: обычный паспорт его не выставляет
+    meta = client.get(f"/api/v1/recordings/{recording_id}").json()
+    assert meta["deduplicated"] is False
+    assert meta["sfreq"] == first.json()["sfreq"]
+
+
+def test_upload_other_file_creates_new_recording(client, edf_file, tmp_path):
+    """Другое содержимое — другая запись: дедуп не «склеивает» разные файлы."""
+    first = _upload(client, edf_file)
+    before = _upload_dirs()
+
+    with open(_other_edf(tmp_path), "rb") as fh:
+        second = client.post(
+            "/api/v1/recordings",
+            files={"file": ("other.edf", fh, "application/octet-stream")},
+        )
+
+    assert second.status_code == 201, second.text
+    assert second.json()["deduplicated"] is False
+    assert second.json()["recording_id"] != first.json()["recording_id"]
+    assert len(_upload_dirs()) == len(before) + 1
+
+
+def test_sidecar_keeps_digest_and_passport(client, edf_file):
+    """Отпечаток и паспорт лежат рядом с файлом — дедуп переживает рестарт."""
+    meta = _upload(client, edf_file).json()
+    recording = recording_registry.get(meta["recording_id"])
+
+    payload = read_sidecar(recording.upload_dir)
+    assert payload is not None
+    assert payload["digest"] == file_digest(recording.path)
+    assert payload["filename"] == "probe.edf"
+    assert payload["meta"]["sfreq"] == 250.0
+
+
+def test_dedup_survives_new_registry(client, edf_file):
+    """Новый процесс (dev `--reload`) находит отпечаток в сайдкарах каталогов."""
+    meta = _upload(client, edf_file).json()
+    digest = file_digest(recording_registry.get(meta["recording_id"]).path)
+
+    restarted = RecordingRegistry(
+        max_recordings=10, ttl_hours=24, upload_dir=settings.upload_dir,
+    )
+    found = restarted.find_by_digest(digest, settings)
+
+    assert found is not None
+    assert found.recording_id == meta["recording_id"]
+    assert found.owned is False  # каталог найден на диске, а не создан процессом
+
+
+def test_restore_does_not_delete_adopted_dir(client, edf_file):
+    """Сброс памяти не удаляет каталог, которого процесс не создавал."""
+    meta = _upload(client, edf_file).json()
+    recording = recording_registry.get(meta["recording_id"])
+
+    restarted = RecordingRegistry(
+        max_recordings=10, ttl_hours=24, upload_dir=settings.upload_dir,
+    )
+    restarted.find_by_digest(file_digest(recording.path), settings)
+    restarted.clear()
+
+    assert os.path.isdir(recording.upload_dir)
+    assert restarted.get(meta["recording_id"]) is None
+
+
+def test_prune_orphans_removes_old_dir_and_keeps_root_file(tmp_path, edf_file):
+    """Уборка сносит устаревшие каталоги и не трогает корневой файл записей."""
+    root = tmp_path / "edf"
+    root.mkdir()
+    shutil.copy(edf_file, root / "test.edf")  # файл из репозитория — не каталог записи
+    old = root / "0d0d0d0d-0000-0000-0000-000000000000"
+    old.mkdir()
+    shutil.copy(edf_file, old / "probe.edf")
+    stale = 1700000000.0  # далёкое прошлое
+    os.utime(old, (stale, stale))
+
+    fresh = root / "1d1d1d1d-0000-0000-0000-000000000000"
+    fresh.mkdir()
+    shutil.copy(edf_file, fresh / "probe.edf")
+
+    registry = RecordingRegistry(max_recordings=10, ttl_hours=1, upload_dir=str(root))
+    removed = registry.prune_orphans(settings)
+
+    assert removed == [old.name]
+    assert not old.exists()
+    assert fresh.is_dir()
+    assert (root / "test.edf").exists()
+

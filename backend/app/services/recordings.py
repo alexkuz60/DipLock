@@ -7,7 +7,18 @@
 Реестр — in-memory + каталог на диске (``data/edf/<recording_id>/<имя>.edf``).
 Записи старше TTL и сверх лимита истории удаляются с диска и из реестра
 при обращении (ленивая очистка, без фоновых потоков).
+
+Дубликаты не хранятся: содержимое загрузки опознаётся отпечатком sha256, и
+повторная загрузка того же файла **открывает существующую запись**
+(``deduplicated=True``) вместо второй копии. Отпечаток и паспорт лежат рядом с
+файлом — в сайдкаре ``recording.json`` каталога записи, поэтому дедуп переживает
+рестарт процесса (в dev ``--reload`` перезапускает его на каждое изменение кода):
+индекс каталогов собирается с диска лениво, при первом обращении. Каталоги
+прошлых запусков без живого владельца (легаси без сайдкара) удаляются
+``prune_orphans`` — но не автоматически: см. ``backend/scripts/dedupe_recordings.py``.
 """
+import hashlib
+import json
 import logging
 import os
 import shutil
@@ -26,6 +37,16 @@ logger = logging.getLogger(__name__)
 # Окно оценки масштаба единиц: весь файл в память не грузим.
 _PROBE_SEC = 10.0
 
+# Сайдкар записи (отпечаток содержимого + паспорт) — источник дедупа и
+# восстановления реестра после рестарта: без него отпечаток пришлось бы
+# пересчитывать по всему EDF, а паспорт — перечитывать через MNE.
+SIDECAR_NAME = "recording.json"
+SIDECAR_VERSION = 1
+
+# Обязательные поля паспорта в сайдкаре: неполный сайдкар не восстанавливаем
+# (иначе в API ушёл бы паспорт без частоты дискретизации и каналов).
+_REQUIRED_META_KEYS = ("filename", "n_channels", "sfreq", "duration_sec", "units_autoscaled")
+
 
 @dataclass
 class Recording:
@@ -37,6 +58,100 @@ class Recording:
     upload_dir: str
     created_at: float
     meta: Dict[str, Any]
+    digest: Optional[str] = None
+    """sha256 содержимого файла — по нему опознаётся повторная загрузка."""
+    deduplicated: bool = False
+    """true — запись отдана повторно, только что записанная копия не понадобилась."""
+    owned: bool = True
+    """true — каталог создан этим процессом (только такие удаляются с диска)."""
+
+
+def sidecar_path(upload_dir: str) -> str:
+    """Путь сайдкара записи в её каталоге."""
+    return os.path.join(upload_dir, SIDECAR_NAME)
+
+
+def file_digest(path: str) -> str:
+    """sha256 содержимого файла (потоково: файл в память не грузится)."""
+    with open(path, "rb") as fh:
+        return hashlib.file_digest(fh, "sha256").hexdigest()
+
+
+def read_sidecar(upload_dir: str) -> Optional[Dict[str, Any]]:
+    """Читает сайдкар каталога записи (None — нет, битый или чужой версии)."""
+    try:
+        with open(sidecar_path(upload_dir), "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != SIDECAR_VERSION:
+        return None
+    return payload
+
+
+def write_sidecar(recording: Recording) -> bool:
+    """Атомарно пишет сайдкар записи. Дедуп — оптимизация, поэтому сбой не роняет загрузку."""
+    payload = {
+        "version": SIDECAR_VERSION,
+        "digest": recording.digest,
+        "filename": recording.filename,
+        "created_at": recording.created_at,
+        "size": os.path.getsize(recording.path) if os.path.exists(recording.path) else None,
+        "meta": recording.meta,
+    }
+    target = sidecar_path(recording.upload_dir)
+    tmp = f"{target}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            # datetime паспорта сериализуется строкой (default=str), обратно — fromisoformat
+            json.dump(payload, fh, ensure_ascii=False, default=str)
+        os.replace(tmp, target)
+        return True
+    except OSError:
+        logger.warning("Не удалось записать сайдкар %s", target, exc_info=True)
+        return False
+
+
+def _recording_from_sidecar(
+    upload_dir: str, payload: Optional[Dict[str, Any]],
+) -> Optional[Recording]:
+    """Собирает запись из сайдкара; None — сайдкара нет, он неполон или файл пропал."""
+    if not payload:
+        return None
+    filename = str(payload.get("filename") or "")
+    meta = payload.get("meta")
+    if not filename or not isinstance(meta, dict):
+        return None
+    if any(key not in meta for key in _REQUIRED_META_KEYS):
+        return None
+    path = os.path.join(upload_dir, filename)
+    if not os.path.exists(path):
+        return None
+
+    meta = dict(meta)
+    recording_id = os.path.basename(os.path.normpath(upload_dir))
+    meta["recording_id"] = recording_id
+    raw_created = meta.get("created_at")
+    if isinstance(raw_created, str):
+        try:
+            meta["created_at"] = datetime.fromisoformat(raw_created)
+        except ValueError:
+            meta["created_at"] = datetime.utcnow()
+    try:
+        created_at = float(payload.get("created_at"))
+    except (TypeError, ValueError):
+        created_at = os.path.getmtime(path)
+
+    return Recording(
+        recording_id=recording_id,
+        filename=filename,
+        path=path,
+        upload_dir=upload_dir,
+        created_at=created_at,
+        meta=meta,
+        digest=payload.get("digest"),
+        owned=False,  # каталог найден на диске, а не создан этим процессом
+    )
 
 
 def read_recording_meta(path: str, cfg: Settings, filename: str) -> Dict[str, Any]:
@@ -118,26 +233,156 @@ def _drop_signal_cache(recording_id: str) -> None:
 
 class RecordingRegistry:
     """In-memory реестр записей с TTL-очисткой каталогов и лимитом истории."""
-    def __init__(self, max_recordings: int, ttl_hours: float) -> None:
+
+    def __init__(
+        self,
+        max_recordings: int,
+        ttl_hours: float,
+        upload_dir: Optional[str] = None,
+    ) -> None:
         self._max = max(1, max_recordings)
         self._ttl_sec = ttl_hours * 3600.0
+        self._upload_dir = upload_dir
         self._items: Dict[str, Recording] = {}
+        self._indexed = False
 
-    def register(self, path: str, upload_dir: str, filename: str, cfg: Settings) -> Recording:
-        """Читает метаданные, регистрирует запись и применяет лимиты хранения."""
+    # --- индекс каталогов на диске (дедуп переживает рестарт) ---------------
+
+    def _root(self, cfg: Settings) -> str:
+        """Каталог загрузок: заданный при создании или из настроек."""
+        return self._upload_dir or cfg.upload_dir
+
+    def _scan_sidecars(self, cfg: Settings) -> Dict[str, Recording]:
+        """Читает сайдкары каталогов загрузок: отпечаток + паспорт каждой записи."""
+        root = self._root(cfg)
+        found: Dict[str, Recording] = {}
+        if not os.path.isdir(root):
+            return found
+        for name in sorted(os.listdir(root)):
+            upload_dir = os.path.join(root, name)
+            if not os.path.isdir(upload_dir):
+                continue
+            recording = _recording_from_sidecar(upload_dir, read_sidecar(upload_dir))
+            if recording is not None:
+                found[recording.recording_id] = recording
+        return found
+
+    def _ensure_index(self, cfg: Settings) -> None:
+        """Однократно поднимает реестр с диска (легаси-каталоги без сайдкара не видит)."""
+        if self._indexed:
+            return
+        self._indexed = True
+        adopted = self._scan_sidecars(cfg)
+        for recording_id, recording in adopted.items():
+            self._items.setdefault(recording_id, recording)
+        if adopted:
+            logger.info("Восстановлено записей из каталога загрузок: %d", len(adopted))
+
+    def find_by_digest(self, digest: Optional[str], cfg: Settings) -> Optional[Recording]:
+        """Запись, чей файл совпадает по отпечатку sha256 (None — такой нет)."""
+        if not digest:
+            return None
+        self._ensure_index(cfg)
+        for recording in self._items.values():
+            if recording.digest == digest and os.path.exists(recording.path):
+                return recording
+        # Память могла устареть (запись вытеснена по TTL) — сверяемся с диском
+        for recording_id, recording in self._scan_sidecars(cfg).items():
+            if recording.digest == digest and os.path.exists(recording.path):
+                self._items.setdefault(recording_id, recording)
+                return recording
+        return None
+
+    def _touch(self, recording: Recording) -> None:
+        """Освежает сессию переиспользованной записи: TTL считается от обращения.
+
+        ``deduplicated`` — факт ответа («копия не создана»), а не свойство файла;
+        ``owned`` — запись снова активна, значит её каталог живёт по общим
+        правилам TTL и лимита истории.
+        """
+        recording.created_at = time.time()
+        recording.meta["created_at"] = datetime.utcnow()
+        recording.deduplicated = True
+        recording.owned = True
+        write_sidecar(recording)
+
+    def register(
+        self,
+        path: str,
+        upload_dir: str,
+        filename: str,
+        cfg: Settings,
+        digest: Optional[str] = None,
+    ) -> Recording:
+        """Регистрирует запись; при совпадении отпечатка — переиспользует прежнюю.
+
+        Возвращённая запись помечена ``deduplicated=True``, если новый файл не
+        понадобился: вызывающий код удаляет только что сохранённую копию и отдаёт
+        клиенту существующий паспорт (см. ``POST /recordings``).
+        """
+        existing = self.find_by_digest(digest, cfg)
+        if existing is not None:
+            self._touch(existing)
+            logger.info(
+                "Отпечаток %s уже хранится записью %s — копия не создана",
+                (digest or "")[:12], existing.recording_id,
+            )
+            return existing
+
+        if digest is None:
+            try:
+                digest = file_digest(path)
+            except OSError:  # отпечаток не обязателен для работы записи
+                logger.warning("Не удалось посчитать отпечаток %s", path)
+
         meta = read_recording_meta(path, cfg, filename)
         recording_id = os.path.basename(upload_dir)
         meta["recording_id"] = recording_id
-        recording = Recording(recording_id, filename, path, upload_dir, time.time(), meta)
+        recording = Recording(
+            recording_id, filename, path, upload_dir, time.time(), meta, digest=digest,
+        )
 
         self._drop_expired()
         self._items[recording_id] = recording
         self._evict()
+        write_sidecar(recording)
         logger.info(
             "Запись %s зарегистрирована (%s, %d каналов, %.1f с)",
             recording_id, filename, meta["n_channels"], meta["duration_sec"],
         )
         return recording
+
+    def prune_orphans(self, cfg: Settings) -> List[str]:
+        """Удаляет каталоги без живой записи старше TTL: легаси и мусор прошлых запусков.
+
+        Реестр — in-memory, поэтому каталоги прежних запусков процесса лимит
+        истории не видит: без этой уборки они копились бы вечно. Живые записи не
+        трогаются, корневые файлы каталога загрузок (например, ``test.edf`` из
+        репозитория) не рассматриваются — удаляются только каталоги. Автовызова
+        нет: уборку запускает ``backend/scripts/dedupe_recordings.py``.
+        """
+        self._ensure_index(cfg)
+        if self._ttl_sec <= 0:
+            return []
+        root = self._root(cfg)
+        if not os.path.isdir(root):
+            return []
+        deadline = time.time() - self._ttl_sec
+        removed: List[str] = []
+        for name in sorted(os.listdir(root)):
+            upload_dir = os.path.join(root, name)
+            if not os.path.isdir(upload_dir) or name in self._items:
+                continue
+            try:
+                if os.path.getmtime(upload_dir) >= deadline:
+                    continue
+            except OSError:
+                continue
+            shutil.rmtree(upload_dir, ignore_errors=True)
+            removed.append(name)
+        if removed:
+            logger.info("Удалены устаревшие каталоги записей: %s", ", ".join(removed))
+        return removed
 
     def get(self, recording_id: str) -> Optional[Recording]:
         """Запись по id (None — неизвестна, устарела или файл уже удалён)."""
@@ -157,16 +402,21 @@ class RecordingRegistry:
         ]
 
     def clear(self) -> None:
-        """Сброс реестра (тесты): каталоги записей удаляются с диска."""
+        """Сброс реестра (тесты): каталоги, созданные процессом, удаляются с диска."""
         for rec in self._items.values():
-            shutil.rmtree(rec.upload_dir, ignore_errors=True)
+            # Записи, найденные на диске при восстановлении, не наши: их каталоги
+            # удаляет TTL-уборка (prune_orphans), а не сброс памяти.
+            if rec.owned:
+                shutil.rmtree(rec.upload_dir, ignore_errors=True)
             _drop_signal_cache(rec.recording_id)
         self._items.clear()
+        self._indexed = False  # следующее обращение перечитает сайдкары с диска
 
     def _drop(self, recording_id: str) -> None:
         rec = self._items.pop(recording_id, None)
         if rec is not None:
-            shutil.rmtree(rec.upload_dir, ignore_errors=True)
+            if rec.owned:
+                shutil.rmtree(rec.upload_dir, ignore_errors=True)
             _drop_signal_cache(rec.recording_id)
 
     def _drop_expired(self) -> None:
@@ -187,4 +437,5 @@ class RecordingRegistry:
 recording_registry = RecordingRegistry(
     max_recordings=settings.recordings_history_limit,
     ttl_hours=settings.recordings_ttl_hours,
+    upload_dir=settings.upload_dir,
 )

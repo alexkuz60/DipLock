@@ -175,6 +175,11 @@ export type RecordingMeta = {
   edf_units: string | null
   warnings: string[]
   created_at: string
+  /**
+   * Файл уже был загружен ранее: открыта существующая запись, копия не создана.
+   * Заполняется только ответом `POST /recordings` (дедуп по sha256 содержимого)
+   */
+  deduplicated: boolean
 }
 
 export type PipelineInfo = {
