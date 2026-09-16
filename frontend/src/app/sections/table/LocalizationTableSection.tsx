@@ -33,14 +33,10 @@ import {
 import { calcJobSummary, resultMatchesParams, useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useTableParams } from '@/shared/state/tableParams'
+import { filterBandText } from '@/shared/lib/calcFilter'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { LocalizationTable } from './LocalizationTable'
-
-/** Полоса фильтра в подписи: «1–40 Гц» или «без фильтра». */
-function bandText(band: number[] | null): string {
-  return band && band.length === 2 ? `${band[0]}–${band[1]} Гц` : 'без фильтра'
-}
 
 export function LocalizationTableSection() {
   const recording = useEdfRecording((state) => state.recording)
@@ -133,7 +129,7 @@ export function LocalizationTableSection() {
           {`Эпох в расчёте: ${result.n_epochs_used} из ${result.n_epochs_total} · reject ${result.reject_threshold_uv} мкВ`}
         </StatusPill>
         <StatusPill tone="neutral">
-          {`Полоса: ${bandText(result.filter_band_hz)}${result.notch_hz ? ` · notch ${result.notch_hz} Гц` : ''}`}
+          {`Полоса: ${filterBandText(result.filter_band_hz)}${result.notch_hz ? ` · notch ${result.notch_hz} Гц` : ''}`}
         </StatusPill>
         {hiddenColumns > 0 ? (
           <StatusPill tone="neutral">{`Скрыто колонок: ${hiddenColumns}`}</StatusPill>
@@ -155,8 +151,8 @@ export function LocalizationTableSection() {
       <p className="text-sm text-fg-2">
         Таблица читает результат задачи раздела «Диполи» и ничего не запрашивает: расчёт запускается
         только кнопкой в шапке того раздела. Порядок строк задаёт панель справа (пока единственный
-        ключ — номер эпохи). Фильтры, переход к диполю по клику и сохранение выборки в БД — следующий
-        срез: сейчас показаны все точки результата, включая те, что без MNI.
+        ключ — номер эпохи). Фильтры, переход к диполю по клику и сохранение выборки в БД —
+        следующий срез: сейчас показаны все точки результата, включая те, что без MNI.
       </p>
 
       {result.warnings.length ? (

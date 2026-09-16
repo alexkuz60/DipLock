@@ -397,6 +397,36 @@ export function pxToNormalized(
   }
 }
 
+/** Эллипс слоя в пикселях фигуры: центр и полуоси. */
+export type EllipsePx = { cx: number; cy: number; rx: number; ry: number }
+
+/**
+ * Эллипс фикстуры (структура среза, поле Бродмана) в пикселях фигуры.
+ *
+ * Радиусы заданы **в долях полуразмаха своей оси** (`MniPoint2` в нормализованных
+ * координатах), поэтому полуось в пикселях — это радиус × половина стороны
+ * прямоугольника плоскости. Функция одна на отрисовку и на хит-тест: попадание в
+ * поле считается по тем же эллипсам, что нарисованы (`brodmannAreaAt`), и
+ * «второго, невидимого» слоя для мыши в разделе нет. Пересчитывать эту
+ * арифметику в компоненте нельзя — разъехавшиеся эллипсы сделают подсветку поля
+ * ложной, а поймать это глазами почти невозможно.
+ */
+export function ellipsePx(
+  plane: ProjectionPlane,
+  center: MniPoint2,
+  radius: MniPoint2,
+  padding = PROJECTION_PADDING,
+): EllipsePx {
+  const box = projectionBox(plane, padding)
+  const at = normalizedToPx(center, plane, padding)
+  return {
+    cx: at.x,
+    cy: at.y,
+    rx: radius.u * (box.innerWidth / 2),
+    ry: radius.v * (box.innerHeight / 2),
+  }
+}
+
 /** Точка MNI → пиксели фигуры (для точек диполей и подписей на срезе). */
 export function projectPoint(
   plane: ProjectionPlane,

@@ -24,6 +24,7 @@ import {
   demoBrodmannAreas,
   demoHeadContours,
   demoSliceStructures,
+  ellipsePx,
   mniToNormalized,
   normalizedToMni,
   normalizedToPx,
@@ -120,7 +121,11 @@ describe('геометрия проекций мозга', () => {
   })
 
   it('клик даёт точку в плоскости своего среза: нормаль берётся из среза', () => {
-    const center = pointFromProjectionClick('sagittal', 24, normalizedToPx({ u: 0, v: 0 }, 'sagittal'))
+    const center = pointFromProjectionClick(
+      'sagittal',
+      24,
+      normalizedToPx({ u: 0, v: 0 }, 'sagittal'),
+    )
     const click = pointFromProjectionClick(
       'sagittal',
       24,
@@ -206,6 +211,48 @@ describe('геометрия проекций мозга', () => {
     const top = areas[areas.length - 1]
     expect(brodmannAreaAt('coronal', 0, top.center)).toBe(top.name)
     expect(brodmannAreaAt('coronal', 0, { u: 5, v: 5 })).toBeNull()
+  })
+
+  /**
+   * Геометрия полей Бродмана (срез 3.5): эллипс считается **одной** функцией —
+   * компонент берёт её для отрисовки, а попадание проверяется по тем же
+   * нормализованным полуосям. Если формулы разъедутся, подсветка поля будет
+   * ложной: клик рядом с полем подсветит его, а клик по нему — нет.
+   */
+  it('держит эллипсы полей Бродмана ровно там, где их ловит хит-тест', () => {
+    for (const plane of PROJECTION_PLANES) {
+      const areas = demoBrodmannAreas(plane, 0)
+      expect(areas.length).toBeGreaterThan(0)
+      // Последнее поле в списке рисуется поверх остальных, поэтому в его центре
+      // хит-тест обязан вернуть именно его — проверка однозначная
+      const area = areas[areas.length - 1]
+      const ellipse = ellipsePx(plane, area.center, area.radius)
+      const box = projectionBox(plane)
+
+      // Полуоси в пикселях — это радиус в долях полуразмаха × половина стороны
+      expect(ellipse.rx).toBeCloseTo(area.radius.u * (box.innerWidth / 2), 9)
+      expect(ellipse.ry).toBeCloseTo(area.radius.v * (box.innerHeight / 2), 9)
+      // Центр совпадает с переводом точки проекции (обратный перевод не «уезжает»)
+      expect(
+        ellipsePx(plane, pxToNormalized({ x: ellipse.cx, y: ellipse.cy }, plane), area.radius).cx,
+      ).toBeCloseTo(ellipse.cx, 9)
+
+      const hit = (px: { x: number; y: number }) =>
+        brodmannAreaAt(plane, 0, pxToNormalized(px, plane))
+      expect(hit({ x: ellipse.cx, y: ellipse.cy })).toBe(area.name)
+      // Границы по обеим полуосям внутри поля (чуть внутрь — попадание)
+      expect(hit({ x: ellipse.cx + ellipse.rx * 0.98, y: ellipse.cy })).toBe(area.name)
+      expect(hit({ x: ellipse.cx - ellipse.rx * 0.98, y: ellipse.cy })).toBe(area.name)
+      expect(hit({ x: ellipse.cx, y: ellipse.cy + ellipse.ry * 0.98 })).toBe(area.name)
+      expect(hit({ x: ellipse.cx, y: ellipse.cy - ellipse.ry * 0.98 })).toBe(area.name)
+      // А сразу за границей — уже нет: эллипс, а не «прямоугольник на все поле»
+      expect(hit({ x: ellipse.cx + ellipse.rx * 1.05, y: ellipse.cy })).not.toBe(area.name)
+      expect(hit({ x: ellipse.cx, y: ellipse.cy + ellipse.ry * 1.05 })).not.toBe(area.name)
+      // Угол описанного прямоугольника лежит вне эллипса (проверка кривизны)
+      expect(
+        hit({ x: ellipse.cx + ellipse.rx * 0.75, y: ellipse.cy + ellipse.ry * 0.75 }),
+      ).not.toBe(area.name)
+    }
   })
 
   it('подписывает срезы и точку для панели', () => {

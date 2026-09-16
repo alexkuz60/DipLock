@@ -6,7 +6,7 @@
  * параметры того расчёта, чьи числа показаны (включая порог reject и версию
  * ассета) — иначе браузер показал бы картинку прошлого фильтра.
  */
-import { screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CALC_PARAM_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
@@ -22,6 +22,8 @@ describe('выдвижная панель раздела «Диполи»', () =
     useDipoleCalc.setState({
       view: 'none',
       amplitudeThresholdNam: 0,
+      fftRangeHz: null,
+      selectedPointId: null,
       params: { ...CALC_PARAM_DEFAULTS },
       job: null,
       result: null,
@@ -65,7 +67,9 @@ describe('выдвижная панель раздела «Диполи»', () =
 
     await user.click(screen.getByRole('button', { name: 'Рассчитать спектр' }))
 
-    const urls = fetchSpy.mock.calls.map(([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`)
+    const urls = fetchSpy.mock.calls.map(
+      ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
+    )
     expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/spectrum')
     expect(await screen.findAllByAltText(/Топокарта/)).toHaveLength(5)
   })
@@ -89,7 +93,68 @@ describe('выдвижная панель раздела «Диполи»', () =
     }
     expect(screen.getByTestId('fft-psd-line')).toBeInTheDocument()
     // Подпись — параметры именно этого расчёта (полоса,эпоха, окно, эпохи)
-    expect(screen.getByText('Спектр: 1–40 Гц · эпоха 1000 мс · окно 250 · эпох 4')).toBeInTheDocument()
+    expect(
+      screen.getByText('Спектр: 1–40 Гц · эпоха 1000 мс · окно 250 · эпох 4'),
+    ).toBeInTheDocument()
+  })
+
+  /**
+   * Окно частот (срез 3.5) — интерактивное сужение АЧХ. Оно ничего не считает и
+   * ничего не запрашивает: числа PSD уже в браузере, а сервер пересчитывается
+   * только кнопкой.
+   */
+  it('сужает FFT-график по ритму и возвращает весь диапазон без запросов', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApiFetch()
+    useDipoleCalc.setState({ view: 'fft', spectrum: spectrumResultFixture() })
+    renderWithProviders(<DipolesDrawer />)
+
+    const pointsOf = () =>
+      (screen.getByTestId('fft-psd-line').getAttribute('points') ?? '').split(' ').filter(Boolean)
+    // В фикстуре 7 посчитанных частот: 1, 4, 8, 10, 13, 30, 40
+    expect(pointsOf()).toHaveLength(7)
+    expect(screen.getByTestId('fft-window-label')).toHaveTextContent('Весь диапазон: 1–40 Гц')
+
+    await user.click(screen.getByTestId('fft-range-alpha'))
+
+    // Окно сузилось до альфа-ритма: на ломаной остались только его частоты
+    expect(pointsOf()).toHaveLength(3)
+    expect(screen.getByTestId('fft-window-label')).toHaveTextContent('Показано 8–13 Гц из 1–40 Гц')
+    expect(screen.getByTestId('fft-bar-alpha')).toHaveAttribute('data-in-range', 'true')
+    expect(screen.getByTestId('fft-bar-delta')).toHaveAttribute('data-in-range', 'false')
+    // Полосы вне окна остаются на месте (приглушены), а не исчезают: видно, что
+    // ещё входит в запись
+    expect(screen.getByTestId('fft-bar-gamma')).toBeInTheDocument()
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Весь диапазон' }))
+
+    expect(pointsOf()).toHaveLength(7)
+    expect(screen.getByTestId('fft-window-label')).toHaveTextContent('Весь диапазон: 1–40 Гц')
+    expect(useDipoleCalc.getState().fftRangeHz).toBeNull()
+  })
+
+  it('правит окно полями «от/до» и зажимает его в измеренные частоты', async () => {
+    useDipoleCalc.setState({ view: 'fft', spectrum: spectrumResultFixture() })
+    renderWithProviders(<DipolesDrawer />)
+
+    fireEvent.change(screen.getByLabelText('Окно от, Гц'), { target: { value: '8' } })
+    expect(useDipoleCalc.getState().fftRangeHz).toEqual([8, 40])
+
+    fireEvent.change(screen.getByLabelText('Окно до, Гц'), { target: { value: '13' } })
+    expect(useDipoleCalc.getState().fftRangeHz).toEqual([8, 13])
+    expect(screen.getByTestId('fft-window-label')).toHaveTextContent('Показано 8–13 Гц из 1–40 Гц')
+
+    // Границы вне посчитанных частот зажимаются: окно [30, 999] → [30, 40]
+    fireEvent.change(screen.getByLabelText('Окно до, Гц'), { target: { value: '999' } })
+    fireEvent.change(screen.getByLabelText('Окно от, Гц'), { target: { value: '30' } })
+    expect(screen.getByTestId('fft-window-label')).toHaveTextContent('Показано 30–40 Гц из 1–40 Гц')
+
+    // Окно уже измеренной частоты честно сообщает, что частот в нём нет
+    fireEvent.change(screen.getByLabelText('Окно до, Гц'), { target: { value: '29' } })
+    fireEvent.change(screen.getByLabelText('Окно от, Гц'), { target: { value: '14' } })
+    expect(screen.getByTestId('fft-empty-window')).toBeInTheDocument()
+    expect(screen.queryByTestId('fft-psd-line')).not.toBeInTheDocument()
   })
 
   it('показывает предупреждение о каналах без позиций в монтаже', () => {
@@ -99,7 +164,9 @@ describe('выдвижная панель раздела «Диполи»', () =
     })
     renderWithProviders(<DipolesDrawer />)
 
-    expect(screen.getByText(/Без позиции в монтаже \(в топокарты не попали\): T7/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Без позиции в монтаже \(в топокарты не попали\): T7/),
+    ).toBeInTheDocument()
   })
 
   it('кнопка «Закрыть панель» возвращает вид в «закрыто»', async () => {
@@ -139,7 +206,9 @@ describe('выдвижная панель раздела «Диполи»', () =
     })
     renderWithProviders(<DipolesDrawer />)
 
-    expect(screen.getByText(/последний запуск завершился ошибкой — Том fsaverage недоступен/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/последний запуск завершился ошибкой — Том fsaverage недоступен/),
+    ).toBeInTheDocument()
     expect(screen.getByTestId('fft-histogram')).toBeInTheDocument()
   })
 })

@@ -17,6 +17,9 @@
  * notch, длина эпохи и порог reject уходят в URL, потому что по ним сервер
  * считает ETag. Иначе после смены фильтра браузер показал бы картинку прошлого
  * расчёта рядом с числами нового.
+ *
+ * Окно частот FFT-графика (срез 3.5) — параметр просмотра: панель передаёт его в
+ * `FftHistogram` из состояния расчёта, и правка окна **ничего не запрашивает**.
  */
 import { X } from 'lucide-react'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
@@ -36,8 +39,8 @@ const TITLES = {
 
 const HINTS = {
   topomap:
-    'Распределение мощности ритма по скальпу: картинку строит сервер (PNG), вне круга головы она прозрачна. Светлее — меньше мощность.',
-  fft: 'Средняя мощность каждого ритма плюс PSD по частотам: по ним видно, на каком ритме сосредоточена энергия записи.',
+    'Распределение мощности ритма по скальпу: картинку строит сервер (PNG), вне круга головы она прозрачна. Светлее — меньше мощность. Полоса фильтра берётся из формы панели «Расчёт диполей».',
+  fft: 'Средняя мощность каждого ритма плюс PSD по частотам: по ним видно, на каком ритме сосредоточена энергия записи. Окно частот сужает график (кнопки ритмов или поля «от/до») — это просмотр уже посчитанных чисел, а не новый расчёт. Полоса самого расчёта задаётся фильтром в панели «Расчёт диполей».',
 } as const
 
 export function DipolesDrawer() {
@@ -47,6 +50,8 @@ export function DipolesDrawer() {
   const spectrumError = useDipoleCalc((state) => state.spectrumError)
   const runSpectrum = useDipoleCalc((state) => state.runSpectrum)
   const setView = useDipoleCalc((state) => state.setView)
+  const fftRangeHz = useDipoleCalc((state) => state.fftRangeHz)
+  const setFftRange = useDipoleCalc((state) => state.setFftRange)
   const recording = useEdfRecording((state) => state.recording)
 
   if (view === 'none') return null
@@ -118,7 +123,11 @@ export function DipolesDrawer() {
           {view === 'topomap' ? (
             <BandTopomaps spectrum={spectrum} query={spectrumQueryOf(spectrum)} />
           ) : (
-            <FftHistogram spectrum={spectrum} />
+            <FftHistogram
+              spectrum={spectrum}
+              range={fftRangeHz ?? null}
+              onRangeChange={setFftRange}
+            />
           )}
         </>
       )}

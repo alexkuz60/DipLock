@@ -1,10 +1,10 @@
 /**
- * Тесты панели опций раздела «Диполи» (срез 3.1, расчёт — 3.4): слои, линейки
- * срезов, сбросы, параметры расчёта и порог «КД ≥ X нАм».
+ * Тесты панели опций раздела «Диполи» (срез 3.1, расчёт — 3.4, форма фильтров — 3.6).
  *
  * Панель — единственное место, где пользователь настраивает просмотр и расчёт, и
  * она **ничего не запускает**: проверяем, что контролы меняют только состояние, а
- * из запросов возможны лишь статические метаданные (`/meta` — длины эпох).
+ * из запросов возможны лишь статические метаданные (`/meta` — длины эпох и
+ * диапазоны ритмов).
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -32,6 +32,8 @@ describe('панель раздела «Диполи»', () => {
     useDipoleCalc.setState({
       params: { ...CALC_PARAM_DEFAULTS },
       amplitudeThresholdNam: 0,
+      fftRangeHz: null,
+      selectedPointId: null,
       job: null,
       result: null,
       spectrumJob: null,
@@ -67,6 +69,21 @@ describe('панель раздела «Диполи»', () => {
     expect(useDipoleParams.getState().params.layerVisibility.mri).toBe(false)
     // Схема среза MNI — другой слой: её правка не следует за срезом МРТ
     expect(useDipoleParams.getState().params.layerVisibility.mni).toBe(true)
+  })
+
+  it('включает позиции диполей и векторы моментов отдельными слоями (срез 3.5)', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    const vectors = screen.getByLabelText('Векторы моментов')
+    expect(vectors).toBeChecked()
+
+    await user.click(vectors)
+
+    expect(useDipoleParams.getState().params.layerVisibility.vectors).toBe(false)
+    // Позиции — другой слой: скрыть лучи не значит скрыть точки
+    expect(useDipoleParams.getState().params.layerVisibility.dipoles).toBe(true)
+    expect(screen.getByLabelText('Точки диполей')).toBeChecked()
   })
 
   it('показывает линейку каждого среза с маркером именованной ориентации', () => {
@@ -162,5 +179,135 @@ describe('панель раздела «Диполи»', () => {
 
     expect(useDipoleCalc.getState().result).toBeNull()
     expect(useDipoleCalc.getState().params.epochLengthMs).toBe(1000)
+  })
+
+  it('выбирает полосу пресетами: диапазоны ритмов приходят из /meta (срез 3.6)', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApiFetch()
+    renderWithProviders(<DipolesPanel />)
+
+    const select = await screen.findByLabelText('Фильтр расчёта')
+    // Подпись несёт границы с сервера — UI их не выдумывает
+    expect(await screen.findByRole('option', { name: 'α — альфа 8–13 Гц' })).toBeInTheDocument()
+
+    await user.selectOptions(select, 'alpha')
+
+    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([8, 13])
+    // Выбор пресета — не запуск: из запросов только метаданные
+    const urls = fetchSpy.mock.calls.map(([input]) => String(input))
+    expect(urls.every((url) => url.includes('/meta'))).toBe(true)
+  })
+
+  it('считает одиночную частоту полосой f ± bw/2 (срез 3.6)', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    await user.selectOptions(await screen.findByLabelText('Фильтр расчёта'), 'single')
+
+    // По умолчанию 7.83 Гц и ширина 0.5 Гц — полоса 7.6–8.1 Гц, и об этом сказано в итоге
+    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([7.6, 8.1])
+    expect(
+      screen.getByText(
+        'В расчёт уйдёт: одиночная частота 7.83 Гц (полоса 7.6–8.1 Гц, ширина 0.5 Гц) · без сетевого фильтра',
+      ),
+    ).toBeInTheDocument()
+
+    const freq = screen.getByLabelText('Одиночная частота')
+    await user.clear(freq)
+    await user.type(freq, '10')
+    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([9.8, 10.3])
+
+    const width = screen.getByLabelText('Ширина полосы')
+    await user.clear(width)
+    await user.type(width, '1')
+    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([9.5, 10.5])
+  })
+
+  it('правит свой диапазон и сам ставит границы по возрастанию (срез 3.6)', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    await user.selectOptions(await screen.findByLabelText('Фильтр расчёта'), 'custom')
+
+    const from = screen.getByLabelText('Полоса от')
+    const to = screen.getByLabelText('Полоса до')
+    await user.clear(from)
+    await user.type(from, '15')
+    await user.clear(to)
+    await user.type(to, '5')
+
+    // Поля можно заполнять в любом порядке: полоса всё равно 5–15 Гц
+    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([5, 15])
+  })
+
+  it('держит «свой диапазон» открытым, даже если числа совпали с пресетом (срез 3.6)', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    const select = await screen.findByLabelText('Фильтр расчёта')
+    await user.selectOptions(select, 'custom')
+
+    // Полоса по умолчанию (1–40 Гц) совпадает с «широким» пресетом: список не
+    // должен «отскакивать» назад и прятать поля, иначе свою полосу не ввести
+    expect(useDipoleCalc.getState().params.filterPreset).toBe('custom')
+    expect(select).toHaveValue('custom')
+    expect(screen.getByLabelText('Полоса от')).toHaveValue(1)
+    expect(screen.getByLabelText('Полоса до')).toHaveValue(40)
+
+    // Правка поля переводит полосу и остаётся «своим диапазоном»
+    const to = screen.getByLabelText('Полоса до')
+    await user.clear(to)
+    await user.type(to, '35')
+    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([1, 35])
+    expect(useDipoleCalc.getState().params.filterPreset).toBe('custom')
+  })
+
+  it('показывает выбор пользователя, а не догадку по числам (срез 3.6)', async () => {
+    // Выбран «свой диапазон» с границами альфа-ритма: список показывает выбор,
+    // а поля — те же числа (иначе непонятно, почему поля исчезли)
+    useDipoleCalc.setState({
+      params: { ...CALC_PARAM_DEFAULTS, filterPreset: 'custom', filterBandHz: [8, 13] },
+    })
+    renderWithProviders(<DipolesPanel />)
+
+    expect(await screen.findByLabelText('Фильтр расчёта')).toHaveValue('custom')
+    expect(screen.getByLabelText('Полоса от')).toHaveValue(8)
+    expect(screen.getByLabelText('Полоса до')).toHaveValue(13)
+  })
+
+  it('выключает полосовой фильтр и ставит сетевой отдельно (срез 3.6)', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    await user.selectOptions(await screen.findByLabelText('Фильтр расчёта'), 'none')
+    expect(useDipoleCalc.getState().params.filterBandHz).toBeNull()
+
+    await user.selectOptions(screen.getByLabelText('Сетевой фильтр'), '50')
+    expect(useDipoleCalc.getState().params.notchHz).toBe(50)
+
+    expect(
+      screen.getByText('В расчёт уйдёт: без полосового фильтра · сетевой фильтр 50 Гц'),
+    ).toBeInTheDocument()
+  })
+
+  it('помечает результат устаревшим, если полоса изменилась после расчёта (срез 3.6)', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      params: { ...CALC_PARAM_DEFAULTS, filterBandHz: [8, 13] },
+    })
+    renderWithProviders(<DipolesPanel />)
+
+    expect(
+      screen.getByText('Параметры расчёта изменены — результат не пересчитан'),
+    ).toBeInTheDocument()
+  })
+
+  it('не пугает рассинхроном, когда результат посчитан на текущих параметрах (срез 3.6)', () => {
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    renderWithProviders(<DipolesPanel />)
+
+    expect(
+      screen.queryByText('Параметры расчёта изменены — результат не пересчитан'),
+    ).not.toBeInTheDocument()
   })
 })

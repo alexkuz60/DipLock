@@ -21,7 +21,13 @@ import {
 } from '@/shared/lib/mriProjections'
 import { MRI_SLICE_UNAVAILABLE } from '@/shared/lib/mriSlices'
 import type { MriSliceRef } from '@/shared/api/types'
-import { demoDipoleLayer } from '@/shared/lib/dipolePoints'
+import {
+  ARROW_LENGTH_MAX_PX,
+  DIPOLE_DOT_RADIUS_PX,
+  DIPOLE_DOT_STROKE_PX,
+  DIPOLE_RAY_STROKE_PX,
+  demoDipoleLayer,
+} from '@/shared/lib/dipolePoints'
 import { DIPOLE_PARAM_DEFAULTS, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { MriProjection } from './MriProjection'
@@ -144,9 +150,146 @@ describe('проекция мозга', () => {
   it('рисует точки диполей с векторами и подписью в тултипе', () => {
     renderProjection('coronal', { points: demoDipoleLayer(7, 3) })
 
-    expect(screen.getByTestId('layer-dipoles-coronal').querySelectorAll('circle')).toHaveLength(3)
+    expect(screen.getAllByTestId(/^dipole-dot-coronal-/)).toHaveLength(3)
     const marker = screen.getByTestId('dipole-coronal-0-0')
     expect(marker.querySelector('title')?.textContent).toContain('Эпоха 1')
+  })
+
+  /**
+   * Слои позиций и векторов — раздельные (срез 3.5): «где» и «куда» отвечают на
+   * разные вопросы, и выключать их хочется по отдельности.
+   */
+  it('включает и выключает позиции и векторы диполей порознь', () => {
+    const layer = demoDipoleLayer(3, 2)
+
+    const vectorsOff = renderProjection('coronal', {
+      points: layer,
+      visibility: visible({ vectors: false }),
+    })
+    expect(screen.queryByTestId('layer-dipole-vectors-coronal')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId(/^dipole-dot-coronal-/)).toHaveLength(2)
+    vectorsOff.unmount()
+
+    const dotsOff = renderProjection('coronal', {
+      points: layer,
+      visibility: visible({ dipoles: false }),
+    })
+    // Луч идёт от позиции диполя, поэтому остаётся: карта направлений без точек
+    // — осмысленный вид, а не «сломанный» слой
+    expect(screen.queryByTestId('layer-dipoles-coronal')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId(/^dipole-vector-coronal-/).length).toBeGreaterThan(0)
+    expect(screen.getAllByTestId(/^dipole-arrow-coronal-/).length).toBeGreaterThan(0)
+    dotsOff.unmount()
+
+    renderProjection('coronal', {
+      points: layer,
+      visibility: visible({ vectors: false, dipoles: false }),
+    })
+    expect(screen.queryByTestId('layer-dipoles-coronal')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('layer-dipole-vectors-coronal')).not.toBeInTheDocument()
+  })
+
+  it('рисует наконечник полигоном от длины луча, а не одним размером на проекцию', () => {
+    renderProjection('axial', { points: demoDipoleLayer(5, 2) })
+
+    const arrow = screen.getByTestId('dipole-arrow-axial-0-0')
+    const vertices = (arrow.getAttribute('points') ?? '')
+      .split(' ')
+      .map((pair) => pair.split(',').map(Number))
+    const line = screen.getByTestId('dipole-vector-axial-0-0')
+    // Толщина штриха луча фиксирована (поправка ручной проверки): 2 px по экрану
+    expect(line).toHaveAttribute('stroke-width', String(DIPOLE_RAY_STROKE_PX))
+    const at = { x: Number(line.getAttribute('x1')), y: Number(line.getAttribute('y1')) }
+    const shaftEnd = { x: Number(line.getAttribute('x2')), y: Number(line.getAttribute('y2')) }
+    const dist = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      Math.hypot(a.x - b.x, a.y - b.y)
+
+    expect(vertices).toHaveLength(3)
+    const tip = { x: vertices[0][0], y: vertices[0][1] }
+    // Наконечник продолжает луч: вершина дальше от точки, чем штрих
+    expect(dist(tip, at)).toBeGreaterThan(dist(shaftEnd, at))
+    // Длина наконечника — от длины луча и зажата, а не «на всю проекцию»
+    expect(dist(tip, shaftEnd)).toBeGreaterThan(0)
+    expect(dist(tip, shaftEnd)).toBeLessThanOrEqual(ARROW_LENGTH_MAX_PX)
+    // Крылья симметричны: треугольник, а не «клин» в одну сторону
+    const left = { x: vertices[1][0], y: vertices[1][1] }
+    const right = { x: vertices[2][0], y: vertices[2][1] }
+    expect(dist(tip, left)).toBeCloseTo(dist(tip, right), 6)
+  })
+
+  it('рисует позиции белыми кольцами фиксированного размера при любой силе диполя', () => {
+    const layer = demoDipoleLayer(11, 4)
+    const weak = { ...layer.points[0], id: 'weak', amplitudeNaM: 1 }
+    const strong = { ...layer.points[1], id: 'strong', amplitudeNaM: 1000 }
+
+    renderProjection('axial', { points: { points: [weak, strong], source: 'demo' } })
+
+    // Поправка ручной проверки: размер кольца не зависит от силы диполя. В jsdom
+    // раскладки нет, масштаб фигуры 1 — атрибуты равны экранным пикселям.
+    for (const id of ['weak', 'strong']) {
+      const dot = screen.getByTestId(`dipole-dot-axial-${id}`)
+      expect(dot).toHaveAttribute('r', String(DIPOLE_DOT_RADIUS_PX))
+      expect(dot).toHaveAttribute('stroke-width', String(DIPOLE_DOT_STROKE_PX))
+      expect(dot).toHaveAttribute('stroke', 'var(--color-mri-dipole-point)')
+      expect(dot).toHaveAttribute('fill', 'none')
+    }
+    // Лучи моментов — тоже фиксированной толщины: у слабого и сильного одинаково
+    for (const ray of screen.queryAllByTestId(/^dipole-vector-axial-/)) {
+      expect(ray).toHaveAttribute('stroke-width', String(DIPOLE_RAY_STROKE_PX))
+    }
+  })
+
+  it('клик по точке выделяет диполь и наводит срезы на его позицию', () => {
+    const onSelectPoint = vi.fn()
+    const onPick = vi.fn()
+    renderProjection('coronal', {
+      points: demoDipoleLayer(7, 2),
+      onSelectPoint,
+      onPick,
+    })
+    const point = demoDipoleLayer(7, 2).points[1]
+
+    fireEvent.click(screen.getByTestId('dipole-hit-coronal-0-1'))
+
+    expect(onSelectPoint).toHaveBeenCalledWith('0-1')
+    // Срезы меняются при любом клике (поправка ручной проверки): по диполю —
+    // на его точную позицию MNI, а не на «сырую» точку клика у края хит-зоны
+    expect(onPick).toHaveBeenCalledTimes(1)
+    expect(onPick).toHaveBeenCalledWith(point.position, point.brodmannArea)
+  })
+
+  it('подсвечивает выделенный диполь и снимает выделение повторным кликом', () => {
+    const onSelectPoint = vi.fn()
+    const point = demoDipoleLayer(7, 2).points[0]
+    const view = renderProjection('coronal', {
+      points: demoDipoleLayer(7, 2),
+      selectedPointId: point.id,
+      onSelectPoint,
+    })
+
+    expect(screen.getByTestId(`dipole-coronal-${point.id}`)).toHaveAttribute(
+      'data-selected',
+      'true',
+    )
+    // Выделенный диполь залит оранжево-жёлтым, кольцо остаётся белым
+    expect(screen.getByTestId(`dipole-dot-coronal-${point.id}`)).toHaveAttribute(
+      'fill',
+      'var(--color-mri-dipole)',
+    )
+    expect(screen.getByTestId(`dipole-dot-coronal-${point.id}`)).toHaveAttribute(
+      'stroke',
+      'var(--color-mri-dipole-point)',
+    )
+    view.unmount()
+
+    // Повторный клик по выделенной точке отдаёт `null` — «снять выделение»
+    renderProjection('coronal', {
+      points: demoDipoleLayer(7, 2),
+      selectedPointId: point.id,
+      onSelectPoint,
+    })
+    fireEvent.click(screen.getByTestId(`dipole-hit-coronal-${point.id}`))
+    expect(onSelectPoint).toHaveBeenCalledWith(null)
   })
 
   it('клик отдаёт точку MNI в плоскости текущего среза', () => {
@@ -182,18 +325,18 @@ describe('проекция мозга', () => {
     expect(point.z).toBe(0)
   })
 
-  it('под курсором показывает координаты, после ухода — пояснение плоскости', () => {
+  it('под курсором показывает координаты текстом, без маркера на фигуре', () => {
     renderProjection('axial')
     const svg = stubFigure('axial')
 
     fireEvent.mouseMove(svg, { clientX: 120, clientY: 200 })
 
-    expect(screen.getByTestId('hover-axial')).toBeInTheDocument()
+    // Маркера, бегающего за мышью, нет: его путали с кольцами диполей (ручная проверка)
+    expect(screen.queryByTestId('hover-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('projection-readout-axial').textContent).toMatch(/MNI .* \/ .* \//)
 
     fireEvent.mouseLeave(svg)
 
-    expect(screen.queryByTestId('hover-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('projection-readout-axial')).toHaveTextContent(PROJECTION_HINTS.axial)
   })
 

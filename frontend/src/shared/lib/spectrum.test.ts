@@ -9,23 +9,41 @@
 import { describe, expect, it } from 'vitest'
 import type { SpectrumBandOut, SpectrumResult } from '@/shared/api/types'
 import {
+  bandInFreqWindow,
   bandLabel,
   bandRangeLabel,
+  clampFreqWindow,
   formatPower,
   freqRange,
+  freqWindowLabel,
   histogramBars,
+  normalizeFreqWindow,
   psdPolyline,
+  psdScale,
   rangeSummary,
   spectrumQueryOf,
   spectrumQueryString,
   spectrumSummary,
+  spectrumWithinWindow,
   topomapUrl,
 } from './spectrum'
 
-const QUERY = { filterBandHz: [1, 40] as [number, number], notchHz: 50, epochLengthMs: 1000, rejectThresholdUv: 150 }
+const QUERY = {
+  filterBandHz: [1, 40] as [number, number],
+  notchHz: 50,
+  epochLengthMs: 1000,
+  rejectThresholdUv: 150,
+}
 
 function band(overrides: Partial<SpectrumBandOut> = {}): SpectrumBandOut {
-  return { name: 'alpha', fmin: 8, fmax: 13, power_uv2: 12.5, topomap_url: '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png', ...overrides }
+  return {
+    name: 'alpha',
+    fmin: 8,
+    fmax: 13,
+    power_uv2: 12.5,
+    topomap_url: '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png',
+    ...overrides,
+  }
 }
 
 function spectrum(overrides: Partial<SpectrumResult> = {}): SpectrumResult {
@@ -73,7 +91,9 @@ describe('спектр по диапазонам', () => {
       '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000&reject_threshold_uv=150&v=abc123',
     )
     // Смена фильтра меняет URL — браузер не подставит картинку прошлого расчёта
-    expect(topomapUrl(spectrum(), band(), { ...QUERY, filterBandHz: [4, 8] })).toContain('band_min=4&band_max=8')
+    expect(topomapUrl(spectrum(), band(), { ...QUERY, filterBandHz: [4, 8] })).toContain(
+      'band_min=4&band_max=8',
+    )
   })
 
   it('не выдумывает URL, если сервер картинку не построил', () => {
@@ -102,7 +122,9 @@ describe('спектр по диапазонам', () => {
   })
 
   it('рисует PSD ломаной линией в габаритах 2D-области', () => {
-    const points = psdPolyline([1, 10, 40], [1, 100, 2], 100, 50).split(' ').map((pair) => pair.split(',').map(Number))
+    const points = psdPolyline([1, 10, 40], [1, 100, 2], 100, 50)
+      .split(' ')
+      .map((pair) => pair.split(',').map(Number))
 
     expect(points).toHaveLength(3)
     // Левая точка — у левого края, правая — у правого
@@ -123,9 +145,16 @@ describe('спектр по диапазонам', () => {
   it('берёт параметры для URL топокарт из самого результата, а не из настроек', () => {
     // Смена длины эпохи после расчёта не должна менять URL картинки: картинка
     // относится к тому расчёту, чьи числа показаны рядом (и к своему ETag).
-    const query = spectrumQueryOf(spectrum({ epoch_length_ms: 500, notch_hz: 60, filter_band_hz: [4, 8] }))
+    const query = spectrumQueryOf(
+      spectrum({ epoch_length_ms: 500, notch_hz: 60, filter_band_hz: [4, 8] }),
+    )
 
-    expect(query).toEqual({ filterBandHz: [4, 8], notchHz: 60, epochLengthMs: 500, rejectThresholdUv: 150 })
+    expect(query).toEqual({
+      filterBandHz: [4, 8],
+      notchHz: 60,
+      epochLengthMs: 500,
+      rejectThresholdUv: 150,
+    })
     expect(spectrumQueryOf(spectrum({ filter_band_hz: null })).filterBandHz).toBeNull()
     // Битые/короткие массивы полосы не превращаются в «диапазон из одного числа»
     expect(spectrumQueryOf(spectrum({ filter_band_hz: [1] })).filterBandHz).toBeNull()
@@ -146,6 +175,93 @@ describe('спектр по диапазонам', () => {
 
   it('подписывает параметры расчёта для панели', () => {
     expect(rangeSummary(QUERY)).toBe('1–40 Гц · эпоха 1000 мс')
-    expect(rangeSummary({ filterBandHz: null, epochLengthMs: 2000 })).toBe('без фильтра · эпоха 2000 мс')
+    expect(rangeSummary({ filterBandHz: null, epochLengthMs: 2000 })).toBe(
+      'без фильтра · эпоха 2000 мс',
+    )
+  })
+})
+
+/**
+ * Окно частот (срез 3.5) — параметр **просмотра**: оно срезает уже посчитанные
+ * числа, зажимается в частоты текущего расчёта и не меняет масштаб логарифма.
+ */
+describe('окно частот FFT-графика (срез 3.5)', () => {
+  const FREQS = [1, 4, 8, 10, 13, 30, 40]
+  const PSD = [1, 2, 6, 12, 4, 2, 1]
+
+  it('приводит ввод пользователя к паре «от … до» и отбрасывает мусор', () => {
+    expect(normalizeFreqWindow([13, 8])).toEqual([8, 13])
+    expect(normalizeFreqWindow([8.04, 12.96])).toEqual([8, 13])
+    expect(normalizeFreqWindow(null)).toBeNull()
+    expect(normalizeFreqWindow([Number.NaN, 10])).toBeNull()
+    expect(normalizeFreqWindow([0, Number.POSITIVE_INFINITY])).toBeNull()
+  })
+
+  it('зажимает окно в измеренный диапазон и без окна показывает весь спектр', () => {
+    // Окно живёт в предпочтениях просмотра и переживает смену записи: чужое окно
+    // не должно показать пустой график вместо всего посчитанного спектра
+    expect(clampFreqWindow(FREQS, null)).toEqual([1, 40])
+    expect(clampFreqWindow(FREQS, [8, 13])).toEqual([8, 13])
+    expect(clampFreqWindow(FREQS, [-50, 500])).toEqual([1, 40])
+    expect(clampFreqWindow(FREQS, [30, 100])).toEqual([30, 40])
+    expect(clampFreqWindow([], [8, 13])).toEqual([0, 1])
+  })
+
+  it('срезает частоты и мощности вместе, не сдвигая их друг относительно друга', () => {
+    const alpha = spectrumWithinWindow(FREQS, PSD, [8, 13])
+
+    expect(alpha.freqs).toEqual([8, 10, 13])
+    // Мощность берётся по тем же индексам, что и частота: 6, 12, 4 — а не «первые три»
+    expect(alpha.power).toEqual([6, 12, 4])
+    // Без окна массивы уходят как есть (ни одной копии «на всякий случай»)
+    expect(spectrumWithinWindow(FREQS, PSD, null)).toEqual({ freqs: FREQS, power: PSD })
+    // Окно уже измеренной частоты — честный пустой результат, а не подмена на весь спектр
+    expect(spectrumWithinWindow(FREQS, PSD, [5, 7]).freqs).toEqual([])
+  })
+
+  it('держит масштаб логарифма по всему спектру: пики не «прыгают» при сужении окна', () => {
+    const scale = psdScale(PSD)
+    const full = psdPolyline(FREQS, PSD, 100, 50, 2, scale)
+    const alpha = spectrumWithinWindow(FREQS, PSD, [8, 13])
+    const zoomed = psdPolyline(alpha.freqs, alpha.power, 100, 50, 2, scale)
+    const yAt = (points: string, index: number) => Number(points.split(' ')[index].split(',')[1])
+
+    // Точка альфа-пика (12 мкВ²/Гц) в полном спектре и в окне — на одной высоте
+    expect(yAt(zoomed, 1)).toBeCloseTo(yAt(full, 3), 6)
+
+    // Окно, в которое максимум спектра не попал: без общего масштаба δ-пик
+    // «подтянулся» бы к верху области, и окно выглядело бы «как весь спектр»
+    const delta = spectrumWithinWindow(FREQS, PSD, [1, 4])
+    const deltaScaled = psdPolyline(delta.freqs, delta.power, 100, 50, 2, scale)
+    const deltaNaive = psdPolyline(delta.freqs, delta.power, 100, 50)
+    expect(yAt(deltaNaive, 1)).toBeLessThan(yAt(deltaScaled, 1))
+    // Масштаб один на оба графика: δ в окне и δ в полном спектре совпадают по высоте
+    expect(yAt(deltaScaled, 1)).toBeCloseTo(yAt(full, 1), 6)
+  })
+
+  it('подписывает окно и считает, какие ритмы в него попали', () => {
+    expect(freqWindowLabel(null, [1, 40])).toBe('Весь диапазон: 1–40 Гц')
+    expect(freqWindowLabel([8, 13], [1, 40])).toBe('Показано 8–13 Гц из 1–40 Гц')
+
+    expect(bandInFreqWindow({ fmin: 8, fmax: 13 }, null)).toBe(true)
+    expect(bandInFreqWindow({ fmin: 8, fmax: 13 }, [8, 13])).toBe(true)
+    // Полосы, лежащие за границей окна, не «прилипают» к нему: δ заканчивается на 4
+    expect(bandInFreqWindow({ fmin: 1, fmax: 4 }, [8, 13])).toBe(false)
+    expect(bandInFreqWindow({ fmin: 13, fmax: 30 }, [8, 13])).toBe(false)
+  })
+
+  it('помечает полосы гистограммы, попавшие в окно, но нормирует по всему спектру', () => {
+    const bands = [
+      band({ name: 'alpha', fmin: 8, fmax: 13, power_uv2: 10 }),
+      band({ name: 'beta', fmin: 13, fmax: 30, power_uv2: 5 }),
+    ]
+    const bars = histogramBars(bands, [8, 13])
+
+    expect(bars.map((bar) => bar.inRange)).toEqual([true, false])
+    // Нормировка — по всем диапазонам, даже вне окна: иначе высота столбиков
+    // зависела бы от выбранного окна, и сравнить ритмы было бы нельзя
+    expect(bars[0].ratio).toBe(1)
+    expect(bars[1].ratio).toBe(0.5)
+    expect(histogramBars(bands).every((bar) => bar.inRange)).toBe(true)
   })
 })

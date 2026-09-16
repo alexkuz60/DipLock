@@ -6,9 +6,11 @@
  * метаданные), а клик по проекции наводит все три среза на выбранную точку.
  */
 import { fireEvent, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PROJECTION_PLANES,
+  applyPointToSlices,
   defaultSlices,
   projectionBox,
   type ProjectionPlane,
@@ -47,6 +49,8 @@ describe('рабочая область раздела «Диполи»', () => 
     useDipoleCalc.setState({
       params: { ...CALC_PARAM_DEFAULTS },
       amplitudeThresholdNam: 0,
+      fftRangeHz: null,
+      selectedPointId: null,
       job: null,
       result: null,
       spectrumJob: null,
@@ -183,5 +187,71 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(screen.queryAllByTestId(/^dipole-dot-axial-/)).toHaveLength(0)
     expect(screen.getByText('Скрыто порогом «КД ≥ 200 нАм»: 3')).toBeInTheDocument()
     expect(screen.getByText(/Быстрый режим, сетка 7 мм/)).toBeInTheDocument()
+  })
+
+  /**
+   * Выделение диполя (срез 3.5, поправка ручной проверки): выбор в одной проекции
+   * синхронизируется во всех трёх **и** наводит срезы на позицию диполя — срезы
+   * обязаны меняться при любом клике по фигуре.
+   */
+  it('выделяет диполь во всех проекциях и наводит срезы на его позицию', () => {
+    const fetchSpy = mockApiFetch()
+    vi.stubGlobal('fetch', fetchSpy)
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    renderWithProviders(<DipolesSection />)
+
+    fireEvent.click(screen.getByTestId('dipole-hit-sagittal-0-120'))
+
+    for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
+      expect(screen.getByTestId(`dipole-${plane}-0-120`)).toHaveAttribute('data-selected', 'true')
+      expect(screen.getByTestId(`dipole-${plane}-1-140`)).toHaveAttribute('data-selected', 'false')
+    }
+    expect(useDipoleCalc.getState().selectedPointId).toBe('0-120')
+    // Подпись выбора: у подсветки на фигуре есть читаемый текст
+    expect(screen.getByText(/Выделен диполь: Эпоха 1, 0.120 с/)).toBeInTheDocument()
+    // Выделенный диполь залит оранжево-жёлтым, остальные — белые кольца без заливки
+    expect(screen.getByTestId('dipole-dot-sagittal-0-120')).toHaveAttribute(
+      'fill',
+      'var(--color-mri-dipole)',
+    )
+    expect(screen.getByTestId('dipole-dot-sagittal-1-140')).toHaveAttribute('fill', 'none')
+
+    // Срезы навелись на позицию диполя (первая точка фикстуры: MNI 12 / -34.5 / 18)
+    const position = { x: 12, y: -34.5, z: 18 }
+    expect(useDipoleParams.getState().selection.point).toEqual(position)
+    expect(useDipoleParams.getState().params.slices).toEqual(applyPointToSlices(position).slices)
+    // Выделение — чистая перерисовка: новых запросов нет
+    const paths = fetchSpy.mock.calls.map(([path]) => String(path))
+    expect(paths.every((path) => path.startsWith('/api/v1/meta'))).toBe(true)
+  })
+
+  it('снимает выделение повторным кликом и кнопкой «Снять выделение»', async () => {
+    const user = userEvent.setup()
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    renderWithProviders(<DipolesSection />)
+
+    fireEvent.click(screen.getByTestId('dipole-hit-axial-1-140'))
+    expect(screen.getByTestId('dipole-coronal-1-140')).toHaveAttribute('data-selected', 'true')
+
+    await user.click(screen.getByRole('button', { name: 'Снять выделение' }))
+
+    expect(useDipoleCalc.getState().selectedPointId).toBeNull()
+    expect(screen.queryByText(/Выделен диполь:/)).not.toBeInTheDocument()
+    for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
+      expect(screen.getByTestId(`dipole-${plane}-1-140`)).toHaveAttribute('data-selected', 'false')
+    }
+  })
+
+  it('подсвечивает выделенный диполь и после подъёма порога «КД»', () => {
+    // Порог скрывает точку из отрисовки, но выделение не должно «теряться» в
+    // подписи: выбор сделан раньше, а порог — параметр отображения
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      amplitudeThresholdNam: 500,
+      selectedPointId: '0-120',
+    })
+    renderWithProviders(<DipolesSection />)
+
+    expect(screen.getByText(/Выделен диполь: Эпоха 1, 0.120 с/)).toBeInTheDocument()
   })
 })

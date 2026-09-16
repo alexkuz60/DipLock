@@ -10,18 +10,29 @@ import { describe, expect, it } from 'vitest'
 import { projectPoint } from './mriProjections'
 import { dipoleScanResultFixture } from '@/test/fixtures'
 import {
+  ARROW_LENGTH_MAX_PX,
+  DIPOLE_DOT_RADIUS_PX,
+  DIPOLE_DOT_STROKE_PX,
+  DIPOLE_RAY_STROKE_PX,
+  DOT_HIT_RADIUS_PX,
+  FORCE_FULL_NAM,
+  MARKER_OPACITY_MIN,
   VECTOR_MAX_PX,
   VECTOR_MIN_PX,
   demoDipoleLayer,
+  dipoleArrowHead,
+  dipoleForceFraction,
   dipoleLayerFromScan,
   dipoleLayerStatus,
   dipoleMarker,
   dipolePointTitle,
+  dipoleRayVisual,
   dipoleVectorDirection,
   dipoleVectorLength,
   emptyDipoleLayer,
   hiddenByThreshold,
   thresholdDipoleLayer,
+  type DipoleMarker,
   type DipolePoint,
 } from './dipolePoints'
 
@@ -92,6 +103,92 @@ describe('слой диполей', () => {
     expect(layer.source).toBe('demo')
     expect(layer.points.map((point) => point.id)).toEqual(['0-0', '0-1', '0-2', '0-3'])
     expect(layer.points.every((point) => point.gof > 0.59 && point.gof <= 1)).toBe(true)
+  })
+})
+
+/**
+ * Кольцо позиции, оформление луча и наконечник (срез 3.5, поправка ручной
+ * проверки): кольцо одно на всех диполей, сила видна по лучу, а стрелка не
+ * «съедает» короткий луч.
+ */
+describe('отрисовка маркера диполя (срез 3.5)', () => {
+  it('зажимает силу сверху: одиночный выброс не растягивает шкалу', () => {
+    expect(dipoleForceFraction(0)).toBe(0)
+    expect(dipoleForceFraction(-50)).toBe(0.5)
+    expect(dipoleForceFraction(FORCE_FULL_NAM)).toBe(1)
+    // Выше «полной» силы маркер не растёт: иначе все прочие диполи выглядели бы
+    // одинаково мелкими, и по картинке нельзя было бы сравнить их силу
+    expect(dipoleForceFraction(FORCE_FULL_NAM * 10)).toBe(1)
+    expect(dipoleForceFraction(Number.NaN)).toBe(0)
+  })
+
+  it('держит геометрию маркера фиксированной: кольцо Ø 10 px, штрихи 2 px — при любой силе', () => {
+    // Поправка ручной проверки: кольцо не зависит ни от амплитуды, ни от масштаба
+    // фигуры (компенсация масштаба — в компоненте), сила диполя читается по лучу
+    expect(DIPOLE_DOT_RADIUS_PX * 2).toBe(10)
+    expect(DIPOLE_DOT_STROKE_PX).toBe(2)
+    expect(DIPOLE_RAY_STROKE_PX).toBe(2)
+    // Хит-зона шире кольца: иначе в маркер диаметром 10 px мышью не попасть
+    expect(DOT_HIT_RADIUS_PX).toBeGreaterThan(DIPOLE_DOT_RADIUS_PX)
+  })
+
+  it('плотнит луч по силе: слабый — бледный, сильный — плотный; толщина у всех одна', () => {
+    const weak = dipoleRayVisual(0)
+    const middle = dipoleRayVisual(FORCE_FULL_NAM / 2)
+    const strong = dipoleRayVisual(FORCE_FULL_NAM * 2)
+
+    // Нулевая амплитуда — нижняя граница шкалы: луч ещё виден, но самый бледный
+    expect(weak.opacity).toBeCloseTo(MARKER_OPACITY_MIN, 6)
+    expect(strong.opacity).toBeCloseTo(1, 6)
+    // Насыщение: выше «полной» силы плотность не растёт (см. dipoleForceFraction)
+    expect(strong).toEqual(dipoleRayVisual(FORCE_FULL_NAM))
+    expect(middle.opacity).toBeGreaterThan(weak.opacity)
+    expect(middle.opacity).toBeLessThan(strong.opacity)
+    // Толщина в оформлении луча не участвует: она одна на все лучи (см. константу)
+    expect(strong).not.toHaveProperty('vectorStroke')
+  })
+
+  it('строит наконечник от длины луча, а не «одним размером на проекцию»', () => {
+    const short = dipoleMarker('axial', {
+      ...POINT,
+      amplitudeNaM: 20,
+      orientation: { x: 1, y: 0, z: 0 },
+    })
+    const long = dipoleMarker('axial', {
+      ...POINT,
+      amplitudeNaM: 1000,
+      orientation: { x: 1, y: 0, z: 0 },
+    })
+
+    expect(short.head).not.toBeNull()
+    expect(long.head).not.toBeNull()
+    /**
+     * Длина наконечника по оси луча: расстояние от вершины до середины основания
+     * (крылья отстоят в стороны, и hypotenuse дал бы «длину» больше зажатой).
+     */
+    const axisLength = (head: NonNullable<DipoleMarker['head']>) =>
+      Math.hypot(head[0].x - (head[1].x + head[2].x) / 2, head[0].y - (head[1].y + head[2].y) / 2)
+
+    // Вершина наконечника — конец луча, основание — ближе к точке
+    expect(short.head?.[0]).toEqual(short.end)
+    expect(axisLength(short.head!)).toBeLessThanOrEqual(short.vectorPx)
+    // Наконечник зажат: на длинном луче он не растёт вместе с ним бесконечно
+    expect(axisLength(long.head!)).toBeLessThanOrEqual(ARROW_LENGTH_MAX_PX + 1e-9)
+    expect(axisLength(long.head!)).toBeGreaterThan(axisLength(short.head!))
+    // Штрих луча короче луча: наконечник стоит на его конце, а не «проткнут» им
+    expect(short.shaftEnd).not.toEqual(short.end)
+    const toAt = (point: { x: number; y: number }) =>
+      Math.hypot(point.x - short.at.x, point.y - short.at.y)
+    expect(toAt(short.shaftEnd!)).toBeLessThan(short.vectorPx)
+  })
+
+  it('не строит наконечник без направления: момент вдоль нормали среза', () => {
+    const alongNormal = dipoleMarker('sagittal', { ...POINT, orientation: { x: 1, y: 0, z: 0 } })
+
+    expect(alongNormal.end).toBeNull()
+    expect(alongNormal.head).toBeNull()
+    expect(alongNormal.shaftEnd).toBeNull()
+    expect(dipoleArrowHead({ x: 0, y: 0 }, { x: 5, y: 0 }, 0)).toBeNull()
   })
 })
 

@@ -31,11 +31,27 @@ import {
   type SliceTriplet,
 } from '@/shared/lib/mriProjections'
 
-/** Фоновые слои проекций мозга: что рисуется поверх «подложки» фигуры. */
-export type DipoleLayerId = 'mri' | 'head' | 'mni' | 'brodmann' | 'dipoles'
+/**
+ * Фоновые слои проекций мозга: что рисуется поверх «подложки» фигуры.
+ *
+ * `dipoles` и `vectors` — **раздельные слои** (срез 3.5): позиции диполей и
+ * векторы их моментов отвечают на разные вопросы («где» и «куда»), и выключить
+ * их хочется по отдельности (например, при плотном облаке точек лучи мешают
+ * читать позиции). Выключение позиций не выключает лучи: они начинаются от
+ * координаты диполя, и «висеть в воздухе» без точки — нормальный вид карты
+ * направлений.
+ */
+export type DipoleLayerId = 'mri' | 'head' | 'mni' | 'brodmann' | 'dipoles' | 'vectors'
 
 /** Порядок слоёв = порядок отрисовки снизу вверх (и порядок чекбоксов в панели). */
-export const DIPOLE_LAYERS: DipoleLayerId[] = ['mri', 'head', 'mni', 'brodmann', 'dipoles']
+export const DIPOLE_LAYERS: DipoleLayerId[] = [
+  'mri',
+  'head',
+  'mni',
+  'brodmann',
+  'dipoles',
+  'vectors',
+]
 
 export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
   mri: 'Срез МРТ (T1)',
@@ -43,6 +59,7 @@ export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
   mni: 'Срезы MNI',
   brodmann: 'Поля Бродмана',
   dipoles: 'Точки диполей',
+  vectors: 'Векторы моментов',
 }
 
 export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
@@ -50,7 +67,10 @@ export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
   head: 'Условная граница черепа на текущем срезе',
   mni: 'Анатомическая схема среза и линии секущих плоскостей',
   brodmann: 'Поля Бродмана, попадающие в текущий срез',
-  dipoles: 'Результат расчёта: точки MNI и векторы направления (пока пусто)',
+  dipoles:
+    'Позиции диполей из результата: одна точка на эпоху в пике GFP (порог «КД» скрывает слабые). Кольца белые, фиксированного размера; клик по точке выделяет диполь и наводит срезы на его позицию',
+  vectors:
+    'Направление момента диполя: луч от позиции точки, длина и толщина — по силе момента, наконечник считается от длины луча',
 }
 
 /** Слои, которые рисуются по умолчанию (точки диполей — тоже, но их пока нет). */
@@ -61,6 +81,7 @@ export const DIPOLE_PARAM_DEFAULTS = {
     mni: true,
     brodmann: true,
     dipoles: true,
+    vectors: true,
   } as Record<DipoleLayerId, boolean>,
   slices: defaultSlices(),
 }

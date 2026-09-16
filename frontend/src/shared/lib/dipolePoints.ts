@@ -108,7 +108,10 @@ export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
  */
 export function thresholdDipoleLayer(layer: DipoleLayer, minAmplitudeNaM: number): DipoleLayer {
   if (!(minAmplitudeNaM > 0)) return layer
-  return { points: layer.points.filter((point) => point.amplitudeNaM >= minAmplitudeNaM), source: layer.source }
+  return {
+    points: layer.points.filter((point) => point.amplitudeNaM >= minAmplitudeNaM),
+    source: layer.source,
+  }
 }
 
 /** Сколько точек скрыто порогом (для пояснения в панели). */
@@ -132,6 +135,64 @@ export function dipoleVectorLength(amplitudeNaM: number): number {
   return Math.min(VECTOR_MAX_PX, Math.max(VECTOR_MIN_PX, raw))
 }
 
+/** Амплитуда, при которой маркер «полный»: сильнее — уже не растёт, нАм. */
+export const FORCE_FULL_NAM = 100
+
+/**
+ * Сила диполя как доля шкалы отображения, 0…1.
+ *
+ * Сила = амплитуда момента (нА·м). Шкала **зажата сверху** (`FORCE_FULL_NAM`):
+ * одиночный выброс в 10 раз больше остальных иначе растянул бы шкалу, и все
+ * остальные диполи выглядели бы одинаково мелкими — по картинке нельзя было бы
+ * сравнить их силу. Выше насыщения маркер не растёт, но и не врёт: он просто
+ * «самый сильный».
+ */
+export function dipoleForceFraction(amplitudeNaM: number): number {
+  if (!Number.isFinite(amplitudeNaM)) return 0
+  return Math.min(1, Math.abs(amplitudeNaM) / FORCE_FULL_NAM)
+}
+
+/**
+ * Кольцо позиции диполя — фиксированный **экранный** размер (поправка ручной
+ * проверки): диаметр 10 px и штрих 2 px при любом размере окна браузера. Фигура
+ * SVG растягивается по ширине колонки (`width: 100%`), поэтому компонент делит
+ * эти пиксели на текущий масштаб `renderedWidth / viewBox.width` — размер кольца
+ * на экране не зависит ни от масштаба фигуры, ни от силы диполя.
+ */
+export const DIPOLE_DOT_RADIUS_PX = 5
+export const DIPOLE_DOT_STROKE_PX = 2
+
+/**
+ * Толщина луча момента — тоже фиксированный **экранный** размер (поправка ручной
+ * проверки): 2 px при любом размере окна, как штрих кольца позиции. Толщина силу
+ * не кодирует: при плотном облаке точек «жирные» лучи сливались бы в пятно, а
+ * силу диполя и без них видно по длине и плотности луча.
+ */
+export const DIPOLE_RAY_STROKE_PX = 2
+/** Слабый диполь всё равно виден: прозрачность луча ниже этой не опускается. */
+export const MARKER_OPACITY_MIN = 0.35
+/**
+ * Радиус хит-зоны выделения, px: попасть в кольцо диаметром 10 px мышью трудно,
+ * а выделение диполя — основной способ «выбрать точку» в разделе.
+ */
+export const DOT_HIT_RADIUS_PX = 9
+
+/** Оформление луча момента по силе диполя: толщина фиксирована, силу кодирует плотность. */
+export type DipoleRayVisual = {
+  /** Непрозрачность луча, 0…1 */
+  opacity: number
+}
+
+/**
+ * Отрисовка луча по силе диполя: сильнее — плотнее и длиннее, слабее —
+ * прозрачнее. Толщина у всех лучей одна (`DIPOLE_RAY_STROKE_PX`): «жирные» лучи
+ * сливались бы в пятно при плотном облаке точек.
+ */
+export function dipoleRayVisual(amplitudeNaM: number): DipoleRayVisual {
+  const force = dipoleForceFraction(amplitudeNaM)
+  return { opacity: MARKER_OPACITY_MIN + force * (1 - MARKER_OPACITY_MIN) }
+}
+
 /**
  * Проекция вектора момента на плоскость проекции: направление в нормализованных
  * осях фигуры (u — горизонталь, v — вертикаль).
@@ -149,14 +210,62 @@ export function dipoleVectorDirection(plane: ProjectionPlane, orientation: MniVe
   return { u: u / norm, v: v / norm }
 }
 
-/** Маркер диполя на проекции: точка в пикселях, конец вектора и длина луча. */
+/**
+ * Маркер диполя на проекции: точка в пикселях, конец вектора и длина луча.
+ *
+ * Наконечник стрелки посчитан **здесь, а не тегом `<marker>` SVG**: размер
+ * `<marker>` задаётся один на всю проекцию, поэтому у короткого луча (слабый
+ * диполь) стрелка накрывала бы весь луч и «съедала» направление, а у длинного
+ * выглядела бы точкой. Длина наконечника берётся от длины луча и зажата в рамки.
+ */
 export type DipoleMarker = {
   /** Позиция диполя на фигуре, px */
   at: PixelPoint
-  /** Конец вектора направления, px (`null` — момент лежит вдоль нормали среза) */
+  /** Конец вектора направления (вершина наконечника), px (`null` — момент вдоль нормали среза) */
   end: PixelPoint | null
+  /** Конец штриха луча: наконечник начинается отсюда (не «протыкает» его) */
+  shaftEnd: PixelPoint | null
+  /** Вершины треугольника наконечника (вершина + два крыла), px */
+  head: PixelPoint[] | null
   /** Длина луча, px */
   vectorPx: number
+}
+
+/** Доля длины луча, уходящая под наконечник, и границы его длины, px. */
+export const ARROW_LENGTH_RATIO = 0.38
+export const ARROW_LENGTH_MIN_PX = 4
+export const ARROW_LENGTH_MAX_PX = 9
+
+/**
+ * Наконечник вектора: треугольник на конце луча плюс укороченный штрих.
+ *
+ * `vectorPx <= 0` — направления нет (момент вдоль нормали среза): наконечника и
+ * штриха тоже нет, компонент рисует точку кольцом.
+ */
+export function dipoleArrowHead(
+  at: PixelPoint,
+  end: PixelPoint,
+  vectorPx: number,
+): { shaftEnd: PixelPoint; head: PixelPoint[] } | null {
+  if (!(vectorPx > 0)) return null
+  const ux = (end.x - at.x) / vectorPx
+  const uy = (end.y - at.y) / vectorPx
+  const length = Math.min(
+    ARROW_LENGTH_MAX_PX,
+    Math.max(ARROW_LENGTH_MIN_PX, vectorPx * ARROW_LENGTH_RATIO),
+    vectorPx,
+  )
+  const half = length * 0.34
+  const baseX = end.x - ux * length
+  const baseY = end.y - uy * length
+  return {
+    shaftEnd: { x: baseX, y: baseY },
+    head: [
+      end,
+      { x: baseX - uy * half, y: baseY + ux * half },
+      { x: baseX + uy * half, y: baseY - ux * half },
+    ],
+  }
 }
 
 /**
@@ -174,14 +283,20 @@ export function dipoleMarker(
   const at = projectPoint(plane, point.position, padding)
   const direction = dipoleVectorDirection(plane, point.orientation)
   const vectorPx = dipoleVectorLength(point.amplitudeNaM)
-  if (direction.u === 0 && direction.v === 0) return { at, end: null, vectorPx: 0 }
+  if (direction.u === 0 && direction.v === 0) {
+    return { at, end: null, shaftEnd: null, head: null, vectorPx: 0 }
+  }
+  const end: PixelPoint = {
+    x: at.x + direction.u * vectorPx,
+    // Экранная вертикаль инвертирована: +v направлен вверх, а y растёт вниз
+    y: at.y - direction.v * vectorPx,
+  }
+  const arrow = dipoleArrowHead(at, end, vectorPx)
   return {
     at,
-    end: {
-      x: at.x + direction.u * vectorPx,
-      // Экранная вертикаль инвертирована: +v направлен вверх, а y растёт вниз
-      y: at.y - direction.v * vectorPx,
-    },
+    end,
+    shaftEnd: arrow?.shaftEnd ?? end,
+    head: arrow?.head ?? null,
     vectorPx,
   }
 }

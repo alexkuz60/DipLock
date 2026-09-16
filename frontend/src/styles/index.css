@@ -41,6 +41,9 @@
   --color-mri-slice: #4da3ff;
   --color-mri-brodmann: #48d17f;
   --color-mri-dipole: #ffb454;
+  /* Кольцо позиции диполя: белое, фиксированного экранного размера (Ø 10 px,
+     штрих 2 px). Выделенный диполь заливается --color-mri-dipole (оранжево-жёлтым) */
+  --color-mri-dipole-point: #ffffff;
 
   /* Системный шрифт пользователя, без веб-загрузок */
   --font-sans:

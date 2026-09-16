@@ -54,7 +54,9 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     await user.click(screen.getByRole('button', { name: 'Рассчитать диполи' }))
 
-    const urls = fetchSpy.mock.calls.map(([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`)
+    const urls = fetchSpy.mock.calls.map(
+      ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
+    )
     expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/dipoles')
     expect(useDipoleCalc.getState().result?.points).toHaveLength(4)
     // Кнопка меняет подпись: результат есть — предлагается пересчёт
@@ -96,6 +98,26 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     expect(useDipoleCalc.getState().amplitudeThresholdNam).toBe(60)
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('отправляет полосу и сетевой фильтр из панели в задачу (срез 3.6)', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({
+      params: { ...CALC_PARAM_DEFAULTS, filterPreset: 'alpha', filterBandHz: [8, 13], notchHz: 50 },
+    })
+    const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    await user.click(screen.getByRole('button', { name: 'Рассчитать диполи' }))
+
+    // Полоса формы фильтров уходит в задачу как band_min/band_max — не «где-то
+    // в состоянии, но не в запросе»
+    const [, init] = fetchSpy.mock.calls[0]
+    const form = init?.body as FormData
+    expect(form.get('band_min')).toBe('8')
+    expect(form.get('band_max')).toBe('13')
+    expect(form.get('notch_hz')).toBe('50')
   })
 
   it('кнопки панелей открывают одну выдвижную панель за раз', async () => {

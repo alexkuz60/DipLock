@@ -8,9 +8,29 @@
  *
  * Слои снизу вверх (порядок и подписи — в `shared/state/dipoleParams.ts`):
  * `mri` — реальный срез T1, `head` — силуэт головы на срезе, `mni` — сетка и
- * схема среза, `brodmann` — поля Бродмана, `dipoles` — точки диполей с векторами
- * моментов. Каждый слой включается отдельно; выключенный слой не рисуется вовсе,
- * а не прячется прозрачностью.
+ * схема среза, `brodmann` — поля Бродмана, `dipoles` — позиции диполей,
+ * `vectors` — векторы моментов. Каждый слой включается отдельно; выключенный
+ * слой не рисуется вовсе, а не прячется прозрачностью. Позиции и векторы —
+ * **разные слои** (срез 3.5): «где» и «куда» отвечают на разные вопросы, и при
+ * плотном облаке точек лучи мешают читать позиции (и наоборот).
+ *
+ * Позиция диполя — белое кольцо **фиксированного экранного размера** (Ø 10 px,
+ * штрих 2 px при любом размере окна: фигура растягивается по ширине колонки,
+ * поэтому геометрия кольца делится на масштаб `renderedWidth / viewBox.width`,
+ * который отслеживает ResizeObserver). Выделенный диполь залит оранжево-жёлтым.
+ * Сила момента видна по лучу (`dipoleRayVisual` в `shared/lib/dipolePoints.ts`),
+ * а не по размеру кольца; толщина луча тоже фиксирована (2 px по экрану), как и
+ * штрих кольца. Наконечник вектора рисуется полигоном с длиной от длины луча:
+ * размер `<marker>` SVG один на всю проекцию, поэтому на коротком луче стрелка
+ * накрывала бы весь луч, а на длинном выглядела бы точкой.
+ *
+ * Клик по точке **выделяет диполь** (`onSelectPoint`) **и наводит срезы** на его
+ * позицию (`onPick`): поправка ручной проверки — срезы обязаны меняться при
+ * любом клике по фигуре. `stopPropagation` остаётся, чтобы клик не обработался
+ * дважды: фигура навела бы срезы на «сырую» точку клика, а хит-зона шире кольца.
+ *
+ * Координаты под курсором — только текстом в строке под фигурой: маркера,
+ * бегающего за мышью, нет, чтобы его не путали с кольцами диполей.
  *
  * Схема среза (`demoSliceStructures`) — фикстура анатомии: она показывается только
  * без реального тома, иначе рисовала бы «вторую» анатомию поверх настоящей.
@@ -22,7 +42,7 @@
  * клик отдаётся наверх через `onPick`. В локальном состоянии живёт «точка под
  * курсором» и признак недоступной картинки — они нужны текущей отрисовке.
  */
-import { useMemo, useState, type CSSProperties, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react'
 import {
   PROJECTION_HINTS,
   PROJECTION_LABELS,
@@ -32,6 +52,7 @@ import {
   demoBrodmannAreas,
   demoHeadContours,
   demoSliceStructures,
+  ellipsePx,
   normalizedToPx,
   planeEdgeLabels,
   planeGridLines,
@@ -50,8 +71,13 @@ import {
 import { MRI_SLICE_UNAVAILABLE, mriSliceRect, mriSliceUrl } from '@/shared/lib/mriSlices'
 import type { MriSliceRef } from '@/shared/api/types'
 import {
+  DIPOLE_DOT_RADIUS_PX,
+  DIPOLE_DOT_STROKE_PX,
+  DIPOLE_RAY_STROKE_PX,
+  DOT_HIT_RADIUS_PX,
   dipoleMarker,
   dipolePointTitle,
+  dipoleRayVisual,
   emptyDipoleLayer,
   type DipoleLayer,
 } from '@/shared/lib/dipolePoints'
@@ -71,6 +97,10 @@ export type MriProjectionProps = {
   points?: DipoleLayer
   /** Выделенное поле Бродмана: подсвечивается, остальные приглушаются */
   selectedArea?: string | null
+  /** Выделенный диполь: подсвечивается на **всех** проекциях (id из `points`) */
+  selectedPointId?: string | null
+  /** Клик по точке диполя: выделить (или снять — `null` при повторном клике) и навести срезы (`onPick`) */
+  onSelectPoint?: (id: string | null) => void
   /** Референс-точка сессии (перекрестие на всех проекциях) */
   reference?: MniVector | null
   /**
@@ -91,6 +121,8 @@ export function MriProjection({
   visibility,
   points = emptyDipoleLayer(),
   selectedArea = null,
+  selectedPointId = null,
+  onSelectPoint,
   reference = null,
   mri = null,
   onPick,
@@ -112,9 +144,31 @@ export function MriProjection({
    * (аксиальная до 22%). Масштаб берётся из геометрии, компонент его не считает.
    */
   const box = projectionBox(plane)
-  /** Полуоси прямоугольника плоскости: полурадиусы эллипсов заданы в долях размаха */
-  const halfWidth = box.innerWidth / 2
-  const halfHeight = box.innerHeight / 2
+
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  /**
+   * Масштаб фигуры: CSS-пикселей экрана на единицу viewBox. Фигура растягивается
+   * по ширине колонки (`w-full`), а кольцо диполя обязано держать экранный
+   * размер (Ø 10 px, штрих 2 px) при любом размере окна — поэтому его геометрия
+   * делится на этот масштаб. В jsdom раскладки нет (rect.width = 0): масштаб
+   * остаётся 1, и тесты видят «честные» пиксели.
+   */
+  const [pxPerUnit, setPxPerUnit] = useState(1)
+  useEffect(() => {
+    const element = svgRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const update = () => {
+      const width = element.getBoundingClientRect().width
+      if (width > 0) setPxPerUnit(width / box.width)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [box.width])
+  const dotRadiusPx = DIPOLE_DOT_RADIUS_PX / pxPerUnit
+  const dotStrokePx = DIPOLE_DOT_STROKE_PX / pxPerUnit
+  const rayStrokePx = DIPOLE_RAY_STROKE_PX / pxPerUnit
 
   /**
    * Слой МРТ: включён, ссылка есть и картинка ещё не падала. Пока он показан,
@@ -145,12 +199,12 @@ export function MriProjection({
       points.points.map((point) => ({
         point,
         marker: dipoleMarker(plane, point),
+        visual: dipoleRayVisual(point.amplitudeNaM),
       })),
     [plane, points],
   )
 
   const referencePx = reference ? projectPoint(plane, reference) : null
-  const hoverPx = hover ? projectPoint(plane, hover) : null
 
   /**
    * Координаты курсора в пикселях фигуры. `getBoundingClientRect` нужен, потому
@@ -208,6 +262,7 @@ export function MriProjection({
       </figcaption>
 
       <svg
+        ref={svgRef}
         data-testid={`projection-svg-${plane}`}
         viewBox={`0 0 ${box.width} ${box.height}`}
         width="100%"
@@ -221,19 +276,8 @@ export function MriProjection({
         onMouseMove={handleHover}
         onMouseLeave={() => setHover(null)}
       >
-        <defs>
-          {/* Наконечник вектора момента: свой id на проекцию, чтобы не совпадали */}
-          <marker
-            id={`dipole-arrow-${plane}`}
-            markerWidth="6"
-            markerHeight="6"
-            refX="5"
-            refY="3"
-            orient="auto"
-          >
-            <path d="M0,0 L6,3 L0,6 z" fill="var(--color-mri-dipole)" />
-          </marker>
-        </defs>
+        {/* Наконечники векторов рисуются полигонами (см. `dipoleArrowHead`): тег
+            `<marker>` один на проекцию и не подстраивается под длину луча. */}
         {/*
           Срез МРТ — подложка: рисуется первым, чтобы сетка, поля и диполи легли
           поверх. Прямоугольник картинки равен прямоугольнику плоскости, а масштаб
@@ -308,15 +352,15 @@ export function MriProjection({
             {mriShown
               ? null
               : structures.map((structure) => {
-                  const center = normalizedToPx(structure.center, plane)
+                  const ellipse = ellipsePx(plane, structure.center, structure.radius)
                   return (
                     <ellipse
                       key={structure.id}
                       data-testid={`slice-structure-${plane}-${structure.id}`}
-                      cx={center.x}
-                      cy={center.y}
-                      rx={structure.radius.u * halfWidth}
-                      ry={structure.radius.v * halfHeight}
+                      cx={ellipse.cx}
+                      cy={ellipse.cy}
+                      rx={ellipse.rx}
+                      ry={ellipse.ry}
                       fill={structure.hollow ? 'none' : 'var(--color-mri-slice)'}
                       fillOpacity={structure.hollow ? 0 : 0.12 * structure.alpha}
                       stroke="var(--color-mri-slice)"
@@ -359,7 +403,7 @@ export function MriProjection({
         {layerVisible(visibility, 'brodmann') ? (
           <g data-testid={`layer-brodmann-${plane}`}>
             {areas.map((area) => {
-              const center = normalizedToPx(area.center, plane)
+              const ellipse = ellipsePx(plane, area.center, area.radius)
               const active = selectedArea === area.name
               return (
                 <g
@@ -368,10 +412,10 @@ export function MriProjection({
                   data-active={active ? 'true' : 'false'}
                 >
                   <ellipse
-                    cx={center.x}
-                    cy={center.y}
-                    rx={area.radius.u * halfWidth}
-                    ry={area.radius.v * halfHeight}
+                    cx={ellipse.cx}
+                    cy={ellipse.cy}
+                    rx={ellipse.rx}
+                    ry={ellipse.ry}
                     fill="var(--color-mri-brodmann)"
                     fillOpacity={(active ? 0.32 : 0.13) * area.alpha}
                     stroke="var(--color-mri-brodmann)"
@@ -379,8 +423,8 @@ export function MriProjection({
                     strokeWidth={active ? 1.8 : 1}
                   />
                   <text
-                    x={center.x}
-                    y={center.y}
+                    x={ellipse.cx}
+                    y={ellipse.cy}
                     textAnchor="middle"
                     dominantBaseline="middle"
                     fontSize={10}
@@ -395,36 +439,96 @@ export function MriProjection({
           </g>
         ) : null}
 
-        {layerVisible(visibility, 'dipoles') ? (
-          <g data-testid={`layer-dipoles-${plane}`}>
-            {markers.map(({ point, marker }) => (
-              <g key={point.id} data-testid={`dipole-${plane}-${point.id}`}>
-                <title>{dipolePointTitle(point)}</title>
-                {/* Вектор момента: null у `end` — момент вдоль нормали среза */}
-                {marker.end ? (
+        {/*
+          Слой векторов — отдельно от позиций (срез 3.5). Луч идёт от позиции
+          диполя, поэтому он рисуется и при выключенных точках: карта направлений
+          без точек — осмысленный вид, а не «сломанный» слой.
+        */}
+        {layerVisible(visibility, 'vectors') ? (
+          <g data-testid={`layer-dipole-vectors-${plane}`}>
+            {markers.map(({ point, marker, visual }) => {
+              if (!marker.end || !marker.shaftEnd || !marker.head) return null
+              const selected = selectedPointId === point.id
+              return (
+                <g key={point.id} data-testid={`dipole-ray-${plane}-${point.id}`}>
+                  <title>{dipolePointTitle(point)}</title>
                   <line
                     data-testid={`dipole-vector-${plane}-${point.id}`}
                     x1={marker.at.x}
                     y1={marker.at.y}
-                    x2={marker.end.x}
-                    y2={marker.end.y}
-                    stroke="var(--color-mri-dipole)"
-                    strokeWidth={1.6}
-                    markerEnd={`url(#dipole-arrow-${plane})`}
+                    x2={marker.shaftEnd.x}
+                    y2={marker.shaftEnd.y}
+                    stroke={selected ? 'var(--color-accent)' : 'var(--color-mri-dipole)'}
+                    strokeWidth={rayStrokePx}
+                    strokeOpacity={selected ? 1 : visual.opacity}
                   />
-                ) : null}
-                <circle
-                  data-testid={`dipole-dot-${plane}-${point.id}`}
-                  cx={marker.at.x}
-                  cy={marker.at.y}
-                  r={4}
-                  fill="var(--color-mri-dipole)"
-                  fillOpacity={0.85}
-                  stroke="var(--color-bg-0)"
-                  strokeWidth={1}
-                />
-              </g>
-            ))}
+                  {/* Наконечник: полигон от длины луча, а не `<marker>` на всю проекцию */}
+                  <polygon
+                    data-testid={`dipole-arrow-${plane}-${point.id}`}
+                    points={marker.head.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')}
+                    fill={selected ? 'var(--color-accent)' : 'var(--color-mri-dipole)'}
+                    fillOpacity={selected ? 1 : visual.opacity}
+                  />
+                </g>
+              )
+            })}
+          </g>
+        ) : null}
+
+        {layerVisible(visibility, 'dipoles') ? (
+          <g data-testid={`layer-dipoles-${plane}`}>
+            {markers.map(({ point, marker }) => {
+              const selected = selectedPointId === point.id
+              return (
+                <g
+                  key={point.id}
+                  data-testid={`dipole-${plane}-${point.id}`}
+                  data-selected={selected ? 'true' : 'false'}
+                >
+                  <title>{dipolePointTitle(point)}</title>
+                  {/*
+                    Кольцо позиции: белое, фиксированного экранного размера
+                    (Ø 10 px, штрих 2 px) — пиксели поделены на масштаб фигуры.
+                    Выделенный диполь залит оранжево-жёлтым; сила момента
+                    читается по лучу, а не по размеру кольца.
+                  */}
+                  <circle
+                    data-testid={`dipole-dot-${plane}-${point.id}`}
+                    cx={marker.at.x}
+                    cy={marker.at.y}
+                    r={dotRadiusPx}
+                    fill={selected ? 'var(--color-mri-dipole)' : 'none'}
+                    stroke="var(--color-mri-dipole-point)"
+                    strokeWidth={dotStrokePx}
+                  />
+                  {/*
+                    Хит-зона выделения: попасть в кольцо диаметром 10 px мышью
+                    трудно, поэтому клик принимает невидимый круг большего радиуса.
+                    Он гасит всплытие, чтобы клик не обработался дважды (фигура
+                    навела бы срезы на «сырую» точку клика у края хит-зоны), и сам
+                    наводит срезы на точную позицию диполя: срезы меняются при
+                    любом клике.
+                  */}
+                  {onSelectPoint ? (
+                    <circle
+                      data-testid={`dipole-hit-${plane}-${point.id}`}
+                      cx={marker.at.x}
+                      cy={marker.at.y}
+                      r={DOT_HIT_RADIUS_PX}
+                      fill="transparent"
+                      className="cursor-pointer"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onSelectPoint(selected ? null : point.id)
+                        onPick?.(point.position, point.brodmannArea)
+                      }}
+                    >
+                      <title>{`Выделить диполь: ${dipolePointTitle(point)}`}</title>
+                    </circle>
+                  ) : null}
+                </g>
+              )
+            })}
           </g>
         ) : null}
         {referencePx ? (
@@ -447,18 +551,6 @@ export function MriProjection({
               y2={referencePx.y + 6}
             />
           </g>
-        ) : null}
-
-        {hoverPx ? (
-          <circle
-            data-testid={`hover-${plane}`}
-            cx={hoverPx.x}
-            cy={hoverPx.y}
-            r={3}
-            fill="none"
-            stroke="var(--color-fg-0)"
-            strokeOpacity={0.7}
-          />
         ) : null}
 
         {/* Края фигуры подписаны по знакам осей: L/R, A/P, S/I */}

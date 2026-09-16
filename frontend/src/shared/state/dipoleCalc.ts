@@ -9,21 +9,39 @@
  *
  * Что здесь, а что нет:
  * - в сторе — параметры расчёта (полоса, длина эпохи, порог reject, шаг сетки),
- *   порог отображения «КД», открытая выдвижная панель (`view`) и сами результаты
- *   задач (они принадлежат записи и сбрасываются при закрытии записи);
- * - в компонентах — отрисовка: топокарты и гистограмма считаются из результата
- *   чистыми функциями (`shared/lib/spectrum.ts`, `shared/lib/dipolePoints.ts`).
+ *   порог отображения «КД», окно частот FFT-графика, открытая выдвижная панель
+ *   (`view`), выделенный диполь и сами результаты задач (они принадлежат записи
+ *   и сбрасываются при закрытии записи);
+ * - в компонентах — отрисовка: топокарты, гистограмма и подсветка выделенного
+ *   диполя считаются из результата чистыми функциями (`shared/lib/spectrum.ts`,
+ *   `shared/lib/dipolePoints.ts`).
  *
- * Полоса фильтра пока фиксирована (1–40 Гц): форма фильтров δ/θ/α/β/γ —
- * следующий срез фазы 3 (`docs/ui.md` §3.3). Она живёт здесь, а не в `edfParams`,
- * чтобы расчёт диполей не менялся «незаметно» от правок предподготовки записи.
+ * Полоса фильтра выбирается формой в панели раздела (срез 3.6): пресеты δ…γ
+ * приходят из `/meta`, есть «свой диапазон», «одиночная частота» (f ± bw/2) и
+ * «без фильтра». Хранится только **полоса** — пресет выводится из неё
+ * (`shared/lib/calcFilter.ts`), поэтому подпись формы не может разойтись с тем,
+ * что уйдёт в задачу. Форма живёт здесь, а не в `edfParams`: расчёт диполей не
+ * должен меняться «незаметно» от правок предподготовки записи.
  *
- * Персистится только набор параметров: результаты задач относятся к конкретной
- * записи и после перезагрузки страницы бессмысленны.
+ * Персистится только набор параметров и предпочтений просмотра (окно частот):
+ * результаты задач и выделенный диполь относятся к конкретной записи и после
+ * перезагрузки страницы бессмысленны.
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api, apiErrorText } from '@/shared/api/client'
+import {
+  BANDWIDTH_RANGE,
+  SINGLE_FREQ_RANGE,
+  bandForPreset,
+  filterPresetIsValid,
+  filterPresetOf,
+  normalizeFilterBand,
+  normalizeNotchHz,
+  singleFreqBand,
+  type CalcFilterPresetId,
+} from '@/shared/lib/calcFilter'
+import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import type { DipoleScanResult, JobStatus, SpectrumResult } from '@/shared/api/types'
 
 /** Что открыто в выдвижной панели раздела: одна панель за раз. */
@@ -31,9 +49,22 @@ export type CalcView = 'none' | 'topomap' | 'fft'
 
 /** Параметры расчёта, уходящие в форму запроса (и в URL топокарт). */
 export type CalcParams = {
-  /** Полоса фильтра, Гц; `null` — без фильтра */
+  /**
+   * Выбор пользователя в списке «Фильтр расчёта»: пресет диапазона (δ…γ из
+   * `/meta`), «одиночная частота», «свой диапазон» или «без фильтра».
+   */
+  filterPreset: CalcFilterPresetId
+  /**
+   * Полоса фильтра, Гц; `null` — без фильтра. **То, что уходит в задачу**
+   * (`band_min`/`band_max`) и входит в отпечаток результата; пересчитывается
+   * каждым сеттером формы (`shared/lib/calcFilter.ts`).
+   */
   filterBandHz: [number, number] | null
   notchHz: number | null
+  /** Одиночная частота, Гц: полосу считает `singleFreqBand` (f ± bw/2) */
+  singleFreqHz: number
+  /** Ширина полосы вокруг одиночной частоты, Гц */
+  bandwidthHz: number
   epochLengthMs: number
   rejectThresholdUv: number
   /** Шаг объёмной сетки поиска диполей, мм */
@@ -41,8 +72,14 @@ export type CalcParams = {
 }
 
 export const CALC_PARAM_DEFAULTS: CalcParams = {
+  filterPreset: 'band_1_40',
   filterBandHz: [1, 40],
   notchHz: null,
+  // Значения одиночной частоты — заготовка формы: 7.83 Гц (частота Шумана) с
+  // полосой ±0.25 Гц. Ширина по умолчанию та же, что у предподготовки записи
+  // (`settings.default_single_freq_bandwidth_hz`), иначе формы расходились бы.
+  singleFreqHz: 7.83,
+  bandwidthHz: 0.5,
   epochLengthMs: 1000,
   rejectThresholdUv: 150,
   gridMm: 7,
@@ -66,7 +103,8 @@ export type CalcJob = {
 /** Задача из ответа сервера в состояние панели (одно место на обе задачи). */
 export function calcJobFromStatus(job: JobStatus): CalcJob {
   return {
-    status: job.status === 'succeeded' ? 'succeeded' : job.status === 'failed' ? 'failed' : 'running',
+    status:
+      job.status === 'succeeded' ? 'succeeded' : job.status === 'failed' ? 'failed' : 'running',
     progress: job.progress,
     message: job.message,
     stage: job.stage,
@@ -130,7 +168,13 @@ function signatureOf(parts: {
   gridMm: number
 }): string {
   const band = parts.band ? `${parts.band[0]}-${parts.band[1]}` : 'none'
-  return [band, parts.notchHz ?? 'none', parts.epochLengthMs, parts.rejectThresholdUv, parts.gridMm].join('|')
+  return [
+    band,
+    parts.notchHz ?? 'none',
+    parts.epochLengthMs,
+    parts.rejectThresholdUv,
+    parts.gridMm,
+  ].join('|')
 }
 
 /** Отпечаток параметров из панели расчёта. */
@@ -196,6 +240,17 @@ export type DipoleCalcState = {
   view: CalcView
   /** Порог отображения «КД ≥ X нАм»: слабее — не рисуется */
   amplitudeThresholdNam: number
+  /**
+   * Окно частот FFT-графика, Гц (`null` — весь измеренный диапазон).
+   * Параметр **просмотра**: график срезает уже посчитанные числа PSD, запросов
+   * не делает (правило раздела «UI не запускает обработку»).
+   */
+  fftRangeHz: FreqWindow | null
+  /**
+   * Выделенный диполь (id точки слоя) — подсвечивается во **всех** проекциях:
+   * выбор в одной, синхронизация в трёх. Сессионное состояние, не персистится.
+   */
+  selectedPointId: string | null
   params: CalcParams
   /** Задача быстрого расчёта диполей (прогресс/ошибка) */
   job: CalcJob | null
@@ -216,9 +271,24 @@ export type DipoleCalcState = {
   /** Открыть панель, а повторное нажатие — закрыть (кнопки тулс-хедера) */
   toggleView: (view: Exclude<CalcView, 'none'>) => void
   setAmplitudeThreshold: (value: number) => void
+  /** Окно частот FFT-графика по кнопке ритма или полю «от/до»; `null` — весь диапазон */
+  setFftRange: (range: FreqWindow | null) => void
+  /** Повторный клик по выделенной точке снимает выделение (одна кнопка на два состояния) */
+  toggleSelectedPoint: (id: string) => void
+  clearSelectedPoint: () => void
   setEpochLengthMs: (value: number) => void
   setGridMm: (value: number) => void
   setRejectThresholdUv: (value: number) => void
+  /** Выбор пресета фильтра: полоса пресета — данные (ритмы идут из `/meta`) */
+  setFilterPreset: (preset: CalcFilterPresetId, freqBands: Record<string, number[]>) => void
+  /** Полоса фильтра числом (поля «свой диапазон»): границы нормализуются */
+  setFilterBand: (band: readonly number[] | null) => void
+  /** Сетевой фильтр 50/60 Гц (`null` — выключен) */
+  setNotchHz: (value: number | null) => void
+  /** Одиночная частота: полоса пересчитывается как f ± bw/2 */
+  setSingleFreq: (value: number) => void
+  /** Ширина полосы одиночной частоты: полоса пересчитывается как f ± bw/2 */
+  setBandwidth: (value: number) => void
   /** Быстрый расчёт диполей по кнопке (202 + поллинг + результат) */
   runCalculation: (recordingId: string | null) => Promise<void>
   /** Расчёт спектра по кнопке: числа PSD + топокарты диапазонов */
@@ -232,6 +302,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
     (set, get) => ({
       view: 'none',
       amplitudeThresholdNam: 0,
+      fftRangeHz: null,
+      selectedPointId: null,
       params: { ...CALC_PARAM_DEFAULTS },
       job: null,
       result: null,
@@ -245,12 +317,68 @@ export const useDipoleCalc = create<DipoleCalcState>()(
 
       setAmplitudeThreshold: (value) =>
         set({ amplitudeThresholdNam: clamp(value, THRESHOLD_NAM_RANGE) }),
+      setFftRange: (range) => set({ fftRangeHz: normalizeFreqWindow(range) }),
+      toggleSelectedPoint: (id) =>
+        set((state) => ({ selectedPointId: state.selectedPointId === id ? null : id })),
+      clearSelectedPoint: () => set({ selectedPointId: null }),
       setEpochLengthMs: (value) =>
         set((state) => ({ params: { ...state.params, epochLengthMs: Math.round(value) } })),
       setGridMm: (value) =>
         set((state) => ({ params: { ...state.params, gridMm: clamp(value, GRID_MM_RANGE) } })),
       setRejectThresholdUv: (value) =>
         set((state) => ({ params: { ...state.params, rejectThresholdUv: Math.max(0, value) } })),
+      setFilterPreset: (preset, freqBands) =>
+        set((state) => ({
+          params: {
+            ...state.params,
+            filterPreset: preset,
+            filterBandHz: bandForPreset(state.params, preset, freqBands),
+          },
+        })),
+      // Полосу правят поля «своего диапазона»: выбор становится «своим», а если
+      // границы совпали (полоса пустая) — фильтра нет вовсе
+      setFilterBand: (band) =>
+        set((state) => {
+          const filterBandHz = normalizeFilterBand(band)
+          return {
+            params: {
+              ...state.params,
+              filterBandHz,
+              filterPreset: filterBandHz === null ? 'none' : 'custom',
+            },
+          }
+        }),
+      setNotchHz: (value) =>
+        set((state) => ({ params: { ...state.params, notchHz: normalizeNotchHz(value) } })),
+      // Частота и ширина одиночной частоты — одно целое с её полосой: полоса
+      // пересчитывается сразу, иначе поля показывали бы одно, а задача получала
+      // другое (поля видны только в пресете «одиночная частота», где это и ждут).
+      setSingleFreq: (value) =>
+        set((state) => {
+          const singleFreqHz = clamp(value, SINGLE_FREQ_RANGE)
+          return {
+            params: {
+              ...state.params,
+              filterPreset: 'single',
+              singleFreqHz,
+              filterBandHz:
+                singleFreqBand(singleFreqHz, state.params.bandwidthHz) ?? state.params.filterBandHz,
+            },
+          }
+        }),
+      setBandwidth: (value) =>
+        set((state) => {
+          const bandwidthHz = clamp(value, BANDWIDTH_RANGE)
+          return {
+            params: {
+              ...state.params,
+              filterPreset: 'single',
+              bandwidthHz,
+              filterBandHz:
+                singleFreqBand(state.params.singleFreqHz, bandwidthHz) ?? state.params.filterBandHz,
+            },
+          }
+        }),
 
       runCalculation: async (recordingId) => {
         if (!recordingId) return
@@ -310,25 +438,41 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           spectrum: null,
           error: null,
           spectrumError: null,
+          // Выделенный диполь жил в результате задачи — вместе с ним он исчезает
+          selectedPointId: null,
         })
       },
     }),
     {
       name: 'diplock.dipoleCalc',
-      // Результаты задач привязаны к записи: после перезагрузки страницы они
-      // бессмысленны (файл живёт по TTL), поэтому храним только параметры
+      // Результаты задач и выделение привязаны к записи: после перезагрузки
+      // страницы они бессмысленны (файл живёт по TTL). Окно частот — наоборот,
+      // предпочтение просмотра, оно переживает перезагрузку.
       partialize: (state) => ({
         view: state.view,
         amplitudeThresholdNam: state.amplitudeThresholdNam,
+        fftRangeHz: state.fftRangeHz,
         params: state.params,
       }),
       merge: (persisted, current) => {
         const stored = (persisted ?? {}) as Partial<DipoleCalcState>
+        const storedParams = (stored.params ?? {}) as Partial<CalcParams>
+        const merged = { ...current.params, ...storedParams }
+        // Состояние до среза 3.6 не знало пресета: выводим его из сохранённой
+        // полосы, а не подставляем «широкий 1–40» к любой полосе (иначе список
+        // называл бы ритмом не то, что уйдёт в расчёт)
+        if (storedParams.filterPreset === undefined) {
+          merged.filterPreset = filterPresetOf(merged, {})
+        }
         return {
           ...current,
           view: stored.view ?? current.view,
           amplitudeThresholdNam: stored.amplitudeThresholdNam ?? current.amplitudeThresholdNam,
-          params: { ...current.params, ...(stored.params ?? {}) },
+          fftRangeHz: normalizeFreqWindow(stored.fftRangeHz ?? current.fftRangeHz),
+          selectedPointId: null,
+          // Старые сохранённые параметры не знают полей формы фильтра (срез 3.6),
+          // а в числах мог оказаться мусор: приводим их к правилам контролов
+          params: normalizeCalcParams(merged),
         }
       },
     },
@@ -341,17 +485,62 @@ function clamp(value: number, [min, max]: [number, number]): number {
   return Math.min(max, Math.max(min, value))
 }
 
+/**
+ * Параметры расчёта в целостном виде: сохранённые в localStorage значения могут
+ * быть из другой версии UI (без полей формы фильтра) или содержать мусор — и то
+ * и другое приводится к правилам контролов, а не уходит в задачу как есть.
+ */
+export function normalizeCalcParams(params: CalcParams): CalcParams {
+  const filterBandHz = normalizeFilterBand(params.filterBandHz)
+  const storedPreset = filterPresetIsValid(params.filterPreset) ? params.filterPreset : 'custom'
+  // Пара «пресет + полоса» должна быть непротиворечивой: пустая полоса — только у
+  // «без фильтра», а непустая не может стоять у него же. Пресет при этом берём из
+  // полосы (`filterPresetOf` без метаданных: 1–40 → «широкий», полоса одиночной
+  // частоты → «одиночная», иначе «свой диапазон» — его поля покажут эти числа).
+  const filterPreset =
+    filterBandHz === null
+      ? 'none'
+      : storedPreset === 'none'
+        ? filterPresetOf({ ...params, filterBandHz }, {})
+        : storedPreset
+
+  return {
+    ...params,
+    filterPreset,
+    filterBandHz,
+    notchHz: normalizeNotchHz(params.notchHz),
+    singleFreqHz: clamp(params.singleFreqHz, SINGLE_FREQ_RANGE),
+    bandwidthHz: clamp(params.bandwidthHz, BANDWIDTH_RANGE),
+    epochLengthMs: Math.round(params.epochLengthMs),
+    gridMm: clamp(params.gridMm, GRID_MM_RANGE),
+    rejectThresholdUv: Math.max(0, params.rejectThresholdUv),
+  }
+}
+
 /** Запуск отменён (сброс/новый расчёт) — это не ошибка пользователя. */
 function isCancelled(error: unknown): boolean {
   return error instanceof Error && error.message === 'cancelled'
 }
 
 function runningJob(): CalcJob {
-  return { status: 'running', progress: 0, message: '', stage: 'queued', epochsDone: 0, epochsTotal: 0, error: null }
+  return {
+    status: 'running',
+    progress: 0,
+    message: '',
+    stage: 'queued',
+    epochsDone: 0,
+    epochsTotal: 0,
+    error: null,
+  }
 }
 
 function succeededJob(previous: CalcJob | null): CalcJob {
-  return { ...(previous ?? runningJob()), status: 'succeeded', progress: 1, epochsDone: previous?.epochsTotal ?? 0 }
+  return {
+    ...(previous ?? runningJob()),
+    status: 'succeeded',
+    progress: 1,
+    epochsDone: previous?.epochsTotal ?? 0,
+  }
 }
 
 function failedJob(previous: CalcJob | null, message: string): CalcJob {

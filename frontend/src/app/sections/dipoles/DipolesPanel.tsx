@@ -38,8 +38,21 @@ import {
   GRID_MM_RANGE,
   THRESHOLD_NAM_RANGE,
   calcJobSummary,
+  resultMatchesParams,
   useDipoleCalc,
 } from '@/shared/state/dipoleCalc'
+import {
+  BANDWIDTH_RANGE,
+  BAND_RANGE,
+  NOTCH_OPTIONS,
+  SINGLE_FREQ_RANGE,
+  WIDE_FILTER_BAND,
+  filterPresetOf,
+  filterPresetOptions,
+  filterSummary,
+  notchFromOption,
+  notchOptionValue,
+} from '@/shared/lib/calcFilter'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { NumberField } from '@/shared/ui/NumberField'
@@ -68,6 +81,11 @@ export function DipolesPanel() {
   const setGridMm = useDipoleCalc((state) => state.setGridMm)
   const setRejectThresholdUv = useDipoleCalc((state) => state.setRejectThresholdUv)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
+  const setFilterPreset = useDipoleCalc((state) => state.setFilterPreset)
+  const setFilterBand = useDipoleCalc((state) => state.setFilterBand)
+  const setNotchHz = useDipoleCalc((state) => state.setNotchHz)
+  const setSingleFreq = useDipoleCalc((state) => state.setSingleFreq)
+  const setBandwidth = useDipoleCalc((state) => state.setBandwidth)
   const resetCalc = useDipoleCalc((state) => state.reset)
 
   // Длины эпох приходят из `/meta` (единственный источник — конфиг сервера):
@@ -79,10 +97,27 @@ export function DipolesPanel() {
     retry: false,
   })
   const epochLengths = meta.data?.epoch_lengths_ms ?? []
-  const epochOptions = (epochLengths.length ? epochLengths : [calcParams.epochLengthMs]).map((value) => ({
-    value: String(value),
-    label: `${value} мс`,
-  }))
+  const epochOptions = (epochLengths.length ? epochLengths : [calcParams.epochLengthMs]).map(
+    (value) => ({
+      value: String(value),
+      label: `${value} мс`,
+    }),
+  )
+
+  // Диапазоны ритмов — тот же `/meta`, из которого берутся длины эпох: список
+  // пресетов не дублирует числа конфига сервера в коде UI
+  const freqBands = meta.data?.freq_bands ?? {}
+  const presetOptions = filterPresetOptions(freqBands)
+  // Показываем выбор пользователя; если такого пункта в текущих метаданных нет
+  // (ритм убрали из конфига сервера), берём пресет по полосе — значение списка
+  // не должно «повисать» вне его пунктов
+  const filterPreset = presetOptions.some((option) => option.value === calcParams.filterPreset)
+    ? calcParams.filterPreset
+    : filterPresetOf(calcParams, freqBands)
+  const filterBand = calcParams.filterBandHz ?? WIDE_FILTER_BAND
+  // Результат посчитан на других параметрах: панель обязана сказать это явно,
+  // а не выглядеть «актуальной» (та же подпись, что в таблице локализации)
+  const staleResult = calcResult !== null && !resultMatchesParams(calcResult, calcParams)
 
   const layer = calcResult ? dipoleLayerFromScan(calcResult) : EMPTY_DIPOLE_LAYER
   const visibleLayer = thresholdDipoleLayer(layer, threshold)
@@ -92,7 +127,7 @@ export function DipolesPanel() {
     <>
       <Panel
         title="Фоновые слои"
-        hint="Слои рисуются снизу вверх: срез МРТ, силуэт головы, схема среза MNI, поля Бродмана, точки диполей. Пока срез МРТ включён, условная схема среза не рисуется."
+        hint="Слои рисуются снизу вверх: срез МРТ, силуэт головы, схема среза MNI, поля Бродмана, точки диполей, векторы моментов. Пока срез МРТ включён, условная схема среза не рисуется. Позиции диполей и их векторы включаются раздельно: «где» и «куда» — разные вопросы, а размер и плотность маркера отражают силу момента."
       >
         {DIPOLE_LAYERS.map((layer) => (
           <CheckboxRow
@@ -195,10 +230,81 @@ export function DipolesPanel() {
               {`Эпох в расчёте: ${calcResult.n_epochs_used} из ${calcResult.n_epochs_total}`}
             </StatusPill>
           ) : null}
+          {staleResult ? (
+            <StatusPill tone="warn">
+              Параметры расчёта изменены — результат не пересчитан
+            </StatusPill>
+          ) : null}
           <StatusPill tone={spectrum ? 'ok' : 'neutral'}>
             {spectrum ? `Спектр: диапазонов ${spectrum.bands.length}` : 'Спектр не рассчитан'}
           </StatusPill>
         </div>
+
+        <SelectField
+          label="Фильтр расчёта"
+          value={filterPreset}
+          options={presetOptions.map(({ value, label }) => ({ value, label }))}
+          onChange={(value) => setFilterPreset(value, freqBands)}
+          hint="Полоса уходит в задачу как band_min/band_max. Диапазоны ритмов приходят с сервера (/meta), одиночная частота — узкая полоса f ± bw/2. Правка ничего не запускает."
+        />
+        {filterPreset === 'single' ? (
+          <>
+            <NumberField
+              label="Одиночная частота"
+              value={calcParams.singleFreqHz}
+              min={SINGLE_FREQ_RANGE[0]}
+              max={SINGLE_FREQ_RANGE[1]}
+              step={0.01}
+              unit="Гц"
+              onChange={setSingleFreq}
+              hint="Например 7.83 Гц: полоса считается вокруг этой частоты как f ± bw/2."
+            />
+            <NumberField
+              label="Ширина полосы"
+              value={calcParams.bandwidthHz}
+              min={BANDWIDTH_RANGE[0]}
+              max={BANDWIDTH_RANGE[1]}
+              step={0.05}
+              unit="Гц"
+              onChange={setBandwidth}
+              hint="Ширина вокруг одиночной частоты: 0.5 Гц — как по умолчанию в предподготовке записи."
+            />
+          </>
+        ) : null}
+        {filterPreset === 'custom' ? (
+          <>
+            <NumberField
+              label="Полоса от"
+              value={filterBand[0]}
+              min={BAND_RANGE[0]}
+              max={BAND_RANGE[1]}
+              step={0.5}
+              unit="Гц"
+              onChange={(value) => setFilterBand([value, filterBand[1]])}
+              hint="Границы полосы: порядок полей не важен — границы встают по возрастанию."
+            />
+            <NumberField
+              label="Полоса до"
+              value={filterBand[1]}
+              min={BAND_RANGE[0]}
+              max={BAND_RANGE[1]}
+              step={0.5}
+              unit="Гц"
+              onChange={(value) => setFilterBand([filterBand[0], value])}
+              hint="Совпавшие границы значат «без фильтра»: полосу нулевой ширины задача не примет."
+            />
+          </>
+        ) : null}
+        <SelectField
+          label="Сетевой фильтр"
+          value={notchOptionValue(calcParams.notchHz)}
+          options={NOTCH_OPTIONS}
+          onChange={(value) => setNotchHz(notchFromOption(value))}
+          hint="50/60 Гц: подавляет наводку сети. Уходит в задачу как notch_hz."
+        />
+        <p className="mt-2 text-sm text-fg-2">
+          {`В расчёт уйдёт: ${filterSummary(calcParams, freqBands)}`}
+        </p>
 
         <SelectField
           label="Длина эпохи"
