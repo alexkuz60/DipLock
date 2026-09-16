@@ -278,6 +278,8 @@ describe('рабочая область раздела «Диполи»', () => 
         'stroke-opacity',
         String(FRAME_DIM_OPACITY),
       )
+      // Шлейф идёт к кадру во всех трёх проекциях: к эпохе 1 ведёт один отрезок 0→1
+      expect(screen.getAllByTestId(new RegExp(`^trail-segment-${plane}-`))).toHaveLength(1)
     }
     expect(screen.getByTestId('frame-axial').querySelector('title')?.textContent).toContain(
       'Кадр воспроизведения: Эпоха 2',

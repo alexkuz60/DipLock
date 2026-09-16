@@ -19,6 +19,7 @@ import {
   DOT_HIT_RADIUS_PX,
   FORCE_FULL_NAM,
   FRAME_DIM_OPACITY,
+  TRAIL_STROKE_PX,
   MARKER_OPACITY_MIN,
   VECTOR_MAX_PX,
   VECTOR_MIN_PX,
@@ -143,6 +144,8 @@ describe('отрисовка маркера диполя (срез 3.5)', () => 
     // Приглушение облака: точки видны, но не спорят с маркером за внимание
     expect(FRAME_DIM_OPACITY).toBeGreaterThan(0)
     expect(FRAME_DIM_OPACITY).toBeLessThan(MARKER_OPACITY_MIN)
+    // Шлейф — история того же диполя: одна толщина с лучом момента, а не своя
+    expect(TRAIL_STROKE_PX).toBe(DIPOLE_RAY_STROKE_PX)
   })
 
   it('плотнит луч по силе: слабый — бледный, сильный — плотный; толщина у всех одна', () => {

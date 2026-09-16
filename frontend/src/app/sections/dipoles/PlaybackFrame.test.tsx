@@ -14,14 +14,18 @@ import { dipoleScanResultFixture } from '@/test/fixtures'
 import { PlaybackFrameProvider } from './PlaybackFrame'
 import { usePlaybackFrame } from './playbackClock'
 
-/** Проба: показывает то, что видит проекция — время, долю и точку кадра. */
+/** Проба: показывает то, что видит проекция — время, долю, точку и длину шлейфа. */
 function Probe() {
   const frame = usePlaybackFrame()
-  if (!frame) return <span data-testid="frame">нет кадра</span>
   return (
-    <span data-testid="frame">
-      {`${Math.round(frame.timeMs)}|${frame.fraction.toFixed(3)}|${frame.point?.id ?? '—'}`}
-    </span>
+    <>
+      <span data-testid="frame">
+        {frame
+          ? `${Math.round(frame.timeMs)}|${frame.fraction.toFixed(3)}|${frame.point?.id ?? '—'}`
+          : 'нет кадра'}
+      </span>
+      <span data-testid="trail">{frame ? frame.trail.length : 0}</span>
+    </>
   )
 }
 
@@ -35,6 +39,11 @@ function renderClock() {
 
 function frameText(): string {
   return screen.getByTestId('frame').textContent ?? ''
+}
+
+/** Длина шлейфа, которую видит проекция (число отрезков). */
+function trailCount(): number {
+  return Number(screen.getByTestId('trail').textContent ?? '0')
 }
 
 /** Результат фикстуры: нарезка 1000 мс, 4 эпохи, точки у эпох 0…2 (у 3-й нет MNI) */
@@ -58,7 +67,11 @@ describe('часы воспроизведения траектории', () => {
 
   beforeEach(() => {
     localStorage.clear()
-    useDipoleCalc.setState({ result: null, playback: { ...PLAYBACK_DEFAULTS } })
+    useDipoleCalc.setState({
+      result: null,
+      amplitudeThresholdNam: 0,
+      playback: { ...PLAYBACK_DEFAULTS },
+    })
     pending = new Map()
     nextId = 1
     clockMs = 0
@@ -178,6 +191,27 @@ describe('часы воспроизведения траектории', () => {
     // Порог — правило отображения: кадр не рисуется, но время идёт
     expect(frameText().endsWith('|—')).toBe(true)
     expect(useDipoleCalc.getState().playback.playing).toBe(true)
+  })
+
+  it('отдаёт шлейф к кадру: измеренные отрезки последних секунд', () => {
+    // Фикстура: нарезка 1000 мс, точки у эпох 0…2 (у 3-й нет MNI) — к кадру эпохи 2
+    // идут два измеренных отрезка
+    setResult({ epochIndex: 2, playing: false })
+    renderClock()
+    expect(trailCount()).toBe(2)
+
+    // Разрыв не «дотягивается»: у эпохи 3 точки нет (нет MNI), поэтому отрезок
+    // 2→3 не появляется и число отрезков не растёт — в шлейфе остаются 0→1 и 1→2
+    act(() => {
+      useDipoleCalc.getState().seekPlaybackEpoch(3)
+    })
+    expect(trailCount()).toBe(2)
+
+    // Кадр снят — шлейфа тоже нет: он принадлежит кадру, а не облаку
+    act(() => {
+      useDipoleCalc.getState().clearPlaybackFrame()
+    })
+    expect(trailCount()).toBe(0)
   })
 
   it('не перерисовывает статичные слои на каждом кадре: кадр идёт контекстом', () => {

@@ -10,6 +10,9 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_PLAYBACK_SPEED,
   PLAYBACK_SPEEDS,
+  TRAIL_ALPHA_HEAD,
+  TRAIL_ALPHA_MIN,
+  TRAIL_MAX_SEGMENTS,
   canPlayback,
   clampEpochIndex,
   epochAtTime,
@@ -21,6 +24,7 @@ import {
   playbackSummary,
   pointByEpoch,
   slerpUnit,
+  trailSegments,
 } from './playback'
 import type { DipolePoint } from './dipolePoints'
 import { dipoleScanResultFixture } from '@/test/fixtures'
@@ -168,5 +172,70 @@ describe('кадр воспроизведения траектории', () => {
   it('подписывает кадр эпохой, временем её начала и скоростью', () => {
     expect(playbackSummary(2, 261, 1.005, 2)).toBe('Кадр: эпоха 3 из 261 · 1.00 с · ×2')
     expect(playbackSummary(0, 4, 0, 1)).toBe('Кадр: эпоха 1 из 4 · 0.00 с · ×1')
+  })
+
+  /**
+   * Шлейф траектории (срез 3.7): затухающий «хвост» из **измеренных** отрезков,
+   * который показывает, каким путём диполь пришёл в текущий кадр.
+   */
+  it('держит окно шлейфа и гасит его от кадра к хвосту', () => {
+    const points = pointByEpoch(Array.from({ length: 30 }, (_, index) => point(index)))
+
+    // Нарезка 1000 мс: окно 10 с — это 10 отрезков к кадру эпохи 20
+    const trail = trailSegments(points, 20, 1000)
+
+    expect(trail).toHaveLength(10)
+    expect(trail[0].id).toBe('10-11')
+    expect(trail[trail.length - 1].id).toBe('19-20')
+    // Примыкающий к кадру отрезок самый плотный, дальний — почти прозрачный
+    expect(trail[trail.length - 1].alpha).toBeCloseTo(TRAIL_ALPHA_HEAD, 6)
+    expect(trail[0].alpha).toBeCloseTo(TRAIL_ALPHA_HEAD * 0.1, 6)
+    for (let index = 1; index < trail.length; index++) {
+      expect(trail[index].alpha).toBeGreaterThan(trail[index - 1].alpha)
+    }
+    // Отрезки — между измеренными позициями соседних эпох, а не «от кадра»
+    expect(trail[0].from).toEqual(points.get(10)?.position)
+    expect(trail[0].to).toEqual(points.get(11)?.position)
+  })
+
+  it('начинает шлейф с первой эпохи и не тянется в прошлое за неё', () => {
+    const points = pointByEpoch([point(0), point(1), point(2)])
+
+    const trail = trailSegments(points, 2, 1000)
+
+    expect(trail.map((segment) => segment.id)).toEqual(['0-1', '1-2'])
+  })
+
+  it('не тянет шлейф через разрыв: у эпохи без диполя отрезков нет', () => {
+    // Эпоха 2 отброшена порогом: шлейф состоит из двух отрезков, а сквозного
+    // скачка 1→3 (через эпоху, где диполя не было) в нём нет
+    const points = pointByEpoch([point(0), point(1), point(3), point(4)])
+
+    const trail = trailSegments(points, 4, 1000)
+
+    expect(trail.map((segment) => segment.id)).toEqual(['0-1', '3-4'])
+  })
+
+  it('подчиняется порогу «КД», как облако и маркер кадра', () => {
+    const points = pointByEpoch([point(0), point(1), point(2)])
+
+    // Порог выше амплитуд всех точек — рисовать нечего
+    expect(trailSegments(points, 2, 1000, 50)).toHaveLength(0)
+    // Порог ниже — те же два отрезка
+    expect(trailSegments(points, 2, 1000, 5)).toHaveLength(2)
+  })
+
+  it('ограничивает длину шлейфа и молчит без нарезки', () => {
+    // Короткие эпохи: окно вместило бы сотни отрезков — их число ограничено
+    const many = pointByEpoch(Array.from({ length: 200 }, (_, index) => point(index)))
+    const trail = trailSegments(many, 150, 250)
+    expect(trail.length).toBeLessThanOrEqual(TRAIL_MAX_SEGMENTS)
+    // …и гаснет раньше окна: слишком старые отрезки уже прозрачны
+    expect(trail[trail.length - 1].alpha).toBeCloseTo(TRAIL_ALPHA_HEAD, 6)
+    expect(trail[0].alpha).toBeGreaterThanOrEqual(TRAIL_ALPHA_MIN)
+
+    // Без длины эпохи и по одной точке шлейфа нет вовсе
+    expect(trailSegments(many, 150, 0)).toEqual([])
+    expect(trailSegments(pointByEpoch([point(0)]), 0, 1000)).toEqual([])
   })
 })

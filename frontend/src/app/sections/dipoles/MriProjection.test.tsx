@@ -28,11 +28,13 @@ import {
   DIPOLE_FRAME_HALO_RADIUS_PX,
   DIPOLE_RAY_STROKE_PX,
   FRAME_DIM_OPACITY,
+  TRAIL_STROKE_PX,
   demoDipoleLayer,
   dipoleLayerFromScan,
   dipoleRayVisual,
   type DipoleLayer,
 } from '@/shared/lib/dipolePoints'
+import { TRAIL_ALPHA_HEAD } from '@/shared/lib/playback'
 import { PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { DIPOLE_PARAM_DEFAULTS, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { dipoleScanResultFixture } from '@/test/fixtures'
@@ -464,6 +466,55 @@ describe('проекция мозга', () => {
       'stroke-opacity',
       String(cloudRayOpacity),
     )
+  })
+
+  /**
+   * Шлейф траектории (срез 3.7, поправка): затухающий «хвост» из измеренных
+   * отрезков под маркером кадра — видно, каким путём диполь пришёл в кадр.
+   */
+  it('рисует затухающий шлейф к кадру по измеренным отрезкам', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 2 },
+    })
+
+    renderProjectionWithFrame('axial', { points: resultLayer(), dimmed: true })
+
+    // Нарезка 1000 мс, окно шлейфа 10 с: к кадру эпохи 2 идут отрезки 0→1 и 1→2
+    const older = screen.getByTestId('trail-segment-axial-0-1')
+    const head = screen.getByTestId('trail-segment-axial-1-2')
+    for (const segment of [older, head]) {
+      expect(segment).toHaveAttribute('stroke', 'var(--color-mri-dipole)')
+      expect(segment).toHaveAttribute('stroke-width', String(TRAIL_STROKE_PX))
+    }
+    // Шлейф гаснет с возрастом: у кадра плотнее, у хвоста прозрачнее
+    expect(head).toHaveAttribute('stroke-opacity', String(TRAIL_ALPHA_HEAD))
+    expect(Number(older.getAttribute('stroke-opacity'))).toBeLessThan(TRAIL_ALPHA_HEAD)
+    // Шлейф лежит **под** маркером кадра, а не поверх него
+    expect(screen.getByTestId('frame-trail-axial').nextElementSibling).toBe(
+      screen.getByTestId('frame-halo-axial'),
+    )
+  })
+
+  it('не рисует шлейф без кадра и при выключенных позициях', () => {
+    // Кадр не задействован — шлейф принадлежит кадру, а не облаку
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    const idle = renderProjectionWithFrame('axial', { points: resultLayer() })
+    expect(screen.queryByTestId('frame-trail-axial')).not.toBeInTheDocument()
+    idle.unmount()
+
+    // Позиции выключены: луч кадра остаётся, а путь позиций — нет
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 2 },
+    })
+    renderProjectionWithFrame('axial', {
+      points: resultLayer(),
+      dimmed: true,
+      visibility: visible({ dipoles: false }),
+    })
+    expect(screen.queryByTestId('frame-trail-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('frame-vector-axial')).toBeInTheDocument()
   })
 
   it('не рисует маркер кадра без кадра и уважает выключенные слои', () => {

@@ -83,6 +83,7 @@ import {
   DIPOLE_RAY_STROKE_PX,
   DOT_HIT_RADIUS_PX,
   FRAME_DIM_OPACITY,
+  TRAIL_STROKE_PX,
   dipoleMarker,
   dipolePointTitle,
   dipoleRayVisual,
@@ -671,6 +672,11 @@ function yOfNormalized(plane: ProjectionPlane, v: number): number {
  *
  * Слои уважаются и здесь: выключенные позиции — нет кольца кадра, выключенные
  * векторы — нет его луча (кадр остаётся виден тем слоем, который включён).
+ *
+ * Шлейф траектории (срез 3.7, поправка) рисуется **под** маркером: отрезки между
+ * измеренными точками последних секунд сессии, гаснущие с возрастом. Он живёт в
+ * слое позиций (путь — это «где был», а не «куда направлен») и показывается вместе
+ * с маркером: нет кадра — нет и шлейфа.
  */
 function FrameMarker({
   plane,
@@ -694,10 +700,35 @@ function FrameMarker({
     layerVisible(visibility, 'vectors') && marker.shaftEnd && marker.head
       ? { end: marker.shaftEnd, head: marker.head }
       : null
+  // Шлейф — в слое позиций: это путь **позиций** диполя, и он же скрывается вместе
+  // с точками (векторы отвечают на другой вопрос — «куда», а не «где был»)
+  const trail = showsDot ? (frame?.trail ?? []) : []
 
   return (
     <g data-testid={`frame-${plane}`}>
       <title>{`Кадр воспроизведения: ${dipolePointTitle(point)}`}</title>
+      {trail.length > 0 ? (
+        <g data-testid={`frame-trail-${plane}`}>
+          {trail.map((segment) => {
+            const from = projectPoint(plane, segment.from)
+            const to = projectPoint(plane, segment.to)
+            return (
+              <line
+                key={segment.id}
+                data-testid={`trail-segment-${plane}-${segment.id}`}
+                x1={from.x}
+                y1={from.y}
+                x2={to.x}
+                y2={to.y}
+                stroke="var(--color-mri-dipole)"
+                strokeWidth={TRAIL_STROKE_PX / pxPerUnit}
+                strokeOpacity={segment.alpha}
+                strokeLinecap="round"
+              />
+            )
+          })}
+        </g>
+      ) : null}
       {showsDot ? (
         <>
           <circle

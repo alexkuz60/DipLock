@@ -175,3 +175,68 @@ export function playbackSummary(
 ): string {
   return `Кадр: эпоха ${epochIndex + 1} из ${totalEpochs} · ${timeSec.toFixed(2)} с · ×${speed}`
 }
+
+/**
+ * Шлейф траектории: окно в **времени сессии**, а не в числе эпох — «шлейф за
+ * последние 10 секунд» остаётся тем же по смыслу при любой длине нарезки.
+ */
+export const TRAIL_WINDOW_MS = 10_000
+
+/** Плотность шлейфа у самого кадра и порог, ниже которого сегмент не рисуется. */
+export const TRAIL_ALPHA_HEAD = 0.6
+export const TRAIL_ALPHA_MIN = 0.04
+
+/**
+ * Предел числа сегментов: на коротких эпохах окно вмещало бы сотни отрезков, а
+ * шлейф нужен как «хвост», а не как второй рисунок облака.
+ */
+export const TRAIL_MAX_SEGMENTS = 40
+
+/** Сегмент шлейфа: отрезок между двумя **измеренными** точками соседних эпох. */
+export type TrailSegment = {
+  /** Ключ React: пары эпох, между которыми построен отрезок */
+  id: string
+  from: MniVector
+  to: MniVector
+  /** Непрозрачность: у кадра — `TRAIL_ALPHA_HEAD`, дальше гаснет с возрастом */
+  alpha: number
+}
+
+/**
+ * Шлейф к текущему кадру: отрезки между точками соседних эпох за последние
+ * `TRAIL_WINDOW_MS` сессии, гаснущие с возрастом.
+ *
+ * Сегменты строятся **по измеренным точкам**, а не по интерполированным
+ * положениям: шлейф — это история измерений, и «дорисовывать» промежуточные
+ * положения там, где их никто не считал, нельзя. Через разрыв (эпоху, у которой
+ * точки нет) шлейф не тянется: вместо сквозного отрезка получаются два.
+ *
+ * Возраст считается по **новому** концу отрезка, поэтому сегмент, примыкающий к
+ * кадру, самый свежий и самый плотный; эпохи старше окна не рисуются вовсе.
+ *
+ * `minAmplitudeNam` — порог «КД»: он правило **отображения**, и шлейф подчиняется
+ * ему так же, как облако и маркер кадра. Отрезок не рисуется, если слабее порога
+ * хотя бы один из его концов: иначе шлейф вёл бы к точке, которой на проекциях нет.
+ */
+export function trailSegments(
+  points: Map<number, DipolePoint>,
+  epochIndex: number,
+  epochLengthMs: number,
+  minAmplitudeNam = 0,
+): TrailSegment[] {
+  if (!(epochLengthMs > 0) || points.size < 2) return []
+  const span = Math.max(1, Math.min(TRAIL_MAX_SEGMENTS, Math.ceil(TRAIL_WINDOW_MS / epochLengthMs)))
+  const segments: TrailSegment[] = []
+  for (let start = epochIndex - span; start < epochIndex; start++) {
+    if (start < 0) continue
+    const from = points.get(start)
+    const to = points.get(start + 1)
+    if (!from || !to) continue
+    if (from.amplitudeNaM < minAmplitudeNam || to.amplitudeNaM < minAmplitudeNam) continue
+    const age = Math.max(0, epochIndex - (start + 1)) * epochLengthMs
+    const alpha = TRAIL_ALPHA_HEAD * Math.max(0, 1 - age / TRAIL_WINDOW_MS)
+    if (alpha < TRAIL_ALPHA_MIN) continue
+    segments.push({ id: `${start}-${start + 1}`, from: from.position, to: to.position, alpha })
+  }
+  return segments
+}

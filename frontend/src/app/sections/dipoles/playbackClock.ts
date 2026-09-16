@@ -32,11 +32,13 @@ import {
   interpolatedPoint,
   playbackDurationMs,
   pointByEpoch,
+  trailSegments,
+  type TrailSegment,
 } from '@/shared/lib/playback'
 import { dipoleLayerFromScan, type DipolePoint } from '@/shared/lib/dipolePoints'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 
-/** Кадр воспроизведения: время, доля внутри эпохи и интерполированная точка. */
+/** Кадр воспроизведения: время, доля внутри эпохи, точка и шлейф траектории. */
 export type PlaybackFrame = {
   /** Время кадра от начала записи, мс */
   timeMs: number
@@ -44,10 +46,14 @@ export type PlaybackFrame = {
   fraction: number
   /** Точка кадра; `null` — кадр пуст (эпоха без диполя или слабее порога «КД») */
   point: DipolePoint | null
+  /** Шлейф к кадру: измеренные отрезки последних секунд сессии, гаснущие с возрастом */
+  trail: TrailSegment[]
 }
 
 /** Общая «пустая» карта точек: постоянная ссылка не сбрасывает мемоизацию. */
 const NO_POINTS: Map<number, DipolePoint> = new Map()
+/** Общий «пустой» шлейф — по той же причине. */
+const NO_TRAIL: TrailSegment[] = []
 
 /** Контекст кадра: значение кладёт `PlaybackFrameProvider` (файл-компонент). */
 export const PlaybackFrameContext = createContext<PlaybackFrame | null>(null)
@@ -144,6 +150,14 @@ export function usePlaybackClock(): PlaybackFrame {
     // не рисуется, но воспроизведение продолжается (эпоха видна в шапке)
     return frame && frame.amplitudeNaM >= threshold ? frame : null
   }, [active, pointsByEpoch, epochIndex, fraction, threshold])
+  /**
+   * Шлейф — история **измеренных** точек (порог «КД» действует на него так же, как
+   * на облако и маркер кадра: правило отображения одно на всех).
+   */
+  const trail = useMemo(
+    () => (active ? trailSegments(pointsByEpoch, epochIndex, epochLengthMs, threshold) : NO_TRAIL),
+    [active, pointsByEpoch, epochIndex, epochLengthMs, threshold],
+  )
 
-  return { timeMs, fraction, point }
+  return { timeMs, fraction, point, trail }
 }
