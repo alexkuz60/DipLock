@@ -58,6 +58,7 @@ import {
   demoHeadContours,
   demoSliceStructures,
   ellipsePx,
+  mniToNormalized,
   normalizedToPx,
   planeEdgeLabels,
   planeGridLines,
@@ -74,7 +75,11 @@ import {
   type SliceTriplet,
 } from '@/shared/lib/mriProjections'
 import { MRI_SLICE_UNAVAILABLE, mriSliceRect, mriSliceUrl } from '@/shared/lib/mriSlices'
-import type { MriSliceRef } from '@/shared/api/types'
+import {
+  contourPathPx,
+  shapeAtPoint,
+} from '@/shared/lib/atlasContours'
+import type { ContourSlice, MriSliceRef } from '@/shared/api/types'
 import {
   DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
@@ -107,6 +112,15 @@ export type MriProjectionProps = {
   points?: DipoleLayer
   /** Выделенное поле Бродмана: подсвечивается, остальные приглушаются */
   selectedArea?: string | null
+  /** Выделенная структура атласа (имя метки) — подсвечивается, как и поле */
+  selectedStructure?: string | null
+  /**
+   * Контуры атласа для этого среза (срез 3.9). `null` — ассета нет: слои рисуют
+   * условные фигуры (`demoBrodmannAreas`), честно помеченные как схема. Пустой
+   * массив меток — это «на срезе их нет», а не «данных нет», и подменять одно
+   * другим нельзя.
+   */
+  contours?: ContourSlice | null
   /**
    * Режим кадра воспроизведения (срез 3.7): облако точек приглушается, чтобы
    * движение читалось. Сам маркер кадра приходит контекстом (`usePlaybackFrame`).
@@ -123,8 +137,8 @@ export type MriProjectionProps = {
    * рисуется: раздел не догадывается о версии тома сам, её объявляет сервер.
    */
   mri?: MriSliceRef | null
-  /** Клик по срезу: точка MNI в плоскости среза + поле Бродмана под кликом */
-  onPick?: (point: MniVector, area: string | null) => void
+  /** Клик по срезу: точка MNI в плоскости среза + поле и структура под кликом */
+  onPick?: (point: MniVector, area: string | null, structure: string | null) => void
   className?: string
   /** Внешние размеры фигуры в раскладке раздела (ширина колонки задаётся снаружи) */
   style?: CSSProperties
@@ -136,6 +150,8 @@ export function MriProjection({
   visibility,
   points = emptyDipoleLayer(),
   selectedArea = null,
+  selectedStructure = null,
+  contours = null,
   selectedPointId = null,
   dimmed = false,
   onSelectPoint,
@@ -210,7 +226,14 @@ export function MriProjection({
   )
 
   const structures = useMemo(() => demoSliceStructures(plane, sliceMm), [plane, sliceMm])
-  const areas = useMemo(() => demoBrodmannAreas(plane, sliceMm), [plane, sliceMm])
+  const demoAreas = useMemo(() => demoBrodmannAreas(plane, sliceMm), [plane, sliceMm])
+  /**
+   * Контуры атласа: `null` — ассета нет, и тогда рисуется условная фикстура;
+   * пустой список — «на этом срезе метки нет», и подменять это фикстурой нельзя
+   * (иначе на срезе без поля появилось бы нарисованное поле).
+   */
+  const structureShapes = contours ? contours.structures : null
+  const areaShapes = contours ? contours.areas : null
   const grid = useMemo(() => planeGridLines(plane), [plane])
   const guides = useMemo(() => sliceGuides(plane, slices), [plane, slices])
   const edges = useMemo(() => planeEdgeLabels(plane), [plane])
@@ -252,21 +275,36 @@ export function MriProjection({
   const handleClick = (event: MouseEvent<SVGSVGElement>) => {
     if (!onPick) return
     const px = pxOf(event)
-    // Поле Бродмана ищем по той же геометрии, что нарисована: попадание в эллипс
-    onPick(
-      pointFromProjectionClick(plane, sliceMm, px),
-      brodmannAreaAt(plane, sliceMm, pxToNormalized(px, plane)),
-    )
+    const normalized = pxToNormalized(px, plane)
+    // Поле и структуру ищем по **той же** геометрии, что нарисована: реальные
+    // контуры атласа, когда они есть, иначе — условные эллипсы фикстуры.
+    const structure = structureShapes
+      ? (shapeAtPoint(structureShapes, plane, normalized)?.id ?? null)
+      : null
+    const area = areaShapes
+      ? (shapeAtPoint(areaShapes, plane, normalized)?.id ?? null)
+      : brodmannAreaAt(plane, sliceMm, normalized)
+    onPick(pointFromProjectionClick(plane, sliceMm, px), area, structure)
   }
 
   const handleHover = (event: MouseEvent<SVGSVGElement>) => {
     setHover(pointFromProjectionClick(plane, sliceMm, pxOf(event)))
   }
 
-  // Текст подписи над фигурой: под курсором — координаты точки, иначе пояснение
-  // плоскости; недоступная картинка среза важнее пояснения — о ней надо сказать.
+  /** Метка под курсором: структура атласа, иначе поле (та же геометрия, что нарисована). */
+  const hoverLabel = useMemo(() => {
+    if (!hover) return null
+    const normalized = mniToNormalized(plane, hover)
+    const structure = structureShapes ? shapeAtPoint(structureShapes, plane, normalized) : null
+    if (structure) return structure.label
+    return areaShapes ? (shapeAtPoint(areaShapes, plane, normalized)?.label ?? null) : null
+  }, [hover, plane, structureShapes, areaShapes])
+
+  // Текст подписи над фигурой: под курсором — координаты и метка атласа, иначе
+  // пояснение плоскости; недоступная картинка среза важнее пояснения — о ней надо
+  // сказать.
   const footnote = hover
-    ? coordsLabel(hover)
+    ? [coordsLabel(hover), hoverLabel].filter(Boolean).join(' · ')
     : mriFailed
       ? MRI_SLICE_UNAVAILABLE
       : PROJECTION_HINTS[plane]
@@ -316,6 +354,36 @@ export function MriProjection({
             preserveAspectRatio="none"
             onError={() => setFailedHref(mriHref)}
           />
+        ) : null}
+
+        {/*
+          Анатомические структуры атласа (`aparc+aseg`): реальные контуры среза.
+          Дырки (желудочки внутри структур) приходят отдельными полигонами, поэтому
+          заливка — `evenodd`: «кольцо» не закрашивается. Подписи в `<title>` —
+          та же подсказка, что видна под курсором в строке под фигурой.
+        */}
+        {layerVisible(visibility, 'anatomy') && structureShapes ? (
+          <g data-testid={`layer-anatomy-${plane}`}>
+            {structureShapes.map((shape) => {
+              const active = selectedStructure === shape.id
+              return (
+                <path
+                  key={shape.id}
+                  data-testid={`anatomy-${plane}-${shape.id}`}
+                  data-active={active ? 'true' : 'false'}
+                  d={contourPathPx(plane, shape)}
+                  fillRule="evenodd"
+                  fill="var(--color-mri-structure)"
+                  fillOpacity={active ? 0.3 : 0.12}
+                  stroke="var(--color-mri-structure)"
+                  strokeOpacity={active ? 0.95 : 0.55}
+                  strokeWidth={active ? 1.6 : 0.9}
+                >
+                  <title>{`${shape.label} · ${shape.area_mm2} мм²`}</title>
+                </path>
+              )
+            })}
+          </g>
         ) : null}
 
         {layerVisible(visibility, 'head') ? (
@@ -423,40 +491,65 @@ export function MriProjection({
         ) : null}
         {layerVisible(visibility, 'brodmann') ? (
           <g data-testid={`layer-brodmann-${plane}`}>
-            {areas.map((area) => {
-              const ellipse = ellipsePx(plane, area.center, area.radius)
-              const active = selectedArea === area.name
-              return (
-                <g
-                  key={area.name}
-                  data-testid={`brodmann-${plane}-${area.name}`}
-                  data-active={active ? 'true' : 'false'}
-                >
-                  <ellipse
-                    cx={ellipse.cx}
-                    cy={ellipse.cy}
-                    rx={ellipse.rx}
-                    ry={ellipse.ry}
-                    fill="var(--color-mri-brodmann)"
-                    fillOpacity={(active ? 0.32 : 0.13) * area.alpha}
-                    stroke="var(--color-mri-brodmann)"
-                    strokeOpacity={(active ? 0.95 : 0.5) * area.alpha}
-                    strokeWidth={active ? 1.8 : 1}
-                  />
-                  <text
-                    x={ellipse.cx}
-                    y={ellipse.cy}
-                    textAnchor="middle"
-                    dominantBaseline="middle"
-                    fontSize={10}
-                    fill="var(--color-mri-brodmann)"
-                    fillOpacity={Math.max(0.35, area.alpha)}
-                  >
-                    {area.name}
-                  </text>
-                </g>
-              )
-            })}
+            {/*
+              Реальные поля атласа: контуры приходят полигонами в мм MNI и по ним же
+              считается попадание клика. Пока ассета нет, рисуются условные эллипсы
+              фикстуры — и это видно по подписи метода в полосе состояния раздела.
+            */}
+            {areaShapes
+              ? areaShapes.map((shape) => {
+                  const active = selectedArea === shape.id
+                  return (
+                    <path
+                      key={shape.id}
+                      data-testid={`area-${plane}-${shape.id}`}
+                      data-active={active ? 'true' : 'false'}
+                      d={contourPathPx(plane, shape)}
+                      fillRule="evenodd"
+                      fill="var(--color-mri-brodmann)"
+                      fillOpacity={active ? 0.32 : 0.13}
+                      stroke="var(--color-mri-brodmann)"
+                      strokeOpacity={active ? 0.95 : 0.5}
+                      strokeWidth={active ? 1.8 : 1}
+                    >
+                      <title>{`${shape.label} · ${shape.area_mm2} мм²`}</title>
+                    </path>
+                  )
+                })
+              : demoAreas.map((area) => {
+                  const ellipse = ellipsePx(plane, area.center, area.radius)
+                  const active = selectedArea === area.name
+                  return (
+                    <g
+                      key={area.name}
+                      data-testid={`brodmann-${plane}-${area.name}`}
+                      data-active={active ? 'true' : 'false'}
+                    >
+                      <ellipse
+                        cx={ellipse.cx}
+                        cy={ellipse.cy}
+                        rx={ellipse.rx}
+                        ry={ellipse.ry}
+                        fill="var(--color-mri-brodmann)"
+                        fillOpacity={(active ? 0.32 : 0.13) * area.alpha}
+                        stroke="var(--color-mri-brodmann)"
+                        strokeOpacity={(active ? 0.95 : 0.5) * area.alpha}
+                        strokeWidth={active ? 1.8 : 1}
+                      />
+                      <text
+                        x={ellipse.cx}
+                        y={ellipse.cy}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fontSize={10}
+                        fill="var(--color-mri-brodmann)"
+                        fillOpacity={Math.max(0.35, area.alpha)}
+                      >
+                        {area.name}
+                      </text>
+                    </g>
+                  )
+                })}
           </g>
         ) : null}
 
@@ -542,7 +635,10 @@ export function MriProjection({
                       onClick={(event) => {
                         event.stopPropagation()
                         onSelectPoint(selected ? null : point.id)
-                        onPick?.(point.position, point.brodmannArea)
+                        // Клик по точке диполя — это выбор **диполя**: структуру под
+                        // ним не угадываем (контур нового среза ещё не пришёл), и
+                        // прежняя подпись структуры не должна «залипать».
+                        onPick?.(point.position, point.brodmannArea, null)
                       }}
                     >
                       <title>{`Выделить диполь: ${dipolePointTitle(point)}`}</title>

@@ -6,6 +6,7 @@
  */
 import type {
   AnalyzeResponse,
+  ContourSlice,
   DipoleScanResult,
   InitStatus,
   JobCreated,
@@ -95,6 +96,13 @@ export const api = {
 
   /** Готовность компонентов (MNE, БД, fsaverage, BEM). */
   initStatus: (signal?: AbortSignal) => request<InitStatus>('/init-status', { signal }),
+
+  /**
+   * Контуры среза атласа (срез 3.9): структуры `aparc+aseg` и поля Бродмана.
+   * URL собирает `shared/lib/atlasContours.ts` — срез квантуется к сетке атласа,
+   * версия ассета уезжает в `?v=`, чтобы браузер не закэшировал старые контуры.
+   */
+  contourSlice: (url: string, signal?: AbortSignal) => request<ContourSlice>(url, { signal }),
 
   /** Запуск анализа фоновой задачей (основной вход для UI). */
   createAnalysisJob: (form: FormData, signal?: AbortSignal) =>

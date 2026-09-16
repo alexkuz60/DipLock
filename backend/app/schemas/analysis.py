@@ -288,6 +288,64 @@ class MriSlicesOut(BaseModel):
     slice_url: str
 
 
+class ContourShapeOut(BaseModel):
+    """Контур одной метки на срезе: полигоны в мм MNI по осям плоскости."""
+
+    id: str = Field(description="Идентификатор метки: имя структуры атласа или поле (`BA17-lh`)")
+    name: str = Field(description="Короткое имя метки как в атласе (без перевода)")
+    label: str = Field(description="Подпись для UI (русская, где есть перевод)")
+    hulls: List[List[List[float]]] = Field(
+        description=(
+            "Замкнутые полигоны [горизонталь_мм, вертикаль_мм] среза; "
+            "дырки — отдельные полигоны, заливка по правилу even-odd"
+        )
+    )
+    area_mm2: float = Field(description="Площадь главного (внешнего) полигона, мм²")
+
+
+class ContourSliceOut(BaseModel):
+    """GET /api/v1/surface/contours/{plane}/{mm} — контуры одного среза."""
+
+    version: str = Field(description="Версия ассета — для ETag и `?v=` в UI")
+    plane: str = Field(description="Плоскость: axial/sagittal/coronal")
+    axis: str = Field(description="Ось MNI, по которой наведён срез (x/y/z)")
+    mm: float = Field(description="Фактическое значение среза после квантования сеткой")
+    spacing_mm: float = Field(description="Шаг сетки контуров, мм")
+    method: str = Field(
+        description=(
+            "Метод разметки полей Бродмана: `nearest_cortex_vertex` — производная "
+            "разметка объёма коры (метки PALS живут на поверхности, а не в объёме)"
+        )
+    )
+    structures: List[ContourShapeOut] = Field(default_factory=list)
+    areas: List[ContourShapeOut] = Field(default_factory=list)
+
+
+class ContoursRef(BaseModel):
+    """Ссылка на контуры для ``/meta``: считается без сборки объёмов, O(1)."""
+
+    version: str = Field(description="Версия ассета атласа")
+    url: str = Field(description="Базовый URL контуров: ``{url}/{plane}/{mm}``")
+    spacing_mm: float = Field(description="Шаг сетки контуров, мм")
+    method: str = Field(description="Метод разметки полей Бродмана (производная разметка)")
+
+
+class ContoursOut(BaseModel):
+    """GET /api/v1/surface/contours — метаданные контуров атласа."""
+
+    version: str
+    encoding: str = Field(description="Формат контуров (json-paths)")
+    spacing_mm: float
+    simplify_mm: float = Field(description="Допуск упрощения контуров, мм")
+    min_area_mm2: float = Field(description="Минимальная площадь метки на срезе, мм²")
+    method: str
+    bounds: Dict[str, List[float]] = Field(description="Границы сетки по осям MNI, мм")
+    planes: Dict[str, MriPlaneOut] = Field(description="Плоскости: axial/sagittal/coronal")
+    n_structures: int = Field(description="Меток анатомических структур в атласе")
+    n_areas: int = Field(description="Полей Бродмана в атласе")
+    url: str
+
+
 # --- Спектр по диапазонам (срез 3.4) ---
 
 class SpectrumBandOut(BaseModel):
@@ -483,5 +541,8 @@ class MetaResponse(BaseModel):
     cors_origins: List[str]
     mri_slices: MriSliceRef = Field(
         description="Срезы МРТ (T1) для проекций: версия, базовый URL, шаг сетки"
+    )
+    contours: ContoursRef = Field(
+        description="Контуры атласа (структуры + поля Бродмана): версия, URL, метод"
     )
 

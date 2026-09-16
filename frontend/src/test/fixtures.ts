@@ -2,6 +2,7 @@
  * Фикстуры ответов бэкенда для тестов UI (совпадают по форме со схемами API).
  */
 import type {
+  ContourSlice,
   DipoleScanPoint,
   DipoleScanResult,
   InitStatus,
@@ -55,6 +56,76 @@ export const metaFixture: MetaResponse = {
     slice_url: '/api/v1/surface/mri/slice',
     spacing_mm: 1,
   },
+  contours: {
+    version: 'cont12345678',
+    url: '/api/v1/surface/contours',
+    spacing_mm: 1,
+    method: 'nearest_cortex_vertex',
+  },
+}
+
+/**
+ * Контуры среза атласа для тестов UI: две структуры и одно поле, полигоны —
+ * квадраты в мм MNI по осям аксиальной плоскости (z = 0).
+ */
+export function contourSliceFixture(
+  overrides: Partial<ContourSlice> = {},
+): ContourSlice {
+  return {
+    version: 'cont12345678',
+    plane: 'axial',
+    axis: 'z',
+    mm: 0,
+    spacing_mm: 1,
+    method: 'nearest_cortex_vertex',
+    structures: [
+      {
+        id: 'Left-Cerebral-White-Matter',
+        name: 'Left-Cerebral-White-Matter',
+        label: 'белое вещество (слева)',
+        hulls: [
+          [
+            [-60, -60],
+            [-10, -60],
+            [-10, -10],
+            [-60, -10],
+          ],
+        ],
+        area_mm2: 2500,
+      },
+      {
+        id: 'Left-Thalamus-Proper',
+        name: 'Left-Thalamus-Proper',
+        label: 'таламус (слева)',
+        hulls: [
+          [
+            [-30, -30],
+            [-20, -30],
+            [-20, -20],
+            [-30, -20],
+          ],
+        ],
+        area_mm2: 100,
+      },
+    ],
+    areas: [
+      {
+        id: 'BA17-lh',
+        name: 'BA17',
+        label: 'поле 17 (слева)',
+        hulls: [
+          [
+            [10, -55],
+            [30, -55],
+            [30, -45],
+            [10, -45],
+          ],
+        ],
+        area_mm2: 200,
+      },
+    ],
+    ...overrides,
+  }
 }
 
 export const initStatusFixture: InitStatus = {

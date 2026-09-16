@@ -71,6 +71,21 @@ describe('панель раздела «Диполи»', () => {
     expect(useDipoleParams.getState().params.layerVisibility.mni).toBe(true)
   })
 
+  it('включает слой анатомических структур отдельно от среза и полей (срез 3.9)', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    const checkbox = screen.getByLabelText('Анатомические структуры')
+    expect(checkbox).toBeChecked()
+
+    await user.click(checkbox)
+
+    expect(useDipoleParams.getState().params.layerVisibility.anatomy).toBe(false)
+    // Срез МРТ и поля Бродмана — другие слои: их правка не следует за структурами
+    expect(useDipoleParams.getState().params.layerVisibility.mri).toBe(true)
+    expect(useDipoleParams.getState().params.layerVisibility.brodmann).toBe(true)
+  })
+
   it('включает позиции диполей и векторы моментов отдельными слоями (срез 3.5)', async () => {
     const user = userEvent.setup()
     renderWithProviders(<DipolesPanel />)

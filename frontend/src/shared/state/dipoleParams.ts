@@ -41,11 +41,19 @@ import {
  * координаты диполя, и «висеть в воздухе» без точки — нормальный вид карты
  * направлений.
  */
-export type DipoleLayerId = 'mri' | 'head' | 'mni' | 'brodmann' | 'dipoles' | 'vectors'
+export type DipoleLayerId =
+  | 'mri'
+  | 'anatomy'
+  | 'head'
+  | 'mni'
+  | 'brodmann'
+  | 'dipoles'
+  | 'vectors'
 
 /** Порядок слоёв = порядок отрисовки снизу вверх (и порядок чекбоксов в панели). */
 export const DIPOLE_LAYERS: DipoleLayerId[] = [
   'mri',
+  'anatomy',
   'head',
   'mni',
   'brodmann',
@@ -55,6 +63,7 @@ export const DIPOLE_LAYERS: DipoleLayerId[] = [
 
 export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
   mri: 'Срез МРТ (T1)',
+  anatomy: 'Анатомические структуры',
   head: 'Силуэт головы',
   mni: 'Срезы MNI',
   brodmann: 'Поля Бродмана',
@@ -64,9 +73,12 @@ export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
 
 export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
   mri: 'Реальный срез тома fsaverage: картинка квантуется шагом 1 мм, снаружи мозга прозрачна',
+  anatomy:
+    'Реальные структуры атласа aparc+aseg (кора, подкорка, желудочки): контуры приходят с сервера, метка подсвечивается и называется под курсором',
   head: 'Условная граница черепа на текущем срезе',
   mni: 'Анатомическая схема среза и линии секущих плоскостей',
-  brodmann: 'Поля Бродмана, попадающие в текущий срез',
+  brodmann:
+    'Поля Бродмана из атласа: разметка производная (метка ближайшей вершины коры), пока ассет недоступен — условные эллипсы',
   dipoles:
     'Позиции диполей из результата: одна точка на эпоху в пике GFP (порог «КД» скрывает слабые). Кольца белые, фиксированного размера; клик по точке выделяет диполь и наводит срезы на его позицию',
   vectors:
@@ -77,6 +89,7 @@ export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
 export const DIPOLE_PARAM_DEFAULTS = {
   layerVisibility: {
     mri: true,
+    anatomy: true,
     head: true,
     mni: true,
     brodmann: true,
@@ -94,11 +107,18 @@ export type DipoleSelection = {
   point: MniVector | null
   /** Поле Бродмана под кликом (`null` — клик не попал в поле) */
   area: string | null
+  /** Анатомическая структура атласа под кликом (`null` — не попала или нет ассета) */
+  structure: string | null
   /** Ориентации, к которым «прилипли» срезы при этом клике */
   orientations: Partial<Record<ProjectionPlane, MniSliceOrientation>>
 }
 
-export const EMPTY_SELECTION: DipoleSelection = { point: null, area: null, orientations: {} }
+export const EMPTY_SELECTION: DipoleSelection = {
+  point: null,
+  area: null,
+  structure: null,
+  orientations: {},
+}
 
 export type DipoleParamsState = {
   params: DipoleParams
@@ -114,6 +134,7 @@ export type DipoleParamsState = {
     point: MniVector,
     area: string | null,
     orientations: Partial<Record<ProjectionPlane, MniSliceOrientation>>,
+    structure?: string | null,
   ) => void
   /** Сбросить срезы на именованные (уровень AC–PC), точку и выделение — очистить */
   resetSlices: () => void
@@ -152,10 +173,10 @@ export const useDipoleParams = create<DipoleParamsState>()(
           // Ручное наведение среза снимает старую точку: она указывала на прежний срез
           selection: { ...state.selection, point: null, orientations: {} },
         })),
-      selectPoint: (point, area, orientations) =>
+      selectPoint: (point, area, orientations, structure = null) =>
         set((state) => ({
           params: { ...state.params, slices: applyPointToSlices(point).slices },
-          selection: { ...state.selection, point, area, orientations },
+          selection: { ...state.selection, point, area, structure, orientations },
         })),
       resetSlices: () =>
         set((state) => ({

@@ -67,6 +67,19 @@ describe('состояние раздела «Диполи»', () => {
     expect(state.selection.orientations.sagittal).toBe('midline')
   })
 
+  it('хранит структуру атласа под кликом (срез 3.9, не персистится)', () => {
+    useDipoleParams
+      .getState()
+      .selectPoint({ x: -25, y: -25, z: 0 }, null, {}, 'Left-Thalamus-Proper')
+
+    let state = useDipoleParams.getState()
+    expect(state.selection.structure).toBe('Left-Thalamus-Proper')
+    // Сброс срезов снимает и структуру: она относится к прежней точке
+    useDipoleParams.getState().resetSlices()
+    state = useDipoleParams.getState()
+    expect(state.selection).toEqual(EMPTY_SELECTION)
+  })
+
   it('сбрасывает срезы с точкой и возвращает всё по умолчанию', () => {
     useDipoleParams.getState().setSlice('axial', 40)
     useDipoleParams.getState().setLayerVisible('head', false)

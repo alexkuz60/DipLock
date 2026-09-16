@@ -8,10 +8,16 @@
  * параметров панели ничего не запускает — она лишь скрывает/показывает уже
  * посчитанные точки (порог «КД») и наводит срезы.
  *
- * Запросы раздела: `/meta` за ссылкой на срезы (статика) и — по кнопке — задачи
- * расчёта. Порог «КД ≥ X нАм» — параметр отображения: он фильтрует слой перед
- * отрисовкой, поэтому счётчик скрытых точек считается по слою, а не по результату
- * задачи (в результате точки остаются).
+ * Запросы раздела: `/meta` за ссылками на статику (срезы МРТ и контуры атласа) и —
+ * по кнопке — задачи расчёта. Порог «КД ≥ X нАм» — параметр отображения: он
+ * фильтрует слой перед отрисовкой, поэтому счётчик скрытых точек считается по
+ * слою, а не по результату задачи (в результате точки остаются).
+ *
+ * Контуры атласа (срез 3.9) — тоже статика: `GET /surface/contours/{plane}/{mm}`
+ * по срезу каждой плоскости, только когда слои «Анатомические структуры» или
+ * «Поля Бродмана» включены. Метки PALS живут на поверхности коры, поэтому
+ * BA-разметка **производная** (ближайшая вершина коры) — метод приходит в ответе,
+ * и UI это подписывает, а не выдаёт за измеренный атлас среза.
  *
  * Выделение диполя — тоже состояние **просмотра** (срез 3.5, поправка ручной
  * проверки): клик по точке в одной проекции подсвечивает её во всех трёх
@@ -31,13 +37,18 @@
  * секунду.
  */
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import {
   PROJECTION_PLANES,
   applyPointToSlices,
   projectionBox,
   slicesSummary,
 } from '@/shared/lib/mriProjections'
+import {
+  CONTOURS_METHOD_HINT,
+  contourSliceUrl,
+  contourSummary,
+} from '@/shared/lib/atlasContours'
 import {
   dipoleLayerFromScan,
   dipoleLayerStatus,
@@ -87,6 +98,45 @@ export function DipolesSection() {
     retry: false,
   })
   const mri = meta.data?.mri_slices ?? null
+  const contoursRef = meta.data?.contours ?? null
+
+  /**
+   * Контуры атласа по срезу каждой плоскости (срез 3.9). Это **статические
+   * ассеты**, а не обработка: запросы идут только когда слои структур/полей
+   * включены, срез квантуется к сетке атласа, а версия ассета — ключ кэша
+   * браузера. Пустой ответ — «на срезе метки нет», и он не подменяется фикстурой.
+   */
+  const contoursEnabled =
+    contoursRef !== null && (visibility.anatomy || visibility.brodmann)
+  const contourQueries = useQueries({
+    queries: PROJECTION_PLANES.map((plane) => ({
+      queryKey: ['contours', plane, slices[plane], contoursRef?.version ?? 'none'],
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        api.contourSlice(contourSliceUrl(contoursRef as NonNullable<typeof contoursRef>, plane, slices[plane]), signal),
+      enabled: contoursEnabled,
+      staleTime: 300_000,
+      retry: false,
+    })),
+  })
+  const contoursMissing = contoursEnabled && contourQueries.some((query) => query.isError)
+  const contoursLoading = contoursEnabled && contourQueries.some((query) => query.isLoading)
+  const contoursCount = contourQueries.reduce(
+    (total, query) => {
+      const summary = contourSummary(query.data ?? null)
+      return { structures: total.structures + summary.structures, areas: total.areas + summary.areas }
+    },
+    { structures: 0, areas: 0 },
+  )
+  /**
+   * Подпись структуры под выбранной точкой: хранится её **id** (метка состояния —
+   * машиночитаемая), а показывается человеческое имя из того среза, где структура
+   * нашлась. Если срезы уехали и структуры на них нет — честно показываем id.
+   */
+  const selectedStructureLabel = selection.structure
+    ? ((contourQueries
+        .flatMap((query) => query.data?.structures ?? [])
+        .find((shape) => shape.id === selection.structure)?.label) ?? selection.structure)
+    : null
 
   /**
    * Слой диполей из результата задачи. Результат не пересчитывается на клиенте:
@@ -139,6 +189,27 @@ export function DipolesSection() {
         {selection.area ? (
           <StatusPill tone="ok">Поле под точкой: {selection.area}</StatusPill>
         ) : null}
+        {selectedStructureLabel ? (
+          <StatusPill tone="accent" title="Структура атласа aparc+aseg под выбранной точкой">
+            {`Структура под точкой: ${selectedStructureLabel}`}
+          </StatusPill>
+        ) : null}
+        {/*
+          Контуры атласа — статический ассет: подпись говорит, сколько меток пришло
+          на текущие срезы, и честно молчит о производности BA-разметки (подсказка).
+        */}
+        <StatusPill
+          tone={contoursMissing || contoursRef === null ? 'warn' : contoursLoading ? 'neutral' : 'ok'}
+          title={CONTOURS_METHOD_HINT}
+        >
+          {contoursRef === null
+            ? 'Контуры атласа: метаданные недоступны'
+            : contoursMissing
+              ? 'Контуры атласа недоступны'
+              : contoursLoading
+                ? 'Контуры атласа: запрашиваю срезы…'
+                : `Атлас: структур ${contoursCount.structures}, полей ${contoursCount.areas}`}
+        </StatusPill>
       </div>
 
       {/*
@@ -166,7 +237,7 @@ export function DipolesSection() {
       */}
       <PlaybackFrameProvider>
         <div className="flex min-h-0 flex-wrap items-start gap-4">
-          {PROJECTION_PLANES.map((plane) => (
+          {PROJECTION_PLANES.map((plane, index) => (
             <MriProjection
               key={plane}
               plane={plane}
@@ -175,14 +246,16 @@ export function DipolesSection() {
               points={visibleLayer}
               dimmed={playbackActive}
               selectedArea={selection.area}
+              selectedStructure={selection.structure}
+              contours={contourQueries[index]?.data ?? null}
               selectedPointId={selectedPointId}
               onSelectPoint={(id) => (id ? toggleSelectedPoint(id) : clearSelectedPoint())}
               reference={selection.point}
               mri={mri}
               className="min-w-[240px]"
               style={{ flex: `${projectionBox(plane).width} 1 0%` }}
-              onPick={(point, area) =>
-                selectPoint(point, area, applyPointToSlices(point).orientations)
+              onPick={(point, area, structure) =>
+                selectPoint(point, area, applyPointToSlices(point).orientations, structure)
               }
             />
           ))}
@@ -191,7 +264,13 @@ export function DipolesSection() {
 
       <p className="text-sm text-fg-2">
         Клик по проекции наводит все три среза на выбранную точку, а попадание в поле Бродмана
-        подсвечивает его во всех проекциях. Срез томографии рисуется из PNG сервера и квантуется
+        или структуру атласа подсвечивает их во всех проекциях и подписывается в полосе состояния.
+        Анатомические структуры и поля Бродмана приходят контурами с сервера
+        (<span className="font-mono">aparc+aseg</span> и <span className="font-mono">PALS_B12_Brodmann</span>):
+        разметка полей — <b>производная</b> (метка ближайшей вершины коры, метод приходит в ответе),
+        поэтому «пятно» поля на срезе — перенос поверхностной метки в объём, а не измеренный атлас
+        среза; пока ассет недоступен, раздел честно рисует условные эллипсы. Срез томографии
+        рисуется из PNG сервера и квантуется
         шагом сетки тома (1 мм), поэтому подпись среза может отличаться от картинки на полшага. Слои
         включаются в панели справа: позиции диполей и векторы их моментов — раздельно; позиции —
         одинаковые белые кольца фиксированного размера, а сила момента читается по длине и плотности

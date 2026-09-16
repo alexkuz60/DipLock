@@ -14,6 +14,7 @@ import {
   PROJECTION_PLANES,
   defaultSlices,
   demoBrodmannAreas,
+  mniToNormalized,
   normalizedToPx,
   planeEdgeLabels,
   projectionBox,
@@ -37,7 +38,7 @@ import {
 import { TRAIL_ALPHA_HEAD } from '@/shared/lib/playback'
 import { PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { DIPOLE_PARAM_DEFAULTS, type DipoleLayerId } from '@/shared/state/dipoleParams'
-import { dipoleScanResultFixture } from '@/test/fixtures'
+import { dipoleScanResultFixture, contourSliceFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { MriProjection } from './MriProjection'
 import { PlaybackFrameProvider } from './PlaybackFrame'
@@ -290,7 +291,7 @@ describe('проекция мозга', () => {
     // Срезы меняются при любом клике (поправка ручной проверки): по диполю —
     // на его точную позицию MNI, а не на «сырую» точку клика у края хит-зоны
     expect(onPick).toHaveBeenCalledTimes(1)
-    expect(onPick).toHaveBeenCalledWith(point.position, point.brodmannArea)
+    expect(onPick).toHaveBeenCalledWith(point.position, point.brodmannArea, null)
   })
 
   it('подсвечивает выделенный диполь и снимает выделение повторным кликом', () => {
@@ -550,5 +551,80 @@ describe('проекция мозга', () => {
     })
     expect(screen.getByTestId('frame-dot-axial')).toBeInTheDocument()
     expect(screen.queryByTestId('frame-vector-axial')).not.toBeInTheDocument()
+  })
+})
+
+/** Пиксели фигуры для точки MNI аксиального среза (z = 0) — как считает компонент. */
+function axialPx(x: number, y: number) {
+  return normalizedToPx(mniToNormalized('axial', { x, y, z: 0 }), 'axial')
+}
+
+/**
+ * Контуры атласа (срез 3.9): структуры и поля приходят полигонами в мм MNI.
+ * Проверяется, что слой рисуется **из них**, хит-тест считает по тем же
+ * полигонам (а не по «второму, невидимому» слою), а без ассета раздел остаётся
+ * на условных эллипсах фикстуры.
+ */
+describe('контуры атласа в проекции', () => {
+  it('рисует структуры и поля полигонами вместо условных эллипсов', () => {
+    renderProjection('axial', { contours: contourSliceFixture() })
+
+    expect(screen.getByTestId('layer-anatomy-axial')).toBeInTheDocument()
+    const thalamus = screen.getByTestId('anatomy-axial-Left-Thalamus-Proper')
+    expect(thalamus.getAttribute('d')).toMatch(/^M /)
+    // Дырки приходят отдельными полигонами: заливка обязана быть even-odd
+    expect(thalamus).toHaveAttribute('fill-rule', 'evenodd')
+    expect(thalamus.querySelector('title')?.textContent).toContain('таламус (слева)')
+
+    expect(screen.getByTestId('area-axial-BA17-lh')).toBeInTheDocument()
+    // Фикстурных эллипсов при живом ассете нет вовсе — «двух анатомий» быть не должно
+    expect(screen.queryByTestId(/^brodmann-axial-/)).not.toBeInTheDocument()
+  })
+
+  it('без ассета контуров остаётся на условных эллипсах фикстуры', () => {
+    renderProjection('axial')
+
+    expect(screen.queryByTestId('layer-anatomy-axial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('area-axial-BA17-lh')).not.toBeInTheDocument()
+    // Ассета нет — раздел не молчит, а рисует условную схему полей
+    expect(screen.getAllByTestId(/^brodmann-axial-/).length).toBeGreaterThan(0)
+  })
+
+  it('клик по полигону отдаёт структуру и поле, считая по нарисованной геометрии', () => {
+    const onPick = vi.fn()
+    renderProjection('axial', { contours: contourSliceFixture(), onPick })
+    const svg = stubFigure('axial')
+
+    // Центр таламуса: квадрат x −30…−20, y −30…−20 мм (лежит внутри белого вещества)
+    const thalamus = axialPx(-25, -25)
+    fireEvent.click(svg, { clientX: thalamus.x, clientY: thalamus.y })
+    // Мелкая метка важнее крупной: клик по таламусу не должен называть белое вещество
+    expect(onPick).toHaveBeenLastCalledWith(expect.anything(), null, 'Left-Thalamus-Proper')
+
+    // Центр BA17: отдельный квадрат x 10…30, y −55…−45 мм
+    const area = axialPx(20, -50)
+    fireEvent.click(svg, { clientX: area.x, clientY: area.y })
+    expect(onPick).toHaveBeenLastCalledWith(expect.anything(), 'BA17-lh', null)
+  })
+
+  it('подписывает структуру под курсором', () => {
+    renderProjection('axial', { contours: contourSliceFixture() })
+    const svg = stubFigure('axial')
+    const at = axialPx(-25, -25)
+
+    fireEvent.mouseMove(svg, { clientX: at.x, clientY: at.y })
+
+    // Подпись под фигурой: координаты и метка атласа (в `<title>` пути — своя строка)
+    expect(screen.getByText(/^MNI .* · таламус \(слева\)$/)).toBeInTheDocument()
+  })
+
+  it('выключенный слой структур не рисуется, поля остаются', () => {
+    renderProjection('axial', {
+      contours: contourSliceFixture(),
+      visibility: visible({ anatomy: false }),
+    })
+
+    expect(screen.queryByTestId('layer-anatomy-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('area-axial-BA17-lh')).toBeInTheDocument()
   })
 })

@@ -36,6 +36,9 @@ from app.schemas.analysis import (
     BrodmannAreaOut,
     BrodmannIndexOut,
     BrodmannLabelsOut,
+    ContourSliceOut,
+    ContoursOut,
+    ContoursRef,
     DipoleScanResult,
     JobCreated,
     JobStatus,
@@ -63,6 +66,11 @@ from app.services.recording_signals import (
     build_signal_blob,
 )
 from app.services.recordings import Recording, recording_registry
+from app.services.atlas_contours import (
+    contours_meta,
+    contours_ref as contour_ref,
+    slice_contours,
+)
 from app.services.mri_slices import (
     mri_meta,
     slice_png as mri_slice_png,
@@ -187,6 +195,11 @@ def _surface_ref() -> SurfaceRef:
 def _mri_ref() -> MriSliceRef:
     """Ссылка на срезы МРТ: версия по отпечатку тома, без его сборки (O(1))."""
     return MriSliceRef(**mri_slice_ref(settings))
+
+
+def _contours_ref() -> ContoursRef:
+    """Ссылка на контуры атласа: версия по отпечатку файлов, без сборки (O(1))."""
+    return ContoursRef(**contour_ref(settings))
 
 
 def _run_analysis(
@@ -1131,6 +1144,60 @@ async def get_mri_slice(
 
 
 @router.get(
+    "/surface/contours", response_model=ContoursOut,
+    summary="Метаданные контуров атласа (структуры и поля Бродмана)",
+)
+async def get_contours() -> Dict[str, Any]:
+    """Шаг сетки, допуски упрощения, число меток и метод BA-разметки.
+
+    Первое обращение собирает объёмы меток из ``aparc+aseg.mgz`` и ленты коры
+    ``lh/rh.ribbon.mgz`` (≈1 с) и кладёт их в ``cache_dir/contours``; дальше ответ
+    мгновенный. Сами контуры отдаются по срезу (``/surface/contours/{plane}/{mm}``).
+    """
+    try:
+        return contours_meta(settings)
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+
+
+@router.get(
+    "/surface/contours/{plane}/{mm}", response_model=ContourSliceOut,
+    summary="Контуры среза: анатомические структуры и поля Бродмана (ETag)",
+)
+async def get_contour_slice(
+    plane: str,
+    mm: float,
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """Полигоны меток среза в миллиметрах MNI по осям плоскости.
+
+    Срез квантуется сеткой атласа (1 мм), фактическое значение возвращается полем
+    ``mm`` ответа и заголовком ``X-Contour-Mm``. Неизвестная плоскость или срез вне
+    сетки — 404, недоступный атлас — 503, повторный запрос с тем же ``If-None-Match``
+    — 304. Поля Бродмана размечены **производно** (``method`` в ответе): метки PALS
+    живут на поверхности коры, в объём они переносятся по ближайшей вершине.
+    """
+    try:
+        payload = slice_contours(settings, plane, mm)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+
+    data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    actual_mm = float(payload["mm"])
+    etag = f'"{payload["version"]}-{plane}-{actual_mm:g}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "public, max-age=604800",
+        "X-Contour-Mm": f"{actual_mm:g}",
+    }
+    if if_none_match and etag in if_none_match:
+        return Response(status_code=304, headers=headers)
+    return Response(content=data, media_type="application/json", headers=headers)
+
+
+@router.get(
     "/brodmann-labels", response_model=BrodmannLabelsOut,
     summary="Имена доступных полей Бродмана",
 )
@@ -1215,6 +1282,7 @@ async def get_meta() -> MetaResponse:
         max_concurrent_jobs=job_manager.max_concurrent,
         cors_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
         mri_slices=_mri_ref(),
+        contours=_contours_ref(),
     )
 
 

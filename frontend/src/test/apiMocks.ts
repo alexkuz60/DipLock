@@ -14,6 +14,7 @@ import {
 } from './fixtures'
 import { encodeSignalBlob } from './signalBlob'
 import type {
+  ContourSlice,
   DipoleScanResult,
   InitStatus,
   JobStatus,
@@ -105,6 +106,12 @@ export type MockApiOptions = {
   dipoleScanResult?: DipoleScanResult
   /** Смоделировать отказ запуска расчёта (404 записи) */
   calcStartFails?: boolean
+  /**
+   * Контуры атласа для `GET /surface/contours/{plane}/{mm}` (срез 3.9).
+   * По умолчанию их нет: раздел честно рисует условные фигуры, а тест, которому
+   * нужны реальные контуры, передаёт срез явно.
+   */
+  contours?: ContourSlice
 }
 
 export function mockApiFetch(options: MockApiOptions = {}) {
@@ -176,6 +183,24 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
       }
       return signalsFixtureResponse()
+    }
+    if (url.includes('/surface/contours')) {
+      // Контуров по умолчанию нет: раздел показывает, что ассет недоступен, и
+      // рисует условные фигуры — как в браузере без fsaverage.
+      if (!options.contours) {
+        return jsonResponse({ detail: 'Нет мока для контуров' }, 404)
+      }
+      // Мок отвечает срезом запрошенной плоскости: иначе счётчики меток в разделе
+      // были бы завышены втрое (один и тот же фикстурный срез на три запроса).
+      const match = /\/surface\/contours\/([a-z]+)\/(-?\d+(?:\.\d+)?)/.exec(url)
+      const plane = match?.[1] ?? 'axial'
+      const onSlice = plane === options.contours.plane
+      return jsonResponse({
+        ...options.contours,
+        plane,
+        structures: onSlice ? options.contours.structures : [],
+        areas: onSlice ? options.contours.areas : [],
+      })
     }
     if (url.includes('/meta')) {
       return jsonResponse(options.meta ?? metaFixture)

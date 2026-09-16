@@ -12,6 +12,8 @@ import {
   PROJECTION_PLANES,
   applyPointToSlices,
   defaultSlices,
+  mniToNormalized,
+  normalizedToPx,
   projectionBox,
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
@@ -22,7 +24,7 @@ import {
   EMPTY_SELECTION,
   useDipoleParams,
 } from '@/shared/state/dipoleParams'
-import { dipoleScanResultFixture } from '@/test/fixtures'
+import { dipoleScanResultFixture, contourSliceFixture } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { DipolesSection } from './DipolesSection'
@@ -38,6 +40,14 @@ function stubFigure(plane: ProjectionPlane) {
   svg.getBoundingClientRect = () =>
     ({ left: 0, top: 0, width, height, right: width, bottom: height }) as DOMRect
   return svg
+}
+
+/**
+ * Запросы раздела — только статика: метаданные, срезы МРТ и контуры атласа.
+ * Ни одного запуска обработки (`/jobs`, `/analyze`, `/recordings`) быть не должно.
+ */
+function staticAsset(path: string): boolean {
+  return path.startsWith('/api/v1/meta') || path.startsWith('/api/v1/surface')
 }
 
 describe('рабочая область раздела «Диполи»', () => {
@@ -124,7 +134,7 @@ describe('рабочая область раздела «Диполи»', () => 
     }
   })
 
-  it('запрашивает только метаданные и никогда не запускает обработку', () => {
+  it('просит только статические ассеты и никогда не запускает обработку', async () => {
     const fetchMock = mockApiFetch()
     vi.stubGlobal('fetch', fetchMock)
     renderWithProviders(<DipolesSection />)
@@ -132,8 +142,12 @@ describe('рабочая область раздела «Диполи»', () => 
 
     fireEvent.click(svg, { clientX: 140, clientY: 180 })
 
+    // Контуры атласа (срез 3.9) — статические ассеты: дожидаемся, что запросы
+    // действительно ушли, иначе проверка «только статика» была бы о времени.
+    expect(await screen.findByText('Контуры атласа недоступны')).toBeInTheDocument()
+
     const paths = fetchMock.mock.calls.map(([path]) => String(path))
-    expect(paths.every((path) => path.startsWith('/api/v1/meta'))).toBe(true)
+    expect(paths.every((path) => staticAsset(path))).toBe(true)
     expect(paths.some((path) => /jobs|preprocess|analyze|recordings/.test(path))).toBe(false)
   })
 
@@ -284,9 +298,10 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(screen.getByTestId('frame-axial').querySelector('title')?.textContent).toContain(
       'Кадр воспроизведения: Эпоха 2',
     )
-    // Кадр — чистая перерисовка: раздел по-прежнему просит только метаданные
+    // Кадр — чистая перерисовка: раздел по-прежнему просит только статику
     const paths = fetchSpy.mock.calls.map(([path]) => String(path))
-    expect(paths.every((path) => path.startsWith('/api/v1/meta'))).toBe(true)
+    expect(paths.every((path) => staticAsset(path))).toBe(true)
+    expect(paths.some((path) => /jobs|preprocess|analyze|recordings/.test(path))).toBe(false)
   })
 
   it('держит облако в обычном виде, пока кадр воспроизведения не задействован', () => {
@@ -295,5 +310,31 @@ describe('рабочая область раздела «Диполи»', () => 
 
     expect(screen.queryByTestId('frame-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('dipole-dot-axial-0-120')).toHaveAttribute('stroke-opacity', '1')
+  })
+
+  /**
+   * Контуры атласа (срез 3.9): статический ассет по срезу каждой плоскости.
+   * Проверяем и отрисовку, и то, что это **не** обработка: уходят GET-запросы на
+   * `/surface/contours`, срез квантуется к сетке атласа, версия — в `?v=`.
+   */
+  it('рисует контуры атласа из статического ассета и называет структуру под кликом', async () => {
+    const fetchMock = mockApiFetch({ contours: contourSliceFixture() })
+    vi.stubGlobal('fetch', fetchMock)
+    renderWithProviders(<DipolesSection />)
+
+    expect(await screen.findByTestId('anatomy-axial-Left-Thalamus-Proper')).toBeInTheDocument()
+    expect(screen.getByTestId('area-axial-BA17-lh')).toBeInTheDocument()
+    // Мок отдаёт метки только для той плоскости, что в фикстуре (axial)
+    expect(screen.getByText('Атлас: структур 2, полей 1')).toBeInTheDocument()
+
+    const paths = fetchMock.mock.calls.map(([path]) => String(path))
+    expect(paths).toContain('/api/v1/surface/contours/axial/0?v=cont12345678')
+    expect(paths.every((path) => staticAsset(path))).toBe(true)
+
+    const svg = stubFigure('axial')
+    const at = normalizedToPx(mniToNormalized('axial', { x: -25, y: -25, z: 0 }), 'axial')
+    fireEvent.click(svg, { clientX: at.x, clientY: at.y })
+
+    expect(await screen.findByText('Структура под точкой: таламус (слева)')).toBeInTheDocument()
   })
 })

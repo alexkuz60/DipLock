@@ -38,10 +38,12 @@ DipLock/
 │   │   │   ├── recordings.py        # реестр записей просмотра: паспорт, TTL
 │   │   │   ├── recording_signals.py # пирамида сигналов вьюера (контейнер DPS1)
 │   │   │   ├── mri_slices.py        # том T1 на MNI-сетке, срез картинкой PNG (ETag/304)
+│   │   │   ├── atlas_contours.py   # контуры структур и полей Бродмана на срезе (вектор, ETag)
 │   │   │   ├── job_manager.py     # фоновые задачи: этапы, прогресс, семафор
 │   │   │   └── surface_cache.py   # кэш меша fsaverage и BA-меток (ETag/304)
 │   │   ├── models/db.py
-│   │   ├── utils/             # brain_export.py, versions.py, png.py (энкодер срезов)
+│   │   ├── utils/             # brain_export.py, versions.py, png.py (энкодер срезов),
+│   │   │                      # marching_squares.py (изолинии маски)
 │   │   └── static/
 │   │       ├── index.html     # legacy-страница (доступна по /legacy)
 │   │       └── ui/            # сборка frontend (npm run build) — раздаётся по /ui/
@@ -154,6 +156,9 @@ curl -s "http://localhost:8000/api/v1/jobs/$JOB/result"   # результат �
 **Статические 3D-ассеты** отдаются отдельно и кэшируются:
 `GET /api/v1/surface` (меш, ETag/304) · `GET /api/v1/surface/brodmann` (индексы BA) ·
 `GET /api/v1/surface/brodmann/{ba}` (одна область) · `GET /api/v1/brodmann-labels` (имена меток) ·
+`GET /api/v1/surface/mri/slice/{plane}/{mm}.png` (срез МРТ, ETag/304) ·
+`GET /api/v1/surface/contours/{plane}/{mm}` (контуры структур `aparc+aseg` и полей Бродмана
+в мм MNI, ETag/304) · `GET /api/v1/surface/contours` (метаданные контуров) ·
 `GET /api/v1/meta` (версии, пути, активные параметры).
 
 
