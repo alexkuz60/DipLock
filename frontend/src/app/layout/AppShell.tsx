@@ -2,8 +2,9 @@
  * Каркас приложения: рейл разделов слева, рабочая область с тулс-хедером
  * в центре, схлопываемая панель опций справа.
  *
- * Горячие клавиши: 1…5 — разделы, «[» — панель опций. Обработчик игнорирует
- * ввод в полях, чтобы хоткеи не мешали набору параметров.
+ * Горячие клавиши: 1…5 — разделы, «[» — панель опций, Space — воспроизведение
+ * кадра траектории (раздел «Диполи»). Обработчик игнорирует ввод в полях, чтобы
+ * хоткеи не мешали набору параметров.
  */
 import { useEffect, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -12,10 +13,14 @@ import { RightPanel } from './RightPanel'
 import { StatusBar } from './StatusBar'
 import { ToolHeader } from './ToolHeader'
 import { MAIN_SECTIONS, type SectionConfig } from '@/app/sections/registry'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useUiStore } from '@/shared/state/uiStore'
 
 const HOTKEY_ROUTES: Record<string, string> = Object.fromEntries(
-  MAIN_SECTIONS.filter((section) => section.hotkey).map((section) => [section.hotkey, section.route]),
+  MAIN_SECTIONS.filter((section) => section.hotkey).map((section) => [
+    section.hotkey,
+    section.route,
+  ]),
 )
 
 const TYPING_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
@@ -33,7 +38,14 @@ export type AppShellProps = {
   panel?: ReactNode
 }
 
-export function AppShell({ section, children, actions, headerExtra, drawer, panel }: AppShellProps) {
+export function AppShell({
+  section,
+  children,
+  actions,
+  headerExtra,
+  drawer,
+  panel,
+}: AppShellProps) {
   const navigate = useNavigate()
   const toggleRightPanel = useUiStore((state) => state.toggleRightPanel)
 
@@ -47,6 +59,15 @@ export function AppShell({ section, children, actions, headerExtra, drawer, pane
         if (!section.hasRightPanel) return
         event.preventDefault()
         toggleRightPanel(section.id)
+        return
+      }
+
+      if (event.key === ' ' || event.code === 'Space') {
+        // Воспроизведение кадра есть только в разделе «Диполи» (`docs/ui.md` §9);
+        // в остальных разделах Space не перехватываем — пусть работает прокрутка
+        if (section.id !== 'dipoles') return
+        event.preventDefault()
+        useDipoleCalc.getState().togglePlayback()
         return
       }
 

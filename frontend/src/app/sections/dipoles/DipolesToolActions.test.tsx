@@ -9,7 +9,7 @@
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { CALC_PARAM_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { calcJobFixture, dipoleScanResultFixture, recordingFixture } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
@@ -23,6 +23,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
       view: 'none',
       amplitudeThresholdNam: 0,
       params: { ...CALC_PARAM_DEFAULTS },
+      playback: { ...PLAYBACK_DEFAULTS },
       job: null,
       result: null,
       spectrumJob: null,
@@ -132,5 +133,72 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     await user.click(screen.getByRole('button', { name: 'FFT-гистограмма' }))
     expect(useDipoleCalc.getState().view).toBe('none')
+  })
+
+  /**
+   * Кадр воспроизведения (срез 3.7): шапка отправляет **команды** в состояние, а
+   * сам кадр ведут часы в рабочей области. Без результата расчёта командовать
+   * нечем — кнопки выключены.
+   */
+  it('выключает кнопки кадра без расчёта', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApiFetch()
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    expect(screen.getByRole('button', { name: 'Воспроизведение траектории' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Предыдущая эпоха' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Следующая эпоха' })).toBeDisabled()
+    // Снимать нечего: кнопки снятия кадра и подписи кадра нет вовсе
+    expect(screen.queryByRole('button', { name: 'Снять кадр' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Следующая эпоха' }))
+    expect(useDipoleCalc.getState().playback.epochIndex).toBe(0)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('играет, шагает покадрово и меняет скорость — без запросов к серверу', async () => {
+    const user = userEvent.setup()
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    const fetchSpy = mockApiFetch()
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    await user.click(screen.getByRole('button', { name: 'Воспроизведение траектории' }))
+    expect(useDipoleCalc.getState().playback).toMatchObject({ playing: true, active: true })
+    // Играющая кнопка меняет доступное имя: пауза — это то же действие
+    const pause = screen.getByRole('button', { name: 'Пауза воспроизведения' })
+    expect(pause).toHaveClass('bg-accent-soft')
+
+    await user.click(screen.getByRole('button', { name: 'Следующая эпоха' }))
+    // Покадровый шаг ставит на паузу: кадр остаётся на выбранной эпохе
+    expect(useDipoleCalc.getState().playback).toMatchObject({
+      playing: false,
+      active: true,
+      epochIndex: 1,
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Скорость ×4' }))
+    expect(useDipoleCalc.getState().playback.speed).toBe(4)
+    expect(screen.getByRole('button', { name: 'Скорость ×4' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('подписывает текущий кадр и снимает его отдельной кнопкой', async () => {
+    const user = userEvent.setup()
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 2 },
+    })
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    // Нарезка 1000 мс: третья эпоха начинается на 2.00 с
+    expect(screen.getByText('Кадр: эпоха 3 из 4 · 2.00 с · ×1')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Снять кадр' }))
+
+    expect(useDipoleCalc.getState().playback).toMatchObject({ playing: false, active: false })
+    expect(screen.queryByText(/^Кадр: эпоха/)).not.toBeInTheDocument()
   })
 })

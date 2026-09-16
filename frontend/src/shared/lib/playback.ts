@@ -1,0 +1,177 @@
+/**
+ * Воспроизведение траектории диполей (срез 3.7) — чистая математика кадра.
+ *
+ * Быстрый расчёт даёт **одну точку на эпоху** (`epoch_index`, `time_ms` — пик GFP
+ * внутри эпохи), поэтому «движение» диполя строится по сетке нарезки: время
+ * сессии `t` растёт непрерывно, эпоха считается как `floor(t / epoch_length_ms)`,
+ * а кадр внутри эпохи — интерполяция между её точкой и точкой следующей эпохи.
+ *
+ * **Интерполяция — отображение, а не измерение**: промежуточных положений в
+ * результате задачи нет, и выдавать их за данные нельзя. Поэтому:
+ * - интерполяция идёт только между **соседними** эпохами, у которых есть точки;
+ *   у отброшенных эпох диполя нет, и «протягивать» его через дыру в данных
+ *   запрещено (кадр в такой эпохе пуст);
+ * - на паузе и при шаге кадр равен измеренной точке своей эпохи (доля 0);
+ * - подписи в UI называют кадр кадром воспроизведения, а не измерением.
+ *
+ * Длительность воспроизведения — вся нарезка результата
+ * (`n_epochs_total × epoch_length_ms`), поэтому скорость ×1 — реальное время
+ * записи: на `test.edf` это 261 эпоха × 500 мс ≈ 130 с.
+ *
+ * Модуль чистый (без DOM и zustand): состояние — `shared/state/dipoleCalc.ts`,
+ * часы и отрисовка — `app/sections/dipoles/PlaybackFrame.tsx`.
+ */
+import type { DipolePoint } from './dipolePoints'
+import type { MniVector } from './mriProjections'
+import type { DipoleScanResult } from '@/shared/api/types'
+
+/** Скорости воспроизведения: 1 — реальное время записи, 2 и 4 — ускорение */
+export const PLAYBACK_SPEEDS = [1, 2, 4] as const
+
+export type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number]
+
+export const DEFAULT_PLAYBACK_SPEED: PlaybackSpeed = 1
+
+/** Сохранённая/присланная скорость приводится к одной из доступных. */
+export function normalizePlaybackSpeed(value: number): PlaybackSpeed {
+  return (PLAYBACK_SPEEDS as readonly number[]).includes(value)
+    ? (value as PlaybackSpeed)
+    : DEFAULT_PLAYBACK_SPEED
+}
+
+/**
+ * Есть ли по чему воспроизводить. Нужны и точки (иначе кадры пусты), и сетка
+ * эпох: по ней считается длительность и номер кадра.
+ */
+export function canPlayback(result: DipoleScanResult | null): boolean {
+  if (!result) return false
+  return result.points.length > 0 && result.n_epochs_total > 0 && result.epoch_length_ms > 0
+}
+
+/** Длительность воспроизведения, мс: вся нарезка эпох результата. */
+export function playbackDurationMs(epochLengthMs: number, totalEpochs: number): number {
+  if (!(epochLengthMs > 0) || totalEpochs <= 0) return 0
+  return epochLengthMs * totalEpochs
+}
+
+/** Номер эпохи, зажатый в сетку нарезки. */
+export function clampEpochIndex(epochIndex: number, totalEpochs: number): number {
+  if (totalEpochs <= 0 || !Number.isFinite(epochIndex)) return 0
+  return Math.min(totalEpochs - 1, Math.max(0, Math.floor(epochIndex)))
+}
+
+/**
+ * Номер эпохи для времени сессии, мс. Время зажимается сеткой нарезки: часовой
+ * цикл может «перелететь» конец записи на кадр, а эпохи за её границей нет.
+ */
+export function epochAtTime(timeMs: number, epochLengthMs: number, totalEpochs: number): number {
+  if (!(epochLengthMs > 0) || totalEpochs <= 0) return 0
+  return clampEpochIndex(timeMs / epochLengthMs, totalEpochs)
+}
+
+/**
+ * Доля внутри эпохи, 0…1: 0 — начало эпохи, 0.5 — её середина. На паузе и при
+ * шаге доля нулевая, поэтому кадр равен измеренной точке, а не «полутону».
+ */
+export function epochFraction(timeMs: number, epochLengthMs: number): number {
+  if (!(epochLengthMs > 0)) return 0
+  const within = timeMs - Math.floor(timeMs / epochLengthMs) * epochLengthMs
+  const fraction = within / epochLengthMs
+  if (!Number.isFinite(fraction)) return 0
+  return Math.min(1, Math.max(0, fraction))
+}
+
+/** Точки по номеру эпохи: у эпох без диполя (отброшены порогом) записи нет. */
+export function pointByEpoch(points: readonly DipolePoint[]): Map<number, DipolePoint> {
+  const map = new Map<number, DipolePoint>()
+  for (const point of points) map.set(point.epochIndex, point)
+  return map
+}
+
+/**
+ * Линейная интерполяция двух чисел (`fraction` уже зажат вызывающей стороной).
+ */
+export function lerp(a: number, b: number, fraction: number): number {
+  return a + (b - a) * fraction
+}
+
+/** Вектор единичной длины; нулевой вектор остаётся нулевым (луча не будет). */
+function normalizeVector(v: MniVector): MniVector {
+  const length = Math.hypot(v.x, v.y, v.z)
+  if (!(length > 0)) return { x: 0, y: 0, z: 0 }
+  return { x: v.x / length, y: v.y / length, z: v.z / length }
+}
+
+/**
+ * Интерполяция **направления** момента (единичные векторы): по большой дуге
+ * (slerp), а не по прямой — иначе середина пути «сплющивалась» бы к центру и луч
+ * на кадре был бы короче, чем у обеих измеренных точек.
+ *
+ * Особые случаи взяты явно: у почти совпадающих направлений `sin θ → 0`, и
+ * формула slerp делит на ноль (там линейная интерполяция с нормировкой), а у
+ * противонаправленных дуга не определена вовсе — произвольное вращение
+ * «дорисовывать» нельзя, поэтому остаётся первое направление.
+ */
+export function slerpUnit(a: MniVector, b: MniVector, fraction: number): MniVector {
+  const va = normalizeVector(a)
+  const vb = normalizeVector(b)
+  const dot = Math.min(1, Math.max(-1, va.x * vb.x + va.y * vb.y + va.z * vb.z))
+  if (dot > 0.9995) {
+    return normalizeVector({
+      x: lerp(va.x, vb.x, fraction),
+      y: lerp(va.y, vb.y, fraction),
+      z: lerp(va.z, vb.z, fraction),
+    })
+  }
+  if (dot < -0.9995) return va
+  const theta = Math.acos(dot)
+  const sinTheta = Math.sin(theta)
+  const wa = Math.sin((1 - fraction) * theta) / sinTheta
+  const wb = Math.sin(fraction * theta) / sinTheta
+  return normalizeVector({
+    x: va.x * wa + vb.x * wb,
+    y: va.y * wa + vb.y * wb,
+    z: va.z * wa + vb.z * wb,
+  })
+}
+
+/**
+ * Кадр воспроизведения: интерполяция позиции, направления момента и амплитуды
+ * между точкой эпохи `epochIndex` и точкой следующей эпохи.
+ *
+ * `null` — в этой эпохе диполя нет (эпоха отброшена): кадр остаётся пустым, а не
+ * «дотягивается» от соседней эпохи. Если у следующей эпохи точки нет или доля
+ * нулевая, кадр — **измеренная** точка своей эпохи (id, эпоха, время пика, GOF и
+ * поле Бродмана всегда берутся у неё: это измеренные величины, их не размываем).
+ */
+export function interpolatedPoint(
+  points: Map<number, DipolePoint>,
+  epochIndex: number,
+  fraction: number,
+): DipolePoint | null {
+  const current = points.get(epochIndex) ?? null
+  if (!current) return null
+  const next = points.get(epochIndex + 1) ?? null
+  if (!next || !(fraction > 0)) return current
+  const f = Math.min(1, Math.max(0, fraction))
+  return {
+    ...current,
+    position: {
+      x: lerp(current.position.x, next.position.x, f),
+      y: lerp(current.position.y, next.position.y, f),
+      z: lerp(current.position.z, next.position.z, f),
+    },
+    orientation: slerpUnit(current.orientation, next.orientation, f),
+    amplitudeNaM: lerp(current.amplitudeNaM, next.amplitudeNaM, f),
+  }
+}
+
+/** Подпись кадра для шапки: эпоха, время её начала и скорость. */
+export function playbackSummary(
+  epochIndex: number,
+  totalEpochs: number,
+  timeSec: number,
+  speed: PlaybackSpeed,
+): string {
+  return `Кадр: эпоха ${epochIndex + 1} из ${totalEpochs} · ${timeSec.toFixed(2)} с · ×${speed}`
+}

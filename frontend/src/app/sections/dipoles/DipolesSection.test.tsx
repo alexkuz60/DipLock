@@ -15,7 +15,8 @@ import {
   projectionBox,
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
-import { CALC_PARAM_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { FRAME_DIM_OPACITY } from '@/shared/lib/dipolePoints'
 import {
   DIPOLE_PARAM_DEFAULTS,
   EMPTY_SELECTION,
@@ -51,6 +52,7 @@ describe('рабочая область раздела «Диполи»', () => 
       amplitudeThresholdNam: 0,
       fftRangeHz: null,
       selectedPointId: null,
+      playback: { ...PLAYBACK_DEFAULTS },
       job: null,
       result: null,
       spectrumJob: null,
@@ -253,5 +255,43 @@ describe('рабочая область раздела «Диполи»', () => 
     renderWithProviders(<DipolesSection />)
 
     expect(screen.getByText(/Выделен диполь: Эпоха 1, 0.120 с/)).toBeInTheDocument()
+  })
+
+  /**
+   * Кадр воспроизведения (срез 3.7): раздел отдаёт проекциям **признак** кадра
+   * (`dimmed`), а сам кадр раздают часы. Интерполяция — отображение, поэтому кадр
+   * синхронен во всех трёх проекциях и не делает ни одного запроса.
+   */
+  it('показывает кадр воспроизведения в трёх проекциях и приглушает облако', () => {
+    const fetchSpy = mockApiFetch()
+    vi.stubGlobal('fetch', fetchSpy)
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      // Эпоха 1 (в подписи — вторая): кадр стоит на измеренной точке, пауза
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 1 },
+    })
+    renderWithProviders(<DipolesSection />)
+
+    for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
+      expect(screen.getByTestId(`frame-${plane}`)).toBeInTheDocument()
+      expect(screen.getByTestId(`dipole-dot-${plane}-0-120`)).toHaveAttribute(
+        'stroke-opacity',
+        String(FRAME_DIM_OPACITY),
+      )
+    }
+    expect(screen.getByTestId('frame-axial').querySelector('title')?.textContent).toContain(
+      'Кадр воспроизведения: Эпоха 2',
+    )
+    // Кадр — чистая перерисовка: раздел по-прежнему просит только метаданные
+    const paths = fetchSpy.mock.calls.map(([path]) => String(path))
+    expect(paths.every((path) => path.startsWith('/api/v1/meta'))).toBe(true)
+  })
+
+  it('держит облако в обычном виде, пока кадр воспроизведения не задействован', () => {
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    renderWithProviders(<DipolesSection />)
+
+    expect(screen.queryByTestId('frame-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('dipole-dot-axial-0-120')).toHaveAttribute('stroke-opacity', '1')
   })
 })

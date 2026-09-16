@@ -13,9 +13,12 @@ import {
   ARROW_LENGTH_MAX_PX,
   DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
+  DIPOLE_FRAME_HALO_RADIUS_PX,
+  DIPOLE_FRAME_HALO_STROKE_PX,
   DIPOLE_RAY_STROKE_PX,
   DOT_HIT_RADIUS_PX,
   FORCE_FULL_NAM,
+  FRAME_DIM_OPACITY,
   MARKER_OPACITY_MIN,
   VECTOR_MAX_PX,
   VECTOR_MIN_PX,
@@ -130,6 +133,16 @@ describe('отрисовка маркера диполя (срез 3.5)', () => 
     expect(DIPOLE_RAY_STROKE_PX).toBe(2)
     // Хит-зона шире кольца: иначе в маркер диаметром 10 px мышью не попасть
     expect(DOT_HIT_RADIUS_PX).toBeGreaterThan(DIPOLE_DOT_RADIUS_PX)
+  })
+
+  it('держит маркер кадра отличимым от выделения и не спорит с размером кольца', () => {
+    // Гало кадра шире кольца позиции: размер кольца не меняем (правило «все
+    // позиции — одинаковые кольца»), а «сейчас» отмечаем вторым кольцом
+    expect(DIPOLE_FRAME_HALO_RADIUS_PX).toBeGreaterThan(DIPOLE_DOT_RADIUS_PX)
+    expect(DIPOLE_FRAME_HALO_STROKE_PX).toBe(2)
+    // Приглушение облака: точки видны, но не спорят с маркером за внимание
+    expect(FRAME_DIM_OPACITY).toBeGreaterThan(0)
+    expect(FRAME_DIM_OPACITY).toBeLessThan(MARKER_OPACITY_MIN)
   })
 
   it('плотнит луч по силе: слабый — бледный, сильный — плотный; толщина у всех одна', () => {

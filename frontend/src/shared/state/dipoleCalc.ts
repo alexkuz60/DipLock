@@ -26,6 +26,13 @@
  * Персистится только набор параметров и предпочтений просмотра (окно частот):
  * результаты задач и выделенный диполь относятся к конкретной записи и после
  * перезагрузки страницы бессмысленны.
+ *
+ * Воспроизведение траектории (срез 3.7) — тоже состояние **просмотра**, но с
+ * командой из шапки: `playback` хранит идущее воспроизведение, скорость (×1/×2/×4),
+ * номер эпохи и счётчик пользовательских переходов (`seekSeq` — как `navRequest.seq`
+ * в EDF, чтобы часы не проигрывали одну команду дважды). Непрерывное время кадра
+ * здесь **не** живёт: его ведут часы раздела (`PlaybackFrame.tsx`), а в стор уходит
+ * только смена эпохи — кадры 60 раз в секунду не должны перерисовывать облако точек.
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
@@ -42,10 +49,51 @@ import {
   type CalcFilterPresetId,
 } from '@/shared/lib/calcFilter'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
+import {
+  DEFAULT_PLAYBACK_SPEED,
+  canPlayback,
+  clampEpochIndex,
+  normalizePlaybackSpeed,
+  type PlaybackSpeed,
+} from '@/shared/lib/playback'
 import type { DipoleScanResult, JobStatus, SpectrumResult } from '@/shared/api/types'
 
 /** Что открыто в выдвижной панели раздела: одна панель за раз. */
 export type CalcView = 'none' | 'topomap' | 'fft'
+
+/**
+ * Кадр воспроизведения траектории (срез 3.7). Живёт в сторе, потому что команда
+ * идёт из шапки (play/pause, покадрово, `Space`), а исполняется в рабочей области:
+ * прямой «ручки» у проекций нет — как и у вьюера EDF.
+ */
+export type PlaybackState = {
+  /** Идёт воспроизведение; на паузе кадр равен измеренной точке своей эпохи */
+  playing: boolean
+  /** Скорость: 1 — реальное время записи, 2 и 4 — ускорение */
+  speed: PlaybackSpeed
+  /** Текущая эпоха нарезки результата (0…`n_epochs_total`−1) */
+  epochIndex: number
+  /**
+   * Счётчик **пользовательских** переходов (покадрово/перевод): растёт монотонно,
+   * поэтому часы видят новую команду, даже если номер эпохи не изменился (повторный
+   * «покадрово» на границе записи). Как `navRequest.seq` в EDF: повторный рендер не
+   * проигрывает команду дважды.
+   */
+  seekSeq: number
+  /**
+   * Кадр задействован: облако проекций приглушено, а маркер кадра виден и на
+   * паузе — так «останавливаются» на интересующем кадре.
+   */
+  active: boolean
+}
+
+export const PLAYBACK_DEFAULTS: PlaybackState = {
+  playing: false,
+  speed: DEFAULT_PLAYBACK_SPEED,
+  epochIndex: 0,
+  seekSeq: 0,
+  active: false,
+}
 
 /** Параметры расчёта, уходящие в форму запроса (и в URL топокарт). */
 export type CalcParams = {
@@ -251,6 +299,8 @@ export type DipoleCalcState = {
    * выбор в одной, синхронизация в трёх. Сессионное состояние, не персистится.
    */
   selectedPointId: string | null
+  /** Кадр воспроизведения траектории: играет/пауза, скорость, эпоха (срез 3.7) */
+  playback: PlaybackState
   params: CalcParams
   /** Задача быстрого расчёта диполей (прогресс/ошибка) */
   job: CalcJob | null
@@ -276,6 +326,20 @@ export type DipoleCalcState = {
   /** Повторный клик по выделенной точке снимает выделение (одна кнопка на два состояния) */
   toggleSelectedPoint: (id: string) => void
   clearSelectedPoint: () => void
+  /** Play/pause кадра воспроизведения: без результата ничего не запускает */
+  togglePlayback: () => void
+  /** Пауза без снятия кадра (конец записи, уход из раздела) */
+  pausePlayback: () => void
+  /** Скорость воспроизведения: значение приводится к 1/2/4 */
+  setPlaybackSpeed: (speed: number) => void
+  /** Покадрово: ставит на паузу и сдвигает кадр на `delta` эпох (с зажимом) */
+  stepPlaybackEpoch: (delta: number) => void
+  /** Перевод кадра на конкретную эпоху (ставит на паузу) */
+  seekPlaybackEpoch: (epochIndex: number) => void
+  /** Снять кадр воспроизведения: облако диполей возвращается в обычный вид */
+  clearPlaybackFrame: () => void
+  /** Сдвиг кадра **часами** воспроизведения (не команда: счётчик переходов не растёт) */
+  setPlaybackEpoch: (epochIndex: number) => void
   setEpochLengthMs: (value: number) => void
   setGridMm: (value: number) => void
   setRejectThresholdUv: (value: number) => void
@@ -304,6 +368,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       amplitudeThresholdNam: 0,
       fftRangeHz: null,
       selectedPointId: null,
+      playback: { ...PLAYBACK_DEFAULTS },
       params: { ...CALC_PARAM_DEFAULTS },
       job: null,
       result: null,
@@ -321,6 +386,77 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       toggleSelectedPoint: (id) =>
         set((state) => ({ selectedPointId: state.selectedPointId === id ? null : id })),
       clearSelectedPoint: () => set({ selectedPointId: null }),
+
+      togglePlayback: () => {
+        const { result, playback } = get()
+        // Без точек и сетки эпох кадры пусты: кнопка выключена в шапке, а действие
+        // не «играет вхолостую»
+        if (!canPlayback(result)) return
+        if (playback.playing) {
+          // Пауза: часы останавливаются, кадр остаётся на текущей эпохе и
+          // показывается **измеренной** точкой (доля внутри эпохи — ноль)
+          set({ playback: { ...playback, playing: false } })
+          return
+        }
+        // Play с последнего кадра начинает запись сначала: иначе кнопка «играет»,
+        // а картинка стоит на месте
+        const atEnd = playback.epochIndex >= (result?.n_epochs_total ?? 1) - 1
+        set({
+          playback: {
+            ...playback,
+            playing: true,
+            active: true,
+            epochIndex: atEnd ? 0 : playback.epochIndex,
+            seekSeq: playback.seekSeq + 1,
+          },
+        })
+      },
+      pausePlayback: () =>
+        set((state) =>
+          state.playback.playing ? { playback: { ...state.playback, playing: false } } : {},
+        ),
+      setPlaybackSpeed: (speed) =>
+        set((state) => ({ playback: { ...state.playback, speed: normalizePlaybackSpeed(speed) } })),
+      stepPlaybackEpoch: (delta) =>
+        set((state) => {
+          const total = state.result?.n_epochs_total ?? 0
+          if (total <= 0) return {}
+          return {
+            playback: {
+              ...state.playback,
+              playing: false,
+              active: true,
+              epochIndex: clampEpochIndex(state.playback.epochIndex + delta, total),
+              seekSeq: state.playback.seekSeq + 1,
+            },
+          }
+        }),
+      seekPlaybackEpoch: (epochIndex) =>
+        set((state) => {
+          const total = state.result?.n_epochs_total ?? 0
+          if (total <= 0) return {}
+          return {
+            playback: {
+              ...state.playback,
+              playing: false,
+              active: true,
+              epochIndex: clampEpochIndex(epochIndex, total),
+              seekSeq: state.playback.seekSeq + 1,
+            },
+          }
+        }),
+      clearPlaybackFrame: () =>
+        set((state) => ({ playback: { ...state.playback, playing: false, active: false } })),
+      setPlaybackEpoch: (epochIndex) =>
+        set((state) => {
+          const next = clampEpochIndex(epochIndex, state.result?.n_epochs_total ?? 0)
+          // Часы пишут кадр на каждом переходе эпохи: при том же номере стор не
+          // трогаем, иначе кадры 60 раз в секунду давали бы лишние перерисовки
+          return next === state.playback.epochIndex
+            ? {}
+            : { playback: { ...state.playback, epochIndex: next } }
+        }),
+
       setEpochLengthMs: (value) =>
         set((state) => ({ params: { ...state.params, epochLengthMs: Math.round(value) } })),
       setGridMm: (value) =>
@@ -397,7 +533,19 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           if (token !== calcRunToken) return
           const result = await api.dipoleScanResult(recordingId, created.job_id)
           if (token !== calcRunToken) return
-          set({ result, job: succeededJob(get().job) })
+          // Новый результат — новый кадр воспроизведения: прежняя эпоха относилась
+          // к другой нарезке (номер эпохи без результата ничего не значит)
+          set({
+            result,
+            job: succeededJob(get().job),
+            playback: {
+              ...get().playback,
+              playing: false,
+              active: false,
+              epochIndex: 0,
+              seekSeq: 0,
+            },
+          })
         } catch (error) {
           if (token !== calcRunToken || isCancelled(error)) return
           set({ job: failedJob(get().job, apiErrorText(error)), error: apiErrorText(error) })
@@ -440,6 +588,9 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           spectrumError: null,
           // Выделенный диполь жил в результате задачи — вместе с ним он исчезает
           selectedPointId: null,
+          // Кадр воспроизведения привязан к нарезке эпох результата: вместе с ним
+          // он снимается, а скорость остаётся (предпочтение просмотра)
+          playback: { ...get().playback, playing: false, active: false, epochIndex: 0, seekSeq: 0 },
         })
       },
     }),
@@ -470,6 +621,9 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           amplitudeThresholdNam: stored.amplitudeThresholdNam ?? current.amplitudeThresholdNam,
           fftRangeHz: normalizeFreqWindow(stored.fftRangeHz ?? current.fftRangeHz),
           selectedPointId: null,
+          // Кадр воспроизведения — сессионное состояние: он не персистится, и после
+          // перезагрузки страницы его нет (как и результата задачи) — берём дефолт
+          playback: { ...PLAYBACK_DEFAULTS },
           // Старые сохранённые параметры не знают полей формы фильтра (срез 3.6),
           // а в числах мог оказаться мусор: приводим их к правилам контролов
           params: normalizeCalcParams(merged),

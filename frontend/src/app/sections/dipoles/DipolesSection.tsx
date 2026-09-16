@@ -22,6 +22,13 @@
  * референс-точка) и `shared/state/dipoleCalc.ts` (параметры расчёта, порог КД,
  * результаты задач). Клик по любой проекции наводит все три среза на выбранную
  * точку (`applyPointToSlices`).
+ *
+ * Воспроизведение траектории (срез 3.7) — режим **просмотра**: часы кадра
+ * (`PlaybackFrame.tsx`) идут по сетке эпох результата и интерполируют позицию и
+ * момент между соседними эпохами, а команды (play/pause, покадрово, скорость)
+ * приходят из шапки. Раздел подписан только на **признак** кадра, а не на его
+ * номер или время: иначе облако из сотен точек перерисовывалось бы десятки раз в
+ * секунду.
  */
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -45,6 +52,7 @@ import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { Button } from '@/shared/ui/Button'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { MriProjection } from './MriProjection'
+import { PlaybackFrameProvider } from './PlaybackFrame'
 
 /**
  * Пустой слой диполей — общий объект на все рендеры: раздел не имитирует расчёт,
@@ -63,6 +71,14 @@ export function DipolesSection() {
   const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
   const toggleSelectedPoint = useDipoleCalc((state) => state.toggleSelectedPoint)
   const clearSelectedPoint = useDipoleCalc((state) => state.clearSelectedPoint)
+  /**
+   * Режим кадра воспроизведения (срез 3.7). Раздел подписан только на **признак**
+   * кадра, а не на его номер или время: номер эпохи меняется несколько раз в
+   * секунду, время — 60 раз, и подписка на них перерисовывала бы облако из сотен
+   * точек. Кадр живёт в часах (`PlaybackFrameProvider`), а маркеры читают его
+   * контекстом.
+   */
+  const playbackActive = useDipoleCalc((state) => state.playback.active)
 
   const meta = useQuery({
     queryKey: ['meta'],
@@ -148,27 +164,30 @@ export function DipolesSection() {
         масштабах — пропала бы та самая общая шкала мм/пиксель. Так коэффициент
         растяжения SVG (`колонка / ширина фигуры`) у всех трёх одинаков.
       */}
-      <div className="flex min-h-0 flex-wrap items-start gap-4">
-        {PROJECTION_PLANES.map((plane) => (
-          <MriProjection
-            key={plane}
-            plane={plane}
-            slices={slices}
-            visibility={visibility}
-            points={visibleLayer}
-            selectedArea={selection.area}
-            selectedPointId={selectedPointId}
-            onSelectPoint={(id) => (id ? toggleSelectedPoint(id) : clearSelectedPoint())}
-            reference={selection.point}
-            mri={mri}
-            className="min-w-[240px]"
-            style={{ flex: `${projectionBox(plane).width} 1 0%` }}
-            onPick={(point, area) =>
-              selectPoint(point, area, applyPointToSlices(point).orientations)
-            }
-          />
-        ))}
-      </div>
+      <PlaybackFrameProvider>
+        <div className="flex min-h-0 flex-wrap items-start gap-4">
+          {PROJECTION_PLANES.map((plane) => (
+            <MriProjection
+              key={plane}
+              plane={plane}
+              slices={slices}
+              visibility={visibility}
+              points={visibleLayer}
+              dimmed={playbackActive}
+              selectedArea={selection.area}
+              selectedPointId={selectedPointId}
+              onSelectPoint={(id) => (id ? toggleSelectedPoint(id) : clearSelectedPoint())}
+              reference={selection.point}
+              mri={mri}
+              className="min-w-[240px]"
+              style={{ flex: `${projectionBox(plane).width} 1 0%` }}
+              onPick={(point, area) =>
+                selectPoint(point, area, applyPointToSlices(point).orientations)
+              }
+            />
+          ))}
+        </div>
+      </PlaybackFrameProvider>
 
       <p className="text-sm text-fg-2">
         Клик по проекции наводит все три среза на выбранную точку, а попадание в поле Бродмана
@@ -180,7 +199,11 @@ export function DipolesSection() {
         позицию: повторный клик или кнопка «Снять выделение» снимают выбор. Диполи считает сервер по
         кнопке в шапке — быстрым режимом (одна точка на эпоху в пике GFP, перебор узлов сетки),
         поэтому позиция точки кратна шагу сетки, а не «миллиметр в миллиметр» как у точного фитинга;
-        порог «КД ≥» скрывает слабые диполи на проекциях, не меняя результат задачи.
+        порог «КД ≥» скрывает слабые диполи на проекциях, не меняя результат задачи. Воспроизведение
+        идёт по сетке эпох результата: кадр интерполируется между соседними эпохами (позиция и
+        направление момента), поэтому промежуточные положения — <b>отображение</b>, а не измерение;
+        на паузе и при покадровом шаге кадр равен измеренной точке своей эпохи. Порог «КД» действует
+        и на кадр: диполь слабее порога кадром не рисуется (эпоха при этом видна в шапке).
       </p>
     </div>
   )

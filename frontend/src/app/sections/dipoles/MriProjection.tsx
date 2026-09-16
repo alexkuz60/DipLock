@@ -32,6 +32,11 @@
  * Координаты под курсором — только текстом в строке под фигурой: маркера,
  * бегающего за мышью, нет, чтобы его не путали с кольцами диполей.
  *
+ * Кадр воспроизведения (срез 3.7) рисуется отдельным компонентом `FrameMarker`:
+ * он берёт кадр из контекста (`PlaybackFrame.tsx`) и потому обновляется сам, а
+ * статичные слои при движении кадра не перерисовываются. В режиме кадра облако
+ * приглушается (`dimmed`) — иначе сотни колец спорят с маркером за внимание.
+ *
  * Схема среза (`demoSliceStructures`) — фикстура анатомии: она показывается только
  * без реального тома, иначе рисовала бы «вторую» анатомию поверх настоящей.
  * Силуэт головы остаётся: это граница черепа (в маске МРТ её нет), а не имитация
@@ -73,8 +78,11 @@ import type { MriSliceRef } from '@/shared/api/types'
 import {
   DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
+  DIPOLE_FRAME_HALO_RADIUS_PX,
+  DIPOLE_FRAME_HALO_STROKE_PX,
   DIPOLE_RAY_STROKE_PX,
   DOT_HIT_RADIUS_PX,
+  FRAME_DIM_OPACITY,
   dipoleMarker,
   dipolePointTitle,
   dipoleRayVisual,
@@ -83,6 +91,7 @@ import {
 } from '@/shared/lib/dipolePoints'
 import { layerVisible, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { cx } from '@/shared/ui/cx'
+import { usePlaybackFrame } from './playbackClock'
 
 export type MriProjectionProps = {
   plane: ProjectionPlane
@@ -97,6 +106,11 @@ export type MriProjectionProps = {
   points?: DipoleLayer
   /** Выделенное поле Бродмана: подсвечивается, остальные приглушаются */
   selectedArea?: string | null
+  /**
+   * Режим кадра воспроизведения (срез 3.7): облако точек приглушается, чтобы
+   * движение читалось. Сам маркер кадра приходит контекстом (`usePlaybackFrame`).
+   */
+  dimmed?: boolean
   /** Выделенный диполь: подсвечивается на **всех** проекциях (id из `points`) */
   selectedPointId?: string | null
   /** Клик по точке диполя: выделить (или снять — `null` при повторном клике) и навести срезы (`onPick`) */
@@ -122,6 +136,7 @@ export function MriProjection({
   points = emptyDipoleLayer(),
   selectedArea = null,
   selectedPointId = null,
+  dimmed = false,
   onSelectPoint,
   reference = null,
   mri = null,
@@ -169,6 +184,11 @@ export function MriProjection({
   const dotRadiusPx = DIPOLE_DOT_RADIUS_PX / pxPerUnit
   const dotStrokePx = DIPOLE_DOT_STROKE_PX / pxPerUnit
   const rayStrokePx = DIPOLE_RAY_STROKE_PX / pxPerUnit
+  /**
+   * Приглушение облака в режиме кадра: выделенный кликом диполь не приглушается —
+   * это осознанный выбор пользователя, и «спорить» с ним кадру не за чем.
+   */
+  const dim = dimmed ? FRAME_DIM_OPACITY : 1
 
   /**
    * Слой МРТ: включён, ссылка есть и картинка ещё не падала. Пока он показан,
@@ -460,14 +480,14 @@ export function MriProjection({
                     y2={marker.shaftEnd.y}
                     stroke={selected ? 'var(--color-accent)' : 'var(--color-mri-dipole)'}
                     strokeWidth={rayStrokePx}
-                    strokeOpacity={selected ? 1 : visual.opacity}
+                    strokeOpacity={selected ? 1 : visual.opacity * dim}
                   />
                   {/* Наконечник: полигон от длины луча, а не `<marker>` на всю проекцию */}
                   <polygon
                     data-testid={`dipole-arrow-${plane}-${point.id}`}
                     points={marker.head.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')}
                     fill={selected ? 'var(--color-accent)' : 'var(--color-mri-dipole)'}
-                    fillOpacity={selected ? 1 : visual.opacity}
+                    fillOpacity={selected ? 1 : visual.opacity * dim}
                   />
                 </g>
               )
@@ -500,6 +520,7 @@ export function MriProjection({
                     fill={selected ? 'var(--color-mri-dipole)' : 'none'}
                     stroke="var(--color-mri-dipole-point)"
                     strokeWidth={dotStrokePx}
+                    strokeOpacity={selected ? 1 : dim}
                   />
                   {/*
                     Хит-зона выделения: попасть в кольцо диаметром 10 px мышью
@@ -531,6 +552,10 @@ export function MriProjection({
             })}
           </g>
         ) : null}
+
+        {/* Маркер кадра воспроизведения — поверх слоёв: он и есть «сейчас» */}
+        <FrameMarker plane={plane} visibility={visibility} pxPerUnit={pxPerUnit} />
+
         {referencePx ? (
           <g
             data-testid={`reference-${plane}`}
@@ -633,4 +658,88 @@ function xOfNormalized(plane: ProjectionPlane, u: number): number {
 /** Пиксельная вертикаль по нормализованной координате (ось v растёт вверх). */
 function yOfNormalized(plane: ProjectionPlane, v: number): number {
   return normalizedToPx({ u: 0, v }, plane).y
+}
+
+/**
+ * Маркер кадра воспроизведения (срез 3.7): интерполированная точка текущей эпохи
+ * поверх приглушённого облака. Кадр приходит **контекстом**, поэтому маркер
+ * обновляется сам (60 раз в секунду), а статичные слои проекции не перерисовываются.
+ *
+ * От кликового выделения кадр отличается **гало** — тонким кольцом большего радиуса
+ * при том же размере кольца позиции: «все позиции — одинаковые кольца» — правило
+ * раздела, и менять размер под курсор времени нельзя.
+ *
+ * Слои уважаются и здесь: выключенные позиции — нет кольца кадра, выключенные
+ * векторы — нет его луча (кадр остаётся виден тем слоем, который включён).
+ */
+function FrameMarker({
+  plane,
+  visibility,
+  pxPerUnit,
+}: {
+  plane: ProjectionPlane
+  visibility: Record<DipoleLayerId, boolean>
+  pxPerUnit: number
+}) {
+  const frame = usePlaybackFrame()
+  const point = frame?.point ?? null
+  if (!point) return null
+
+  const marker = dipoleMarker(plane, point)
+  const visual = dipoleRayVisual(point.amplitudeNaM)
+  const showsDot = layerVisible(visibility, 'dipoles')
+  // Луч кадра — отдельным объектом: проверка слоя и наличия луча в одном месте,
+  // без «утверждений о непустоте» внутри разметки
+  const ray =
+    layerVisible(visibility, 'vectors') && marker.shaftEnd && marker.head
+      ? { end: marker.shaftEnd, head: marker.head }
+      : null
+
+  return (
+    <g data-testid={`frame-${plane}`}>
+      <title>{`Кадр воспроизведения: ${dipolePointTitle(point)}`}</title>
+      {showsDot ? (
+        <>
+          <circle
+            data-testid={`frame-halo-${plane}`}
+            cx={marker.at.x}
+            cy={marker.at.y}
+            r={DIPOLE_FRAME_HALO_RADIUS_PX / pxPerUnit}
+            fill="none"
+            stroke="var(--color-accent)"
+            strokeWidth={DIPOLE_FRAME_HALO_STROKE_PX / pxPerUnit}
+          />
+          <circle
+            data-testid={`frame-dot-${plane}`}
+            cx={marker.at.x}
+            cy={marker.at.y}
+            r={DIPOLE_DOT_RADIUS_PX / pxPerUnit}
+            fill="var(--color-mri-dipole)"
+            stroke="var(--color-mri-dipole-point)"
+            strokeWidth={DIPOLE_DOT_STROKE_PX / pxPerUnit}
+          />
+        </>
+      ) : null}
+      {ray ? (
+        <>
+          <line
+            data-testid={`frame-vector-${plane}`}
+            x1={marker.at.x}
+            y1={marker.at.y}
+            x2={ray.end.x}
+            y2={ray.end.y}
+            stroke="var(--color-accent)"
+            strokeWidth={DIPOLE_RAY_STROKE_PX / pxPerUnit}
+            strokeOpacity={visual.opacity}
+          />
+          <polygon
+            data-testid={`frame-arrow-${plane}`}
+            points={ray.head.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')}
+            fill="var(--color-accent)"
+            fillOpacity={visual.opacity}
+          />
+        </>
+      ) : null}
+    </g>
+  )
 }

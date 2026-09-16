@@ -7,9 +7,10 @@ import { Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { SECTION_ROUTES } from '@/app/sections/registry'
 import { SectionRoute } from '@/app/sections/routes'
-import { useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useUiStore } from '@/shared/state/uiStore'
 import { mockApiFetch } from '@/test/apiMocks'
+import { dipoleScanResultFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 function renderApp(route = '/edf') {
@@ -58,9 +59,7 @@ describe('каркас приложения', () => {
 
   it('на Главной нет тулс-хедера раздела', () => {
     renderApp('/')
-    expect(
-      screen.queryByRole('heading', { level: 1, name: 'Главная' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: 'Главная' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { level: 1, name: 'DipLock' })).toBeInTheDocument()
   })
 
@@ -140,5 +139,38 @@ describe('каркас приложения', () => {
       screen.getByRole('heading', { level: 1, name: 'EDF — просмотр записи' }),
     ).toBeInTheDocument()
     expect(screen.queryByTestId('dipoles-drawer')).not.toBeInTheDocument()
+  })
+
+  /**
+   * Space — воспроизведение кадра траектории (срез 3.7, `docs/ui.md` §9). Хоткей
+   * принадлежит разделу «Диполи»: в других разделах он не перехватывается (там
+   * Space — обычная прокрутка), а в полях не мешает набору параметров.
+   */
+  it('включает и останавливает воспроизведение по Space только в разделе «Диполи»', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS },
+    })
+
+    // Другой раздел: воспроизведения там нет, команда не должна «протекать»
+    renderApp('/edf')
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' })
+    expect(useDipoleCalc.getState().playback.playing).toBe(false)
+    cleanup()
+
+    renderApp('/dipoles')
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' })
+    expect(useDipoleCalc.getState().playback.playing).toBe(true)
+
+    // Одно нажатие — одно действие: повторный Space ставит на паузу
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' })
+    expect(useDipoleCalc.getState().playback.playing).toBe(false)
+
+    // Ввод в поле не считается хоткеем: Space должен попасть в текст
+    const input = document.createElement('input')
+    document.body.append(input)
+    fireEvent.keyDown(input, { key: ' ', code: 'Space' })
+    expect(useDipoleCalc.getState().playback.playing).toBe(false)
+    input.remove()
   })
 })

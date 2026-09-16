@@ -11,6 +11,7 @@ import { BANDWIDTH_RANGE, SINGLE_FREQ_RANGE } from '@/shared/lib/calcFilter'
 import { mockApiFetch } from '@/test/apiMocks'
 import {
   CALC_PARAM_DEFAULTS,
+  PLAYBACK_DEFAULTS,
   buildDipoleForm,
   buildSpectrumForm,
   calcJobFromStatus,
@@ -35,6 +36,7 @@ function resetState() {
     amplitudeThresholdNam: 0,
     fftRangeHz: null,
     selectedPointId: null,
+    playback: { ...PLAYBACK_DEFAULTS },
     params: { ...CALC_PARAM_DEFAULTS },
     job: null,
     result: null,
@@ -438,5 +440,154 @@ describe('состояние расчёта диполей', () => {
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, filterBandHz: null })).toBe(false)
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, notchHz: 50 })).toBe(false)
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, epochLengthMs: 500 })).toBe(false)
+  })
+})
+
+/**
+ * Кадр воспроизведения траектории (срез 3.7): состояние **принимает команды**
+ * (play/pause, покадрово, скорость, снятие кадра) и хранит номер эпохи. Само время
+ * кадра ведут часы раздела (`PlaybackFrame.tsx`), поэтому здесь проверяются зажимы,
+ * счётчик пользовательских переходов и снятие кадра вместе с результатом.
+ */
+describe('кадр воспроизведения в состоянии расчёта (срез 3.7)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetState()
+  })
+
+  it('начинает без воспроизведения и без кадра', () => {
+    expect(useDipoleCalc.getState().playback).toEqual(PLAYBACK_DEFAULTS)
+  })
+
+  it('не играет без результата: кнопка выключена, действие молчит', () => {
+    useDipoleCalc.getState().togglePlayback()
+    expect(useDipoleCalc.getState().playback.playing).toBe(false)
+
+    // Результат без точек (все эпохи отброшены) тоже не даёт кадров
+    useDipoleCalc.setState({ result: dipoleScanResultFixture({ points: [] }) })
+    useDipoleCalc.getState().togglePlayback()
+    expect(useDipoleCalc.getState().playback.playing).toBe(false)
+  })
+
+  it('играет и ставит на паузу, оставляя кадр до отдельного снятия', () => {
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+
+    useDipoleCalc.getState().togglePlayback()
+    expect(useDipoleCalc.getState().playback).toMatchObject({
+      playing: true,
+      active: true,
+      epochIndex: 0,
+    })
+    const seq = useDipoleCalc.getState().playback.seekSeq
+
+    useDipoleCalc.getState().togglePlayback()
+    // Пауза кадр не снимает: именно так останавливаются на интересующей эпохе
+    expect(useDipoleCalc.getState().playback).toMatchObject({ playing: false, active: true })
+    expect(useDipoleCalc.getState().playback.seekSeq).toBe(seq)
+
+    useDipoleCalc.getState().clearPlaybackFrame()
+    expect(useDipoleCalc.getState().playback).toMatchObject({ playing: false, active: false })
+  })
+
+  it('начинает запись сначала, если play нажат на последней эпохе', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, epochIndex: 3 },
+    })
+
+    useDipoleCalc.getState().togglePlayback()
+
+    // Иначе кнопка «играла» бы, а картинка стояла на месте
+    expect(useDipoleCalc.getState().playback).toMatchObject({ playing: true, epochIndex: 0 })
+  })
+
+  it('шагает покадрово с зажимом и ставит на паузу, а сдвиг часов счётчик не двигает', () => {
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+
+    useDipoleCalc.getState().stepPlaybackEpoch(1)
+    expect(useDipoleCalc.getState().playback).toMatchObject({
+      playing: false,
+      active: true,
+      epochIndex: 1,
+    })
+
+    // За краем записи номер стоит на месте, но команда всё равно новая: повторный
+    // клик по «покадрово» на границе обязан быть виден часам (счётчик `seekSeq`)
+    const seq = useDipoleCalc.getState().playback.seekSeq
+    useDipoleCalc.getState().stepPlaybackEpoch(-9)
+    expect(useDipoleCalc.getState().playback.epochIndex).toBe(0)
+    expect(useDipoleCalc.getState().playback.seekSeq).toBe(seq + 1)
+
+    useDipoleCalc.getState().stepPlaybackEpoch(99)
+    expect(useDipoleCalc.getState().playback.epochIndex).toBe(3)
+
+    // Сдвиг часов: кадр меняется, а счётчик команд — нет (это не команда)
+    const beforeSeq = useDipoleCalc.getState().playback.seekSeq
+    useDipoleCalc.getState().setPlaybackEpoch(2)
+    expect(useDipoleCalc.getState().playback).toMatchObject({ epochIndex: 2, seekSeq: beforeSeq })
+    // Тот же кадр — состояние не трогаем: часы пишут его десятки раз в секунду
+    const before = useDipoleCalc.getState().playback
+    useDipoleCalc.getState().setPlaybackEpoch(2)
+    expect(useDipoleCalc.getState().playback).toBe(before)
+  })
+
+  it('переводит кадр на конкретную эпоху и приводит скорость к ×1/×2/×4', () => {
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+
+    useDipoleCalc.getState().seekPlaybackEpoch(2)
+    expect(useDipoleCalc.getState().playback).toMatchObject({
+      epochIndex: 2,
+      active: true,
+      playing: false,
+    })
+    useDipoleCalc.getState().seekPlaybackEpoch(99)
+    expect(useDipoleCalc.getState().playback.epochIndex).toBe(3)
+
+    useDipoleCalc.getState().setPlaybackSpeed(4)
+    expect(useDipoleCalc.getState().playback.speed).toBe(4)
+    // Скорости ×3 в UI нет: чужое значение не должно дойти до часов
+    useDipoleCalc.getState().setPlaybackSpeed(3)
+    expect(useDipoleCalc.getState().playback.speed).toBe(1)
+  })
+
+  it('снимает кадр вместе с результатом, а скорость оставляет', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { playing: true, speed: 2, epochIndex: 2, seekSeq: 4, active: true },
+    })
+
+    useDipoleCalc.getState().reset()
+
+    expect(useDipoleCalc.getState().playback).toEqual({
+      playing: false,
+      speed: 2,
+      epochIndex: 0,
+      seekSeq: 0,
+      active: false,
+    })
+  })
+
+  it('снимает прежний кадр, когда приходит новый результат расчёта', async () => {
+    mockApiFetch({ calcJob: calcJobFixture })
+    useDipoleCalc.setState({
+      playback: { playing: true, speed: 1, epochIndex: 2, seekSeq: 3, active: true },
+    })
+
+    await useDipoleCalc.getState().runCalculation('rec-1')
+
+    // Номер эпохи без своего результата ничего не значит: новая нарезка — новый кадр
+    expect(useDipoleCalc.getState().playback).toEqual(PLAYBACK_DEFAULTS)
+    expect(useDipoleCalc.getState().result?.points).toHaveLength(4)
+  })
+
+  it('не персистит кадр воспроизведения (только параметры и предпочтения)', () => {
+    useDipoleCalc.setState({
+      playback: { ...PLAYBACK_DEFAULTS, playing: true, active: true, epochIndex: 2 },
+    })
+
+    const raw = localStorage.getItem('diplock.dipoleCalc')
+    expect(raw).toBeTruthy()
+    expect(raw).not.toContain('playback')
+    expect(raw).toContain('amplitudeThresholdNam')
   })
 })

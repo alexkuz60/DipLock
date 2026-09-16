@@ -7,7 +7,7 @@
  */
 import type { ComponentProps } from 'react'
 import { fireEvent, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PROJECTION_HINTS,
   PROJECTION_PADDING,
@@ -25,12 +25,20 @@ import {
   ARROW_LENGTH_MAX_PX,
   DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
+  DIPOLE_FRAME_HALO_RADIUS_PX,
   DIPOLE_RAY_STROKE_PX,
+  FRAME_DIM_OPACITY,
   demoDipoleLayer,
+  dipoleLayerFromScan,
+  dipoleRayVisual,
+  type DipoleLayer,
 } from '@/shared/lib/dipolePoints'
+import { PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { DIPOLE_PARAM_DEFAULTS, type DipoleLayerId } from '@/shared/state/dipoleParams'
+import { dipoleScanResultFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { MriProjection } from './MriProjection'
+import { PlaybackFrameProvider } from './PlaybackFrame'
 
 /** Видимость слоёв с точечными правками: по умолчанию включены все. */
 function visible(overrides: Partial<Record<DipoleLayerId, boolean>> = {}) {
@@ -51,6 +59,26 @@ function renderProjection(
   return renderWithProviders(
     <MriProjection plane={plane} slices={defaultSlices()} visibility={visible()} {...overrides} />,
   )
+}
+
+/**
+ * Проекция с часами воспроизведения: кадр приходит контекстом, поэтому без
+ * провайдера маркера кадра не бывает вовсе (`usePlaybackFrame` → `null`).
+ */
+function renderProjectionWithFrame(
+  plane: ProjectionPlane,
+  overrides: Partial<ComponentProps<typeof MriProjection>> = {},
+) {
+  return renderWithProviders(
+    <PlaybackFrameProvider>
+      <MriProjection plane={plane} slices={defaultSlices()} visibility={visible()} {...overrides} />
+    </PlaybackFrameProvider>,
+  )
+}
+
+/** Слой точек из результата задачи: те же данные, что рисует раздел (без порога «КД»). */
+function resultLayer(): DipoleLayer {
+  return dipoleLayerFromScan(dipoleScanResultFixture())
 }
 
 /** Подмена размеров фигуры: клики в тестах считаются в координатах viewBox. */
@@ -78,6 +106,11 @@ const EXPECTED_EDGES: Record<
 }
 
 describe('проекция мозга', () => {
+  beforeEach(() => {
+    // Кадр воспроизведения — состояние сессии: тесты не должны влиять друг на друга
+    useDipoleCalc.setState({ result: null, playback: { ...PLAYBACK_DEFAULTS } })
+  })
+
   it('подписывает края буквами направлений MNI', () => {
     for (const plane of PROJECTION_PLANES) {
       const view = renderProjection(plane)
@@ -389,5 +422,82 @@ describe('проекция мозга', () => {
     expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('projection-readout-axial')).toHaveTextContent(MRI_SLICE_UNAVAILABLE)
     expect(screen.getAllByTestId(/slice-structure-axial-/).length).toBeGreaterThan(0)
+  })
+
+  /**
+   * Кадр воспроизведения (срез 3.7) приходит **контекстом**: маркер обновляется сам
+   * (60 раз в секунду), а статичные слои проекции не перерисовываются. Поэтому без
+   * провайдера маркера кадра нет вовсе, а в режиме кадра облако приглушается —
+   * размер кольца позиции при этом не меняется (правило раздела).
+   */
+  it('рисует маркер кадра воспроизведения поверх приглушённого облака', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 0 },
+    })
+
+    renderProjectionWithFrame('axial', { points: resultLayer(), dimmed: true })
+
+    // Маркер кадра: гало (отличие от кликового выделения) + кольцо того же размера
+    expect(screen.getByTestId('frame-halo-axial')).toHaveAttribute(
+      'r',
+      String(DIPOLE_FRAME_HALO_RADIUS_PX),
+    )
+    expect(screen.getByTestId('frame-halo-axial')).toHaveAttribute('stroke', 'var(--color-accent)')
+    const dot = screen.getByTestId('frame-dot-axial')
+    expect(dot).toHaveAttribute('r', String(DIPOLE_DOT_RADIUS_PX))
+    expect(dot).toHaveAttribute('fill', 'var(--color-mri-dipole)')
+    expect(screen.getByTestId('frame-vector-axial')).toHaveAttribute(
+      'stroke',
+      'var(--color-accent)',
+    )
+    expect(screen.getByTestId('frame-axial').querySelector('title')?.textContent).toContain(
+      'Кадр воспроизведения: Эпоха 1',
+    )
+
+    // Облако приглушено, но не исчезло: видно и движение, и общий рисунок точек
+    const cloudDot = screen.getByTestId('dipole-dot-axial-1-140')
+    expect(cloudDot).toHaveAttribute('stroke-opacity', String(FRAME_DIM_OPACITY))
+    // Луч приглушается вместе с точкой: сила момента умножается на приглушение
+    const cloudRayOpacity = dipoleRayVisual(25).opacity * FRAME_DIM_OPACITY
+    expect(screen.getByTestId('dipole-vector-axial-1-140')).toHaveAttribute(
+      'stroke-opacity',
+      String(cloudRayOpacity),
+    )
+  })
+
+  it('не рисует маркер кадра без кадра и уважает выключенные слои', () => {
+    // Результат есть, но кадр не задействован: облако в обычном виде (приглушение —
+    // решение раздела, а не часов: `dimmed` приходит пропсом)
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    const idle = renderProjectionWithFrame('axial', { points: resultLayer() })
+    expect(screen.queryByTestId('frame-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('dipole-dot-axial-1-140')).toHaveAttribute('stroke-opacity', '1')
+    idle.unmount()
+
+    // Кадр задействован: эпоха выбрана, отсчёт времени не нужен — маркер стоит на
+    // измеренной точке (доля нулевая, воспроизведение на паузе)
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 0 },
+    })
+
+    // Позиции выключены — у кадра остаётся луч; векторы выключены — остаётся кольцо
+    const raysOnly = renderProjectionWithFrame('axial', {
+      points: resultLayer(),
+      dimmed: true,
+      visibility: visible({ dipoles: false }),
+    })
+    expect(screen.queryByTestId('frame-dot-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('frame-vector-axial')).toBeInTheDocument()
+    raysOnly.unmount()
+
+    renderProjectionWithFrame('axial', {
+      points: resultLayer(),
+      dimmed: true,
+      visibility: visible({ vectors: false }),
+    })
+    expect(screen.getByTestId('frame-dot-axial')).toBeInTheDocument()
+    expect(screen.queryByTestId('frame-vector-axial')).not.toBeInTheDocument()
   })
 })
