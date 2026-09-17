@@ -269,25 +269,37 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
+    // Захват указателя берём **только когда жест стал панорамой**, а не на
+    // `pointerdown`: с захватом браузер отдаёт `click` общему предку
+    // pointerdown/pointerup, то есть контейнеру, и кнопка под названием канала
+    // (переход в «ЭЭГ») или стрелка разворота теряла свой обработчик. На экране это
+    // читалось как «переход по названию канала не работает»; в jsdom
+    // `setPointerCapture` нет, поэтому тесты молчали.
+    let pending = false
     let dragging = false
     let lastX = 0
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return
-      dragging = true
+      // Кнопка в области треков — не начало панорамирования: у неё своё действие
+      if ((event.target as HTMLElement | null)?.closest('button')) return
+      pending = true
+      dragging = false
       draggedRef.current = false
       lastX = event.clientX
-      // Захват указателя — необязательное улучшение (drag за пределами области);
-      // в jsdom этих методов нет, поэтому вызываем защищённо.
-      el.setPointerCapture?.(event.pointerId)
-      el.style.cursor = 'grabbing'
     }
     const onPointerMove = (event: PointerEvent) => {
-      if (!dragging) return
+      if (!pending) return
       const dx = event.clientX - lastX
+      if (!dragging) {
+        // До порога это ещё клик: сдвиг курсора мышью не должен двигать окно
+        if (Math.abs(dx) <= 3) return
+        dragging = true
+        draggedRef.current = true
+        el.setPointerCapture?.(event.pointerId)
+        el.style.cursor = 'grabbing'
+      }
       lastX = event.clientX
-      // Смещение больше порога — это панорамирование, а не клик
-      if (Math.abs(dx) > 3) draggedRef.current = true
       const state = useEdfParams.getState()
       const win = zoomWindow(
         signal.durationSec,
@@ -298,6 +310,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
       setCenterSec(panByPixels(centerSec, dx, win, trackWidth, signal.durationSec))
     }
     const onPointerUp = (event: PointerEvent) => {
+      pending = false
       dragging = false
       el.style.cursor = ''
       if (el.hasPointerCapture?.(event.pointerId)) el.releasePointerCapture(event.pointerId)

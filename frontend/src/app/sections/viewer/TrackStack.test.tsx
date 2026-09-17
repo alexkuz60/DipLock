@@ -187,6 +187,39 @@ describe('вьюер треков', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it('нажатие и движение по названию канала не начинают панораму (срез 5)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3', 'F4'] })
+    // В jsdom метода может не быть — определяем сами. Проверяем первопричину сбоя:
+    // контейнер **не должен** захватывать указатель, если жест начался на кнопке.
+    // Захват отдаёт `click` контейнеру (общий предок pointerdown/pointerup), и
+    // кнопка теряет свой обработчик — на экране это «переход в „ЭЭГ“ не работает».
+    const proto = Element.prototype as unknown as { setPointerCapture?: (id: number) => void }
+    const original = proto.setPointerCapture
+    const capture = vi.fn()
+    proto.setPointerCapture = capture
+    try {
+      renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+      await user.pointer([
+        {
+          keys: '[MouseLeft>]',
+          target: screen.getByTestId('track-label-F4'),
+          coords: { clientX: 100, clientY: 20 },
+        },
+        { coords: { clientX: 220, clientY: 20 } },
+        { keys: '[/MouseLeft]', coords: { clientX: 220, clientY: 20 } },
+      ])
+
+      expect(capture).not.toHaveBeenCalled()
+      // Окно не сдвинулось: движение по подписи — не панорама
+      expect(screen.getByText('Окно 0.00–10.00 с')).toBeInTheDocument()
+    } finally {
+      if (original) proto.setPointerCapture = original
+      else delete proto.setPointerCapture
+    }
+  })
+
   it('скрытый в панели канал сбрасывает разворот трека', async () => {
     const user = userEvent.setup()
     paramsState({ visibleChannels: ['F3', 'F4'] })
