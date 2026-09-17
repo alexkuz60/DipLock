@@ -120,6 +120,20 @@ def asset_version(settings: Settings) -> str:
     return surface_version(_AssetCtx.from_settings(settings))
 
 
+def surface_ref(settings: Settings) -> Dict[str, str]:
+    """Ссылка на кэшируемый меш: версия считается без построения данных (O(1)).
+
+    Возвращает поля ``SurfaceRef`` (``version``/``url``/``brodmann_url``) — схема
+    одна на ``/meta``, результат анализа и UI, поэтому собирается в одном месте.
+    """
+    prefix = settings.api_prefix
+    return {
+        "version": asset_version(settings),
+        "url": f"{prefix}/surface",
+        "brodmann_url": f"{prefix}/surface/brodmann",
+    }
+
+
 def get_surface_bytes(settings: Settings) -> Tuple[bytes, str]:
     """Байты JSON меша fsaverage + версия ассета (для ETag/Cache-Control)."""
     mesh_bytes, _, version = _build_assets(_AssetCtx.from_settings(settings))

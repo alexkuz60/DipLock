@@ -11,8 +11,9 @@ import time
 import pytest
 from fastapi import HTTPException
 
-from app.api import routes
+from app.api import routes, uploads
 from app.core.config import settings
+from app.services import analysis_pipeline
 from app.services.surface_cache import clear_asset_cache
 
 _PREFIX = settings.api_prefix
@@ -122,7 +123,7 @@ def isolated_io(tmp_path, monkeypatch):
     async def _no_db(result):  # noqa: ARG001
         return None
 
-    monkeypatch.setattr(routes, "_save_analysis_to_db", _no_db)
+    monkeypatch.setattr(analysis_pipeline, "save_analysis_to_db", _no_db)
     routes.job_manager.clear()
     return tmp_path
 
@@ -137,7 +138,7 @@ def fake_pipeline(monkeypatch):
         progress("artifacts", 0.3, "детекция артефактов")
         return _fake_analysis_result(session_id=f"session-{len(calls)}", filename=filename)
 
-    monkeypatch.setattr(routes, "_run_analysis", _fake)
+    monkeypatch.setattr(analysis_pipeline, "run_analysis", _fake)
     return calls
 
 
@@ -204,19 +205,19 @@ def test_init_status_extended_payload(client):
 ])
 def test_safe_edf_name_sanitizes(raw, expected):
     """Имя загрузки не выходит за upload_dir и не содержит опасных символов."""
-    assert routes._safe_edf_name(raw) == expected
+    assert uploads.safe_edf_name(raw) == expected
 
 
 def test_safe_edf_name_default_for_empty():
     """Пустое имя получает безопасный дефолт."""
-    assert routes._safe_edf_name(None) == "recording.edf"
-    assert routes._safe_edf_name("") == "recording.edf"
+    assert uploads.safe_edf_name(None) == "recording.edf"
+    assert uploads.safe_edf_name("") == "recording.edf"
 
 
 @pytest.mark.parametrize("raw", ["rec.txt", "rec", "rec.edf.txt"])
 def test_safe_edf_name_rejects_non_edf(raw):
     with pytest.raises(HTTPException) as err:
-        routes._safe_edf_name(raw)
+        uploads.safe_edf_name(raw)
     assert err.value.status_code == 400
     assert ".edf" in str(err.value.detail)
 
@@ -333,7 +334,7 @@ def test_failed_job_reports_error_and_409_on_result(client, isolated_io, monkeyp
     def _boom(progress, *args, **kwargs):  # noqa: ARG001
         raise ValueError("Все эпохи отброшены reject-фильтром")
 
-    monkeypatch.setattr(routes, "_run_analysis", _boom)
+    monkeypatch.setattr(analysis_pipeline, "run_analysis", _boom)
 
     created = client.post(f"{_PREFIX}/jobs", files=_files())
     job_id = created.json()["job_id"]

@@ -45,14 +45,20 @@ npm run build      # → ../backend/app/static/ui (раздаётся FastAPI п
 backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
-├── api/routes.py      # /analyze, /jobs, /recordings(+/signals,/preprocess,/spectrum,/dipoles),
-│                      # /surface(+brodmann, +mri срезы), /brodmann-labels, /meta
+├── api/               # роуты + адаптеры HTTP (этап 3)
+│   ├── routes.py      # 28 роутов: /analyze, /jobs, /recordings(+signals/preprocess/spectrum/
+│   │                  # dipoles/spectrogram), /surface(+brodmann,+mri), /brodmann-labels, /meta
+│   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
+│   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
+│   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
+│   └── uploads.py     # приём EDF: имя, размер, sha256 (F10)
 ├── schemas/           # Pydantic-контракт ответов (OpenAPI → TS-типы UI)
+├── models/db.py       # SQLAlchemy модели (Session, Epoch, Dipole): пишется только legacy-анализ
+├── utils/             # brain_export.py, versions.py, png.py (энкодер срезов),
+│                      # marching_squares.py (изолинии маски без зависимостей)
 ├── services/          # КАЖДЫЙ модуль = один шаг пайплайна
 │   ├── edf_loader.py  # read_raw_edf → pick/montage/reference/filter
-│   ├── artifact_detector.py
-│   ├── epoch_segmenter.py
-│   ├── bandpass_filter.py
+│   ├── artifact_detector.py, epoch_segmenter.py, bandpass_filter.py
 │   ├── dipole_fitter.py     # точный фитинг: mne.fit_dipole по эпохам (медленно)
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
@@ -60,19 +66,15 @@ backend/app/
 │   ├── spectral.py        # спектр δ…γ (Welch) + топокарты PNG, кэш + ETag (3.4)
 │   ├── spectrogram.py     # спектрограмма канала: STFT → сетка дБ (DPS2), кэш + ETag (5)
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
+│   ├── analysis_pipeline.py # пайплайн файлового анализа (/analyze, /jobs) + запись в БД (A1)
 │   ├── cache_store.py     # единый дисковый кэш: путь/чтение/атомарная запись/очистка (этап 2)
 │   ├── prepared_signal.py # RAM-кэш подготовленного сигнала: EDF один раз на набор параметров (A4)
 │   ├── job_manager.py     # фоновые задачи: этапы, прогресс эпох, семафор (F7)
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
 │   ├── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)
 │   └── atlas_contours.py  # контуры структур и полей Бродмана на срезе (вектор, ETag) (3.9)
-├── utils/                 # brain_export.py, versions.py, png.py (энкодер срезов),
-│                          # marching_squares.py (изолинии маски без зависимостей)
 backend/scripts/       # dedupe_recordings.py — разовая чистка дублей в data/edf,
                        # build_atlas_contours.py — прогрев кэша контуров (3.9)
-├── models/db.py       # SQLAlchemy модели (Session, Epoch, Dipole)
-└── utils/             # brain_export.py, versions.py, png.py (энкодер срезов)
-backend/scripts/       # dedupe_recordings.py — разовая чистка дублей в data/edf
 frontend/              # UI (Vite+React+TS), сборка → backend/app/static/ui
 data/                  # локальные данные (edf/results/cache) — НЕ коммитить
 docs/ui.md             # спецификация UI и дорожная карта фаз
@@ -90,6 +92,10 @@ docs/ui.md             # спецификация UI и дорожная кар�
   генерируются TS-типы UI; «сырые» dict в ответах не добавляем.
 - **Тяжёлые статические ассеты** (меш fsaverage, BA-индексы) — только отдельными кэшируемыми
   эндпоинтами (`app/services/surface_cache.py`), никогда внутри `/analyze`.
+- **Роут = форма и контракт, работа — в слое ниже**: приём файла (`api/uploads.py`), разбор формы и
+  400-тексты (`api/params.py`), задачи записи (`api/recording_jobs.py`), расчёты (`services/*`).
+- **Ассеты — только через `app/api/assets.py`** (`asset_response`): ETag, `Cache-Control` и 304 в
+  одном месте, ручных `status_code=304` в роутах нет — ловит `tests/test_api_assets.py` (A1/A2).
 - Один шаг пайплайна = один модуль в `services/`, без смешивания ответственности.
 - Кэшируйте ресурсоёмкие объекты (поверхности FSAverage, transform, labels).
 - **Дисковые кэши — через `services/cache_store.py`** (своей копии «временный файл + `os.replace`»
@@ -128,12 +134,12 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов (шесть кэшей, три версии) |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
-| `docs/rules/tests.md` | полный инвентарь покрытия (551 Vitest / 214 pytest) |
+| `docs/rules/tests.md` | полный инвентарь покрытия (551 Vitest / 270 pytest) |
 | `docs/rules/docs.md` | **правило ведения документации** — новое правило идёт в файл по теме, а не сюда |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |
 | `docs/history.md` | журнал закрытых работ (сюда переносится закрытое из `todo.md`) |
-| `audit.md`, `audit-2026-09.md` | долг и находки: F17–F21 (`audit.md` §7.7), A1–A10 (`audit-2026-09.md`) |
+| `audit.md`, `audit-2026-09.md` | долг и находки: F17–F21 (`audit.md` §7.7), A1–A11 (`audit-2026-09.md`) |
 | `todo.md` | только открытые задачи (≤1 экрана) |
 | `README.md`, `frontend/README.md` | запуск проекта и детали фронтенда |
 
@@ -145,12 +151,8 @@ docs/ui.md             # спецификация UI и дорожная кар�
 Фреймворки: **pytest** (`backend/tests/`, конфиг `backend/pytest.ini`) и **Vitest** (`frontend/src/**/*.test.tsx`).
 
 ```bash
-cd backend && venv/bin/pip install -r requirements-dev.txt
-cd backend && venv/bin/python -m pytest                        # все тесты backend
-cd backend && venv/bin/python -m pytest tests/test_api.py -v
-cd backend && venv/bin/python -m pytest -m "not integration"   # без локальных данных
-
-cd frontend && npm run test                                    # Vitest (jsdom)
+cd backend && venv/bin/pip install -r requirements-dev.txt   # + pytest / pytest -m "not integration"
+cd frontend && npm run test                                  # Vitest (jsdom)
 ```
 
 Тесты быстрые (без сети): синтетический ЭЭГ (`backend/tests/conftest.py`) + `TestClient`; ветки с

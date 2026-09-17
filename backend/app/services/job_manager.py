@@ -27,6 +27,15 @@ logger = logging.getLogger(__name__)
 # Колбэк прогресса: cb(stage, progress=None, message="")
 ProgressCallback = Callable[..., None]
 
+
+def noop_progress(stage: str, progress: Optional[float] = None, message: str = "") -> None:
+    """Заглушка колбэка прогресса: этапы задачи некому показывать.
+
+    Нужна синхронному ``POST /analyze``: он считает полный пайплайн в одном
+    запросе, и прогресс-бар рисовать негде.
+    """
+
+
 # Этапы пайплайна анализа и их «целевой» прогресс (для UI-прогресс-бара)
 PIPELINE_STAGES: Dict[str, float] = {
     "queued": 0.0,

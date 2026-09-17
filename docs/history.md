@@ -3,6 +3,50 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 17.09.2026 — этап 3: тонкие роуты и единый ETag/304 (A1 + A2)
+
+Закрытый пункт `todo.md` (перенесён дословно): **«Этап 3: единый ETag/304 (`_asset_response`
+вместо 5 ручных копий, A2) + выделение сервисов из `routes.py` (1438 строк, A1)»**.
+
+Что сделано:
+
+- **A2 — `app/api/assets.py`.** Один помощник `asset_response(data, version, *, if_none_match,
+  media_type, cache_control, headers)` обслуживает **все восемь** мест отдачи ассетов: пирамида
+  сигналов, топокарта диапазона, сетка спектрограммы, срез МРТ, контуры среза, `/surface`,
+  `/surface/brodmann`, `/brain-surface` (было: 5 ручных копий + 3 вызова прежнего помощника).
+  Заголовки кэша — именованные константы (`CACHE_PUBLIC_WEEK` / `CACHE_PUBLIC_DAY` /
+  `CACHE_PRIVATE_DAY` / `CACHE_PRIVATE_HOUR`), значения на проводе не менялись. Условие 304:
+  сравнение `If-None-Match` по списку тегов с нормализацией (`W/"v1"`, `v1`, `"v1"` — одно и то
+  же, `*` → 304) вместо подстроки — старая проверка считала `"v1"` совпавшим в `"v10"`.
+- **A1 — выделение из `routes.py`** (1438 → **875 строк**, обработчики по 5–15 строк):
+  - `app/api/uploads.py` — приём EDF (`safe_edf_name`, `save_upload`, `MAX_UPLOAD_SIZE`) (F10);
+  - `app/api/params.py` — формы → параметры сервисов и проверки с текстом для UI
+    (`parse_filter_band`, `parse_reference_channels`, `require_epoch_length`,
+    `validate_analysis_request`, `preprocess_params`, `spectrum_params`, `spectrogram_params`,
+    `stored_spectrogram_params`, `dipole_scan_params`);
+  - `app/api/recording_jobs.py` — задачи записи: `require_recording`, воркеры `WORKERS`,
+    `submit_recording_job` (202 + `result_url` рядом с записью), `job_status`,
+    `recording_job_result`, `job_by_id`;
+  - `app/services/analysis_pipeline.py` — пайплайн файлового анализа (`/analyze`, `/jobs`),
+    запись в БД и удаление временной загрузки; `noop_progress` переехал в `job_manager`;
+    `surface_ref` — в `surface_cache`.
+  Поведение API сохранено: те же роуты, те же коды и тексты ошибок, тот же состав заголовков
+  (проверено тестами контракта). Патч-таргеты тестов переехали вместе с кодом
+  (`analysis_pipeline.run_analysis` / `save_analysis_to_db`, `uploads.MAX_UPLOAD_SIZE`).
+- **Найдено при переносе (A11, не исправлено осознанно):** сетка `grid.bin` собирает параметры
+  пересчёта из результата задачи, а `reference` в результат не пишется — при
+  `reference != 'average'` сетка пересчитывается с другим референсом, чем показывал расчёт.
+  Ранее это молчаливое расхождение выглядело как часть контракта `grid.bin`; теперь оно
+  задокументировано в `stored_spectrogram_params` и внесено в `audit-2026-09.md` (A11).
+- **Тесты:** `tests/test_api_assets.py` (19), `tests/test_api_params.py` (25),
+  `tests/test_api_recording_jobs.py` (14) → 214 → **270** pytest (263 без integration);
+  инвентарь — `docs/rules/tests.md`. В `test_api_assets.py` — «сторож»: `status_code=304`
+  не должен появляться вне `api/assets.py`.
+- **Документация:** `AGENTS.md` (структура `api/*`, две новые конвенции), `README.md`,
+  `docs/rules/api-jobs.md` (где что лежит, правила 2 и 4), `docs/rules/dipoles.md`,
+  `docs/rules/eeg.md`, `docs/rules/safety.md`, `docs/data_map.md` (§8 и §10 п.3 закрыт),
+  `docs/rules/tests.md`, `todo.md`, `audit-2026-09.md` (A1/A2 закрыты, A11 добавлена).
+
 ## 17.09.2026 — этап 2: единый кэш и кэш подготовленного сигнала (A3 + A4)
 
 Закрытый пункт `todo.md` (перенесён дословно): **«Этап 2: кэш подготовленного сигнала (A4) +

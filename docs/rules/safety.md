@@ -23,7 +23,7 @@
   `backend/app/services/recording_signals.py`, `backend/app/schemas/analysis.py`
   (`RecordingSignalsHeader`) и `frontend/src/shared/lib/signalFrame.ts`.
 - **Записи просмотра не дублируются** (дедуп загрузок): `POST /recordings` считает sha256 содержимого
-  в том же проходе по чанкам (`_save_upload(..., with_digest=True)`), реестр ищет запись по отпечатку и
+  в том же проходе по чанкам (`app/api/uploads.py`: `save_upload(..., with_digest=True)`), реестр ищет запись по отпечатку и
   при совпадении **возвращает существующую** с `deduplicated=true` (200), а только что записанный каталог
   удаляет — копий на диске не появляется. Отпечаток + паспорт лежат в сайдкаре `recording.json` каталога
   записи (`write_sidecar`/`read_sidecar`), поэтому дедуп переживает рестарт: при первом обращении реестр

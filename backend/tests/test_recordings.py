@@ -105,7 +105,7 @@ def test_upload_rejects_broken_edf_and_cleans_disk(client):
 
 
 def test_upload_rejects_too_large(client, edf_file, monkeypatch):
-    monkeypatch.setattr("app.api.routes.MAX_UPLOAD_SIZE", 8)
+    monkeypatch.setattr("app.api.uploads.MAX_UPLOAD_SIZE", 8)
 
     r = _upload(client, edf_file)
     assert r.status_code == 413

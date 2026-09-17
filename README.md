@@ -25,6 +25,7 @@ DipLock/
 │   │   ├── main.py            # FastAPI entry: CORS, gzip, /ui (сборка frontend), /init-status
 │   │   ├── core/config.py     # Pydantic Settings — единый источник конфигурации
 │   │   ├── api/routes.py      # /analyze, /jobs, /recordings (+/signals, /preprocess, /dipoles, /spectrum), /surface, /meta
+│   │   │                      # + assets.py (ETag/304), params.py (формы), recording_jobs.py (задачи), uploads.py
 │   │   ├── schemas/analysis.py# Pydantic-контракт ответов (→ TypeScript-типы UI)
 │   │   ├── services/
 │   │   │   ├── edf_loader.py

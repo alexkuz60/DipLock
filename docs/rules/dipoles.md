@@ -80,7 +80,8 @@
   слой перед отрисовкой, точки в результате задачи остаются, а счётчик скрытых
   (`hiddenByThreshold`) считается по слою. Правка порога ничего не запускает и не делает запросов.
 - **Задачи записи** (`kind=spectrum` / `kind=dipoles`) — через общий `job_manager`, результат рядом
-  с записью (`/recordings/{id}/{kind}/{job_id}`), `_job_status` собирает `result_url` по `kind`.
+  с записью (`/recordings/{id}/{kind}/{job_id}`), `job_status` (`app/api/recording_jobs.py`) собирает
+  `result_url` по `kind`.
   Новые поля прогресса `epochs_done`/`epochs_total` в `Job`/`JobStatus` заполняются колбэком
   `set_progress(..., epochs_done=…)`: «эпох 12 из 30» информативнее дробного прогресса. Задача
   стартует **только** `POST …/spectrum` / `POST …/dipoles`; сброс результатов — при загрузке новой

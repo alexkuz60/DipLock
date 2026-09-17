@@ -1,22 +1,25 @@
 """REST API эндпоинты DipLock.
 
+Роут описывает только форму запроса и контракт ответа; работа живёт в модулях
+слоя (A1, этап 3):
+
+* ``app/api/uploads.py`` — приём EDF: санитизация имени, размер, sha256 (F10);
+* ``app/api/params.py`` — формы → параметры сервисов (400 с текстом для UI);
+* ``app/api/recording_jobs.py`` — задачи записи: запуск, статус, результат;
+* ``app/api/assets.py`` — отдача кэшируемых ассетов с ETag/304 (A2, этап 3);
+* ``app/services/*`` — расчёты («один шаг пайплайна = один модуль»).
+
 Контракт ответов описан Pydantic-моделями в ``app/schemas`` (F4): из OpenAPI
 генерируются TypeScript-типы frontend. Тяжёлые статические ассеты (меш
 fsaverage, атлас Brodmann) отдаются отдельными кэшируемыми эндпоинтами (F6),
 долгий анализ — фоновыми задачами с прогрессом по этапам (F7).
 """
 import asyncio
-import hashlib
 import json
 import logging
-import os
-import re
 import shutil
 import sys
-import time
-import uuid
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from fastapi import (
     APIRouter,
@@ -29,6 +32,28 @@ from fastapi import (
     UploadFile,
 )
 
+from app.api.assets import (
+    CACHE_PRIVATE_DAY,
+    CACHE_PRIVATE_HOUR,
+    CACHE_PUBLIC_WEEK,
+    asset_response,
+)
+from app.api.params import (
+    dipole_scan_params,
+    preprocess_params,
+    spectrogram_params,
+    spectrum_params,
+    stored_spectrogram_params,
+    validate_analysis_request,
+)
+from app.api.recording_jobs import (
+    job_by_id,
+    job_status,
+    recording_job_result,
+    require_recording,
+    submit_recording_job,
+)
+from app.api.uploads import safe_edf_name, save_upload
 from app.core.config import settings
 from app.schemas.analysis import (
     AnalyzeResponse,
@@ -53,37 +78,28 @@ from app.schemas.analysis import (
     SpectrogramResult,
     SpectrumResult,
     SurfaceOut,
-    SurfaceRef,
 )
-from app.services.dipole_scanner import DipoleScanParams, compute_dipole_scan
-from app.services.job_manager import ProgressCallback, job_manager
-from app.services.preprocess import PreprocessParams, run_preprocess
-from app.services.spectral import (
-    SpectrumParams,
-    cached_topomap,
-    compute_spectrum,
+from app.services import analysis_pipeline
+from app.services.atlas_contours import (
+    contours_meta,
+    contours_ref as contour_ref,
+    slice_contours,
 )
-from app.services.spectrogram import (
-    SpectrogramParams,
-    cached_grid as cached_spectrogram_grid,
-    compute_spectrogram,
-    grid_url as spectrogram_grid_url,
-    validate_params as validate_spectrogram_params,
+from app.services.job_manager import job_manager, noop_progress
+from app.services.mri_slices import (
+    mri_meta,
+    slice_png as mri_slice_png,
+    slice_ref as mri_slice_ref,
 )
 from app.services.recording_signals import (
     SignalBuildError,
     build_signal_blob,
 )
 from app.services.recordings import Recording, recording_registry
-from app.services.atlas_contours import (
-    contours_meta,
-    contours_ref as contour_ref,
-    slice_contours,
-)
-from app.services.mri_slices import (
-    mri_meta,
-    slice_png as mri_slice_png,
-    slice_ref as mri_slice_ref,
+from app.services.spectral import cached_topomap
+from app.services.spectrogram import (
+    cached_grid as cached_spectrogram_grid,
+    grid_url as spectrogram_grid_url,
 )
 from app.services.surface_cache import (
     asset_version,
@@ -98,88 +114,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Максимальный размер загружаемого EDF (200 МБ)
-MAX_UPLOAD_SIZE = 200 * 1024 * 1024
-_UPLOAD_CHUNK = 1024 * 1024
-
-# Имя загрузки: только basename и безопасные символы (F10 — защита от "../" и
-# абсолютных путей, которые вывели бы запись за пределы upload_dir).
-_UNSAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._+-]+")
-_MAX_NAME_LEN = 128
-
-
-def _noop_progress(stage: str, progress: Optional[float] = None, message: str = "") -> None:
-    """Заглушка прогресса для синхронного ``/analyze`` (его некому показывать)."""
-
-
-def _validate_analysis_params(
-    epoch_length_ms: float, freq_band: str, single_freq: Optional[float],
-) -> None:
-    """Проверка параметров запроса: 400 с понятным для UI текстом."""
-    if epoch_length_ms not in settings.epoch_lengths_ms:
-        raise HTTPException(
-            status_code=400,
-            detail=f"epoch_length_ms должен быть одним из {settings.epoch_lengths_ms}",
-        )
-    if freq_band not in ("all", "custom", *settings.freq_bands.keys()):
-        raise HTTPException(
-            status_code=400,
-            detail=f"freq_band должен быть 'all'/'custom' или {list(settings.freq_bands.keys())}",
-        )
-    if single_freq is not None and freq_band != "all":
-        raise HTTPException(status_code=400, detail="single_freq ставится вместе с freq_band='all'")
-
-
-def _safe_edf_name(filename: Optional[str]) -> str:
-    """Санитизация имени загружаемого файла (F10).
-
-    Отбрасывает каталоги (в т.ч. ``../`` и Windows-пути), заменяет небезопасные
-    символы, требует суффикс ``.edf``.
-    """
-    raw_name = (filename or "").replace("\\", "/").strip()
-    base = os.path.basename(raw_name) or "recording.edf"
-    base = _UNSAFE_NAME_RE.sub("_", base)[:_MAX_NAME_LEN]
-    if not base.lower().endswith(".edf"):
-        raise HTTPException(status_code=400, detail="Поддерживаются только файлы .edf")
-    return base
-
-
-async def _save_upload(
-    file: UploadFile, safe_name: str, with_digest: bool = False,
-) -> Tuple[str, str, Optional[str]]:
-    """Сохраняет загрузку в отдельный каталог с контролем размера (F10).
-
-    Возвращает ``(путь_к_файлу, каталог_загрузки, sha256)``; каталог удаляет
-    вызывающий код (в ``finally``) — при ошибке/413 частичный файл не остаётся
-    на диске. ``with_digest`` считает отпечаток содержимого в том же проходе по
-    чанкам (нужен дедупу записей); ``/analyze`` и ``/jobs`` его не заказывают —
-    они удаляют файл сразу после чтения.
-    """
-    upload_dir = os.path.join(settings.upload_dir, str(uuid.uuid4()))
-    os.makedirs(upload_dir, exist_ok=True)
-    tmp_path = os.path.join(upload_dir, safe_name)
-
-    size = 0
-    digest = hashlib.sha256() if with_digest else None
-    try:
-        with open(tmp_path, "wb") as out:
-            while chunk := await file.read(_UPLOAD_CHUNK):
-                size += len(chunk)
-                if size > MAX_UPLOAD_SIZE:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"Файл слишком большой (макс {MAX_UPLOAD_SIZE // (1024 * 1024)} МБ)",
-                    )
-                if digest is not None:
-                    digest.update(chunk)
-                out.write(chunk)
-    except BaseException:
-        shutil.rmtree(upload_dir, ignore_errors=True)
-        raise
-    finally:
-        await file.close()
-    return tmp_path, upload_dir, digest.hexdigest() if digest is not None else None
-
 
 def _meta_out(recording: Recording, deduplicated: bool = False) -> RecordingMeta:
     """Паспорт записи для ответа.
@@ -191,15 +125,6 @@ def _meta_out(recording: Recording, deduplicated: bool = False) -> RecordingMeta
     return RecordingMeta(**recording.meta, deduplicated=deduplicated)
 
 
-def _surface_ref() -> SurfaceRef:
-    """Ссылка на кэшируемый меш: версия считается без построения данных (O(1))."""
-    prefix = settings.api_prefix
-    return SurfaceRef(
-        version=asset_version(settings),
-        url=f"{prefix}/surface",
-        brodmann_url=f"{prefix}/surface/brodmann",
-    )
-
 
 def _mri_ref() -> MriSliceRef:
     """Ссылка на срезы МРТ: версия по отпечатку тома, без его сборки (O(1))."""
@@ -209,340 +134,6 @@ def _mri_ref() -> MriSliceRef:
 def _contours_ref() -> ContoursRef:
     """Ссылка на контуры атласа: версия по отпечатку файлов, без сборки (O(1))."""
     return ContoursRef(**contour_ref(settings))
-
-
-def _run_analysis(
-    progress: ProgressCallback,
-    filepath: str,
-    filename: str,
-    epoch_length_ms: float,
-    freq_band: str,
-    custom_min_freq: Optional[float],
-    custom_max_freq: Optional[float],
-    single_freq: Optional[float],
-    run_ica: bool = True,
-    z_threshold: float = 5.0,
-    pp_threshold_uv: float = 100.0,
-) -> Dict[str, Any]:
-    """Синхронный (CPU-bound) анализ EDF: вызывается в потоке, не в event-loop.
-
-    ``progress`` — колбэк этапов (``job_manager``); в синхронном ``/analyze``
-    передаётся заглушка. Меш fsaverage здесь НЕ строится: клиент получает
-    ссылку на кэшируемый ассет (F6).
-    """
-    from app.services.artifact_detector import detect_artifacts
-    from app.services.bandpass_filter import apply_band_filter, compute_band_power
-    from app.services.dipole_fitter import fit_dipoles_for_epochs, localize_dipoles
-    from app.services.edf_loader import load_edf
-    from app.services.epoch_segmenter import segment_epochs
-
-    started = time.perf_counter()
-    session_id = str(uuid.uuid4())
-
-    progress("load_edf", message="Чтение EDF, монтаж 10-20, average reference")
-    raw = load_edf(filepath, settings.standard_channels, units=settings.edf_units)
-
-    progress("artifacts", message="Детекция артефактов")
-    annotations, artifact_stats = detect_artifacts(
-        raw, settings, z_threshold, pp_threshold_uv, run_ica=run_ica,
-    )
-
-    # Band-specific фильтр применяем к continuous raw ДО нарезки: короткие
-    # эпохи (250–1000 мс) короче FIR-фильтра и дают сильные искажения.
-    if freq_band != "all" or single_freq is not None:
-        progress("filter", message=f"Частотная фильтрация: {freq_band}")
-        raw = apply_band_filter(
-            raw, freq_band,
-            custom_min=custom_min_freq,
-            custom_max=custom_max_freq,
-            single_freq=single_freq,
-            bandwidth_hz=settings.default_single_freq_bandwidth_hz,
-        )
-
-    progress("epochs", message=f"Нарезка эпох по {epoch_length_ms:.0f} мс")
-    epochs = segment_epochs(
-        raw, annotations,
-        epoch_length_ms=epoch_length_ms,
-        reject_threshold_uv=settings.reject_threshold_uv,
-    )
-    # len(epochs.events) — все созданные эпохи, len(epochs) — прошедшие reject
-    n_epochs_total = int(len(epochs.events))
-    n_epochs_used = int(len(epochs))
-
-    progress("band_power", message="Спектральная мощность по диапазонам")
-    freq_powers = compute_band_power(epochs, settings.freq_bands)
-
-    progress("dipoles", message="Фитинг диполей по эпохам")
-    dipoles = fit_dipoles_for_epochs(epochs, settings, freq_bands=freq_powers)
-
-    progress("localize", message="Локализация: анатомия + поля Бродмана")
-    dipoles = localize_dipoles(dipoles, settings)
-
-    # Компактные best-fit диполи (таблица локализации + БД). Траектория сюда не
-    # дублируется — она уже есть в dipoles[].trajectory.
-    best_fit_dipoles: List[Dict[str, Any]] = []
-    for d in dipoles:
-        best = d.get("best_fit") or {}
-        if not best:
-            continue
-        mni = best.get("mni_coords") or [0, 0, 0]
-        best_fit_dipoles.append({
-            "epoch_index": d.get("epoch_index"),
-            "time_ms": best.get("time_ms"),
-            "mni_x": mni[0], "mni_y": mni[1], "mni_z": mni[2],
-            "amplitude_nam": best.get("amplitude_nam"),
-            "gof": best.get("gof"),
-            "anatomical_roi": best.get("anatomical_structure"),
-            "brodmann_area": best.get("brodmann_area"),
-        })
-
-    versions = _library_versions()
-    pipeline = {
-        "app_version": settings.app_version,
-        "mne_version": versions["mne"],
-        "numpy_version": versions["numpy"],
-        "python_version": sys.version.split()[0],
-        "epoch_length_ms": epoch_length_ms,
-        "freq_band": freq_band,
-        "single_freq": single_freq,
-        "dipole_fit_decim": settings.dipole_fit_decim,
-        "dipole_fit_max_epochs": settings.dipole_fit_max_epochs,
-        "z_threshold": z_threshold,
-        "pp_threshold_uv": pp_threshold_uv,
-        "reject_threshold_uv": settings.reject_threshold_uv,
-        "ica_requested": run_ica,
-        "ica_applied": bool(artifact_stats.get("ica_applied")),
-        "edf_units": settings.edf_units,
-        "duration_sec": round(time.perf_counter() - started, 3),
-        "created_at": datetime.utcnow(),
-    }
-
-    results_path = os.path.join(settings.results_dir, f"{session_id}.json")
-    os.makedirs(settings.results_dir, exist_ok=True)
-    result: Dict[str, Any] = {
-        "session_id": session_id,
-        "filename": filename,
-        "n_channels": int(raw.info["nchan"]),
-        "sfreq": float(raw.info["sfreq"]),
-        "duration_sec": round(len(raw) / raw.info["sfreq"], 2),
-        "epoch_length_ms": epoch_length_ms,
-        "freq_band": freq_band,
-        "n_epochs_total": n_epochs_total,
-        "n_epochs_used": n_epochs_used,
-        "n_epochs_dropped": n_epochs_total - n_epochs_used,
-        "n_artifacts": artifact_stats["total"],
-        "artifact_types": artifact_stats["by_type"],
-        "frequency_powers": freq_powers,
-        "surface": _surface_ref().model_dump(),
-        # {} -> None: пустая траектория не должна ломать валидацию best_fit
-        "dipoles": [{**d, "best_fit": d.get("best_fit") or None} for d in dipoles],
-        "best_fit_dipoles": best_fit_dipoles,
-        "results_file": results_path,
-        "pipeline": pipeline,
-    }
-
-    # JSON-дамп результата: debug-артефакт и источник для повторного просмотра
-    with open(results_path, "w") as f:
-        json.dump(
-            {
-                "session_id": session_id,
-                "filename": filename,
-                "pipeline": pipeline,
-                "frequency_powers": freq_powers,
-                "dipoles": dipoles,
-            },
-            f, indent=2, default=str,
-        )
-
-    progress("done", 1.0, message="Готово")
-    return result
-
-
-async def _save_analysis_to_db(result: Dict[str, Any]) -> None:
-    """Сохраняет сессию и best-fit диполи в БД (async, вызывается в event-loop)."""
-    from app.models.db import AsyncSessionLocal, init_db
-    from app.models.db import Dipole as DipoleModel
-    from app.models.db import Session as SessionModel
-
-    # Траектория берётся из dipoles по epoch_index: в best_fit_dipoles её больше
-    # нет (раньше дублировалась в обоих списках — лишний мегабайт в ответе).
-    trajectories = {
-        d.get("epoch_index"): d.get("trajectory")
-        for d in result.get("dipoles") or []
-    }
-
-    await init_db()
-    async with AsyncSessionLocal() as session:
-        session.add(SessionModel(
-            id=result["session_id"],
-            filename=result.get("filename"),
-            n_channels=result.get("n_channels"),
-            sfreq=result.get("sfreq"),
-            duration_sec=result.get("duration_sec"),
-            epoch_length_ms=result.get("epoch_length_ms"),
-            freq_band=result.get("freq_band"),
-        ))
-        for d in result.get("best_fit_dipoles") or []:
-            session.add(DipoleModel(
-                session_id=result["session_id"],
-                epoch_id=d.get("epoch_index"),
-                time_ms=d.get("time_ms"),
-                mni_x=d.get("mni_x"),
-                mni_y=d.get("mni_y"),
-                mni_z=d.get("mni_z"),
-                amplitude_nam=d.get("amplitude_nam"),
-                gof=d.get("gof"),
-                anatomical_roi=d.get("anatomical_roi"),
-                brodmann_area=d.get("brodmann_area"),
-                freq_band=result.get("freq_band"),
-                trajectory_json=trajectories.get(d.get("epoch_index")),
-            ))
-        await session.commit()
-
-
-def _analysis_job_worker(
-    progress: ProgressCallback,
-    filepath: str,
-    filename: str,
-    upload_dir: str,
-    epoch_length_ms: float,
-    freq_band: str,
-    custom_min_freq: Optional[float],
-    custom_max_freq: Optional[float],
-    single_freq: Optional[float],
-    run_ica: bool,
-    z_threshold: float,
-    pp_threshold_uv: float,
-) -> Dict[str, Any]:
-    """Воркер задачи анализа (поток): пайплайн + удаление временной загрузки."""
-    try:
-        return _run_analysis(
-            progress, filepath, filename,
-            epoch_length_ms, freq_band,
-            custom_min_freq, custom_max_freq, single_freq,
-            run_ica, z_threshold, pp_threshold_uv,
-        )
-    finally:
-        shutil.rmtree(upload_dir, ignore_errors=True)
-
-
-async def _persist_job_result(job: Any, result: Dict[str, Any]) -> None:
-    """Постобработка успешной задачи: запись в БД (в event-loop, не в потоке)."""
-    try:
-        await _save_analysis_to_db(result)
-    except Exception:
-        logger.exception("Не удалось сохранить результат задачи %s в БД", job.job_id)
-
-
-def _job_status(job: Any) -> JobStatus:
-    """``JobStatus`` из задачи; ``result_url`` заполняется только для успешных.
-
-    У предподготовки результат лежит не в ``/jobs/{id}/result``, а рядом со
-    записью (``/recordings/{id}/preprocess/{job_id}``) — это отдельный контракт
-    (``PreprocessResult`` вместо ``AnalyzeResponse``).
-    """
-    prefix = settings.api_prefix
-    result_url: Optional[str] = None
-    if job.status == "succeeded":
-        recording_id = job.meta.get("recording_id")
-        # Задачи записи (предподготовка, спектр, диполи, спектрограмма) держат
-        # результат рядом с записью: `/recordings/{id}/{kind}/{job_id}` —
-        # отдельные контракты (`PreprocessResult`, `SpectrumResult`,
-        # `DipoleScanResult`, `SpectrogramResult`).
-        if recording_id and job.kind in ("preprocess", "spectrum", "dipoles", "spectrogram"):
-            result_url = f"{prefix}/recordings/{recording_id}/{job.kind}/{job.job_id}"
-        else:
-            result_url = f"{prefix}/jobs/{job.job_id}/result"
-    return JobStatus(**job.as_dict(), result_url=result_url)
-
-
-def _recording_job(recording_id: str, job_id: str, kind: str) -> Any:
-    """Задача записи нужного типа; 404/409 — как у результата предподготовки.
-
-    Общий разбор для «задач записи»: чужой job, незавершённая или упавшая задача
-    не должны отдавать результат, а UI показывает `detail` как есть.
-    """
-    job = job_manager.get(job_id)
-    if job is None or job.kind != kind or job.meta.get("recording_id") != recording_id:
-        raise HTTPException(
-            status_code=404, detail=f"Задача {kind} {job_id} для записи {recording_id} не найдена",
-        )
-    if job.status == "failed":
-        raise HTTPException(status_code=409, detail=f"Задача завершилась ошибкой: {job.error}")
-    if job.status != "succeeded" or job.result is None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Задача ещё не завершена (этап {job.stage}, прогресс {job.progress:.0%})",
-        )
-    return job
-
-
-def _optional_band(band_min: Optional[float], band_max: Optional[float]) -> Optional[Tuple[float, float]]:
-    """Полоса фильтра из формы: пара значений либо «без фильтра».
-
-    Односторонняя полоса — ошибка: молча догадываться о второй границе нельзя,
-    фильтр меняет и спектр, и локализацию.
-    """
-    if band_min is None and band_max is None:
-        return None
-    if band_min is None or band_max is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Полоса задаётся парой band_min и band_max либо не задаётся вовсе",
-        )
-    if band_min >= band_max:
-        raise HTTPException(status_code=400, detail="band_min должен быть меньше band_max")
-    return (band_min, band_max)
-
-
-def _validate_epoch_length(epoch_length_ms: float) -> None:
-    """Проверка длины эпохи: только значения из `epoch_lengths_ms` (DRY с панелью)."""
-    if epoch_length_ms not in settings.epoch_lengths_ms:
-        raise HTTPException(
-            status_code=400,
-            detail=f"epoch_length_ms должен быть одним из {settings.epoch_lengths_ms}",
-        )
-
-
-def _preprocess_job_worker(
-    progress: ProgressCallback,
-    recording: Any,
-    params: PreprocessParams,
-) -> Dict[str, Any]:
-    """Воркер задачи предподготовки (поток): одна стадия на запись.
-
-    Загрузку не удаляем (в отличие от ``/jobs``): файл записи принадлежит
-    реестру просмотра и живёт по своему TTL.
-    """
-    return run_preprocess(recording, settings, params, progress)
-
-
-def _spectrum_job_worker(
-    progress: ProgressCallback,
-    recording: Any,
-    params: SpectrumParams,
-) -> Dict[str, Any]:
-    """Воркер задачи спектра (поток): Welch PSD + топокарты диапазонов."""
-    return compute_spectrum(recording, settings, params, progress)
-
-
-def _spectrogram_job_worker(
-    progress: ProgressCallback,
-    recording: Any,
-    params: SpectrogramParams,
-) -> Dict[str, Any]:
-    """Воркер задачи спектрограммы (поток): STFT одного канала → сетка дБ."""
-    return compute_spectrogram(recording, settings, params, progress)
-
-
-def _dipole_scan_job_worker(
-    progress: ProgressCallback,
-    recording: Any,
-    params: DipoleScanParams,
-) -> Dict[str, Any]:
-    """Воркер быстрого расчёта диполей (поток): перебор сетки по эпохам."""
-    return compute_dipole_scan(recording, settings, params, progress)
-
 
 
 @router.post("/analyze", response_model=AnalyzeResponse, summary="Синхронный анализ EDF")
@@ -564,13 +155,13 @@ async def analyze_eeg(
     обрыве соединения. Тяжёлый меш fsaverage в ответ НЕ входит — только ссылка
     на кэшируемый ассет (``surface.url``).
     """
-    _validate_analysis_params(epoch_length_ms, freq_band, single_freq)
-    safe_name = _safe_edf_name(file.filename)
-    tmp_path, upload_dir, _digest = await _save_upload(file, safe_name)
+    validate_analysis_request(epoch_length_ms, freq_band, single_freq)
+    safe_name = safe_edf_name(file.filename)
+    tmp_path, upload_dir, _digest = await save_upload(file, safe_name)
 
     try:
         result = await asyncio.to_thread(
-            _run_analysis, _noop_progress, tmp_path, safe_name,
+            analysis_pipeline.run_analysis, noop_progress, tmp_path, safe_name,
             epoch_length_ms, freq_band,
             custom_min_freq, custom_max_freq, single_freq,
             run_ica, z_threshold, pp_threshold_uv,
@@ -586,7 +177,7 @@ async def analyze_eeg(
 
     # Сохранить в БД (не падаем при сбое БД)
     try:
-        await _save_analysis_to_db(result)
+        await analysis_pipeline.save_analysis_to_db(result)
     except Exception:
         logger.exception("Не удалось сохранить результат в БД")
 
@@ -612,8 +203,8 @@ async def create_recording(
     возвращается **существующая** запись с ``deduplicated=true`` (200), а только
     что записанная копия удаляется. Новая запись — 201.
     """
-    safe_name = _safe_edf_name(file.filename)
-    tmp_path, upload_dir, digest = await _save_upload(file, safe_name, with_digest=True)
+    safe_name = safe_edf_name(file.filename)
+    tmp_path, upload_dir, digest = await save_upload(file, safe_name, with_digest=True)
     try:
         recording = await asyncio.to_thread(
             recording_registry.register, tmp_path, upload_dir, safe_name, settings, digest,
@@ -643,12 +234,7 @@ async def create_recording(
 )
 async def get_recording(recording_id: str) -> RecordingMeta:
     """Метаданные загруженной записи. 404 — неизвестна, устарела (TTL) или удалена."""
-    recording = recording_registry.get(recording_id)
-    if recording is None:
-        raise HTTPException(
-            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
-        )
-    return _meta_out(recording)
+    return _meta_out(require_recording(recording_id))
 
 
 @router.get(
@@ -670,33 +256,20 @@ async def get_recording_signals(
     не теряются при прореживании. Уровень отдаётся с ``ETag``: повторный запрос
     с тем же ``If-None-Match`` получает 304, а сам уровень кэшируется на диске.
     """
-    recording = recording_registry.get(recording_id)
-    if recording is None:
-        raise HTTPException(
-            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
-        )
+    recording = require_recording(recording_id)
     try:
         data, version = await asyncio.to_thread(build_signal_blob, recording, level, settings)
     except SignalBuildError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    headers = {
-        "ETag": f'"{version}"',
+    return asset_response(
+        data, version,
+        if_none_match=if_none_match,
+        media_type="application/octet-stream",
         # Запись живёт по TTL реестра, поэтому кэшируем приватно и недолго
-        "Cache-Control": "private, max-age=3600",
-        "X-Signal-Level": str(level),
-    }
-    if if_none_match and version in if_none_match:
-        return Response(status_code=304, headers=headers)
-    return Response(content=data, media_type="application/octet-stream", headers=headers)
-
-
-def _parse_reference_channels(raw: Optional[str]) -> Optional[List[str]]:
-    """Разбирает список каналов референса из формы (``F3,F4`` → ``['F3','F4']``)."""
-    if not raw:
-        return None
-    names = [name.strip() for name in raw.split(",") if name.strip()]
-    return names or None
+        cache_control=CACHE_PRIVATE_HOUR,
+        headers={"X-Signal-Level": str(level)},
+    )
 
 
 @router.post(
@@ -729,45 +302,18 @@ async def create_preprocess_job(
     Задача возвращается сразу (202 + ``job_id``): прогресс — в ``GET /jobs/{id}``,
     результат — в ``GET /recordings/{id}/preprocess/{job_id}``.
     """
-    recording = recording_registry.get(recording_id)
-    if recording is None:
-        raise HTTPException(
-            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
-        )
-
-    band = _optional_band(band_min, band_max)
-
-    if stage == "epochs":
-        _validate_epoch_length(epoch_length_ms)
-
-    params = PreprocessParams(
+    recording = require_recording(recording_id)
+    params = preprocess_params(
         stage=stage,
-        filter_band=band,
+        band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
-        reference=reference,
-        reference_channels=_parse_reference_channels(reference_channels),
-        z_threshold=z_threshold,
-        pp_threshold_uv=pp_threshold_uv,
-        flat_line_uv=flat_line_uv,
-        flat_line_ms=flat_line_ms,
+        reference=reference, reference_channels=reference_channels,
+        z_threshold=z_threshold, pp_threshold_uv=pp_threshold_uv,
+        flat_line_uv=flat_line_uv, flat_line_ms=flat_line_ms,
         run_ica=run_ica,
-        epoch_length_ms=epoch_length_ms,
-        reject_threshold_uv=reject_threshold_uv,
+        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
     )
-
-    job = job_manager.submit(
-        "preprocess", recording.filename, _preprocess_job_worker,
-        recording, params,
-        meta={"recording_id": recording_id, "stage": stage},
-    )
-    prefix = settings.api_prefix
-    logger.info("Создана задача предподготовки %s (%s, стадия %s)", job.job_id, recording_id, stage)
-    return JobCreated(
-        job_id=job.job_id,
-        status=job.status,
-        poll_url=f"{prefix}/jobs/{job.job_id}",
-        result_url=f"{prefix}/recordings/{recording_id}/preprocess/{job.job_id}",
-    )
+    return submit_recording_job("preprocess", recording, params, meta={"stage": stage})
 
 
 @router.get(
@@ -776,18 +322,7 @@ async def create_preprocess_job(
 )
 async def get_preprocess_result(recording_id: str, job_id: str) -> PreprocessResult:
     """Результат стадии. 409 — задача идёт или упала; 404 — чужой/неизвестный job."""
-    job = job_manager.get(job_id)
-    if job is None or job.kind != "preprocess" or job.meta.get("recording_id") != recording_id:
-        raise HTTPException(
-            status_code=404, detail=f"Задача предподготовки {job_id} для записи {recording_id} не найдена",
-        )
-    if job.status == "failed":
-        raise HTTPException(status_code=409, detail=f"Задача завершилась ошибкой: {job.error}")
-    if job.status != "succeeded" or job.result is None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Задача ещё не завершена (этап {job.stage}, прогресс {job.progress:.0%})",
-        )
+    job = recording_job_result(recording_id, job_id, "preprocess")
     return PreprocessResult(**job.result)
 
 
@@ -812,33 +347,15 @@ async def create_spectrum_job(
     эндпоинт ``/spectrum/topomap/{band}.png`` с ETag/304. Расчёт стартует только
     этим запросом (правило «обработка — по кнопке», docs/ui.md).
     """
-    recording = recording_registry.get(recording_id)
-    if recording is None:
-        raise HTTPException(
-            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
-        )
-    band = _optional_band(band_min, band_max)
-    _validate_epoch_length(epoch_length_ms)
-
-    params = SpectrumParams(
-        filter_band=band,
+    recording = require_recording(recording_id)
+    params = spectrum_params(
+        band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
-        epoch_length_ms=epoch_length_ms,
-        reference=reference,
-        reference_channels=_parse_reference_channels(reference_channels),
-        reject_threshold_uv=reject_threshold_uv,
+        reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
     )
-    job = job_manager.submit(
-        "spectrum", recording.filename, _spectrum_job_worker, recording, params,
-        meta={"recording_id": recording_id, "epoch_length_ms": epoch_length_ms},
-    )
-    prefix = settings.api_prefix
-    logger.info("Создана задача спектра %s (%s)", job.job_id, recording_id)
-    return JobCreated(
-        job_id=job.job_id,
-        status=job.status,
-        poll_url=f"{prefix}/jobs/{job.job_id}",
-        result_url=f"{prefix}/recordings/{recording_id}/spectrum/{job.job_id}",
+    return submit_recording_job(
+        "spectrum", recording, params, meta={"epoch_length_ms": epoch_length_ms},
     )
 
 
@@ -848,7 +365,8 @@ async def create_spectrum_job(
 )
 async def get_spectrum_result(recording_id: str, job_id: str) -> SpectrumResult:
     """Числа PSD по диапазонам и ссылки на топокарты. 409 — задача идёт/упала."""
-    return SpectrumResult(**_recording_job(recording_id, job_id, "spectrum").result)
+    job = recording_job_result(recording_id, job_id, "spectrum")
+    return SpectrumResult(**job.result)
 
 
 @router.get(
@@ -874,16 +392,14 @@ async def get_spectrum_topomap(
     запрос не пересчитывает PSD, а промах кэша пересчитывает (как пирамида
     сигналов, 2.5). Неизвестный диапазон — 400, чужая запись — 404.
     """
-    recording = recording_registry.get(recording_id)
-    if recording is None:
-        raise HTTPException(
-            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
-        )
-    params = SpectrumParams(
-        filter_band=_optional_band(band_min, band_max),
+    recording = require_recording(recording_id)
+    # Референс в query топокарты не передаётся (контракт URL среза 3.4): берём
+    # значение по умолчанию, как раньше; полоса, notch и эпоха — из параметров.
+    params = spectrum_params(
+        band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
-        epoch_length_ms=epoch_length_ms,
-        reject_threshold_uv=reject_threshold_uv,
+        reference="average", reference_channels=None,
+        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
     )
     try:
         data, version = await asyncio.to_thread(
@@ -892,15 +408,13 @@ async def get_spectrum_topomap(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    etag = f'"{version}"'
-    headers = {
-        "ETag": etag,
-        "Cache-Control": "private, max-age=86400",
-        "X-Spectrum-Band": band,
-    }
-    if if_none_match and etag in if_none_match:
-        return Response(status_code=304, headers=headers)
-    return Response(content=data, media_type="image/png", headers=headers)
+    return asset_response(
+        data, version,
+        if_none_match=if_none_match,
+        media_type="image/png",
+        cache_control=CACHE_PRIVATE_DAY,
+        headers={"X-Spectrum-Band": band},
+    )
 
 
 @router.post(
@@ -924,34 +438,16 @@ async def create_dipole_scan_job(
     помечен ``method='fast_grid'``, и UI показывает эту метку, а не выдаёт быстрый
     расчёт за точный (`docs/ui.md` §12).
     """
-    recording = recording_registry.get(recording_id)
-    if recording is None:
-        raise HTTPException(
-            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
-        )
-    band = _optional_band(band_min, band_max)
-    _validate_epoch_length(epoch_length_ms)
-
-    params = DipoleScanParams(
-        filter_band=band,
+    recording = require_recording(recording_id)
+    params = dipole_scan_params(
+        band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
-        epoch_length_ms=epoch_length_ms,
-        reject_threshold_uv=reject_threshold_uv,
-        reference=reference,
-        reference_channels=_parse_reference_channels(reference_channels),
+        reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
         grid_mm=grid_mm,
     )
-    job = job_manager.submit(
-        "dipoles", recording.filename, _dipole_scan_job_worker, recording, params,
-        meta={"recording_id": recording_id, "epoch_length_ms": epoch_length_ms},
-    )
-    prefix = settings.api_prefix
-    logger.info("Создана задача расчёта диполей %s (%s)", job.job_id, recording_id)
-    return JobCreated(
-        job_id=job.job_id,
-        status=job.status,
-        poll_url=f"{prefix}/jobs/{job.job_id}",
-        result_url=f"{prefix}/recordings/{recording_id}/dipoles/{job.job_id}",
+    return submit_recording_job(
+        "dipoles", recording, params, meta={"epoch_length_ms": epoch_length_ms},
     )
 
 
@@ -961,7 +457,8 @@ async def create_dipole_scan_job(
 )
 async def get_dipole_scan_result(recording_id: str, job_id: str) -> DipoleScanResult:
     """Точки диполей (MNI, момент, амплитуда, GOF). 409 — задача идёт или упала."""
-    return DipoleScanResult(**_recording_job(recording_id, job_id, "dipoles").result)
+    job = recording_job_result(recording_id, job_id, "dipoles")
+    return DipoleScanResult(**job.result)
 
 
 @router.post(
@@ -988,37 +485,15 @@ async def create_spectrogram_job(
     столбцов на времена слишком много для JSON-ответа. Палитра, окно дБ и
     сглаживание — параметры просмотра UI, они сетку не пересчитывают.
     """
-    recording = recording_registry.get(recording_id)
-    if recording is None:
-        raise HTTPException(
-            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
-        )
-    params = SpectrogramParams(
+    recording = require_recording(recording_id)
+    params = spectrogram_params(
         channel=channel,
-        filter_band=_optional_band(band_min, band_max),
+        band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
-        reference=reference,
-        reference_channels=_parse_reference_channels(reference_channels),
-        window_ms=window_ms,
-        overlap_pct=overlap_pct,
-        fmax_hz=fmax_hz,
+        reference=reference, reference_channels=reference_channels,
+        window_ms=window_ms, overlap_pct=overlap_pct, fmax_hz=fmax_hz,
     )
-    try:
-        validate_spectrogram_params(params, settings)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    job = job_manager.submit(
-        "spectrogram", recording.filename, _spectrogram_job_worker, recording, params,
-        meta={"recording_id": recording_id, "channel": channel},
-    )
-    prefix = settings.api_prefix
-    logger.info("Создана задача спектрограммы %s (%s)", job.job_id, recording_id)
-    return JobCreated(
-        job_id=job.job_id,
-        status=job.status,
-        poll_url=f"{prefix}/jobs/{job.job_id}",
-        result_url=f"{prefix}/recordings/{recording_id}/spectrogram/{job.job_id}",
-    )
+    return submit_recording_job("spectrogram", recording, params, meta={"channel": channel})
 
 
 @router.get(
@@ -1031,7 +506,7 @@ async def get_spectrogram_result(recording_id: str, job_id: str) -> SpectrogramR
     ``grid_url`` собирается здесь, а не в воркере: воркер не знает ``job_id``
     (задача создаётся после него), а ссылка адресуется именно задаче.
     """
-    job = _recording_job(recording_id, job_id, "spectrogram")
+    job = recording_job_result(recording_id, job_id, "spectrogram")
     result = dict(job.result)
     result["grid_url"] = spectrogram_grid_url(settings, recording_id, job_id)
     return SpectrogramResult(**result)
@@ -1054,22 +529,10 @@ async def get_spectrogram_grid(
     соответствует именно тому расчёту, который показан на экране. При промахе
     дискового кэша сетка пересчитывается (как топокарты, 3.4).
     """
-    job = _recording_job(recording_id, job_id, "spectrogram")
-    recording = recording_registry.get(recording_id)
-    if recording is None:
-        raise HTTPException(
-            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
-        )
+    job = recording_job_result(recording_id, job_id, "spectrogram")
+    recording = require_recording(recording_id)
     result = job.result
-    band = result.get("filter_band_hz")
-    params = SpectrogramParams(
-        channel=result["channel"],
-        filter_band=(band[0], band[1]) if band and len(band) == 2 else None,
-        notch_hz=result.get("notch_hz"),
-        window_ms=float(result["window_ms"]),
-        overlap_pct=float(result["overlap_pct"]),
-        fmax_hz=float(result["fmax_hz"]),
-    )
+    params = stored_spectrogram_params(result)
     try:
         data, version = await asyncio.to_thread(
             cached_spectrogram_grid, recording, settings, params,
@@ -1077,16 +540,16 @@ async def get_spectrogram_grid(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    etag = f'"{version}-{params.channel}"'
-    headers = {
-        "ETag": etag,
-        "Cache-Control": "private, max-age=86400",
-        "X-Spectrogram-Channel": params.channel,
-        "X-Spectrogram-Version": version,
-    }
-    if if_none_match and etag in if_none_match:
-        return Response(status_code=304, headers=headers)
-    return Response(content=data, media_type="application/octet-stream", headers=headers)
+    return asset_response(
+        data, f"{version}-{params.channel}",
+        if_none_match=if_none_match,
+        media_type="application/octet-stream",
+        cache_control=CACHE_PRIVATE_DAY,
+        headers={
+            "X-Spectrogram-Channel": params.channel,
+            "X-Spectrogram-Version": version,
+        },
+    )
 
 
 
@@ -1110,21 +573,18 @@ async def create_analysis_job(
     Параметры те же, что у ``POST /analyze``. Число одновременно выполняемых
     задач ограничено ``MAX_CONCURRENT_JOBS`` (остальные ждут в очереди).
     """
-    _validate_analysis_params(epoch_length_ms, freq_band, single_freq)
-    safe_name = _safe_edf_name(file.filename)
-    tmp_path, upload_dir, _digest = await _save_upload(file, safe_name)
+    validate_analysis_request(epoch_length_ms, freq_band, single_freq)
+    safe_name = safe_edf_name(file.filename)
+    tmp_path, upload_dir, _digest = await save_upload(file, safe_name)
 
-    job = job_manager.submit(
-        "analyze", safe_name, _analysis_job_worker,
-        tmp_path, safe_name, upload_dir,
-        epoch_length_ms, freq_band,
-        custom_min_freq, custom_max_freq, single_freq,
-        run_ica, z_threshold, pp_threshold_uv,
-        on_success=_persist_job_result,
-        meta={"epoch_length_ms": epoch_length_ms, "freq_band": freq_band},
+    job = analysis_pipeline.submit_uploaded_analysis(
+        filepath=tmp_path, filename=safe_name, upload_dir=upload_dir,
+        epoch_length_ms=epoch_length_ms, freq_band=freq_band,
+        custom_min_freq=custom_min_freq, custom_max_freq=custom_max_freq,
+        single_freq=single_freq,
+        run_ica=run_ica, z_threshold=z_threshold, pp_threshold_uv=pp_threshold_uv,
     )
     prefix = settings.api_prefix
-    logger.info("Создана задача %s (%s)", job.job_id, safe_name)
     return JobCreated(
         job_id=job.job_id,
         status=job.status,
@@ -1136,7 +596,7 @@ async def create_analysis_job(
 @router.get("/jobs", response_model=List[JobStatus], summary="История задач")
 async def list_jobs(limit: int = Query(20, ge=1, le=200)) -> List[JobStatus]:
     """Последние задачи (новые — в конце списка)."""
-    return [_job_status(job) for job in job_manager.list_jobs(limit)]
+    return [job_status(job) for job in job_manager.list_jobs(limit)]
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus, summary="Состояние задачи")
@@ -1145,7 +605,7 @@ async def get_job(job_id: str) -> JobStatus:
     job = job_manager.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Задача {job_id} не найдена")
-    return _job_status(job)
+    return job_status(job)
 
 
 @router.get(
@@ -1154,27 +614,7 @@ async def get_job(job_id: str) -> JobStatus:
 )
 async def get_job_result(job_id: str) -> Dict[str, Any]:
     """Результат анализа. 409 — задача ещё идёт или завершилась ошибкой."""
-    job = job_manager.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Задача {job_id} не найдена")
-    if job.status == "failed":
-        raise HTTPException(status_code=409, detail=f"Задача завершилась ошибкой: {job.error}")
-    if job.status != "succeeded" or job.result is None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Задача ещё не завершена (этап {job.stage}, прогресс {job.progress:.0%})",
-        )
-    return job.result
-
-
-def _asset_response(
-    data: bytes, version: str, if_none_match: Optional[str], max_age: int = 86400,
-) -> Response:
-    """Отдаёт кэшированный JSON-ассет; 304, если ``If-None-Match`` совпал (F6)."""
-    headers = {"ETag": f'"{version}"', "Cache-Control": f"public, max-age={max_age}"}
-    if if_none_match and version in if_none_match:
-        return Response(status_code=304, headers=headers)
-    return Response(content=data, media_type="application/json", headers=headers)
+    return job_by_id(job_id).result
 
 
 @router.get(
@@ -1196,7 +636,7 @@ async def get_surface(
         data, version = get_surface_bytes(settings)
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
-    return _asset_response(data, version, if_none_match)
+    return asset_response(data, version, if_none_match=if_none_match)
 
 
 @router.get(
@@ -1217,7 +657,9 @@ async def get_brodmann_all(
         data, version = get_brodmann_bytes(settings)
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
-    return _asset_response(data, version, if_none_match, max_age=604800)
+    return asset_response(
+        data, version, if_none_match=if_none_match, cache_control=CACHE_PUBLIC_WEEK,
+    )
 
 
 @router.get(
@@ -1277,15 +719,13 @@ async def get_mri_slice(
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
 
-    etag = f'"{version}-{plane}-{actual_mm:g}"'
-    headers = {
-        "ETag": etag,
-        "Cache-Control": "public, max-age=604800",
-        "X-Mri-Slice-Mm": f"{actual_mm:g}",
-    }
-    if if_none_match and etag in if_none_match:
-        return Response(status_code=304, headers=headers)
-    return Response(content=data, media_type="image/png", headers=headers)
+    return asset_response(
+        data, f"{version}-{plane}-{actual_mm:g}",
+        if_none_match=if_none_match,
+        media_type="image/png",
+        cache_control=CACHE_PUBLIC_WEEK,
+        headers={"X-Mri-Slice-Mm": f"{actual_mm:g}"},
+    )
 
 
 @router.get(
@@ -1331,15 +771,12 @@ async def get_contour_slice(
 
     data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     actual_mm = float(payload["mm"])
-    etag = f'"{payload["version"]}-{plane}-{actual_mm:g}"'
-    headers = {
-        "ETag": etag,
-        "Cache-Control": "public, max-age=604800",
-        "X-Contour-Mm": f"{actual_mm:g}",
-    }
-    if if_none_match and etag in if_none_match:
-        return Response(status_code=304, headers=headers)
-    return Response(content=data, media_type="application/json", headers=headers)
+    return asset_response(
+        data, f"{payload['version']}-{plane}-{actual_mm:g}",
+        if_none_match=if_none_match,
+        cache_control=CACHE_PUBLIC_WEEK,
+        headers={"X-Contour-Mm": f"{actual_mm:g}"},
+    )
 
 
 @router.get(
@@ -1377,7 +814,7 @@ async def get_brain_surface_legacy(
             data = json.dumps(mesh, separators=(",", ":")).encode("utf-8")
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
-    return _asset_response(data, version, None)
+    return asset_response(data, version)
 
 
 @router.get("/meta", response_model=MetaResponse, summary="Версии, окружение и параметры")
@@ -1429,10 +866,3 @@ async def get_meta() -> MetaResponse:
         mri_slices=_mri_ref(),
         contours=_contours_ref(),
     )
-
-
-
-
-
-
-
