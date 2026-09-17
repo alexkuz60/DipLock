@@ -30,7 +30,8 @@ import {
   tableRows,
   visibleColumns,
 } from '@/shared/lib/tableRows'
-import { calcJobSummary, resultMatchesParams, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { calcJobSummary, resultMatchesParams } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useTableParams } from '@/shared/state/tableParams'
 import { filterBandText } from '@/shared/lib/calcFilter'

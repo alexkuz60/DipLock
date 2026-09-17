@@ -255,7 +255,8 @@ function round1(value: number): number {
   return Math.round(value * 10) / 10
 }
 
-function clamp(value: number, [min, max]: [number, number]): number {
+/** Зажатие значения в диапазон контрола: `NaN` и бесконечность дают нижнюю границу. */
+export function clamp(value: number, [min, max]: [number, number]): number {
   if (!Number.isFinite(value)) return min
   return Math.min(max, Math.max(min, value))
 }

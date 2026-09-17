@@ -9,7 +9,8 @@
  */
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { dipoleScanResultFixture } from '@/test/fixtures'
 import { PlaybackFrameProvider } from './PlaybackFrame'
 import { usePlaybackFrame } from './playbackClock'

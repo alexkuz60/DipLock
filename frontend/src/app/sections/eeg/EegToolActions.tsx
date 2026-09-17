@@ -16,7 +16,7 @@
  */
 import { useState } from 'react'
 import { CircleHelp, Loader2, Play } from 'lucide-react'
-import { calcJobSummary } from '@/shared/state/dipoleCalc'
+import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
 import {
   eegResultMatchesParams,
   eegSignature,

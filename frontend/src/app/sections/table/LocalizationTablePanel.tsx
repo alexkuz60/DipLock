@@ -19,7 +19,8 @@ import {
   sortDirectionLabel,
   tableRows,
 } from '@/shared/lib/tableRows'
-import { resultMatchesParams, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { resultMatchesParams } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { TABLE_SORT_OPTIONS, useTableParams } from '@/shared/state/tableParams'
 import { Button } from '@/shared/ui/Button'

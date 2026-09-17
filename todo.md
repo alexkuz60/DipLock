@@ -68,8 +68,8 @@
       а не только быстрые unit-тесты.
 - [ ] **Разрезка фронтенда (остаток, по образцу 17.09.2026):** сделаны `mriProjections` →
       `mriDemoShapes`, `TrackStack` → `TrackRow` + `shared/lib/trackOptions.ts`, `MriProjection` →
-      `MriProjectionParts`. Осталось: `shared/state/dipoleCalc.ts` (675 строк — стор раздела вместе
-      с доменом: типы, `FormData`-формы, сигнатуры, `normalizeCalcParams`; вынести домен в
-      `shared/lib/dipoleCalcModel.ts`) и глубинная разрезка слоёв `MriProjection.tsx` (723 строки:
-      семь SVG-слоёв в одном компоненте). Делать по правилу `docs/rules/frontend-state.md` п.6 —
-      перенос без изменения поведения, после каждого шага `lint`/`typecheck`/`test`.
+      `MriProjectionParts`, **домен расчёта диполей** `state/dipoleCalc.ts` (675) →
+      `shared/lib/dipoleCalcModel.ts` (255; в сторе осталось 453 строки состояния и действий).
+      Осталось: глубинная разрезка слоёв `MriProjection.tsx` (723 строки — семь SVG-слоёв в одном
+      компоненте). Делать по правилу `docs/rules/frontend-state.md` п.6 — перенос без изменения
+      поведения, после каждого шага `lint`/`typecheck`/`test`.

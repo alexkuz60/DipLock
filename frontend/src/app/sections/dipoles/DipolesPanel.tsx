@@ -39,8 +39,8 @@ import {
   THRESHOLD_NAM_RANGE,
   calcJobSummary,
   resultMatchesParams,
-  useDipoleCalc,
-} from '@/shared/state/dipoleCalc'
+} from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import {
   BANDWIDTH_RANGE,
   BAND_RANGE,

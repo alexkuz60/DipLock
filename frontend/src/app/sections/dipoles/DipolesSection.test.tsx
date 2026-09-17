@@ -17,7 +17,8 @@ import {
   projectionBox,
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
-import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { FRAME_DIM_OPACITY } from '@/shared/lib/dipolePoints'
 import {
   DIPOLE_PARAM_DEFAULTS,

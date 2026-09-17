@@ -54,7 +54,7 @@ import {
 import { DB_RANGE_LIMITS, normalizeAmplitudeUv } from '@/shared/lib/eegView'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import { TIME_LEVELS } from './edfParams'
-import { calcJobFromStatus, calcJobSummary, type CalcJob } from './dipoleCalc'
+import { calcJobFromStatus, calcJobSummary, type CalcJob } from '@/shared/lib/dipoleCalcModel'
 
 export { TIME_LEVELS }
 

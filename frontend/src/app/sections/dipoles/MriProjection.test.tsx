@@ -36,7 +36,8 @@ import {
   type DipoleLayer,
 } from '@/shared/lib/dipolePoints'
 import { TRAIL_ALPHA_HEAD } from '@/shared/lib/playback'
-import { PLAYBACK_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { DIPOLE_PARAM_DEFAULTS, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { dipoleScanResultFixture, contourSliceFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'

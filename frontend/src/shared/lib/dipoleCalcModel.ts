@@ -1,0 +1,255 @@
+/**
+ * Домен раздела «Диполи» (срезы 3.4–3.7), чистый модуль без zustand и React:
+ * параметры расчёта и их дефолты, рамки контролов, состояние фоновой задачи,
+ * формы запросов (`FormData`), отпечатки параметров и результата, нормализация
+ * сохранённых параметров.
+ *
+ * Здесь же — типы состояния **просмотра** (`CalcView`, `PlaybackState`) и их
+ * дефолты: их читают панель, шапка и часы воспроизведения, а zustand-стор лишь
+ * хранит значения (`shared/state/dipoleCalc.ts`). Разрезка сделана переносом
+ * без изменения поведения: правила расчёта (что уходит в задачу и что считается
+ * «свежим результатом») проверяются без хранилища.
+ *
+ * Границы: параметры, формы и отпечатки — здесь; действия, поллинг задач,
+ * персист и сам стор — `shared/state/dipoleCalc.ts`; топокарты, гистограмма и
+ * подсветка диполя — `shared/lib/spectrum.ts`, `shared/lib/dipolePoints.ts`.
+ */
+import {
+  BANDWIDTH_RANGE,
+  SINGLE_FREQ_RANGE,
+  clamp,
+  filterPresetIsValid,
+  filterPresetOf,
+  normalizeFilterBand,
+  normalizeNotchHz,
+  type CalcFilterPresetId,
+} from '@/shared/lib/calcFilter'
+import { DEFAULT_PLAYBACK_SPEED, type PlaybackSpeed } from '@/shared/lib/playback'
+import type { DipoleScanResult, JobStatus } from '@/shared/api/types'
+
+/** Что открыто в выдвижной панели раздела: одна панель за раз. */
+export type CalcView = 'none' | 'topomap' | 'fft'
+
+/**
+ * Кадр воспроизведения траектории (срез 3.7). Хранится в сторе, потому что
+ * команда идёт из шапки (play/pause, покадрово, `Space`), а исполняется в рабочей
+ * области: прямой «ручки» у проекций нет — как и у вьюера EDF.
+ */
+export type PlaybackState = {
+  /** Идёт воспроизведение; на паузе кадр равен измеренной точке своей эпохи */
+  playing: boolean
+  /** Скорость: 1 — реальное время записи, 2 и 4 — ускорение */
+  speed: PlaybackSpeed
+  /** Текущая эпоха нарезки результата (0…`n_epochs_total`−1) */
+  epochIndex: number
+  /**
+   * Счётчик **пользовательских** переходов к эпохе (кнопки, `Space`, клик по
+   * строке): часы раздела берут кадр только при его смене, поэтому повторный
+   * клик по той же эпохе всё равно её перезапускает (`navRequest.seq` в EDF).
+   */
+  seekSeq: number
+  /** Показан ли кадр: пауза его оставляет, «снять кадр» — убирает */
+  active: boolean
+}
+
+export const PLAYBACK_DEFAULTS: PlaybackState = {
+  playing: false,
+  speed: DEFAULT_PLAYBACK_SPEED,
+  epochIndex: 0,
+  seekSeq: 0,
+  active: false,
+}
+
+/**
+ * Параметры расчёта: то, что уходит в задачу быстрого расчёта диполей и в задачу
+ * спектра. Хранятся только **данные** — подписи контролов выводятся из них
+ * (`shared/lib/calcFilter.ts`), поэтому форма и запрос не могут разойтись.
+ */
+export type CalcParams = {
+  /**
+   * Выбор пользователя в списке «Фильтр расчёта»: пресет диапазона (δ…γ из
+   * `/meta`), «одиночная частота», «свой диапазон» или «без фильтра».
+   */
+  filterPreset: CalcFilterPresetId
+  /**
+   * Полоса фильтра, Гц; `null` — без фильтра. **То, что уходит в задачу**
+   * (`band_min`/`band_max`) и входит в отпечаток результата; пересчитывается
+   * каждым сеттером формы (`shared/lib/calcFilter.ts`).
+   */
+  filterBandHz: [number, number] | null
+  notchHz: number | null
+  /** Одиночная частота, Гц: полосу считает `singleFreqBand` (f ± bw/2) */
+  singleFreqHz: number
+  /** Ширина полосы вокруг одиночной частоты, Гц */
+  bandwidthHz: number
+  epochLengthMs: number
+  rejectThresholdUv: number
+  /** Шаг объёмной сетки поиска диполей, мм */
+  gridMm: number
+}
+
+export const CALC_PARAM_DEFAULTS: CalcParams = {
+  filterPreset: 'band_1_40',
+  filterBandHz: [1, 40],
+  notchHz: null,
+  // Значения одиночной частоты — заготовка формы: 7.83 Гц (частота Шумана) с
+  // полосой ±0.25 Гц. Ширина по умолчанию та же, что у предподготовки записи
+  // (`settings.default_single_freq_bandwidth_hz`), иначе формы расходились бы.
+  singleFreqHz: 7.83,
+  bandwidthHz: 0.5,
+  epochLengthMs: 1000,
+  rejectThresholdUv: 150,
+  gridMm: 7,
+}
+
+/** Ограничения контролов панели (совпадают со схемой формы на сервере). */
+export const GRID_MM_RANGE: [number, number] = [2, 20]
+export const THRESHOLD_NAM_RANGE: [number, number] = [0, 1000]
+
+/** Состояние одной фоновой задачи раздела: прогресс по этапам и эпохам. */
+export type CalcJob = {
+  status: 'running' | 'succeeded' | 'failed'
+  progress: number
+  message: string
+  stage: string
+  epochsDone: number
+  epochsTotal: number
+  error: string | null
+}
+
+/** Задача из ответа сервера в состояние панели (одно место на обе задачи). */
+export function calcJobFromStatus(job: JobStatus): CalcJob {
+  return {
+    status:
+      job.status === 'succeeded' ? 'succeeded' : job.status === 'failed' ? 'failed' : 'running',
+    progress: job.progress,
+    message: job.message,
+    stage: job.stage,
+    epochsDone: job.epochs_done,
+    epochsTotal: job.epochs_total,
+    error: job.status === 'failed' ? (job.error ?? 'Задача завершилась ошибкой') : null,
+  }
+}
+
+/** Подпись хода задачи: этап, прогресс и «N из M эпох», когда они есть. */
+export function calcJobSummary(job: CalcJob | null): string {
+  if (job === null) return 'Расчёт не запускался'
+  if (job.status === 'failed') return `Ошибка: ${job.error ?? 'задача завершилась ошибкой'}`
+  const parts = [job.message || job.stage]
+  if (job.epochsTotal > 0) parts.push(`эпох ${job.epochsDone} из ${job.epochsTotal}`)
+  parts.push(`${Math.round(job.progress * 100)} %`)
+  return parts.join(' · ')
+}
+
+/** Форма запроса быстрого расчёта диполей: параметры идут как есть, без догадок. */
+export function buildDipoleForm(params: CalcParams): FormData {
+  const form = new FormData()
+  if (params.filterBandHz) {
+    form.set('band_min', String(params.filterBandHz[0]))
+    form.set('band_max', String(params.filterBandHz[1]))
+  }
+  if (params.notchHz) form.set('notch_hz', String(params.notchHz))
+  form.set('epoch_length_ms', String(params.epochLengthMs))
+  form.set('reject_threshold_uv', String(params.rejectThresholdUv))
+  form.set('grid_mm', String(params.gridMm))
+  return form
+}
+
+/** Форма запроса спектра: полоса та же, что у расчёта диполей (один источник). */
+export function buildSpectrumForm(params: CalcParams): FormData {
+  const form = new FormData()
+  if (params.filterBandHz) {
+    form.set('band_min', String(params.filterBandHz[0]))
+    form.set('band_max', String(params.filterBandHz[1]))
+  }
+  if (params.notchHz) form.set('notch_hz', String(params.notchHz))
+  form.set('epoch_length_ms', String(params.epochLengthMs))
+  form.set('reject_threshold_uv', String(params.rejectThresholdUv))
+  return form
+}
+
+/**
+ * Отпечаток параметров расчёта: одна и та же строка для параметров и для
+ * результата, поэтому их расхождение = «результат посчитан на других настройках».
+ *
+ * Нужно таблице локализации (срез 4): она показывает результат **как есть** (в
+ * том числе после правки настроек панели) и обязана сказать, что с текущими
+ * параметрами он уже не совпадает, — иначе числа таблицы читались бы как
+ * «посчитано на этих настройках».
+ */
+function signatureOf(parts: {
+  band: [number, number] | null
+  notchHz: number | null
+  epochLengthMs: number
+  rejectThresholdUv: number
+  gridMm: number
+}): string {
+  const band = parts.band ? `${parts.band[0]}-${parts.band[1]}` : 'none'
+  return [
+    band,
+    parts.notchHz ?? 'none',
+    parts.epochLengthMs,
+    parts.rejectThresholdUv,
+    parts.gridMm,
+  ].join('|')
+}
+
+/** Отпечаток параметров из панели расчёта. */
+export function calcSignature(params: CalcParams): string {
+  return signatureOf({
+    band: params.filterBandHz,
+    notchHz: params.notchHz,
+    epochLengthMs: params.epochLengthMs,
+    rejectThresholdUv: params.rejectThresholdUv,
+    gridMm: params.gridMm,
+  })
+}
+
+/** Отпечаток параметров, с которыми реально посчитан результат задачи (эхо сервера). */
+export function resultSignature(result: DipoleScanResult): string {
+  const band = result.filter_band_hz
+  return signatureOf({
+    band: band && band.length === 2 ? [band[0], band[1]] : null,
+    notchHz: result.notch_hz,
+    epochLengthMs: result.epoch_length_ms,
+    rejectThresholdUv: result.reject_threshold_uv,
+    gridMm: result.grid_mm,
+  })
+}
+
+/** Результат соответствует текущим параметрам расчёта? `false` — он устарел. */
+export function resultMatchesParams(result: DipoleScanResult, params: CalcParams): boolean {
+  return resultSignature(result) === calcSignature(params)
+}
+
+/**
+ * Параметры расчёта в целостном виде: сохранённые в localStorage значения могут
+ * быть из другой версии UI (без полей формы фильтра) или содержать мусор — и то
+ * и другое приводится к правилам контролов, а не уходит в задачу как есть.
+ */
+export function normalizeCalcParams(params: CalcParams): CalcParams {
+  const filterBandHz = normalizeFilterBand(params.filterBandHz)
+  const storedPreset = filterPresetIsValid(params.filterPreset) ? params.filterPreset : 'custom'
+  // Пара «пресет + полоса» должна быть непротиворечивой: пустая полоса — только у
+  // «без фильтра», а непустая не может стоять у него же. Пресет при этом берём из
+  // полосы (`filterPresetOf` без метаданных: 1–40 → «широкий», полоса одиночной
+  // частоты → «одиночная», иначе «свой диапазон» — его поля покажут эти числа).
+  const filterPreset =
+    filterBandHz === null
+      ? 'none'
+      : storedPreset === 'none'
+        ? filterPresetOf({ ...params, filterBandHz }, {})
+        : storedPreset
+
+  return {
+    ...params,
+    filterPreset,
+    filterBandHz,
+    notchHz: normalizeNotchHz(params.notchHz),
+    singleFreqHz: clamp(params.singleFreqHz, SINGLE_FREQ_RANGE),
+    bandwidthHz: clamp(params.bandwidthHz, BANDWIDTH_RANGE),
+    epochLengthMs: Math.round(params.epochLengthMs),
+    gridMm: clamp(params.gridMm, GRID_MM_RANGE),
+    rejectThresholdUv: Math.max(0, params.rejectThresholdUv),
+  }
+}

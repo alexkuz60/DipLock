@@ -15,7 +15,8 @@ import {
   EMPTY_SELECTION,
   useDipoleParams,
 } from '@/shared/state/dipoleParams'
-import { CALC_PARAM_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { CALC_PARAM_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { dipoleScanResultFixture } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'

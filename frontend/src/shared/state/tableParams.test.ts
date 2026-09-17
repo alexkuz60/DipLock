@@ -6,7 +6,8 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import { defaultColumnVisibility } from '@/shared/lib/tableRows'
-import { CALC_PARAM_DEFAULTS, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { CALC_PARAM_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { TABLE_PARAM_DEFAULTS, useTableParams } from '@/shared/state/tableParams'
 import { dipoleScanResultFixture } from '@/test/fixtures'
 

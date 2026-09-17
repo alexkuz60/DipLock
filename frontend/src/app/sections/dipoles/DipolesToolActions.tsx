@@ -35,7 +35,8 @@ import {
   Play,
   Square,
 } from 'lucide-react'
-import { calcJobSummary, useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { canPlayback, playbackSummary, PLAYBACK_SPEEDS } from '@/shared/lib/playback'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
