@@ -19,6 +19,7 @@ from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 from app.core.config import Settings
+from app.services.cache_store import cache_path, cache_read, cache_write
 from app.utils.brain_export import export_fsaverage_surface
 
 logger = logging.getLogger(__name__)
@@ -65,31 +66,10 @@ def surface_version(ctx: _AssetCtx) -> str:
 
 def _cache_paths(ctx: _AssetCtx, version: str) -> Tuple[str, str]:
     """Пути файлов кэша: (меш, индексы Brodmann)."""
-    base = os.path.join(ctx.cache_dir, "surface")
     return (
-        os.path.join(base, f"surface-{version}.json"),
-        os.path.join(base, f"brodmann-{version}.json"),
+        cache_path(ctx.cache_dir, "surface", f"surface-{version}.json"),
+        cache_path(ctx.cache_dir, "surface", f"brodmann-{version}.json"),
     )
-
-
-def _read_cached(path: str) -> Optional[bytes]:
-    try:
-        with open(path, "rb") as fh:
-            return fh.read()
-    except OSError:
-        return None
-
-
-def _write_cached(path: str, data: bytes) -> None:
-    """Атомарная запись кэша; сбой не критичен (кэш — только оптимизация)."""
-    tmp = f"{path}.tmp"
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)
-    except OSError as exc:
-        logger.warning("Кэш поверхности не записан (%s): %s", path, exc)
 
 
 @lru_cache(maxsize=4)
@@ -97,7 +77,7 @@ def _build_assets(ctx: _AssetCtx) -> Tuple[bytes, bytes, str]:
     """Строит байты меша и BA-индексов (или берёт их с диска) + версию ассета."""
     version = surface_version(ctx)
     mesh_path, ba_path = _cache_paths(ctx, version)
-    mesh_cached, ba_cached = _read_cached(mesh_path), _read_cached(ba_path)
+    mesh_cached, ba_cached = cache_read(mesh_path), cache_read(ba_path)
     if mesh_cached is not None and ba_cached is not None:
         logger.info("Поверхность fsaverage взята из кэша (version=%s)", version)
         return mesh_cached, ba_cached, version
@@ -119,8 +99,8 @@ def _build_assets(ctx: _AssetCtx) -> Tuple[bytes, bytes, str]:
     mesh_bytes = json.dumps(mesh_payload, separators=(",", ":")).encode("utf-8")
     ba_bytes = json.dumps(ba_payload, separators=(",", ":")).encode("utf-8")
 
-    _write_cached(mesh_path, mesh_bytes)
-    _write_cached(ba_path, ba_bytes)
+    cache_write(mesh_path, mesh_bytes, label="Кэш поверхности")
+    cache_write(ba_path, ba_bytes, label="Кэш поверхности (BA)")
     logger.info(
         "Поверхность fsaverage построена (version=%s, меш=%.2f МБ, BA=%.2f МБ)",
         version, len(mesh_bytes) / 1e6, len(ba_bytes) / 1e6,

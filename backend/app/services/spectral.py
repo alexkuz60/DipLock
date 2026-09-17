@@ -46,7 +46,6 @@ notch, длина эпохи, n_fft, набор каналов): сменили 
 """
 import hashlib
 import logging
-import os
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -56,8 +55,10 @@ import mne
 import numpy as np
 
 from app.core.config import Settings
-from app.services.edf_loader import _MONTAGE_NAMES, load_edf
+from app.services.cache_store import cache_clear, cache_path, cache_write
+from app.services.edf_loader import _MONTAGE_NAMES
 from app.services.epoch_segmenter import segment_epochs
+from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
 from app.utils.png import encode_png_gray8
 
@@ -120,7 +121,7 @@ def spectrum_signature(params: SpectrumParams, cfg: Settings, channels: Sequence
 
 def _topomap_path(cfg: Settings, recording_id: str, signature: str, band: str) -> str:
     """Путь топокарты в дисковом кэше."""
-    return os.path.join(cfg.cache_dir, "spectra", recording_id, signature, f"{band}.png")
+    return cache_path(cfg.cache_dir, "spectra", recording_id, signature, f"{band}.png")
 
 
 def topomap_url(cfg: Settings, recording_id: str, band: str) -> str:
@@ -129,11 +130,9 @@ def topomap_url(cfg: Settings, recording_id: str, band: str) -> str:
 
 
 def clear_spectrum_cache(cfg: Settings, recording_id: Optional[str] = None) -> None:
-    """Удаляет дисковый кэш топокарт (тесты и очистка реестра записей)."""
-    import shutil
-
-    root = os.path.join(cfg.cache_dir, "spectra")
-    shutil.rmtree(os.path.join(root, recording_id) if recording_id else root, ignore_errors=True)
+    """Удаляет дисковый кэш топокарт: одну запись или весь (тесты и реестр)."""
+    parts = ("spectra", recording_id) if recording_id else ("spectra",)
+    cache_clear(cfg.cache_dir, *parts)
 
 
 @lru_cache(maxsize=4)
@@ -271,7 +270,9 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams)
 
     Аннотации артефактов здесь не нужны: `segment_epochs` отбраковывает эпохи по
     амплитуде (reject), а детекция артефактов — отдельная стадия предподготовки
-    (2.7). Считать её второй раз ради спектра незачем.
+    (2.7). Считать её второй раз ради спектра незачем. Сигнал берётся из кэша
+    подготовленного сигнала (A4): повтор расчёта с теми же параметрами не читает
+    EDF заново.
     """
     l_freq: Optional[float] = None
     h_freq: Optional[float] = None
@@ -279,12 +280,11 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams)
         l_freq, h_freq = params.filter_band
 
     try:
-        raw = load_edf(
-            recording.path,
-            cfg.standard_channels,
+        raw = prepared_raw(
+            recording,
+            cfg,
             l_freq=l_freq,
             h_freq=h_freq,
-            units=cfg.edf_units,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
         )
@@ -427,14 +427,7 @@ def _write_topomap(
     except SpectrumError as exc:
         logger.warning("Топокарта %s не построена: %s", band, exc)
         return
-    tmp = f"{path}.tmp"
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)
-    except OSError as exc:
-        logger.warning("Кэш топокарт не записан (%s): %s", path, exc)
+    cache_write(path, data, label="Кэш топокарт")
 
 
 def cached_topomap(

@@ -25,6 +25,7 @@
 диполей и срезов UI. На воксельной сетке каждый клик требовал бы пересчёта.
 """
 import hashlib
+import io
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from app.core.config import Settings
+from app.services.cache_store import cache_path, cache_write
 from app.utils.png import encode_png_gray8
 
 logger = logging.getLogger(__name__)
@@ -247,10 +249,9 @@ def mri_version(ctx: _MriCtx) -> str:
 
 def _cache_paths(ctx: _MriCtx, version: str) -> Tuple[str, str]:
     """Пути кэша тома: (массив npz, паспорт сборки json)."""
-    base = os.path.join(ctx.cache_dir, "mri")
     return (
-        os.path.join(base, f"volume-{version}.npz"),
-        os.path.join(base, f"volume-{version}.json"),
+        cache_path(ctx.cache_dir, "mri", f"volume-{version}.npz"),
+        cache_path(ctx.cache_dir, "mri", f"volume-{version}.json"),
     )
 
 
@@ -278,7 +279,12 @@ def _read_volume_cache(paths: Tuple[str, str]) -> Optional[MriVolume]:
 
 
 def _write_volume_cache(paths: Tuple[str, str], volume: MriVolume) -> None:
-    """Атомарная запись кэша; сбой не критичен (кэш — только оптимизация)."""
+    """Атомарная запись кэша; сбой не критичен (кэш — только оптимизация).
+
+    Архив собирается в память: ``np.savez_compressed`` дописывает ``.npz`` к
+    имени файла, если его там нет, поэтому временный файл ``*.tmp`` превратился
+    бы в ``*.tmp.npz`` и ``os.replace`` не нашёл бы источник.
+    """
     npz_path, meta_path = paths
     meta = {
         "version": volume.version,
@@ -288,19 +294,10 @@ def _write_volume_cache(paths: Tuple[str, str], volume: MriVolume) -> None:
         "bounds": {axis: list(value) for axis, value in MRI_BOUNDS.items()},
         "intensity_window": [volume.window[0], volume.window[1]],
     }
-    try:
-        os.makedirs(os.path.dirname(npz_path), exist_ok=True)
-        tmp_npz = f"{npz_path}.tmp"
-        with open(tmp_npz, "wb") as fh:
-            np.savez_compressed(fh, gray=volume.gray, alpha=volume.alpha)
-        os.replace(tmp_npz, npz_path)
-
-        tmp_meta = f"{meta_path}.tmp"
-        with open(tmp_meta, "w", encoding="utf-8") as fh:
-            json.dump(meta, fh)
-        os.replace(tmp_meta, meta_path)
-    except OSError as exc:
-        logger.warning("Кэш тома МРТ не записан (%s): %s", npz_path, exc)
+    buffer = io.BytesIO()
+    np.savez_compressed(buffer, gray=volume.gray, alpha=volume.alpha)
+    cache_write(npz_path, buffer.getvalue(), label="Кэш тома МРТ")
+    cache_write(meta_path, json.dumps(meta).encode("utf-8"), label="Кэш тома МРТ (паспорт)")
 
 
 def _voxel_axis_of(affine: np.ndarray) -> Dict[str, int]:

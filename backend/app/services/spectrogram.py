@@ -42,7 +42,6 @@
 """
 import hashlib
 import logging
-import os
 import struct
 import time
 from dataclasses import dataclass
@@ -52,7 +51,8 @@ import numpy as np
 
 from app.core.config import Settings
 from app.schemas.analysis import SpectrogramGridHeader
-from app.services.edf_loader import load_edf
+from app.services.cache_store import cache_clear, cache_path, cache_write
+from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
 
 logger = logging.getLogger(__name__)
@@ -148,7 +148,7 @@ def spectrogram_signature(
 
 def grid_path(cfg: Settings, recording_id: str, signature: str) -> str:
     """Путь сетки в дисковом кэше."""
-    return os.path.join(cfg.cache_dir, "spectrograms", recording_id, f"{signature}.bin")
+    return cache_path(cfg.cache_dir, "spectrograms", recording_id, f"{signature}.bin")
 
 
 def grid_url(cfg: Settings, recording_id: str, job_id: str) -> str:
@@ -157,11 +157,9 @@ def grid_url(cfg: Settings, recording_id: str, job_id: str) -> str:
 
 
 def clear_spectrogram_cache(cfg: Settings, recording_id: Optional[str] = None) -> None:
-    """Удаляет дисковый кэш спектрограмм (тесты и очистка реестра записей)."""
-    import shutil
-
-    root = os.path.join(cfg.cache_dir, "spectrograms")
-    shutil.rmtree(os.path.join(root, recording_id) if recording_id else root, ignore_errors=True)
+    """Удаляет дисковый кэш спектрограмм: одну запись или весь (тесты и реестр)."""
+    parts = ("spectrograms", recording_id) if recording_id else ("spectrograms",)
+    cache_clear(cfg.cache_dir, *parts)
 
 
 def stft_grid(
@@ -270,19 +268,23 @@ def read_grid_blob(data: bytes) -> Tuple[SpectrogramGridHeader, np.ndarray]:
 def _prepare_signal(
     recording: Recording, cfg: Settings, params: SpectrogramParams,
 ) -> Tuple[np.ndarray, float, List[str]]:
-    """Читает запись и отдаёт данные одного канала в мкВ: ``(data, sfreq, channels)``."""
+    """Читает запись и отдаёт данные одного канала в мкВ: ``(data, sfreq, channels)``.
+
+    Сигнал берётся из кэша подготовленного сигнала (A4): смена канала или окна
+    STFT — параметры просмотра, и они не должны заставлять перечитывать EDF,
+    если параметры фильтра те же.
+    """
     l_freq: Optional[float] = None
     h_freq: Optional[float] = None
     if params.filter_band is not None:
         l_freq, h_freq = params.filter_band
 
     try:
-        raw = load_edf(
-            recording.path,
-            cfg.standard_channels,
+        raw = prepared_raw(
+            recording,
+            cfg,
             l_freq=l_freq,
             h_freq=h_freq,
-            units=cfg.edf_units,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
         )
@@ -379,15 +381,7 @@ def compute_spectrogram(
 
 def _write_grid(cfg: Settings, recording_id: str, signature: str, blob: bytes) -> None:
     """Атомарно кладёт сетку на диск; сбой кэша не критичен."""
-    path = grid_path(cfg, recording_id, signature)
-    tmp = f"{path}.tmp"
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(tmp, "wb") as fh:
-            fh.write(blob)
-        os.replace(tmp, path)
-    except OSError as exc:
-        logger.warning("Кэш спектрограммы не записан (%s): %s", path, exc)
+    cache_write(grid_path(cfg, recording_id, signature), blob, label="Кэш спектрограммы")
 
 
 def cached_grid(recording: Recording, cfg: Settings, params: SpectrogramParams) -> Tuple[bytes, str]:

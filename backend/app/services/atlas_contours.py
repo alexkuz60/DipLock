@@ -46,6 +46,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from app.core.config import Settings
+from app.services.cache_store import cache_path, cache_write
 from app.services.mri_slices import (
     MRI_BOUNDS,
     MRI_SPACING_MM,
@@ -145,7 +146,7 @@ def asset_version(settings: Settings) -> str:
 
 
 def _cache_path(ctx: _ContourCtx, version: str) -> str:
-    return os.path.join(ctx.cache_dir, "contours", f"labels-{version}.npz")
+    return cache_path(ctx.cache_dir, "contours", f"labels-{version}.npz")
 
 
 def _resample_nearest(data: np.ndarray, affine: np.ndarray) -> np.ndarray:
@@ -441,18 +442,11 @@ def _write_cache(
     файла, если его там нет, поэтому временный файл ``*.tmp`` превратился бы в
     ``*.tmp.npz`` и ``os.replace`` не нашёл бы источник.
     """
-    tmp = f"{path}.tmp"
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        buffer = io.BytesIO()
-        np.savez_compressed(
-            buffer, structures=structures, areas=areas, area_names=json.dumps(area_names)
-        )
-        with open(tmp, "wb") as handle:
-            handle.write(buffer.getvalue())
-        os.replace(tmp, path)
-    except OSError as exc:
-        logger.warning("Кэш контуров не записан (%s): %s", path, exc)
+    buffer = io.BytesIO()
+    np.savez_compressed(
+        buffer, structures=structures, areas=areas, area_names=json.dumps(area_names)
+    )
+    cache_write(path, buffer.getvalue(), label="Кэш контуров")
 
 
 @lru_cache(maxsize=2)

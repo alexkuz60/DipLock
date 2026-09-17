@@ -15,7 +15,6 @@
 """
 import hashlib
 import logging
-import os
 import struct
 from typing import List, Optional, Tuple
 
@@ -24,6 +23,7 @@ import numpy as np
 
 from app.core.config import Settings
 from app.schemas.analysis import RecordingSignalsHeader
+from app.services.cache_store import cache_clear, cache_path, cache_read, cache_write
 from app.services.edf_loader import normalize_channel_name
 from app.services.recordings import Recording
 
@@ -152,27 +152,7 @@ def _build_level(recording: Recording, level: int, settings: Settings) -> bytes:
 
 def _cache_path(settings: Settings, recording_id: str, level: int) -> str:
     """Путь кэша одного уровня на диске."""
-    return os.path.join(settings.cache_dir, "signals", recording_id, f"level{level}.bin")
-
-
-def _read_cached(path: str) -> Optional[bytes]:
-    try:
-        with open(path, "rb") as fh:
-            return fh.read()
-    except OSError:
-        return None
-
-
-def _write_cached(path: str, data: bytes) -> None:
-    """Атомарная запись кэша; сбой не критичен (кэш — только оптимизация)."""
-    tmp = f"{path}.tmp"
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)
-    except OSError as exc:
-        logger.warning("Кэш сигналов не записан (%s): %s", path, exc)
+    return cache_path(settings.cache_dir, "signals", recording_id, f"level{level}.bin")
 
 
 def signal_etag(recording: Recording, level: int, settings: Settings) -> str:
@@ -195,10 +175,10 @@ def build_signal_blob(recording: Recording, level: int, settings: Settings) -> T
         raise SignalBuildError(f"Уровень {level} не поддерживается (доступны: {allowed})")
 
     path = _cache_path(settings, recording.recording_id, level)
-    blob = _read_cached(path)
+    blob = cache_read(path)
     if blob is None:
         blob = _build_level(recording, level, settings)
-        _write_cached(path, blob)
+        cache_write(path, blob, label="Кэш сигналов")
         logger.info(
             "Пирамида сигналов: запись %s, уровень ×%d (%.2f МБ)",
             recording.recording_id, level, len(blob) / 1e6,
@@ -207,8 +187,6 @@ def build_signal_blob(recording: Recording, level: int, settings: Settings) -> T
 
 
 def clear_signal_cache(settings: Settings, recording_id: Optional[str] = None) -> None:
-    """Удаляет дисковый кэш сигналов (тесты)."""
-    import shutil
-
-    root = os.path.join(settings.cache_dir, "signals")
-    shutil.rmtree(os.path.join(root, recording_id) if recording_id else root, ignore_errors=True)
+    """Удаляет дисковый кэш сигналов: одну запись или весь (тесты и реестр)."""
+    parts = ("signals", recording_id) if recording_id else ("signals",)
+    cache_clear(settings.cache_dir, *parts)

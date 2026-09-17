@@ -31,7 +31,8 @@
 -----------------------------------
 * единицы: данные MNE — вольты, момент — А·м, в ответ уходит нА·м (×1e9), как в
   таблице локализации;
-* average reference: сигнал уже вычтен по среднему (`load_edf`), поэтому и
+* average reference: сигнал уже вычтен по среднему (``load_edf`` в кэше
+  подготовленного сигнала), поэтому и
   свинцовое поле центрируется по каналам — иначе МНК «подгонял» бы общий сдвиг;
 * минимальное расстояние диполя от электродов 5 мм (`min_dist` у `fit_dipole`);
 * MNI — только через `mne.read_trans` + `mne.head_to_mni` (правило безопасности
@@ -47,8 +48,8 @@ import mne
 import numpy as np
 
 from app.core.config import Settings
-from app.services.edf_loader import load_edf
 from app.services.epoch_segmenter import segment_epochs
+from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
 from app.services.spectral import channel_positions
 
@@ -250,19 +251,22 @@ def _structure_of(cfg: Settings, mni_coords: Optional[List[float]]) -> Optional[
 
 
 def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParams) -> Any:
-    """Читает запись и нарезает эпохи для расчёта (reject-порог из параметров)."""
+    """Читает запись и нарезает эпохи для расчёта (reject-порог из параметров).
+
+    Сигнал — из кэша подготовленного сигнала (A4): повторный запуск с теми же
+    параметрами фильтра и нарезки не читает EDF заново.
+    """
     l_freq: Optional[float] = None
     h_freq: Optional[float] = None
     if params.filter_band is not None:
         l_freq, h_freq = params.filter_band
 
     try:
-        raw = load_edf(
-            recording.path,
-            cfg.standard_channels,
+        raw = prepared_raw(
+            recording,
+            cfg,
             l_freq=l_freq,
             h_freq=h_freq,
-            units=cfg.edf_units,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
         )

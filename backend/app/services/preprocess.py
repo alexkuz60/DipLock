@@ -29,8 +29,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.core.config import Settings
 from app.schemas.analysis import ArtifactZoneOut, PreprocessStage
 from app.services.artifact_detector import detect_artifacts
-from app.services.edf_loader import load_edf
 from app.services.epoch_segmenter import segment_epochs
+from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
 
 logger = logging.getLogger(__name__)
@@ -72,6 +72,9 @@ def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) 
     Полоса фильтра — из параметров стадии `filter`; ``None`` означает «без
     фильтра» (пользователь выбрал пресет «Без фильтра»). Единицы берутся из
     конфигурации сервера, как и в остальном пайплайне.
+
+    Сигнал приходит из кэша подготовленного сигнала (A4): стадии `artifacts` и
+    `epochs` с теми же параметрами не читают EDF заново.
     """
     l_freq: Optional[float] = None
     h_freq: Optional[float] = None
@@ -79,12 +82,11 @@ def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) 
         l_freq, h_freq = params.filter_band
 
     try:
-        return load_edf(
-            recording.path,
-            cfg.standard_channels,
+        return prepared_raw(
+            recording,
+            cfg,
             l_freq=l_freq,
             h_freq=h_freq,
-            units=cfg.edf_units,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
         )

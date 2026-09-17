@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     recordings_history_limit: int = Field(default=10, env="RECORDINGS_HISTORY_LIMIT")
     recordings_ttl_hours: int = Field(default=24, env="RECORDINGS_TTL_HOURS")
 
+    # Кэш подготовленного сигнала (A4, этап 2): сколько наборов «запись + полоса +
+    # notch + референс» держать в RAM. Один набор — float64-данные записи
+    # (130.7 с × 500 Гц × 18 каналов ≈ 9.4 МБ), поэтому по умолчанию 2;
+    # 0 — кэш выключен, каждый расчёт читает EDF заново.
+    prepared_signal_cache_size: int = Field(default=2, env="PREPARED_SIGNAL_CACHE_SIZE")
+
     # Пирамида сигналов для вьюера треков (docs/ui.md §8): уровни зума
     # x1…x16 и бюджет точек на канал на уровне x1 (2 × ширина вьюпорта).
     # Уровень k отдаёт не больше `signal_base_points * k` точек на канал,
