@@ -61,6 +61,7 @@ from app.schemas.analysis import (
     BrodmannAreaOut,
     BrodmannIndexOut,
     BrodmannLabelsOut,
+    ChannelMixOut,
     ContourSliceOut,
     ContoursOut,
     ContoursRef,
@@ -88,6 +89,7 @@ from app.services.atlas_contours import (
 from app.services.atlas_contours import (
     contours_ref as contour_ref,
 )
+from app.services.channel_mix import mixes_for
 from app.services.job_manager import job_manager, noop_progress
 from app.services.mri_slices import (
     mri_meta,
@@ -130,8 +132,17 @@ def _meta_out(recording: Recording, deduplicated: bool = False) -> RecordingMeta
     Флаг ``deduplicated`` — факт ответа на загрузку («файл уже хранился, копия не
     создана»), а не свойство файла: в сайдкар записи он не пишется, и обычная
     выдача паспорта (`GET /recordings/{id}`) его не выставляет.
+
+    ``mixes`` — виртуальные каналы раздела «ЭЭГ»: состав считается по каналам
+    записи в `services/channel_mix.py`, чтобы правила монтажа 10-20 жили в одном
+    месте, а UI только показывал готовый список.
     """
-    return RecordingMeta(**recording.meta, deduplicated=deduplicated)
+    return RecordingMeta(
+        **recording.meta,
+        # dict из чистого сервиса → элемент контракта: валидацию типа делает Pydantic
+        mixes=[ChannelMixOut(**option) for option in mixes_for(recording.meta.get("channels") or [])],
+        deduplicated=deduplicated,
+    )
 
 
 

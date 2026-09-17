@@ -16,9 +16,12 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { EEG_LABEL_W, EEG_VALUE_W } from '@/shared/lib/eegView'
+import type { ArtifactZone } from '@/shared/lib/viewerLayers'
 import {
+  ARTIFACT_STRIPE_PX,
   canvasScale,
   canvasTheme,
+  drawArtifactZones,
   drawFreqMarker,
   drawLevelMarker,
   drawNullLine,
@@ -200,5 +203,48 @@ describe('холсты раздела «ЭЭГ»', () => {
     const { ctx, calls } = fakeContext()
     drawWindowFrame(ctx, { x0: 400, x1: 460 }, 1200, 300, canvasTheme())
     expect(calls.fillText).toEqual([])
+  })
+
+  it('рисует зоны артефактов заливкой и полоской типа, обрезая их по области графика', () => {
+    const { ctx, calls } = fakeContext()
+    const theme = canvasTheme()
+    // В jsdom CSS переменных нет — цвета берутся из fallback темы, а не пустыми
+    expect(theme.artifacts.zscore_outlier).toBe('#ff7b72')
+
+    const window = { t0: 5, t1: 15 }
+    const plotWidth = 1200 - EEG_LABEL_W - EEG_VALUE_W
+    const x = (time: number) => EEG_LABEL_W + ((time - window.t0) / 10) * plotWidth
+    const zones: ArtifactZone[] = [
+      // Началась до окна и тянется в него: левый край обрезан областью графика
+      { id: 'z1', kind: 'peak_to_peak', onsetSec: 4, durationSec: 2, channels: [] },
+      // Вне окна: рисовать нечего
+      { id: 'z2', kind: 'flat_line', onsetSec: 40, durationSec: 1, channels: [] },
+    ]
+
+    drawArtifactZones(ctx, zones, window, 1200, 300, theme)
+
+    const start = EEG_LABEL_W
+    const width = x(6) - start
+    expect(calls.fillRect).toEqual([
+      [start, 0, width, 300], // заливка: фоном под сигналом
+      [start, 0, width, ARTIFACT_STRIPE_PX], // полоска типа артефакта у верхнего края
+    ])
+  })
+
+  it('не рисует зоны на вырожденной области графика и при пустом списке', () => {
+    const { ctx, calls } = fakeContext()
+    const theme = canvasTheme()
+    const zone: ArtifactZone = {
+      id: 'z1',
+      kind: 'zscore_outlier',
+      onsetSec: 1,
+      durationSec: 1,
+      channels: [],
+    }
+
+    drawArtifactZones(ctx, [], { t0: 0, t1: 10 }, 1200, 300, theme)
+    drawArtifactZones(ctx, [zone], { t0: 0, t1: 10 }, EEG_LABEL_W + EEG_VALUE_W, 300, theme)
+
+    expect(calls.fillRect).toEqual([])
   })
 })

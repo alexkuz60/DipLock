@@ -40,6 +40,13 @@ import { api } from '@/shared/api/client'
 import type { RecordingMeta } from '@/shared/api/types'
 import { demoSpectrogramGrid } from '@/shared/lib/eegSpectrogram'
 import {
+  channelFrame,
+  channelLabel,
+  channelSourceChannels,
+  isMixChannel,
+  resolveChannel,
+} from '@/shared/lib/eegChannels'
+import {
   clampEegCenter,
   dragAmplitudeUv,
   dragFreqWindow,
@@ -54,12 +61,16 @@ import {
 } from '@/shared/lib/eegView'
 import { anchoredCenter, panByPixels, windowCenter } from '@/shared/lib/viewerMath'
 import { resolveSignalLevel, selectFrame, type SignalFrame } from '@/shared/lib/signalFrame'
+import { artifactZonesForChannels, zonesInWindow } from '@/shared/lib/eegArtifacts'
+import { artifactCounts, visibleZones } from '@/shared/lib/viewerLayers'
+import { useEdfParams } from '@/shared/state/edfParams'
 import { TIME_LEVELS, eegResultMatchesParams, useEegParams } from '@/shared/state/eegParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { LayersLegend } from '../viewer/TrackLayers'
 import { SpectrogramCanvas } from './SpectrogramCanvas'
 import { EegTimeline } from './EegTimeline'
 import { EegTrackView } from './EegTrackView'
@@ -170,6 +181,9 @@ function EegWorkspace({
   const setParams = useEegParams((state) => state.setParams)
   const setAmplitudeUv = useEegParams((state) => state.setAmplitudeUv)
   const setFreqWindow = useEegParams((state) => state.setFreqWindow)
+  const layers = useEdfRecording((state) => state.layers)
+  const artifactVisibility = useEdfParams((state) => state.params.artifactVisibility)
+  const toggleArtifactVisibility = useEdfParams((state) => state.toggleArtifactVisibility)
 
   /** Курсор — состояние просмотра: не персистится и снимается при смене источника */
   const [cursorSec, setCursorSec] = useState<number | null>(null)
@@ -191,7 +205,15 @@ function EegWorkspace({
   const [size, setSize] = useState({ width: 0, height: 0 })
   const wrapRef = useRef<HTMLDivElement>(null)
 
-  const channel = params.channel ?? frame.channels[0] ?? ''
+  const channel = resolveChannel(recording, frame.channels, params.channel)
+  // Трек микса: пирамида отдаёт огибающую по электродам, среднее по группе
+  // считает `channelFrame` — компонент трека по-прежнему рисует один канал
+  const trackFrame = channelFrame(
+    frame,
+    channel,
+    channelSourceChannels(recording, channel),
+  )
+  const channelTitle = channelLabel(recording, channel)
   const factor = TIME_LEVELS[params.timeLevel] ?? 1
   const window = eegWindow(frame.durationSec, factor, params.windowCenterSec)
   const plotWidth = plotWidthPx(size.width)
@@ -206,6 +228,23 @@ function EegWorkspace({
   )
   const shownGrid = grid ?? demoGrid
   const stale = result !== null && !eegResultMatchesParams(result, params)
+
+  /**
+   * Артефакты канала: слои считает раздел EDF (кнопка «Артефакты»), здесь —
+   * только показ. Демо-фикстуру вьюера сюда не тащим: раздел «ЭЭГ» не имитирует
+   * обработку, и «зоны из ничего» читались бы как найденные артефакты.
+   */
+  const layerZones = useMemo(() => {
+    const artifacts = layers?.source === 'result' ? layers.artifacts : []
+    return artifactZonesForChannels(artifacts, channelSourceChannels(recording, channel))
+  }, [layers, recording, channel])
+  const zones = useMemo(
+    () => visibleZones(layerZones, artifactVisibility),
+    [layerZones, artifactVisibility],
+  )
+  const zoneCounts = useMemo(() => artifactCounts(layerZones), [layerZones])
+  const zonesInView = useMemo(() => zonesInWindow(zones, window), [zones, window])
+  const artifactsComputed = layers?.source === 'result' && layerZones.length > 0
 
   // Новый источник сигнала — окно к «вся сессия» и без меток: курсор, частота и
   // уровень относятся к прежней записи, а не к новой
@@ -401,8 +440,9 @@ function EegWorkspace({
         {/* Верхняя половина: трек выбранного канала + полоса времени */}
         <div className="flex flex-col overflow-hidden" style={{ height: `${heights.top}px` }}>
           <EegTrackView
-            signal={frame}
+            signal={trackFrame}
             channel={channel}
+            label={channelTitle}
             window={window}
             amplitudeUv={params.amplitudeUv}
             width={size.width}
@@ -410,6 +450,7 @@ function EegWorkspace({
             cursorSec={params.showCursor ? cursorSec : null}
             markerUv={params.showCursor ? levelUv : null}
             grid={params.grid}
+            zones={zones}
             onPick={handleTrackPick}
             onClear={clearMarkers}
             onAmplitudeDrag={handleAmplitudeDrag}
@@ -444,6 +485,7 @@ function EegWorkspace({
             smoothBins={params.smoothBins}
             freqWindow={params.freqWindow}
             lines={params.grid}
+            zones={zones}
             width={size.width}
             height={spectrogramHeight}
             cursorSec={params.showCursor ? cursorSec : null}
@@ -457,14 +499,14 @@ function EegWorkspace({
 
       <div className="flex flex-wrap items-center gap-2">
         <StatusPill tone="accent" title={`Окно времени: ${windowLabel}`}>
-          {`Канал ${channel} · ${params.amplitudeUv} мкВ/дел · ${windowLabel}`}
+          {`${isMixChannel(channel) ? channelTitle : `Канал ${channelTitle}`} · ${params.amplitudeUv} мкВ/дел · ${windowLabel}`}
         </StatusPill>
         <StatusPill tone="neutral" title="Масштаб по времени: ×1 — вся сессия">
           {`×${factor}`}
         </StatusPill>
         {demo ? <StatusPill tone="warn">демо-сетка</StatusPill> : null}
         {shownGrid && !demo ? (
-          <StatusPill tone="ok" title={`Сетка расчёта: ${shownGrid.channel}`}>
+          <StatusPill tone="ok" title={`Сетка расчёта: ${channelLabel(recording, shownGrid.channel)}`}>
             {`Спектрограмма: ${shownGrid.nFreqs} × ${shownGrid.nTimes} · окно ${Math.round(
               shownGrid.windowMs,
             )} мс`}
@@ -476,6 +518,22 @@ function EegWorkspace({
         {stale ? (
           <StatusPill tone="warn" title="Параметры расчёта изменили после расчёта">
             параметры расчёта изменены
+          </StatusPill>
+        ) : null}
+        {artifactsComputed ? (
+          <StatusPill
+            tone={zonesInView.length ? 'warn' : 'neutral'}
+            title={`Зоны артефактов из раздела EDF (стадия «Артефакты»), относящиеся к каналу ${channelTitle}. В окне — ${zonesInView.length} из ${layerZones.length}; тип зоны читается по цвету полоски у верхнего края.`}
+          >
+            {`артефактов в окне: ${zonesInView.length}`}
+          </StatusPill>
+        ) : null}
+        {!demo && !artifactsComputed ? (
+          <StatusPill
+            tone="neutral"
+            title="Артефакты считает раздел EDF: откройте запись, нажмите «Артефакты» — зоны появятся на треке и спектрограмме. Раздел «ЭЭГ» их не выдумывает."
+          >
+            артефакты не рассчитаны
           </StatusPill>
         ) : null}
         {cursorSec !== null ? (
@@ -497,6 +555,16 @@ function EegWorkspace({
           </StatusPill>
         ) : null}
       </div>
+
+      {/* Легенда слоёв — общая с вьюером EDF: чипы типов и клик «скрыть/показать».
+          Состояние одно (`artifactVisibility`), поэтому разделы не расходятся */}
+      {artifactsComputed ? (
+        <LayersLegend
+          counts={zoneCounts}
+          visibility={artifactVisibility}
+          onToggle={toggleArtifactVisibility}
+        />
+      ) : null}
     </div>
   )
 }

@@ -53,12 +53,15 @@ class _SignalKey:
     ``reference`` — **эффективный** список каналов референса, а не строка
     ``reference`` из формы (``average``/``custom``): пустой список и «average»
     дают одинаковый сигнал, и разные ключи на них — лишние промахи кэша.
+    ``reference_mode`` вынесен отдельно: ``"none"`` (миксы каналов «ЭЭГ») даёт
+    **другой** сигнал, чем «average» с тем же пустым списком каналов.
     """
 
     recording_id: str
     units: str | None
     channels: tuple[str, ...]
     reference: tuple[str, ...]
+    reference_mode: str
     l_freq: float | None
     h_freq: float | None
     notch_hz: float | None
@@ -70,7 +73,10 @@ class _SignalKey:
         else:
             band = f"полоса {self.l_freq}…{self.h_freq} Гц"
         notch = f", notch {self.notch_hz} Гц" if self.notch_hz else ""
-        reference = ",".join(self.reference) if self.reference else "average"
+        if self.reference_mode == "none":
+            reference = "без референса"
+        else:
+            reference = ",".join(self.reference) if self.reference else "average"
         return f"{band}{notch}, референс {reference}"
 
     def signature(self) -> str:
@@ -82,7 +88,7 @@ class _SignalKey:
         """
         parts = [
             self.recording_id, self.units or "-", ",".join(self.channels),
-            ",".join(self.reference) or "average",
+            ",".join(self.reference) or "average", self.reference_mode,
             str(self.l_freq), str(self.h_freq), str(self.notch_hz),
         ]
         # sha1 здесь — не криптография, а короткий ключ RAM-кэша (12 hex):
@@ -115,6 +121,7 @@ def _key(
     h_freq: float | None,
     notch_hz: float | None,
     reference_channels: list[str] | None,
+    reference_mode: str,
 ) -> _SignalKey:
     """Собирает ключ кэша из всех параметров, влияющих на сигнал."""
     return _SignalKey(
@@ -122,6 +129,7 @@ def _key(
         units=cfg.edf_units,
         channels=tuple(cfg.standard_channels),
         reference=tuple(reference_channels or ()),
+        reference_mode=reference_mode,
         l_freq=None if l_freq is None else float(l_freq),
         h_freq=None if h_freq is None else float(h_freq),
         notch_hz=None if not notch_hz else float(notch_hz),
@@ -152,6 +160,7 @@ def _load(
     h_freq: float | None,
     notch_hz: float | None,
     reference_channels: list[str] | None,
+    reference_mode: str,
 ) -> mne.io.BaseRaw:
     """Читает EDF и применяет предподготовку (промах кэша или кэш выключен)."""
     return load_edf(
@@ -162,6 +171,7 @@ def _load(
         units=cfg.edf_units,
         notch_hz=notch_hz,
         reference_channels=reference_channels,
+        reference_mode=reference_mode,
     )
 
 
@@ -180,6 +190,7 @@ def prepared_raw(
     h_freq: float | None = None,
     notch_hz: float | None = None,
     reference_channels: list[str] | None = None,
+    reference_mode: str = "average",
     pipeline: str | None = None,
 ) -> mne.io.BaseRaw:
     """Подготовленный сигнал записи: ``load_edf`` с кэшем по параметрам расчёта.
@@ -187,13 +198,19 @@ def prepared_raw(
     Возвращает сигнал, которым владеет вызывающий: его можно мутировать
     (``segment_epochs`` ставит аннотации) — кэш хранит собственную копию.
 
+    ``reference_mode`` — ``"average"`` (по умолчанию) или ``"none"``: вторым
+    пользуются миксы каналов раздела «ЭЭГ» (``services/channel_mix.py``),
+    которым референс не нужен — среднее по группе само является ссылкой.
+
     ``pipeline`` — имя пайплайна для журнала шагов (`docs/data_map.md` §9):
     попадание в этот кэш — главный ответ на «почему повторный расчёт стоит как
     первый». ``None`` означает «не измерять» (разовые вызовы, тесты).
     """
     started = time.perf_counter()
     limit = _limit(cfg)
-    key = _key(recording, cfg, l_freq, h_freq, notch_hz, reference_channels)
+    key = _key(
+        recording, cfg, l_freq, h_freq, notch_hz, reference_channels, reference_mode,
+    )
 
     def _report(hit: bool, raw: mne.io.BaseRaw) -> None:
         """Строка журнала о шаге чтения EDF (``cache_hit`` — попали ли в кэш)."""
@@ -227,7 +244,9 @@ def prepared_raw(
 
     if limit <= 0:
         logger.info("Подготовленный сигнал: кэш выключен, читаю EDF (%s)", key.label())
-        raw = _load(recording, cfg, l_freq, h_freq, notch_hz, reference_channels)
+        raw = _load(
+            recording, cfg, l_freq, h_freq, notch_hz, reference_channels, reference_mode,
+        )
         _report(False, raw)
         return raw
 
@@ -243,7 +262,9 @@ def prepared_raw(
                 _report(True, hit_raw)
                 return hit_raw
 
-        raw = _load(recording, cfg, l_freq, h_freq, notch_hz, reference_channels)
+        raw = _load(
+            recording, cfg, l_freq, h_freq, notch_hz, reference_channels, reference_mode,
+        )
         _report(False, raw)
         with _LOCK:
             _STATS["misses"] += 1

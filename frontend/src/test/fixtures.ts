@@ -159,6 +159,49 @@ export const recordingFixture: RecordingMeta = {
   filename: 'probe.edf',
   n_channels: 10,
   channels: [...metaFixture.standard_channels],
+  // Виртуальные каналы «ЭЭГ»: тот же состав, что вернул бы сервер для монтажа
+  // `standard_channels` (`services/channel_mix.py`) — вариант есть только для
+  // непустой группы
+  mixes: [
+    {
+      id: 'mix:all',
+      label: 'Все каналы',
+      group: 'all',
+      channels: [...metaFixture.standard_channels],
+    },
+    {
+      id: 'mix:left',
+      label: 'Левое полушарие',
+      group: 'left',
+      channels: ['Fp1', 'F3', 'C3', 'P3', 'O1', 'F7', 'T7', 'P7'],
+    },
+    {
+      id: 'mix:right',
+      label: 'Правое полушарие',
+      group: 'right',
+      channels: ['Fp2', 'F4', 'C4', 'P4', 'O2', 'F8', 'T8', 'P8'],
+    },
+    {
+      id: 'mix:frontal',
+      label: 'Лобные',
+      group: 'frontal',
+      channels: ['Fp1', 'Fp2', 'F3', 'F4', 'F7', 'F8', 'Fz'],
+    },
+    {
+      id: 'mix:temporal',
+      label: 'Височные',
+      group: 'temporal',
+      channels: ['F7', 'F8', 'T7', 'T8', 'P7', 'P8'],
+    },
+    { id: 'mix:central', label: 'Центральные', group: 'central', channels: ['C3', 'C4', 'Cz'] },
+    {
+      id: 'mix:parietal',
+      label: 'Теменные',
+      group: 'parietal',
+      channels: ['P3', 'P4', 'P7', 'P8', 'Pz'],
+    },
+    { id: 'mix:occipital', label: 'Затылочные', group: 'occipital', channels: ['O1', 'O2', 'Oz'] },
+  ],
   unmatched_channels: [],
   sfreq: 250,
   duration_sec: 30,
@@ -387,6 +430,7 @@ export function spectrogramResultFixture(
     recording_id: recordingFixture.recording_id,
     channel: 'Fp1',
     channels: [...recordingFixture.channels],
+    mix_channels: [],
     sfreq: recordingFixture.sfreq,
     duration_sec: recordingFixture.duration_sec,
     window_ms: 1000,

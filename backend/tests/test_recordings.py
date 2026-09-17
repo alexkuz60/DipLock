@@ -64,6 +64,19 @@ def test_upload_recording_returns_metadata_and_keeps_file(client, edf_file):
     assert meta["warnings"] == []
     assert meta["created_at"]
 
+    # Виртуальные каналы «ЭЭГ» (срез 5+): вариант есть только для непустой группы.
+    # Пять первых каналов монтажа — Fp1, Fp2, F3, F4, C3: лобные, центральные,
+    # левое/правое полушарие и «все каналы»; затылочных электродов нет, значит
+    # затылочного варианта в паспорте нет.
+    mixes = {option["id"]: option for option in meta["mixes"]}
+    assert set(mixes) == {
+        "mix:all", "mix:left", "mix:right", "mix:frontal", "mix:central",
+    }
+    assert mixes["mix:frontal"]["label"] == "Лобные"
+    assert mixes["mix:frontal"]["channels"] == ["Fp1", "Fp2", "F3", "F4"]
+    assert mixes["mix:central"]["channels"] == ["C3"]
+    assert mixes["mix:left"]["channels"] == ["Fp1", "F3", "C3"]
+
     # В отличие от /analyze файл записи остаётся на диске: его читают
     # эндпоинты просмотра (сигналы, предподготовка).
     rec = recording_registry.get(meta["recording_id"])

@@ -149,6 +149,23 @@ class PreprocessResult(BaseModel):
     duration_sec_calc: float = Field(default=0.0, description="Длительность расчёта, сек")
 
 
+class ChannelMixOut(BaseModel):
+    """Виртуальный канал записи: микс каналов группы (срез 5+).
+
+    Раздел «ЭЭГ» считает спектрограмму по одному каналу, а смотреть по 18
+    электродам — 18 задач; микс отвечает на вопрос «что в этой области/полушарии».
+    Состав приходит из паспорта записи, чтобы UI не повторял разбор имён 10-20
+    (`services/channel_mix.py` — единственный источник правил группировки).
+    """
+
+    id: str = Field(description="Идентификатор канала для формы расчёта (mix:frontal)")
+    label: str = Field(description="Русская подпись для списка каналов («Лобные»)")
+    group: str = Field(description="Код группы: all | left | right | frontal | …")
+    channels: list[str] = Field(
+        default_factory=list, description="Каналы записи, попавшие в микс (порядок монтажа)"
+    )
+
+
 class RecordingMeta(BaseModel):
     """Паспорт загруженной для просмотра записи EDF (просмотр ≠ обработка)."""
 
@@ -158,6 +175,13 @@ class RecordingMeta(BaseModel):
     channels: list[str] = Field(
         default_factory=list,
         description="Каналы, сопоставленные с монтажом 10-20 (в порядке монтажа)",
+    )
+    mixes: list[ChannelMixOut] = Field(
+        default_factory=list,
+        description=(
+            "Виртуальные каналы «ЭЭГ» (миксы групп). Пустые группы не предлагаются: "
+            "в записи нет таких электродов"
+        ),
     )
     unmatched_channels: list[str] = Field(
         default_factory=list, description="Каналы файла, не вошедшие в монтаж 10-20"
@@ -517,6 +541,13 @@ class SpectrogramResult(BaseModel):
     recording_id: str
     channel: str = Field(description="Канал, по которому посчитана спектрограмма")
     channels: list[str] = Field(default_factory=list, description="Каналы записи, попавшие в расчёт")
+    mix_channels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Электроды, усреднённые в виртуальном канале (mix:*); пусто — "
+            "спектрограмма обычного канала"
+        ),
+    )
     sfreq: float
     duration_sec: float = Field(description="Длительность записи, с")
     window_ms: float = Field(description="Длина окна STFT, мс")

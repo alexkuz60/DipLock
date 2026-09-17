@@ -24,6 +24,7 @@
  */
 import { useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import type { TimeWindow } from '@/shared/lib/viewerMath'
+import type { ArtifactZone } from '@/shared/lib/viewerLayers'
 import {
   dbToUnit,
   paletteLut,
@@ -48,6 +49,7 @@ import {
 import {
   canvasScale,
   canvasTheme,
+  drawArtifactZones,
   drawCursor,
   drawEmptyMessage,
   drawFreqMarker,
@@ -75,6 +77,11 @@ export type SpectrogramCanvasProps = {
   freqWindow: [number, number] | null
   /** Рисовать ли линии сетки поверх картинки */
   lines: boolean
+  /**
+   * Зоны артефактов поверх картинки: мощность не показывает артефакт — глаз
+   * должен видеть, что всплеск на треке пришёлся на то же время (срез 5+)
+   */
+  zones?: ArtifactZone[]
   width: number
   height: number
   /** Время общего курсора, с (null — курсора нет) */
@@ -99,6 +106,7 @@ export function SpectrogramCanvas({
   smoothBins,
   freqWindow,
   lines,
+  zones = [],
   width,
   height,
   cursorSec,
@@ -190,6 +198,10 @@ export function SpectrogramCanvas({
     }
     putImageDataAt(ctx, image, left, 0)
 
+    // Зоны артефактов — поверх картинки: спектрограмма не отличает всплеск от
+    // ритма, а зона показывает, что в это время сигнал был помечен детектором
+    drawArtifactZones(ctx, zones, shownWindow, width, height, theme)
+
     if (lines) {
       drawGridLines(ctx, freqTicks(fmin, fmax, height).map((tick) => tick.y), left, right, theme)
     }
@@ -219,6 +231,7 @@ export function SpectrogramCanvas({
     overview,
     dbRangeDb,
     lines,
+    zones,
     width,
     height,
     cursorSec,

@@ -173,6 +173,24 @@ export type DipoleScanResult = {
   duration_sec_calc: number
 }
 
+/**
+ * Виртуальный канал записи: микс каналов группы (срез 5+).
+ *
+ * Раздел «ЭЭГ» считает спектрограмму по одному каналу, а микс отвечает на
+ * вопрос «что в этой области/полушарии». Состав приходит из паспорта записи:
+ * правила разбора имён 10-20 живут на сервере (`services/channel_mix.py`), UI их
+ * не повторяет — он только усредняет готовый список каналов для трека.
+ */
+export type RecordingMix = {
+  /** Идентификатор канала для формы расчёта (`mix:frontal`) */
+  id: string
+  /** Русская подпись для списка каналов («Лобные») */
+  label: string
+  group: string
+  /** Каналы записи, попавшие в микс (порядок монтажа) */
+  channels: string[]
+}
+
 /** Паспорт загруженной для просмотра записи (срез 2.2, без обработки) */
 export type RecordingMeta = {
   recording_id: string
@@ -181,6 +199,11 @@ export type RecordingMeta = {
   n_channels: number
   /** Каналы, сопоставленные с монтажом 10-20 (порядок монтажа) */
   channels: string[]
+  /**
+   * Виртуальные каналы «ЭЭГ» (миксы групп). Пустые группы не приходят: в записи
+   * нет таких электродов — предлагать их значило бы обещать пустую линию
+   */
+  mixes: RecordingMix[]
   /** Каналы файла вне монтажа 10-20 */
   unmatched_channels: string[]
   sfreq: number
@@ -404,6 +427,11 @@ export type SpectrogramResult = {
   recording_id: string
   channel: string
   channels: string[]
+  /**
+   * Электроды, усреднённые в виртуальном канале (`mix:*`); пусто — спектрограмма
+   * обычного канала (срез 5+)
+   */
+  mix_channels: string[]
   sfreq: number
   duration_sec: number
   window_ms: number

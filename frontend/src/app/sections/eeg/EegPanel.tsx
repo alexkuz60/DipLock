@@ -25,6 +25,7 @@ import {
   notchFromOption,
 } from '@/shared/lib/calcFilter'
 import { EEG_PALETTES, hopMs } from '@/shared/lib/eegSpectrogram'
+import { channelLabel, channelOptions, isMixChannel, resolveChannel } from '@/shared/lib/eegChannels'
 import { AMPLITUDE_UV_PER_DIV } from '@/shared/lib/eegView'
 import { BAND_LABELS } from '@/shared/lib/spectrum'
 import {
@@ -77,8 +78,9 @@ export function EegPanel() {
     retry: false,
   })
   const freqBands = meta.data?.freq_bands ?? {}
-  const channels = recording?.channels ?? demo?.channels ?? []
-  const channel = params.channel ?? channels[0] ?? ''
+  const demoChannels = demo?.channels ?? []
+  const channelOptionsList = channelOptions(recording, demoChannels)
+  const channel = resolveChannel(recording, demoChannels, params.channel)
   const presets = filterPresetOptions(freqBands)
   const stale = result !== null && !eegResultMatchesParams(result, params)
   const fullFreq = grid ? ([0, grid.fmaxHz] as [number, number]) : null
@@ -89,11 +91,13 @@ export function EegPanel() {
         <SelectField
           label="Канал"
           value={channel}
-          options={channels.map((name) => ({ value: name, label: name }))}
+          options={channelOptionsList}
           onChange={setChannel}
           hint={
             channel
-              ? 'Спектрограмма считается по одному каналу: у разных каналов разная топография.'
+              ? isMixChannel(channel)
+                ? 'Виртуальный канал: среднее сигналов группы (референс к нему не применяется — среднее само является ссылкой).'
+                : 'Спектрограмма считается по одному каналу: у разных каналов разная топография.'
               : 'Каналы появятся после загрузки записи в разделе EDF.'
           }
         />
@@ -340,7 +344,14 @@ export function EegPanel() {
       </Panel>
 
       <Panel title="Состояние расчёта">
-        <InfoRow label="Канал результата" value={result?.channel ?? null} mono />
+        <InfoRow
+          label="Канал результата"
+          value={result ? channelLabel(recording, result.channel) : null}
+          mono
+        />
+        {result && result.mix_channels.length ? (
+          <InfoRow label="Каналы микса" value={result.mix_channels.join(', ')} mono />
+        ) : null}
         <InfoRow label="Окно задания" value={result ? `${Math.round(result.window_ms)} мс` : null} />
         <InfoRow label="Перекрытие" value={result ? `${Math.round(result.overlap_pct)} %` : null} />
         <InfoRow label="Верхняя частота" value={result ? `${result.fmax_hz} Гц` : null} />

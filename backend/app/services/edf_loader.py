@@ -100,6 +100,7 @@ def load_edf(
     units: str | None = None,
     notch_hz: float | None = None,
     reference_channels: list[str] | None = None,
+    reference_mode: str = "average",
 ) -> mne.io.BaseRaw:
     """Читает EDF, ставит монтаж 10-20, референс и применяет фильтры.
 
@@ -107,6 +108,10 @@ def load_edf(
     «без фильтра» (пресет «Без фильтра» в UI предподготовки, срез 2.7).
     ``notch_hz`` — сетевой фильтр (50/60 Гц), ``None`` — выключен.
     ``reference_channels`` — референс по выбранным каналам вместо average.
+    ``reference_mode`` — ``"average"`` (по умолчанию) или ``"none"``: миксы
+    каналов раздела «ЭЭГ» считаются **без** референса, потому что среднее по
+    группе само является ссылкой (``services/channel_mix.py``); с average
+    reference «Все каналы» показывали бы пустую линию.
     """
     raw = _read_raw_edf(filepath, units)
     raw = _ensure_physical_units(raw, units)
@@ -131,12 +136,11 @@ def load_edf(
     raw.pick(available)
     _apply_standard_montage(raw)
     # Референс применяем сразу (projection=False): mne.fit_dipole требует
-    # applied average reference, а не отложенную проекцию.
-    refs = [ch for ch in (reference_channels or []) if ch in raw.ch_names]
-    if refs:
-        raw.set_eeg_reference(refs, projection=False)
-    else:
-        raw.set_eeg_reference("average", projection=False)
+    # applied average reference, а не отложенную проекцию. «Без референса» —
+    # только для миксов каналов: среднее по группе само является ссылкой.
+    if reference_mode != "none":
+        refs = [ch for ch in (reference_channels or []) if ch in raw.ch_names]
+        raw.set_eeg_reference(refs if refs else "average", projection=False)
     # Полосовой фильтр — только если заданы границы; нарезка эпох и артефакты
     # идут после, чтобы FIR-фильтр работал на continuous-сигнале.
     if l_freq is not None or h_freq is not None:

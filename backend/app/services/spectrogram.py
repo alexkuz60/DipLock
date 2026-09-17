@@ -54,6 +54,13 @@ from app.core.config import Settings
 from app.schemas.analysis import SpectrogramGridHeader
 from app.services import journal
 from app.services.cache_store import cache_clear, cache_path, cache_write
+from app.services.channel_mix import (
+    MIX_GROUPS,
+    MIX_PREFIX,
+    channel_label,
+    channel_mix_channels,
+    is_mix_channel,
+)
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
 
@@ -112,6 +119,11 @@ def validate_params(params: SpectrogramParams, cfg: Settings) -> None:
     """
     if not params.channel.strip():
         raise SpectrogramError("Спектрограмма считается по одному каналу: канал не указан")
+    if params.channel.startswith(MIX_PREFIX) and not is_mix_channel(params.channel):
+        known = ", ".join(f"{MIX_PREFIX}{group}" for group, _ in MIX_GROUPS)
+        raise SpectrogramError(
+            f"Неизвестный виртуальный канал «{params.channel}»: доступны {known}"
+        )
     low, high = SPECTROGRAM_WINDOW_RANGE_MS
     if not low <= params.window_ms <= high:
         raise SpectrogramError(f"Окно STFT должно быть от {low:g} до {high:g} мс")
@@ -272,8 +284,13 @@ def read_grid_blob(data: bytes) -> tuple[SpectrogramGridHeader, np.ndarray]:
 
 def _prepare_signal(
     recording: Recording, cfg: Settings, params: SpectrogramParams,
-) -> tuple[np.ndarray, float, list[str]]:
-    """Читает запись и отдаёт данные одного канала в мкВ: ``(data, sfreq, channels)``.
+) -> tuple[np.ndarray, float, list[str], list[str]]:
+    """Данные канала в мкВ и состав микса: ``(data, sfreq, channels, mix_channels)``.
+
+    Канал — либо электрод записи, либо виртуальный микс (``mix:frontal``,
+    ``services/channel_mix.py``): тогда данные — среднее сигналов каналов
+    группы, посчитанное **без** референса (среднее по группе само является
+    ссылкой; с average reference «Все каналы» показывали бы пустую линию).
 
     Сигнал берётся из кэша подготовленного сигнала (A4): смена канала или окна
     STFT — параметры просмотра, и они не должны заставлять перечитывать EDF,
@@ -284,6 +301,14 @@ def _prepare_signal(
     if params.filter_band is not None:
         l_freq, h_freq = params.filter_band
 
+    available = [str(name) for name in (recording.meta.get("channels") or [])]
+    mix = channel_mix_channels(params.channel, available)
+    if mix is not None and not mix:
+        raise SpectrogramError(
+            f"В миксе «{channel_label(params.channel)}» нет каналов этой записи. "
+            f"Доступные каналы: {', '.join(available) or '—'}"
+        )
+
     try:
         raw = prepared_raw(
             recording,
@@ -292,20 +317,24 @@ def _prepare_signal(
             h_freq=h_freq,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
+            # Микс — без референса: среднее по группе само является ссылкой
+            reference_mode="none" if mix is not None else "average",
             pipeline="spectrogram",
         )
     except ValueError as exc:
         raise SpectrogramError(str(exc)) from exc
 
     channels = list(raw.ch_names)
-    if params.channel not in channels:
+    if mix is None and params.channel not in channels:
         raise SpectrogramError(
             f"Канал {params.channel} не найден в записи. Доступные: {', '.join(channels)}"
         )
     # ×1e6: MNE отдаёт вольты, а сетка (как и мощности в spectral.py) считается
-    # в микровольтах — единицы должны быть одни на весь проект.
-    data = raw.get_data(picks=[params.channel], verbose=False)[0] * 1e6
-    return np.asarray(data, dtype=float), float(raw.info["sfreq"]), channels
+    # в микровольтах — единицы должны быть одни на весь проект. Среднее по группе
+    # берём в пространстве сигналов (не огибающих): это и есть «микс каналов».
+    picks = mix if mix is not None else [params.channel]
+    data = raw.get_data(picks=picks, verbose=False).mean(axis=0) * 1e6
+    return np.asarray(data, dtype=float), float(raw.info["sfreq"]), channels, mix or []
 
 
 def compute_spectrogram(
@@ -325,7 +354,7 @@ def compute_spectrogram(
     validate_params(params, cfg)
     report("load_edf", message="Чтение EDF, монтаж 10-20")
 
-    data, sfreq, channels = _prepare_signal(recording, cfg, params)
+    data, sfreq, channels, mix_channels = _prepare_signal(recording, cfg, params)
     with journal.step(
         "spectrogram", "stft",
         note=(
@@ -381,6 +410,9 @@ def compute_spectrogram(
         "recording_id": recording.recording_id,
         "channel": params.channel,
         "channels": channels,
+        # Состав микса — часть результата: по нему UI показывает, какие именно
+        # электроды усреднены (у обычного канала список пуст)
+        "mix_channels": list(mix_channels),
         "sfreq": float(sfreq),
         "duration_sec": round(duration_sec, 3),
         "window_ms": params.window_ms,

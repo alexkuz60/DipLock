@@ -26,12 +26,26 @@ export const ARTIFACT_LABELS: Record<ArtifactKind, string> = {
   ica_eog: 'ICA: EOG-компоненты',
 }
 
+/**
+ * Имя CSS-токена типа артефакта.
+ *
+ * Нужно там, где цвет читают **не из DOM**: canvas не понимает `var(...)`, и
+ * `themeColor` ждёт имя токена (`--color-artifact-zscore`). Держим имена здесь,
+ * чтобы DOM-слой и холсты не расходились в названиях.
+ */
+export const ARTIFACT_COLOR_TOKENS: Record<ArtifactKind, string> = {
+  zscore_outlier: '--color-artifact-zscore',
+  peak_to_peak: '--color-artifact-pp',
+  flat_line: '--color-artifact-flat',
+  ica_eog: '--color-artifact-ica',
+}
+
 /** Цвет зоны артефакта: токен темы, синхронизирован с легендой и панелью */
 export const ARTIFACT_COLORS: Record<ArtifactKind, string> = {
-  zscore_outlier: 'var(--color-artifact-zscore)',
-  peak_to_peak: 'var(--color-artifact-pp)',
-  flat_line: 'var(--color-artifact-flat)',
-  ica_eog: 'var(--color-artifact-ica)',
+  zscore_outlier: `var(${ARTIFACT_COLOR_TOKENS.zscore_outlier})`,
+  peak_to_peak: `var(${ARTIFACT_COLOR_TOKENS.peak_to_peak})`,
+  flat_line: `var(${ARTIFACT_COLOR_TOKENS.flat_line})`,
+  ica_eog: `var(${ARTIFACT_COLOR_TOKENS.ica_eog})`,
 }
 
 /** Короткая подпись типа для тултипа/легенды: «z-score», «ICA», «flat-line», «peak-to-peak» */

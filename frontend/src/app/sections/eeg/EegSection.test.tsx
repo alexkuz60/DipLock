@@ -299,5 +299,60 @@ describe('рабочая область раздела «ЭЭГ»', () => {
     })
     await waitFor(() => expect(screen.getByText(/курсор \d+\.\d\d с/)).toBeInTheDocument())
   })
+
+  it('открывает виртуальный канал: подпись микса и никакого расчёта (срез 5+)', async () => {
+    const fetchMock = mockApiFetch()
+    openRecording()
+    // Канал из паспорта записи: микс «Лобные» — состояние раздела назначения
+    // (так же его выставляет панель или переход из EDF кликом по названию)
+    useEegParams.getState().setChannel('mix:frontal')
+
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    // Подпись честно говорит, что это среднее группы, а не электрод
+    expect(screen.getByText(/Микс: Лобные/)).toBeInTheDocument()
+    // Выбор канала — параметр расчёта, но задачу он не запускает: только кнопка
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/spectrogram'))).toBe(
+      false,
+    )
+  })
+
+  it('показывает артефакты результата, относящиеся к выбранному каналу (срез 5+)', async () => {
+    mockApiFetch()
+    openRecording()
+    useEdfRecording.setState({
+      layers: {
+        artifacts: [
+          { id: 'own', kind: 'zscore_outlier', onsetSec: 1, durationSec: 0.5, channels: ['Fp1'] },
+          // ICA находит компоненты, а не каналы: зона относится ко всему монтажу
+          { id: 'montage', kind: 'ica_eog', onsetSec: 2, durationSec: 1, channels: [] },
+          { id: 'other', kind: 'peak_to_peak', onsetSec: 3, durationSec: 0.2, channels: ['O1'] },
+        ],
+        rejectedEpochs: [],
+        epochLengthMs: null,
+        source: 'result',
+      },
+    })
+
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    // Канал по умолчанию — Fp1: своя зона плюс зона всего монтажа; зона O1 чужая
+    expect(screen.getByText('артефактов в окне: 2')).toBeInTheDocument()
+    expect(screen.getByLabelText('Легенда слоёв')).toBeInTheDocument()
+    expect(screen.queryByText('артефакты не рассчитаны')).not.toBeInTheDocument()
+  })
+
+  it('говорит «артефакты не рассчитаны» вместо выдуманных зон', async () => {
+    mockApiFetch()
+    openRecording() // Стадию «Артефакты» в EDF ещё не считали: layers === null
+
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    expect(screen.getByText('артефакты не рассчитаны')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Легенда слоёв')).not.toBeInTheDocument()
+  })
 })
 

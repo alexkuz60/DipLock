@@ -255,6 +255,50 @@ def test_compute_spectrogram_reports_reference(tmp_path):
     ) == result["grid_version"]
 
 
+def test_mix_channel_averages_group_without_reference(tmp_path):
+    """Виртуальный канал — среднее группы каналов, посчитанное без референса.
+
+    Проверка не косметическая: если бы микс считался по average reference, «Все
+    каналы» были бы **нулём** — референс вычитает ровно среднее по каналам, из
+    которого микс и состоит. Поэтому у микса обязана быть энергия тона.
+    """
+    recording = _register(tmp_path, _tone_edf(tmp_path, freq=10.0))
+    params = SpectrogramParams(
+        channel="mix:all", window_ms=500.0, overlap_pct=75.0, fmax_hz=40.0,
+    )
+
+    result = compute_spectrogram(recording, settings, params)
+
+    assert result["channel"] == "mix:all"
+    # Состав микса едет в результат: UI показывает, какие электроды усреднены
+    assert result["mix_channels"] == ["Fp1", "Fp2", "F3", "F4"]
+    # Тон 10 Гц у среднего четырёх каналов (50…200 мкВ → 125 мкВ) виден, а не пол шкалы
+    assert result["db_max"] > 20.0
+    row = int(np.argmin(np.abs(np.asarray(result["freqs"]) - 10.0)))
+    header, values = read_grid_blob(cached_grid(recording, settings, params)[0])
+    assert (header.n_freqs, header.n_times) == (len(result["freqs"]), len(result["times"]))
+    assert float(np.mean(values[row])) > float(np.mean(values)) + 10.0
+    # Круг «задача → grid.bin» для микса тоже без потерь
+    assert stored_spectrogram_params(result) == params
+    assert spectrogram_signature(
+        stored_spectrogram_params(result), settings, result["channels"],
+    ) == result["grid_version"]
+
+
+def test_mix_without_group_channels_is_reported(client, tmp_path):
+    """Группа известна, но электродов таких в записи нет — понятная ошибка задачи."""
+    recording = _register(tmp_path, _tone_edf(tmp_path))
+
+    created = client.post(
+        f"{_PREFIX}/recordings/{recording.recording_id}/spectrogram",
+        data={"channel": "mix:occipital", "window_ms": 500},
+    )
+    status = _wait_finished(client, created.json()["job_id"])
+
+    assert status["status"] == "failed"
+    assert "нет каналов этой записи" in (status["error"] or "")
+
+
 def test_spectrogram_job_flow(client, tmp_path):
     """202 → поллинг с прогрессом по окнам → метаданные → сетка ``DPS2`` с ETag/304."""
     recording = _register(tmp_path, _tone_edf(tmp_path))

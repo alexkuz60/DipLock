@@ -14,8 +14,17 @@
  * и уж тем более `color-mix`), как в экспорте окна вьюера (2.8) и проекциях
  * мозга (3.1): hex в JS не дублируется.
  */
+import { ARTIFACT_COLOR_TOKENS, ARTIFACT_KINDS, type ArtifactKind } from '@/shared/lib/artifacts'
 import { themeColor } from '@/shared/lib/theme'
-import { EEG_LABEL_W, EEG_VALUE_W, type ValueTick, type WindowFrame } from '@/shared/lib/eegView'
+import {
+  EEG_LABEL_W,
+  EEG_VALUE_W,
+  plotTimeX,
+  type ValueTick,
+  type WindowFrame,
+} from '@/shared/lib/eegView'
+import type { ArtifactZone } from '@/shared/lib/viewerLayers'
+import type { TimeWindow } from '@/shared/lib/viewerMath'
 
 export type CanvasTheme = {
   text: string
@@ -25,6 +34,8 @@ export type CanvasTheme = {
   label: string
   /** Фон половин: подпись поверх картинки (маркер частоты) читается только на плашке */
   panel: string
+  /** Цвета типов артефактов: зоны рисуются и на треке, и на спектрограмме */
+  artifacts: Record<ArtifactKind, string>
 }
 
 /**
@@ -39,6 +50,16 @@ export function canvasScale(): number {
 
 /** Цвета темы для холста (fallback — значения из `styles/index.css`). */
 export function canvasTheme(doc: Document = document): CanvasTheme {
+  const fallback: Record<ArtifactKind, string> = {
+    zscore_outlier: '#ff7b72',
+    peak_to_peak: '#ffb454',
+    flat_line: '#8b949e',
+    ica_eog: '#a78bfa',
+  }
+  const artifacts = {} as Record<ArtifactKind, string>
+  for (const kind of ARTIFACT_KINDS) {
+    artifacts[kind] = themeColor(doc, ARTIFACT_COLOR_TOKENS[kind], fallback[kind])
+  }
   return {
     text: themeColor(doc, '--color-fg-2', '#8695a8'),
     grid: themeColor(doc, '--color-border', '#2c3a4d'),
@@ -46,6 +67,7 @@ export function canvasTheme(doc: Document = document): CanvasTheme {
     accent: themeColor(doc, '--color-accent', '#4da3ff'),
     label: themeColor(doc, '--color-fg-0', '#e8eef6'),
     panel: themeColor(doc, '--color-bg-1', '#121a24'),
+    artifacts,
   }
 }
 
@@ -312,6 +334,54 @@ export function drawGridLines(
     ctx.lineTo(right, Math.round(y) + 0.5)
     ctx.stroke()
   })
+  ctx.restore()
+}
+
+/** Прозрачность заливки зон: сигнал и картинка спектрограммы остаются читаемыми */
+export const ARTIFACT_FILL_ALPHA = 0.18
+
+/** Высота цветной полоски типа артефакта у верхнего края половины, px */
+export const ARTIFACT_STRIPE_PX = 3
+
+/**
+ * Зоны артефактов поверх половины: полупрозрачная заливка по типу и цветная
+ * полоска у верхнего края.
+ *
+ * Полоска нужна потому, что заливка специально слабая: на треке она не должна
+ * перебивать сигнал, на спектрограмме — мешать читать мощность. Тип зоны
+ * (z-score, ICA, flat-line) читается по цвету полоски, интервал — по её длине:
+ * это визуальный контроль результата стадии «Артефакты» раздела EDF, а не
+ * второй детектор.
+ *
+ * Зоны обрезаются по области графика: крайняя зона не «залезает» под линейки.
+ */
+export function drawArtifactZones(
+  ctx: CanvasRenderingContext2D,
+  zones: readonly ArtifactZone[],
+  window: TimeWindow,
+  width: number,
+  height: number,
+  theme: CanvasTheme,
+  fillAlpha = ARTIFACT_FILL_ALPHA,
+): void {
+  const left = EEG_LABEL_W
+  const right = width - EEG_VALUE_W
+  if (zones.length === 0 || right <= left || height <= 0) return
+  ctx.save()
+  for (const zone of zones) {
+    const x0 = plotTimeX(zone.onsetSec, window, width)
+    const x1 = plotTimeX(zone.onsetSec + zone.durationSec, window, width)
+    if (x1 <= left || x0 >= right) continue
+    const start = Math.max(left, x0)
+    // Минимум 2 px: короткая зона (всплеск peak-to-peak) иначе не различима
+    const zoneWidth = Math.max(2, Math.min(right, x1) - start)
+    const color = theme.artifacts[zone.kind]
+    ctx.globalAlpha = fillAlpha
+    ctx.fillStyle = color
+    ctx.fillRect(start, 0, zoneWidth, height)
+    ctx.globalAlpha = 1
+    ctx.fillRect(start, 0, zoneWidth, ARTIFACT_STRIPE_PX)
+  }
   ctx.restore()
 }
 

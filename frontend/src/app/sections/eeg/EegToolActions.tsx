@@ -18,10 +18,15 @@ import { useState } from 'react'
 import { CircleHelp, Loader2, Play } from 'lucide-react'
 import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
 import {
+  channelLabel,
+  channelOptions,
+  isMixChannel,
+  resolveChannel,
+} from '@/shared/lib/eegChannels'
+import {
   eegResultMatchesParams,
   eegSignature,
   useEegParams,
-  type EegParams,
 } from '@/shared/state/eegParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
@@ -33,11 +38,6 @@ import { EegHelpDialog } from './EegHelpDialog'
 /** Пояснение к выключенной кнопке, когда записи ещё нет */
 const NO_RECORDING_HINT =
   'Сначала загрузите EDF в разделе EDF: спектрограмма считается по файлу записи на сервере.'
-
-/** Канал, который реально пойдёт в расчёт: выбранный или первый из записи */
-function channelOf(params: EegParams, channels: string[]): string {
-  return params.channel ?? channels[0] ?? ''
-}
 
 /** Прогресс задачи расчёта: полоса + подпись «окон N из M». */
 export function EegCalcProgress() {
@@ -82,8 +82,10 @@ export function EegToolHeaderActions() {
   const setChannel = useEegParams((state) => state.setChannel)
   const [helpOpen, setHelpOpen] = useState(false)
 
-  const channels = recording?.channels ?? demo?.channels ?? []
-  const channel = channelOf(params, channels)
+  const demoChannels = demo?.channels ?? []
+  const options = channelOptions(recording, demoChannels)
+  const channel = resolveChannel(recording, demoChannels, params.channel)
+  const mixSelected = isMixChannel(channel)
   const running = job?.status === 'running'
   const canRun = recording !== null && channel !== '' && !running
   const stale = result !== null && !eegResultMatchesParams(result, params)
@@ -97,24 +99,30 @@ export function EegToolHeaderActions() {
         : stale
           ? 'Параметры расчёта изменились — пересчитайте спектрограмму по текущим настройкам'
           : result
-            ? `Пересчитать спектрограмму канала ${channel}: ${eegSignature({ ...params, channel })}`
-            : 'Рассчитать спектрограмму: STFT по одному каналу, окно и перекрытие — из панели'
+            ? `Пересчитать спектрограмму канала ${channelLabel(recording, channel)}: ${eegSignature({ ...params, channel })}`
+            : mixSelected
+              ? 'Рассчитать спектрограмму микса: сервер усреднит каналы группы и посчитает STFT'
+              : 'Рассчитать спектрограмму: STFT по одному каналу, окно и перекрытие — из панели'
 
   return (
     <>
-      {channels.length > 1 ? (
+      {options.length > 1 ? (
         <label className="flex items-center gap-2 text-sm text-fg-2">
           <span className="shrink-0">Канал</span>
           <select
             aria-label="Канал спектрограммы"
-            title="Канал трека и спектрограммы: расчёт считается по одному каналу"
+            title={
+              mixSelected
+                ? 'Виртуальный канал: среднее сигналов группы. Считается отдельной задачей, как и электрод'
+                : 'Канал трека и спектрограммы: расчёт считается по одному каналу'
+            }
             value={channel}
             onChange={(event) => setChannel(event.target.value)}
             className="rounded-lg border border-border bg-bg-2 px-2 py-1.5 text-sm text-fg-0"
           >
-            {channels.map((name) => (
-              <option key={name} value={name}>
-                {name}
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
               </option>
             ))}
           </select>

@@ -18,6 +18,7 @@
 import { useEffect, useRef, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { frameEnvelope, type TimeWindow } from '@/shared/lib/viewerMath'
 import type { SignalFrame } from '@/shared/lib/signalFrame'
+import type { ArtifactZone } from '@/shared/lib/viewerLayers'
 import {
   ampTicks,
   amplitudeRangeUv,
@@ -33,6 +34,7 @@ import {
 } from '@/shared/lib/eegView'
 import {
   canvasTheme,
+  drawArtifactZones,
   drawCursor,
   drawEmptyMessage,
   drawGridLines,
@@ -46,6 +48,8 @@ import {
 export type EegTrackViewProps = {
   signal: SignalFrame
   channel: string
+  /** Подпись канала слева: у микса — «Микс: Лобные» (по умолчанию — имя канала) */
+  label?: string
   window: TimeWindow
   /** Шкала трека: мкВ на деление */
   amplitudeUv: number
@@ -57,6 +61,11 @@ export type EegTrackViewProps = {
   markerUv: number | null
   /** Рисовать ли сетку шкалы */
   grid: boolean
+  /**
+   * Зоны артефактов, показанные на треке (результат стадии «Артефакты» из EDF).
+   * Это визуальный контроль: раздел «ЭЭГ» зоны не считает и ни на что не влияет
+   */
+  zones?: ArtifactZone[]
   /** Клик по области: время — в общий курсор, уровень — в линию уровня */
   onPick: (timeSec: number, levelUv: number) => void
   /** Двойной клик по области: снять метки точки клика */
@@ -70,6 +79,7 @@ export type EegTrackViewProps = {
 export function EegTrackView({
   signal,
   channel,
+  label,
   window,
   amplitudeUv,
   width,
@@ -77,6 +87,7 @@ export function EegTrackView({
   cursorSec,
   markerUv,
   grid,
+  zones = [],
   onPick,
   onClear,
   onAmplitudeDrag,
@@ -103,8 +114,10 @@ export function EegTrackView({
     const half = amplitudeRangeUv(amplitudeUv)
     const ticks = ampTicks(amplitudeUv, height)
 
-    drawLeftLabel(ctx, [channel, 'мкВ'], height, theme)
+    drawLeftLabel(ctx, [label ?? channel, 'мкВ'], height, theme)
     if (grid) drawGridLines(ctx, ticks.map((tick) => tick.y), left, right, theme)
+    // Зоны артефактов — фоном под сигналом: пики и огибающая читаются поверх них
+    drawArtifactZones(ctx, zones, window, width, height, theme)
     // Нулевая линия — под огибающей: где шумно, её закрывает сам сигнал, а на
     // спокойных участках видно, стоит сигнал на нуле или смещён
     drawNullLine(ctx, valueToY(0, half, height), width, theme)
@@ -148,7 +161,7 @@ export function EegTrackView({
     if (cursorSec !== null && timeInWindow(cursorSec, window)) {
       drawCursor(ctx, plotTimeX(cursorSec, window, width), height, theme)
     }
-  }, [signal, channel, window, amplitudeUv, width, height, cursorSec, markerUv, grid])
+  }, [signal, channel, label, window, amplitudeUv, width, height, cursorSec, markerUv, grid, zones])
 
   /** Попадание в столбец значений справа (по нему — перетаскивание шкалы). */
   function insideValueAxis(clientX: number): boolean {
