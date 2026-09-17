@@ -19,7 +19,7 @@ import json
 import logging
 import shutil
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import (
     APIRouter,
@@ -68,8 +68,8 @@ from app.schemas.analysis import (
     JobCreated,
     JobStatus,
     MetaResponse,
-    MriSlicesOut,
     MriSliceRef,
+    MriSlicesOut,
     PreprocessResult,
     PreprocessStage,
     RecordingMeta,
@@ -83,13 +83,19 @@ from app.schemas.journal import JournalEntry, JournalOut
 from app.services import analysis_pipeline, journal
 from app.services.atlas_contours import (
     contours_meta,
-    contours_ref as contour_ref,
     slice_contours,
+)
+from app.services.atlas_contours import (
+    contours_ref as contour_ref,
 )
 from app.services.job_manager import job_manager, noop_progress
 from app.services.mri_slices import (
     mri_meta,
+)
+from app.services.mri_slices import (
     slice_png as mri_slice_png,
+)
+from app.services.mri_slices import (
     slice_ref as mri_slice_ref,
 )
 from app.services.recording_signals import (
@@ -100,6 +106,8 @@ from app.services.recordings import Recording, recording_registry
 from app.services.spectral import cached_topomap
 from app.services.spectrogram import (
     cached_grid as cached_spectrogram_grid,
+)
+from app.services.spectrogram import (
     grid_url as spectrogram_grid_url,
 )
 from app.services.surface_cache import (
@@ -142,13 +150,13 @@ async def analyze_eeg(
     file: UploadFile = File(...),
     epoch_length_ms: float = Form(2000.0),
     freq_band: str = Form("all"),
-    custom_min_freq: Optional[float] = Form(None),
-    custom_max_freq: Optional[float] = Form(None),
-    single_freq: Optional[float] = Form(None),
+    custom_min_freq: float | None = Form(None),
+    custom_max_freq: float | None = Form(None),
+    single_freq: float | None = Form(None),
     run_ica: bool = Form(True),
     z_threshold: float = Form(5.0),
     pp_threshold_uv: float = Form(100.0),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Полный пайплайн одним запросом: EDF → артефакты → эпохи → фильтр → диполи.
 
     Удобно для curl/скриптов. Для UI используйте ``POST /jobs``: там есть
@@ -168,10 +176,10 @@ async def analyze_eeg(
             run_ica, z_threshold, pp_threshold_uv,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Анализ завершился ошибкой")
-        raise HTTPException(status_code=500, detail=f"Ошибка анализа: {e}")
+        raise HTTPException(status_code=500, detail=f"Ошибка анализа: {e}") from e
     finally:
         # Загрузка удаляется и после успеха (F10): файл уже прочитан
         shutil.rmtree(upload_dir, ignore_errors=True)
@@ -190,7 +198,11 @@ async def analyze_eeg(
     summary="Загрузить EDF для просмотра (без обработки)",
 )
 async def create_recording(
-    file: UploadFile = File(...), response: Response = None,  # noqa: RUF013 — FastAPI инжектит Response
+    # ``response`` нужен, чтобы вернуть 200 при дедупликации (201 — по умолчанию).
+    # Default — формальность для FastAPI-сигнатуры: обработчик всегда получает
+    # инжектированный объект, а аннотация ``Response`` (без ``| None``) — единственная
+    # форма, которую FastAPI распознаёт как специальный параметр.
+    file: UploadFile = File(...), response: Response = Response(),
 ) -> RecordingMeta:
     """Сохраняет EDF и возвращает паспорт записи (каналы, sfreq, длительность).
 
@@ -212,11 +224,11 @@ async def create_recording(
         )
     except ValueError as e:
         shutil.rmtree(upload_dir, ignore_errors=True)
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:  # noqa: BLE001 — отдаём UI понятный текст, не traceback
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
         shutil.rmtree(upload_dir, ignore_errors=True)
         logger.exception("Не удалось прочитать EDF %s", safe_name)
-        raise HTTPException(status_code=400, detail=f"Не удалось прочитать EDF: {e}")
+        raise HTTPException(status_code=400, detail=f"Не удалось прочитать EDF: {e}") from e
 
     if recording.deduplicated:
         # Такой файл уже хранится: только что записанная копия не нужна
@@ -247,7 +259,7 @@ async def get_recording(recording_id: str) -> RecordingMeta:
 async def get_recording_signals(
     recording_id: str,
     level: int = Query(default=1, ge=1, description="Уровень пирамиды (множитель зума ×1…×16)"),
-    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """Огибающая сигналов для вьюера треков (срез 2.5, docs/ui.md §8).
 
@@ -261,7 +273,7 @@ async def get_recording_signals(
     try:
         data, version = await asyncio.to_thread(build_signal_blob, recording, level, settings)
     except SignalBuildError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return asset_response(
         data, version,
@@ -280,11 +292,11 @@ async def get_recording_signals(
 async def create_preprocess_job(
     recording_id: str,
     stage: PreprocessStage = Form(..., description="Стадия: filter | artifacts | epochs"),
-    band_min: Optional[float] = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
-    band_max: Optional[float] = Form(None, description="Верхняя граница полосы, Гц"),
-    notch_hz: Optional[float] = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
     reference: str = Form("average", description="average | custom"),
-    reference_channels: Optional[str] = Form(None, description="Каналы референса через запятую"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     z_threshold: float = Form(5.0),
     pp_threshold_uv: float = Form(100.0),
     flat_line_uv: float = Form(5.0),
@@ -333,11 +345,11 @@ async def get_preprocess_result(recording_id: str, job_id: str) -> PreprocessRes
 )
 async def create_spectrum_job(
     recording_id: str,
-    band_min: Optional[float] = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
-    band_max: Optional[float] = Form(None, description="Верхняя граница полосы, Гц"),
-    notch_hz: Optional[float] = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
     reference: str = Form("average", description="average | custom"),
-    reference_channels: Optional[str] = Form(None, description="Каналы референса через запятую"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     epoch_length_ms: float = Form(2000.0, description="Длина эпохи для PSD"),
     reject_threshold_uv: float = Form(150.0, description="Порог reject: эпохи выше — не в спектр"),
 ) -> JobCreated:
@@ -379,12 +391,12 @@ async def get_spectrum_result(recording_id: str, job_id: str) -> SpectrumResult:
 async def get_spectrum_topomap(
     recording_id: str,
     band: str,
-    band_min: Optional[float] = Query(None, description="Полоса фильтра, нижняя граница, Гц"),
-    band_max: Optional[float] = Query(None, description="Полоса фильтра, верхняя граница, Гц"),
-    notch_hz: Optional[float] = Query(None, description="Сетевой фильтр, Гц"),
+    band_min: float | None = Query(None, description="Полоса фильтра, нижняя граница, Гц"),
+    band_max: float | None = Query(None, description="Полоса фильтра, верхняя граница, Гц"),
+    notch_hz: float | None = Query(None, description="Сетевой фильтр, Гц"),
     epoch_length_ms: float = Query(2000.0, description="Длина эпохи для PSD"),
     reject_threshold_uv: float = Query(150.0, description="Порог reject"),
-    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """PNG топокарты ритма в раскладке скальпа; вне круга голова прозрачна.
 
@@ -407,7 +419,7 @@ async def get_spectrum_topomap(
             cached_topomap, recording, settings, params, band,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return asset_response(
         data, version,
@@ -424,11 +436,11 @@ async def get_spectrum_topomap(
 )
 async def create_dipole_scan_job(
     recording_id: str,
-    band_min: Optional[float] = Form(None, description="Нижняя граница полосы, Гц"),
-    band_max: Optional[float] = Form(None, description="Верхняя граница полосы, Гц"),
-    notch_hz: Optional[float] = Form(None, description="Сетевой фильтр 50/60 Гц"),
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц"),
     reference: str = Form("average", description="average | custom"),
-    reference_channels: Optional[str] = Form(None, description="Каналы референса через запятую"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     epoch_length_ms: float = Form(1000.0, description="Длина эпохи для расчёта"),
     reject_threshold_uv: float = Form(150.0, description="Порог reject эпох"),
     grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг объёмной сетки поиска, мм"),
@@ -469,11 +481,11 @@ async def get_dipole_scan_result(recording_id: str, job_id: str) -> DipoleScanRe
 async def create_spectrogram_job(
     recording_id: str,
     channel: str = Form("", description="Канал, по которому считается спектрограмма"),
-    band_min: Optional[float] = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
-    band_max: Optional[float] = Form(None, description="Верхняя граница полосы, Гц"),
-    notch_hz: Optional[float] = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
     reference: str = Form("average", description="average | custom"),
-    reference_channels: Optional[str] = Form(None, description="Каналы референса через запятую"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     window_ms: float = Form(500.0, description="Длина окна STFT, мс"),
     overlap_pct: float = Form(75.0, description="Перекрытие окон, %"),
     fmax_hz: float = Form(40.0, description="Верхняя частота сетки, Гц"),
@@ -522,7 +534,7 @@ async def get_spectrogram_result(recording_id: str, job_id: str) -> SpectrogramR
 async def get_spectrogram_grid(
     recording_id: str,
     job_id: str,
-    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """Сетка уровней (дБ) как бинарный контейнер ``DPS2`` с ETag/304.
 
@@ -539,7 +551,7 @@ async def get_spectrogram_grid(
             cached_spectrogram_grid, recording, settings, params,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return asset_response(
         data, f"{version}-{params.channel}",
@@ -562,9 +574,9 @@ async def create_analysis_job(
     file: UploadFile = File(...),
     epoch_length_ms: float = Form(2000.0),
     freq_band: str = Form("all"),
-    custom_min_freq: Optional[float] = Form(None),
-    custom_max_freq: Optional[float] = Form(None),
-    single_freq: Optional[float] = Form(None),
+    custom_min_freq: float | None = Form(None),
+    custom_max_freq: float | None = Form(None),
+    single_freq: float | None = Form(None),
     run_ica: bool = Form(True),
     z_threshold: float = Form(5.0),
     pp_threshold_uv: float = Form(100.0),
@@ -594,8 +606,8 @@ async def create_analysis_job(
     )
 
 
-@router.get("/jobs", response_model=List[JobStatus], summary="История задач")
-async def list_jobs(limit: int = Query(20, ge=1, le=200)) -> List[JobStatus]:
+@router.get("/jobs", response_model=list[JobStatus], summary="История задач")
+async def list_jobs(limit: int = Query(20, ge=1, le=200)) -> list[JobStatus]:
     """Последние задачи (новые — в конце списка)."""
     return [job_status(job) for job in job_manager.list_jobs(limit)]
 
@@ -613,7 +625,7 @@ async def get_job(job_id: str) -> JobStatus:
     "/jobs/{job_id}/result", response_model=AnalyzeResponse,
     summary="Результат завершённой задачи",
 )
-async def get_job_result(job_id: str) -> Dict[str, Any]:
+async def get_job_result(job_id: str) -> dict[str, Any]:
     """Результат анализа. 409 — задача ещё идёт или завершилась ошибкой."""
     return job_by_id(job_id).result
 
@@ -625,7 +637,7 @@ async def get_job_result(job_id: str) -> Dict[str, Any]:
     summary="Меш fsaverage (кэш + ETag)",
 )
 async def get_surface(
-    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """Децимированный меш lh/rh без тяжёлых BA-индексов.
 
@@ -636,7 +648,7 @@ async def get_surface(
     try:
         data, version = get_surface_bytes(settings)
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
     return asset_response(data, version, if_none_match=if_none_match)
 
 
@@ -647,7 +659,7 @@ async def get_surface(
     summary="Индексы вершин всех полей Бродмана (тяжёлый ассет)",
 )
 async def get_brodmann_all(
-    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """Все метки PALS_B12_Brodmann (≈2 МБ).
 
@@ -657,7 +669,7 @@ async def get_brodmann_all(
     try:
         data, version = get_brodmann_bytes(settings)
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
     return asset_response(
         data, version, if_none_match=if_none_match, cache_control=CACHE_PUBLIC_WEEK,
     )
@@ -667,12 +679,12 @@ async def get_brodmann_all(
     "/surface/brodmann/{area_name}", response_model=BrodmannAreaOut,
     summary="Индексы вершин одного поля Бродмана",
 )
-async def get_brodmann_one(area_name: str) -> Dict[str, Any]:
+async def get_brodmann_one(area_name: str) -> dict[str, Any]:
     """Лёгкий ответ по конкретной области (например ``BA17-lh``)."""
     try:
         area = get_brodmann_area(settings, area_name)
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
     if area is None:
         raise HTTPException(status_code=404, detail=f"Поле Бродмана {area_name} не найдено")
     return area
@@ -682,7 +694,7 @@ async def get_brodmann_one(area_name: str) -> Dict[str, Any]:
     "/surface/mri", response_model=MriSlicesOut,
     summary="Метаданные срезов МРТ (T1, MNI-сетка)",
 )
-async def get_mri_slices() -> Dict[str, Any]:
+async def get_mri_slices() -> dict[str, Any]:
     """Границы, шаг сетки, плоскости и окно яркости срезов.
 
     Первое обращение собирает том на MNI-сетке из ``T1.mgz`` + ``brainmask.mgz``
@@ -692,7 +704,7 @@ async def get_mri_slices() -> Dict[str, Any]:
     try:
         return mri_meta(settings)
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
 
 
 @router.get(
@@ -704,7 +716,7 @@ async def get_mri_slices() -> Dict[str, Any]:
 async def get_mri_slice(
     plane: str,
     mm: float,
-    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """PNG среза (серый + альфа) в раскладке проекций UI.
 
@@ -716,9 +728,9 @@ async def get_mri_slice(
     try:
         data, version, actual_mm = mri_slice_png(settings, plane, mm)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
 
     return asset_response(
         data, f"{version}-{plane}-{actual_mm:g}",
@@ -733,7 +745,7 @@ async def get_mri_slice(
     "/surface/contours", response_model=ContoursOut,
     summary="Метаданные контуров атласа (структуры и поля Бродмана)",
 )
-async def get_contours() -> Dict[str, Any]:
+async def get_contours() -> dict[str, Any]:
     """Шаг сетки, допуски упрощения, число меток и метод BA-разметки.
 
     Первое обращение собирает объёмы меток из ``aparc+aseg.mgz`` и ленты коры
@@ -743,7 +755,7 @@ async def get_contours() -> Dict[str, Any]:
     try:
         return contours_meta(settings)
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
 
 
 @router.get(
@@ -753,7 +765,7 @@ async def get_contours() -> Dict[str, Any]:
 async def get_contour_slice(
     plane: str,
     mm: float,
-    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """Полигоны меток среза в миллиметрах MNI по осям плоскости.
 
@@ -766,9 +778,9 @@ async def get_contour_slice(
     try:
         payload = slice_contours(settings, plane, mm)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
 
     data = json.dumps(payload, separators=(",", ":")).encode("utf-8")
     actual_mm = float(payload["mm"])
@@ -784,12 +796,12 @@ async def get_contour_slice(
     "/brodmann-labels", response_model=BrodmannLabelsOut,
     summary="Имена доступных полей Бродмана",
 )
-async def get_brodmann_labels() -> Dict[str, Any]:
+async def get_brodmann_labels() -> dict[str, Any]:
     """Список меток из кэша атласа (без чтения файлов MNE на каждый запрос)."""
     try:
         names = brodmann_area_names(settings)
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
     return {"brodmann_areas": names, "count": len(names), "version": asset_version(settings)}
 
 
@@ -814,7 +826,7 @@ async def get_brain_surface_legacy(
             }
             data = json.dumps(mesh, separators=(",", ":")).encode("utf-8")
     except (FileNotFoundError, OSError) as exc:
-        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}")
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
     return asset_response(data, version)
 
 
@@ -862,6 +874,11 @@ async def get_meta() -> MetaResponse:
         ),
         dipole_fit_decim=settings.dipole_fit_decim,
         dipole_fit_max_epochs=settings.dipole_fit_max_epochs,
+        dipole_fit_n_jobs=settings.dipole_fit_n_jobs,
+        dipole_fit_sec_per_point=settings.dipole_fit_sec_per_point,
+        # Точный фитинг — «медленный профиль»: дефолты означают часы счёта,
+        # поэтому UI обязан предупреждать до запуска, а не после (F19).
+        dipole_fit_experimental=True,
         max_concurrent_jobs=job_manager.max_concurrent,
         cors_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
         mri_slices=_mri_ref(),
@@ -872,7 +889,7 @@ async def get_meta() -> MetaResponse:
 @router.get("/journal", response_model=JournalOut, summary="Журнал шагов: пошаговые замеры")
 async def journal_tail(
     limit: int = Query(200, ge=1, le=2000, description="Сколько последних строк вернуть"),
-    pipeline: Optional[str] = Query(
+    pipeline: str | None = Query(
         None, description="Фильтр по пайплайну: spectrum, dipoles, signals, asset-surface, …"
     ),
 ) -> JournalOut:

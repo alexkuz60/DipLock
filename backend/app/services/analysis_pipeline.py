@@ -19,7 +19,7 @@ import sys
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from app.core.config import settings
 from app.services import journal
@@ -30,7 +30,7 @@ from app.utils.versions import library_versions
 logger = logging.getLogger(__name__)
 
 
-def _file_size(path: str) -> Optional[int]:
+def _file_size(path: str) -> int | None:
     """Размер файла записи в байтах (``None`` — файл недоступен: не ошибка шага)."""
     try:
         return os.path.getsize(path)
@@ -44,13 +44,13 @@ def run_analysis(
     filename: str,
     epoch_length_ms: float,
     freq_band: str,
-    custom_min_freq: Optional[float],
-    custom_max_freq: Optional[float],
-    single_freq: Optional[float],
+    custom_min_freq: float | None,
+    custom_max_freq: float | None,
+    single_freq: float | None,
     run_ica: bool = True,
     z_threshold: float = 5.0,
     pp_threshold_uv: float = 100.0,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Синхронный (CPU-bound) анализ EDF: вызывается в потоке, не в event-loop.
 
     ``progress`` — колбэк этапов (``job_manager``); в синхронном ``/analyze``
@@ -58,10 +58,14 @@ def run_analysis(
     строится: клиент получает ссылку на кэшируемый ассет (F6).
     """
     from app.services.artifact_detector import detect_artifacts
-    from app.services.bandpass_filter import apply_band_filter, compute_band_power
-    from app.services.dipole_fitter import fit_dipoles_for_epochs, localize_dipoles
+    from app.services.bandpass_filter import apply_band_filter, compute_band_powers
+    from app.services.dipole_fitter import (
+        fit_dipoles_for_epochs,
+        fit_summary,
+        localize_dipoles,
+    )
     from app.services.edf_loader import load_edf
-    from app.services.epoch_segmenter import segment_epochs
+    from app.services.epoch_segmenter import epoch_records, make_epoch_events, segment_epochs
 
     started = time.perf_counter()
     session_id = str(uuid.uuid4())
@@ -111,19 +115,35 @@ def run_analysis(
         )
         entry.epochs = int(len(epochs.drop_log) if hasattr(epochs, "drop_log") else len(epochs))
     # len(epochs.events) — все созданные эпохи, len(epochs) — прошедшие reject
-    n_epochs_total = int(len(epochs.events))
-    n_epochs_used = int(len(epochs))
+    n_epochs_total = len(epochs.events)
+    n_epochs_used = len(epochs)
 
     progress("band_power", message="Спектральная мощность по диапазонам")
     with journal.step("analyze", "band_power", epochs=n_epochs_used):
-        freq_powers = compute_band_power(epochs, settings.freq_bands)
+        # Один PSD-расчёт отдаёт и средние (для ответа), и мощности по каждой
+        # эпохе (для строк таблицы `epochs` в БД, F21).
+        freq_powers, per_epoch_powers = compute_band_powers(epochs, settings.freq_bands)
+    # Плоское описание всех созданных эпох (включая отброшенные reject'ом) —
+    # источник строк `epochs` в БД и связи `dipoles.epoch_id`. События берём
+    # заново: `epochs.events` хранит только прошедшие эпохи.
+    epoch_rows = epoch_records(
+        epochs, make_epoch_events(raw, epoch_length_ms), epoch_length_ms, per_epoch_powers,
+    )
 
     progress("dipoles", message="Фитинг диполей по эпохам")
     with journal.step(
         "analyze", "dipoles", epochs=n_epochs_used,
-        note=f"decim={settings.dipole_fit_decim}, max_epochs={settings.dipole_fit_max_epochs}",
+        note=(
+            f"decim={settings.dipole_fit_decim}, max_epochs={settings.dipole_fit_max_epochs}, "
+            f"n_jobs={settings.dipole_fit_n_jobs}"
+        ),
     ):
-        dipoles = fit_dipoles_for_epochs(epochs, settings, freq_bands=freq_powers)
+        dipoles = fit_dipoles_for_epochs(
+            epochs, settings, freq_bands=freq_powers, progress=progress,
+        )
+    # Счётчики и предупреждения фитинга — часть результата (F18): задача с
+    # ошибками во всех эпохах не должна выглядеть успешной.
+    dipole_stats = fit_summary(dipoles)
 
     progress("localize", message="Локализация: анатомия + поля Бродмана")
     with journal.step("analyze", "localize", epochs=n_epochs_used):
@@ -131,7 +151,7 @@ def run_analysis(
 
     # Компактные best-fit диполи (таблица локализации + БД). Траектория сюда не
     # дублируется — она уже есть в dipoles[].trajectory.
-    best_fit_dipoles: List[Dict[str, Any]] = []
+    best_fit_dipoles: list[dict[str, Any]] = []
     for d in dipoles:
         best = d.get("best_fit") or {}
         if not best:
@@ -170,7 +190,7 @@ def run_analysis(
 
     results_path = os.path.join(settings.results_dir, f"{session_id}.json")
     os.makedirs(settings.results_dir, exist_ok=True)
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "session_id": session_id,
         "filename": filename,
         "n_channels": int(raw.info["nchan"]),
@@ -188,6 +208,11 @@ def run_analysis(
         # {} -> None: пустая траектория не должна ломать валидацию best_fit
         "dipoles": [{**d, "best_fit": d.get("best_fit") or None} for d in dipoles],
         "best_fit_dipoles": best_fit_dipoles,
+        "epochs": epoch_rows,
+        "n_dipole_fit": dipole_stats["n_dipole_fit"],
+        "n_dipole_errors": dipole_stats["n_dipole_errors"],
+        "dipole_error_samples": dipole_stats["dipole_error_samples"],
+        "warnings": dipole_stats["warnings"],
         "results_file": results_path,
         "pipeline": pipeline,
     }
@@ -200,7 +225,9 @@ def run_analysis(
                 "filename": filename,
                 "pipeline": pipeline,
                 "frequency_powers": freq_powers,
+                "epochs": epoch_rows,
                 "dipoles": dipoles,
+                "dipole_fit": dipole_stats,
             },
             f, indent=2, default=str,
         )
@@ -209,9 +236,15 @@ def run_analysis(
     return result
 
 
-async def save_analysis_to_db(result: Dict[str, Any]) -> None:
-    """Сохраняет сессию и best-fit диполи в БД (async, вызывается в event-loop)."""
-    from app.models.db import AsyncSessionLocal, init_db
+async def save_analysis_to_db(result: dict[str, Any]) -> None:
+    """Сохраняет сессию, эпохи и best-fit диполи в БД (async, в event-loop).
+
+    ``dipoles.epoch_id`` — внешний ключ на ``epochs.id`` (F21): строки эпох
+    вставляются первыми, их id берутся после ``flush``, а индекс эпохи
+    (``epoch_index``) переводится в id. Раньше в колонку клался сам номер эпохи,
+    ссылка вела в пустую таблицу, и PostgreSQL (прод) отклонил бы вставку.
+    """
+    from app.models.db import AsyncSessionLocal, EpochRecord, init_db
     from app.models.db import Dipole as DipoleModel
     from app.models.db import Session as SessionModel
 
@@ -233,10 +266,34 @@ async def save_analysis_to_db(result: Dict[str, Any]) -> None:
             epoch_length_ms=result.get("epoch_length_ms"),
             freq_band=result.get("freq_band"),
         ))
+
+        # Эпохи пишутся до диполей: связь `dipoles.epoch_id` — настоящий FK, а не
+        # номер эпохи (иначе на PostgreSQL вставка диполя отклоняется).
+        epoch_rows: dict[int, Any] = {}
+        for record in result.get("epochs") or []:
+            powers = record.get("band_powers") or {}
+            row = EpochRecord(
+                session_id=result["session_id"],
+                epoch_index=record.get("epoch_index"),
+                start_time_sec=record.get("start_time_sec"),
+                duration_ms=record.get("duration_ms"),
+                has_artifact=int(bool(record.get("has_artifact"))),
+                delta_power=powers.get("delta_power"),
+                theta_power=powers.get("theta_power"),
+                alpha_power=powers.get("alpha_power"),
+                beta_power=powers.get("beta_power"),
+            )
+            session.add(row)
+            epoch_rows[record.get("epoch_index")] = row
+        await session.flush()  # id эпох выдаёт БД — без flush их нет
+
         for d in result.get("best_fit_dipoles") or []:
+            epoch_row = epoch_rows.get(d.get("epoch_index"))
             session.add(DipoleModel(
                 session_id=result["session_id"],
-                epoch_id=d.get("epoch_index"),
+                # Нет строки эпохи (старый результат без `epochs`) → NULL, а не
+                # висящая ссылка: FK-колонка не обязана быть заполненной.
+                epoch_id=epoch_row.id if epoch_row is not None else None,
                 time_ms=d.get("time_ms"),
                 mni_x=d.get("mni_x"),
                 mni_y=d.get("mni_y"),
@@ -258,13 +315,13 @@ def analysis_job_worker(
     upload_dir: str,
     epoch_length_ms: float,
     freq_band: str,
-    custom_min_freq: Optional[float],
-    custom_max_freq: Optional[float],
-    single_freq: Optional[float],
+    custom_min_freq: float | None,
+    custom_max_freq: float | None,
+    single_freq: float | None,
     run_ica: bool,
     z_threshold: float,
     pp_threshold_uv: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Воркер задачи анализа (поток): пайплайн + удаление временной загрузки."""
     import shutil
 
@@ -279,7 +336,7 @@ def analysis_job_worker(
         shutil.rmtree(upload_dir, ignore_errors=True)
 
 
-async def persist_job_result(job: Job, result: Dict[str, Any]) -> None:
+async def persist_job_result(job: Job, result: dict[str, Any]) -> None:
     """Постобработка успешной задачи: запись в БД (в event-loop, не в потоке).
 
     Сбой БД не отменяет успешный расчёт: результат уже есть у клиента и в
@@ -298,9 +355,9 @@ def submit_uploaded_analysis(
     upload_dir: str,
     epoch_length_ms: float,
     freq_band: str,
-    custom_min_freq: Optional[float],
-    custom_max_freq: Optional[float],
-    single_freq: Optional[float],
+    custom_min_freq: float | None,
+    custom_max_freq: float | None,
+    single_freq: float | None,
     run_ica: bool,
     z_threshold: float,
     pp_threshold_uv: float,

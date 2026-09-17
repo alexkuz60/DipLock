@@ -1,7 +1,6 @@
 """Загрузка EDF + монтаж 10-20 + фильтр."""
 import logging
 import re
-from typing import Dict, List, Optional
 
 import mne
 import numpy as np
@@ -28,7 +27,7 @@ def looks_unscaled(data_v: np.ndarray) -> bool:
     return float(np.median(np.std(data_v, axis=1))) > _UNREALISTIC_STD_V
 
 # Устаревшие обозначения 10-20 -> современные (MNE montage знает оба)
-_CHANNEL_ALIASES: Dict[str, str] = {
+_CHANNEL_ALIASES: dict[str, str] = {
     "T3": "T7",
     "T4": "T8",
     "T5": "P7",
@@ -59,20 +58,20 @@ def _apply_standard_montage(raw: mne.io.BaseRaw) -> None:
         try:
             raw.set_montage(name)
             return
-        except (ValueError, KeyError, RuntimeError) as err:  # noqa: PERF203
+        except (ValueError, KeyError, RuntimeError) as err:
             last_err = err
     raise ValueError(f"Не удалось установить монтаж 10-20: {last_err}")
 
 
-def _read_raw_edf(filepath: str, units: Optional[str]) -> mne.io.BaseRaw:
+def _read_raw_edf(filepath: str, units: str | None) -> mne.io.BaseRaw:
     """Читает EDF; units передаётся только при явном указании (иначе авто MNE)."""
-    kwargs: Dict = {"preload": True, "stim_channel": False}
+    kwargs: dict = {"preload": True, "stim_channel": False}
     if units is not None:
         kwargs["units"] = units
     return mne.io.read_raw_edf(filepath, **kwargs)
 
 
-def _ensure_physical_units(raw: mne.io.BaseRaw, requested_units: Optional[str]) -> mne.io.BaseRaw:
+def _ensure_physical_units(raw: mne.io.BaseRaw, requested_units: str | None) -> mne.io.BaseRaw:
     """Страхует от нефизиологического масштаба.
 
     Часть EDF-файлов не содержит physical dimension, и MNE читает цифровые
@@ -95,12 +94,12 @@ def _ensure_physical_units(raw: mne.io.BaseRaw, requested_units: Optional[str]) 
 
 def load_edf(
     filepath: str,
-    channel_names: List[str],
-    l_freq: float = 1.0,
-    h_freq: float = 40.0,
-    units: Optional[str] = None,
-    notch_hz: Optional[float] = None,
-    reference_channels: Optional[List[str]] = None,
+    channel_names: list[str],
+    l_freq: float | None = 1.0,
+    h_freq: float | None = 40.0,
+    units: str | None = None,
+    notch_hz: float | None = None,
+    reference_channels: list[str] | None = None,
 ) -> mne.io.BaseRaw:
     """Читает EDF, ставит монтаж 10-20, референс и применяет фильтры.
 
@@ -114,7 +113,7 @@ def load_edf(
 
     # Нормализуем имена каналов EDF (префиксы "EEG"/"POL", T3->T7 и т.п.),
     # чтобы сопоставить их со стандартом 10-20 из настроек.
-    rename: Dict[str, str] = {}
+    rename: dict[str, str] = {}
     for orig in raw.ch_names:
         norm = normalize_channel_name(orig)
         if norm in channel_names and norm not in rename.values():

@@ -1,19 +1,20 @@
 """Частотная фильтрация: δ/θ/α/β/γ + кастомный диапазон + одиночная частота."""
+
 import mne
 import numpy as np
-from typing import Dict, Optional, Union
+
 from app.core.config import settings
 
 # Фильтровать можно как эпохи, так и continuous raw (рекомендуется raw — см. routes).
-FilterTarget = Union[mne.Epochs, mne.io.BaseRaw]
+type FilterTarget = mne.Epochs | mne.io.BaseRaw
 
 
 def apply_band_filter(
     epochs: FilterTarget,
     band_name: str = "all",
-    custom_min: Optional[float] = None,
-    custom_max: Optional[float] = None,
-    single_freq: Optional[float] = None,
+    custom_min: float | None = None,
+    custom_max: float | None = None,
+    single_freq: float | None = None,
     bandwidth_hz: float = 0.5,
 ) -> FilterTarget:
     """
@@ -53,10 +54,18 @@ def apply_band_filter(
     )
 
 
-def compute_band_power(epochs: mne.Epochs, bands: Dict[str, tuple]) -> Dict[str, float]:
-    """Средняя мощность по каждому диапазону (Welch). Один PSD-расчёт + нарезка."""
+def compute_band_powers(
+    epochs: mne.Epochs, bands: dict[str, tuple],
+) -> tuple[dict[str, float], dict[str, np.ndarray]]:
+    """Мощности по диапазонам (Welch): средние и по каждой эпохе — один PSD.
+
+    Возвращает ``(means, per_epoch)``: ``means[name]`` — среднее по всем эпохам и
+    каналам (как раньше ``compute_band_power``), ``per_epoch[name]`` — массив
+    длины ``len(epochs)`` (нужен для строк эпох в БД, F21). PSD считается **один
+    раз**: второй вызов стоил бы ещё ~0.5 с на 261 эпохе.
+    """
     if not bands:
-        return {}
+        return {}, {}
 
     # n_fft не может превышать длину эпохи (ограничение pSD-welch), иначе
     # короткие эпохи (250–1000 мс) дают ValueError. Адаптируем под сигнал.
@@ -73,8 +82,16 @@ def compute_band_power(epochs: mne.Epochs, bands: Dict[str, tuple]) -> Dict[str,
     psds = spectrum.get_data()  # shape (n_epochs, n_channels, n_freqs)
     freqs = spectrum.freqs
 
-    powers = {}
+    means: dict[str, float] = {}
+    per_epoch: dict[str, np.ndarray] = {}
     for name, (fmin, fmax) in bands.items():
         mask = (freqs >= fmin) & (freqs <= fmax)
-        powers[name] = float(np.mean(psds[:, :, mask]))
-    return powers
+        band = np.mean(psds[:, :, mask], axis=(1, 2))  # (n_epochs,)
+        per_epoch[name] = band
+        means[name] = float(np.mean(band))
+    return means, per_epoch
+
+
+def compute_band_power(epochs: mne.Epochs, bands: dict[str, tuple]) -> dict[str, float]:
+    """Средняя мощность по каждому диапазону (Welch). Один PSD-расчёт + нарезка."""
+    return compute_band_powers(epochs, bands)[0]

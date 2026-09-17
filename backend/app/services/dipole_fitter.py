@@ -1,17 +1,36 @@
-"""fit_dipole + локализация (анатомия + Brodmann)."""
+"""fit_dipole + локализация (анатомия + Brodmann).
+
+Точный фитинг (``mne.fit_dipole``) — «медленный профиль»: он считается эпоха
+за эпохой. Здесь же сводка ошибок фитинга (``fit_summary``): задача не должна
+выглядеть успешной, если диполей не получилось (F18, ``audit.md`` §7.7).
+"""
+import logging
 import os
+from functools import lru_cache
+from typing import Any, Optional
 
 import mne
 import numpy as np
-from functools import lru_cache
-from typing import Dict, List, Optional, Tuple
+
 from app.core.config import Settings
 
+logger = logging.getLogger(__name__)
 
-def fit_dipoles_for_epochs(epochs: mne.Epochs, settings: Settings, freq_bands: dict):
+
+def fit_dipoles_for_epochs(
+    epochs: mne.Epochs,
+    settings: Settings,
+    freq_bands: dict,
+    progress: Any = None,
+) -> list[dict[str, Any]]:
+    """Фитинг по эпохам; ``progress`` — колбэк задачи (этап ``dipoles``).
+
+    Дробный прогресс по эпохам обязателен: на дефолтах (все эпохи, ``decim=5``)
+    расчёт идёт часами, и без счётчика задача выглядит зависшей (F19).
+    """
+    report = progress or (lambda *args, **kwargs: None)
     bem = _get_bem(settings)
     trans = settings.fsaverage_trans
-    subjects_dir = settings.subjects_dir
 
     # Ковариация: из файла, иначе считаем empirical прямо из эпох
     # (method='shrunk' требует scikit-learn).
@@ -26,8 +45,9 @@ def fit_dipoles_for_epochs(epochs: mne.Epochs, settings: Settings, freq_bands: d
     data = epochs.get_data()[:n_fit]  # (n_fit, n_channels, n_times)
     tmin = float(epochs.times[0])
     decim = max(1, int(getattr(settings, "dipole_fit_decim", 1) or 1))
+    n_jobs = max(1, int(getattr(settings, "dipole_fit_n_jobs", 1) or 1))
 
-    all_dips = []
+    all_dips: list[dict[str, Any]] = []
     for i in range(n_fit):
         evoked = mne.EvokedArray(
             data[i], epochs.info.copy(), tmin=tmin, nave=1, verbose=False,
@@ -36,10 +56,13 @@ def fit_dipoles_for_epochs(epochs: mne.Epochs, settings: Settings, freq_bands: d
         if decim > 1:
             evoked.decimate(decim, verbose=False)
         try:
-            dip = mne.fit_dipole(
+            # MNE 1.13 отдаёт кортеж (dipoles, residual): без распаковки
+            # `dip.pos` падал, и диполей не было вовсе (F17).
+            out = mne.fit_dipole(
                 evoked, cov, bem, trans=trans,
-                min_dist=5.0, n_jobs=1, verbose=False,
+                min_dist=5.0, n_jobs=n_jobs, verbose=False,
             )
+            dip = out[0] if isinstance(out, tuple) else out
             traj = []
             for idx in range(len(dip.pos)):
                 traj.append({
@@ -58,8 +81,42 @@ def fit_dipoles_for_epochs(epochs: mne.Epochs, settings: Settings, freq_bands: d
             })
         except Exception as e:
             all_dips.append({"epoch_index": i, "error": str(e), "trajectory": [], "best_fit": {}})
+        report(
+            "dipoles", (i + 1) / max(1, n_fit),
+            message=f"Фитинг диполей: эпоха {i + 1} из {n_fit}",
+            epochs_done=i + 1, epochs_total=n_fit,
+        )
 
     return all_dips
+
+
+def fit_summary(dipoles: list[dict[str, Any]]) -> dict[str, Any]:
+    """Сводка фитинга: сколько эпох дало диполь и сколько завершилось ошибкой.
+
+    Ошибки глушить нельзя (F18): задача со 100 % ошибок получает
+    ``succeeded`` и «прогресс 1.0», поэтому предупреждение и счётчики — часть
+    контракта результата (`AnalyzeResponse`), а не строка в логе.
+    """
+    errors = [str(d["error"]) for d in dipoles if d.get("error")]
+    fitted = [d for d in dipoles if d.get("best_fit")]
+    warnings: list[str] = []
+    total = len(dipoles)
+    if errors and len(errors) == total:
+        warnings.append(
+            f"Точный фитинг не дал диполей: все {total} эпох — ошибка. "
+            f"Первая: {errors[0]}"
+        )
+    elif errors:
+        warnings.append(
+            f"Часть эпох не посчитана: {len(errors)} из {total}. Первая: {errors[0]}"
+        )
+    return {
+        "n_dipole_fit": len(fitted),
+        "n_dipole_errors": len(errors),
+        # Тексты усечены: контракт не должен раздуваться списком на сотни эпох
+        "dipole_error_samples": errors[:5],
+        "warnings": warnings,
+    }
 
 
 def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
@@ -90,22 +147,13 @@ def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
             except Exception:
                 dp["mni_coords"] = [0, 0, 0]
 
-            # Анатомия
-            try:
-                dp_dip = mne.Dipole(
-                    times=[dp["time_ms"] / 1000],
-                    pos=pos,
-                    amplitude=[dp["amplitude_nam"] * 1e-9],
-                    ori=np.array(dp["ori_head"]).reshape(1, 3),
-                    gof=[dp["gof"]],
-                )
-                vol_labels = dp_dip.to_volume_labels(
-                    transform, subject="fsaverage",
-                    aseg="aparc.a2009s+aseg", subjects_dir=subjects_dir,
-                )
-                dp["anatomical_structure"] = vol_labels[0] if vol_labels else "unknown"
-            except Exception:
-                dp["anatomical_structure"] = "unknown"
+            # Анатомия: тот же атлас, что у контуров срезов и быстрого расчёта
+            # (`aparc+aseg`), поэтому подписи структур в таблице локализации не
+            # расходятся. Объёмы кэшируются (`atlas_contours.load_volumes`) — цена
+            # точки становится поиском в массиве вместо чтения тома на точку (F19).
+            dp["anatomical_structure"] = (
+                _structure_at_mni(settings, mni[0]) if mni is not None else None
+            )
 
             # Brodmann — через кэшированные центры меток (без повторов read_surface)
             if mni is not None:
@@ -128,7 +176,7 @@ def _get_transform(subjects_dir: str, trans_path: str) -> "mne.Transform":
 
 
 @lru_cache(maxsize=1)
-def _get_ba_centers(subjects_dir: str) -> List[Tuple[str, np.ndarray]]:
+def _get_ba_centers(subjects_dir: str) -> list[tuple[str, np.ndarray]]:
     """
     Центры Brodmann-меток на fsaverage (атлас PALS_B12_Brodmann).
 
@@ -139,7 +187,7 @@ def _get_ba_centers(subjects_dir: str) -> List[Tuple[str, np.ndarray]]:
         "fsaverage", parc="PALS_B12_Brodmann",
         subjects_dir=subjects_dir, verbose=False,
     )
-    verts_cache: Dict[str, np.ndarray] = {}
+    verts_cache: dict[str, np.ndarray] = {}
     centers = []
     for label in labels:
         # В PALS_B12_Brodmann метки названы "Brodmann.<area>-lh/rh"
@@ -171,6 +219,21 @@ def _find_ba(mni_pos, ba_centers) -> str:
     return best_label
 
 
+def _structure_at_mni(settings: Settings, mni_mm) -> str | None:
+    """Анатомическая структура по MNI-координате — общий источник с UI.
+
+    Ленивый импорт: `atlas_contours` тянет nibabel/scipy, а фитинг без
+    локализации (например, в тестах) не должен зависеть от атласов.
+    """
+    try:
+        from app.services.atlas_contours import structure_at
+
+        return structure_at(settings, [float(value) for value in mni_mm])
+    except Exception as exc:
+        logger.info("Структура по MNI не определена: %s", exc)
+        return None
+
+
 def _get_covariance(settings) -> Optional["mne.Covariance"]:
     try:
         return mne.read_cov(f"{settings.subjects_dir}/fsaverage-cov.fif")
@@ -178,7 +241,7 @@ def _get_covariance(settings) -> Optional["mne.Covariance"]:
         return None
 
 
-def _get_bem(settings) -> str:
+def bem_path(settings) -> str:
     """Путь к BEM-решению fsaverage; ищем существующий файл."""
     candidates = [
         f"{settings.subjects_dir}/fsaverage/bem/fsaverage-5120-5120-5120-bem-sol.fif",
@@ -192,3 +255,14 @@ def _get_bem(settings) -> str:
         "BEM-решение fsaverage не найдено. Ожидался один из файлов: "
         + ", ".join(candidates)
     )
+
+
+@lru_cache(maxsize=1)
+def _read_bem(bem_file: str) -> "mne.bem.ConductorModel":
+    """BEM-решение читается один раз на путь (F19: было чтение на каждую эпоху)."""
+    return mne.read_bem_solution(bem_file, verbose=False)
+
+
+def _get_bem(settings) -> "mne.bem.ConductorModel":
+    """BEM-решение fsaverage из кэша процесса — аргумент ``mne.fit_dipole``."""
+    return _read_bem(bem_path(settings))

@@ -1,22 +1,44 @@
-"""Тесты dipole_fitter: подготовка Evoked для каждой эпохи."""
+"""Тесты dipole_fitter: подготовка Evoked, распаковка fit_dipole, кэш BEM."""
 import mne
+import numpy as np
+import pytest
 
 import app.services.dipole_fitter as dipole_fitter
 from app.core.config import settings
+from app.services.job_manager import noop_progress
 
 
-def test_fit_dipoles_builds_evoked_per_epoch(epochs_alpha, monkeypatch):
-    """fit_dipole вызывается с Evoked для каждой эпохи (а не с numpy-массивом)."""
-    calls = []
+class FakeDipole:
+    """Двойник ``mne.Dipole``: две временные точки, разный gof."""
+
+    def __init__(self) -> None:
+        self.times = np.array([0.0, 0.1])
+        self.pos = np.array([[0.0, 0.0, 50.0], [1.0, 0.0, 50.0]], dtype=float)
+        self.ori = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 1.0]], dtype=float)
+        self.amplitude = np.array([1e-9, 2e-9])
+        self.gof = np.array([80.0, 95.0])
+
+
+def _patch_fit(monkeypatch, result_factory, calls=None, kwargs_seen=None):
+    """Изолирует фитинг от FSAverage/BEM и подменяет ``mne.fit_dipole``."""
 
     def fake_fit_dipole(evoked, cov, bem, **kwargs):
-        calls.append(evoked)
-        raise RuntimeError("stop")  # не выполняем тяжёлый реальный фитинг
+        if calls is not None:
+            calls.append(evoked)
+        if kwargs_seen is not None:
+            kwargs_seen.append(kwargs)
+        return result_factory(evoked)
 
-    # Изолируем тест от наличия FSAverage/BEM на машине
-    monkeypatch.setattr(dipole_fitter, "_get_bem", lambda settings: "dummy-bem.fif")
+    monkeypatch.setattr(dipole_fitter, "_get_bem", lambda settings: "dummy-bem")
     monkeypatch.setattr(dipole_fitter, "_get_covariance", lambda settings: None)
     monkeypatch.setattr(dipole_fitter.mne, "fit_dipole", fake_fit_dipole)
+
+
+def test_fit_dipoles_unpacks_tuple_from_mne(epochs_alpha, monkeypatch):
+    """MNE 1.13 отдаёт кортеж ``(dipoles, residual)`` — траектория не пуста (F17)."""
+    calls: list = []
+    kwargs_seen: list = []
+    _patch_fit(monkeypatch, lambda evoked: (FakeDipole(), None), calls, kwargs_seen)
 
     result = dipole_fitter.fit_dipoles_for_epochs(
         epochs_alpha, settings, freq_bands={},
@@ -26,7 +48,173 @@ def test_fit_dipoles_builds_evoked_per_epoch(epochs_alpha, monkeypatch):
     assert all(isinstance(e, mne.Evoked) for e in calls)
     assert [r["epoch_index"] for r in result] == list(range(len(epochs_alpha)))
     for r in result:
-        assert "trajectory" in r and "best_fit" in r
+        assert "error" not in r
+        assert r["n_time_points"] == 2, "кортеж распакован: точки траектории на месте"
+        assert r["best_fit"]["gof"] == pytest.approx(95.0)
+        assert r["best_fit"]["amplitude_nam"] == pytest.approx(2.0)
+    # n_jobs берётся из настроек, а не зашит единицей
+    assert all(kw.get("n_jobs") == settings.dipole_fit_n_jobs for kw in kwargs_seen)
+def test_fit_dipoles_accepts_bare_dipole_too(epochs_alpha, monkeypatch):
+    """Старое API ``fit_dipole`` (без кортежа) продолжает работать."""
+    _patch_fit(monkeypatch, lambda evoked: FakeDipole())
+
+    result = dipole_fitter.fit_dipoles_for_epochs(epochs_alpha, settings, freq_bands={})
+
+    assert all(r["n_time_points"] == 2 for r in result)
+
+
+def test_fit_dipoles_reports_progress_per_epoch(epochs_alpha, monkeypatch):
+    """Прогресс задачи идёт по эпохам, а не «0 → 1» в конце (F19)."""
+    seen: list = []
+    _patch_fit(monkeypatch, lambda evoked: (FakeDipole(), None))
+
+    def progress(stage, value=None, message="", epochs_done=None, epochs_total=None):
+        seen.append((stage, value, epochs_done, epochs_total))
+
+    dipole_fitter.fit_dipoles_for_epochs(
+        epochs_alpha, settings, freq_bands={}, progress=progress,
+    )
+
+    total = len(epochs_alpha)
+    assert [item[2] for item in seen] == list(range(1, total + 1))
+    assert all(item[3] == total for item in seen)
+    assert seen[-1][1] == pytest.approx(1.0)
+    assert all(item[0] == "dipoles" for item in seen)
+
+
+def test_fit_dipoles_works_with_noop_progress(epochs_alpha, monkeypatch):
+    """Синхронный ``/analyze`` передаёт заглушку прогресса — она принимает счётчики."""
+    _patch_fit(monkeypatch, lambda evoked: (FakeDipole(), None))
+
+    result = dipole_fitter.fit_dipoles_for_epochs(
+        epochs_alpha, settings, freq_bands={}, progress=noop_progress,
+    )
+
+    assert len(result) == len(epochs_alpha)
+
+
+def test_fit_summary_flags_total_failure():
+    """Все эпохи с ошибкой → предупреждение, а не «успех с пустым списком» (F18)."""
+    summary = dipole_fitter.fit_summary([
+        {"epoch_index": 0, "error": "boom"},
+        {"epoch_index": 1, "error": "boom"},
+    ])
+
+    assert summary["n_dipole_fit"] == 0
+    assert summary["n_dipole_errors"] == 2
+    assert summary["dipole_error_samples"] == ["boom", "boom"]
+    assert len(summary["warnings"]) == 1
+    assert "не дал диполей" in summary["warnings"][0]
+
+
+def test_fit_summary_counts_partial_failure():
+    """Часть эпох упала: счётчики по факту, а не «всё или ничего»."""
+    summary = dipole_fitter.fit_summary([
+        {"epoch_index": 0, "error": "bad channels"},
+        {"epoch_index": 1, "best_fit": {"gof": 90.0}},
+        {"epoch_index": 2, "best_fit": {"gof": 80.0}},
+    ])
+
+    assert (summary["n_dipole_fit"], summary["n_dipole_errors"]) == (2, 1)
+    assert summary["dipole_error_samples"] == ["bad channels"]
+    assert "1 из 3" in summary["warnings"][0]
+
+
+def test_fit_summary_is_silent_when_all_epochs_fitted():
+    """Ошибок нет — предупреждений нет: контракт не шумит зря."""
+    summary = dipole_fitter.fit_summary([
+        {"epoch_index": 0, "best_fit": {"gof": 90.0}},
+    ])
+
+    assert summary["warnings"] == []
+    assert (summary["n_dipole_fit"], summary["n_dipole_errors"]) == (1, 0)
+
+
+def test_get_bem_returns_cached_solution(monkeypatch):
+    """BEM читается из файла один раз и возвращается решением, а не путём (F19)."""
+    reads: list = []
+    monkeypatch.setattr(dipole_fitter, "bem_path", lambda settings: "bem.fif")
+    monkeypatch.setattr(
+        dipole_fitter.mne, "read_bem_solution",
+        lambda path, verbose=False: reads.append(path) or "bem-solution",
+    )
+    dipole_fitter._read_bem.cache_clear()
+
+    assert dipole_fitter._get_bem(settings) == "bem-solution"
+    assert dipole_fitter._get_bem(settings) == "bem-solution"
+
+    assert reads == ["bem.fif"], "BEM не перечитывается на каждую эпоху"
+    dipole_fitter._read_bem.cache_clear()
+
+
+def test_bem_path_reports_missing_files(monkeypatch):
+    """Нет BEM-файла — понятная ошибка со списком ожидаемых путей."""
+    monkeypatch.setattr(dipole_fitter.os.path, "exists", lambda path: False)
+
+    with pytest.raises(FileNotFoundError, match="BEM-решение fsaverage"):
+        dipole_fitter.bem_path(settings)
+
+
+def test_localize_takes_structure_from_shared_atlas(monkeypatch):
+    """Анатомия — из ``atlas_contours.structure_at``: чтения тома на точку нет (F19)."""
+    from app.services import atlas_contours
+
+    seen: list = []
+    monkeypatch.setattr(
+        atlas_contours, "structure_at",
+        lambda cfg, mni: seen.append(list(mni)) or "Precentral Gyrus",
+    )
+    monkeypatch.setattr(dipole_fitter, "_get_transform", lambda subjects_dir, trans: None)
+    monkeypatch.setattr(dipole_fitter, "_get_ba_centers", lambda subjects_dir: [])
+    monkeypatch.setattr(
+        dipole_fitter.mne, "head_to_mni",
+        lambda pos, **kwargs: np.array([[1.0, 2.0, 3.0]]),
+    )
+    point = {
+        "time_ms": 10.0, "pos_head": [0.0, 0.0, 50.0], "ori_head": [0.0, 0.0, 1.0],
+        "amplitude_nam": 12.0, "gof": 90.0,
+    }
+
+    result = dipole_fitter.localize_dipoles(
+        [{"epoch_index": 0, "n_time_points": 1, "trajectory": [point], "best_fit": point}],
+        settings,
+    )
+
+    localized = result[0]["trajectory"][0]
+    assert seen == [[1.0, 2.0, 3.0]]
+    assert localized["anatomical_structure"] == "Precentral Gyrus"
+    assert localized["mni_coords"] == [1.0, 2.0, 3.0]
+    assert localized["brodmann_area"] == "unknown"
+    assert result[0]["best_fit"]["anatomical_structure"] == "Precentral Gyrus"
+
+
+def test_localize_keeps_none_when_atlas_is_unavailable(monkeypatch):
+    """Атлас недоступен — расчёт не отменяется, структура остаётся пустой."""
+    from app.services import atlas_contours
+
+    def boom(cfg, mni):
+        raise OSError("нет атласа")
+
+    monkeypatch.setattr(atlas_contours, "structure_at", boom)
+    monkeypatch.setattr(dipole_fitter, "_get_transform", lambda subjects_dir, trans: None)
+    monkeypatch.setattr(dipole_fitter, "_get_ba_centers", lambda subjects_dir: [])
+    monkeypatch.setattr(
+        dipole_fitter.mne, "head_to_mni",
+        lambda pos, **kwargs: np.array([[4.0, 5.0, 6.0]]),
+    )
+    point = {
+        "time_ms": 10.0, "pos_head": [0.0, 0.0, 50.0], "ori_head": [0.0, 0.0, 1.0],
+        "amplitude_nam": 12.0, "gof": 90.0,
+    }
+
+    result = dipole_fitter.localize_dipoles(
+        [{"epoch_index": 0, "trajectory": [point], "best_fit": {}}],
+        settings,
+    )
+
+    assert result[0]["trajectory"][0]["anatomical_structure"] is None
+    assert result[0]["best_fit"]["gof"] == pytest.approx(90.0)
+
 
 
 def test_find_ba_returns_nearest():

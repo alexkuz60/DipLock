@@ -47,9 +47,10 @@ notch, длина эпохи, n_fft, набор каналов): сменили 
 import hashlib
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import mne
 import numpy as np
@@ -90,11 +91,11 @@ class SpectrumError(ValueError):
 class SpectrumParams:
     """Параметры расчёта спектра (плоская проекция формы запроса)."""
 
-    filter_band: Optional[Tuple[float, float]] = None
-    notch_hz: Optional[float] = None
+    filter_band: tuple[float, float] | None = None
+    notch_hz: float | None = None
     epoch_length_ms: float = 2000.0
     reference: str = "average"
-    reference_channels: Optional[List[str]] = None
+    reference_channels: list[str] | None = None
     reject_threshold_uv: float = 150.0
     n_fft: int = SPECTRUM_N_FFT
 
@@ -130,14 +131,14 @@ def topomap_url(cfg: Settings, recording_id: str, band: str) -> str:
     return f"{cfg.api_prefix}/recordings/{recording_id}/spectrum/topomap/{band}.png"
 
 
-def clear_spectrum_cache(cfg: Settings, recording_id: Optional[str] = None) -> None:
+def clear_spectrum_cache(cfg: Settings, recording_id: str | None = None) -> None:
     """Удаляет дисковый кэш топокарт: одну запись или весь (тесты и реестр)."""
     parts = ("spectra", recording_id) if recording_id else ("spectra",)
     cache_clear(cfg.cache_dir, *parts)
 
 
 @lru_cache(maxsize=4)
-def _montage_positions(montage_name: str) -> Dict[str, np.ndarray]:
+def _montage_positions(montage_name: str) -> dict[str, np.ndarray]:
     """Координаты каналов монтажа в системе головы (кэш: файл монтажа читается раз).
 
     Имя монтажа берётся из общего списка `edf_loader` (MNE 1.13 переименовал
@@ -151,7 +152,7 @@ def _montage_positions(montage_name: str) -> Dict[str, np.ndarray]:
     }
 
 
-def channel_positions(channels: Sequence[str]) -> Dict[str, np.ndarray]:
+def channel_positions(channels: Sequence[str]) -> dict[str, np.ndarray]:
     """Позиции каналов записи по монтажу 10-20 (только те, что нашлись).
 
     Пустой dict — монтаж недоступен: спектр всё равно считается, а топокарты не
@@ -213,7 +214,7 @@ def _normalize(values: np.ndarray) -> np.ndarray:
 
 
 def topomap_png(
-    positions: Dict[str, np.ndarray], values: Dict[str, float], size: int = TOPO_SIZE,
+    positions: dict[str, np.ndarray], values: dict[str, float], size: int = TOPO_SIZE,
 ) -> bytes:
     """PNG топокарты: круг скальпа, серая шкала, вне круга прозрачно.
 
@@ -240,15 +241,15 @@ def topomap_png(
 
 
 def _band_powers(
-    freqs: np.ndarray, psd_mean: np.ndarray, bands: Dict[str, tuple],
-) -> Dict[str, Optional[float]]:
+    freqs: np.ndarray, psd_mean: np.ndarray, bands: dict[str, tuple],
+) -> dict[str, float | None]:
     """Средняя мощность каждого диапазона: PSD уже усреднён по эпохам.
 
     Диапазон без попавших частот (например γ при узкой полосе фильтра) даёт
     ``None``, а не NaN: «NaN» — невалидный JSON, и ответ ломался бы на клиенте,
     тогда как ``None`` читается как «не измерено» (UI покажет «—»).
     """
-    powers: Dict[str, Optional[float]] = {}
+    powers: dict[str, float | None] = {}
     for name, (fmin, fmax) in bands.items():
         mask = (freqs >= fmin) & (freqs <= fmax)
         powers[name] = float(np.mean(psd_mean[:, mask])) if np.any(mask) else None
@@ -256,14 +257,16 @@ def _band_powers(
 
 
 def _channel_band_power(
-    freqs: np.ndarray, psd_mean: np.ndarray, channels: List[str], fmin: float, fmax: float,
-) -> Dict[str, float]:
+    freqs: np.ndarray, psd_mean: np.ndarray, channels: list[str], fmin: float, fmax: float,
+) -> dict[str, float]:
     """Мощность диапазона по каждому каналу — значения для топокарты."""
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
         return {}
     per_channel = np.mean(psd_mean[:, mask], axis=1)
-    return {name: float(value) for name, value in zip(channels, per_channel)}
+    # ``strict=False`` — явная фиксация контракта: набор каналов и мощность берутся
+    # из одного расчёта, а если они разойдутся, обрезка повторит прежнее поведение.
+    return {name: float(value) for name, value in zip(channels, per_channel, strict=False)}
 
 
 def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams) -> Any:
@@ -275,8 +278,8 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams)
     подготовленного сигнала (A4): повтор расчёта с теми же параметрами не читает
     EDF заново.
     """
-    l_freq: Optional[float] = None
-    h_freq: Optional[float] = None
+    l_freq: float | None = None
+    h_freq: float | None = None
     if params.filter_band is not None:
         l_freq, h_freq = params.filter_band
 
@@ -312,7 +315,7 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams)
 
 def _compute_psd(
     epochs: Any, cfg: Settings, params: SpectrumParams,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
     """Welch PSD по эпохам: ``(freqs, psd, psd_mean, n_fft)`` в мкВ²/Гц.
 
     Данные MNE приходят в вольтах, поэтому x1e12 даёт мкВ²/Гц без параметра
@@ -337,7 +340,7 @@ def compute_spectrum(
     cfg: Settings,
     params: SpectrumParams,
     progress: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Считает PSD по диапазонам, строит и кэширует топокарты.
 
     Возвращает dict под схему ``SpectrumResult`` (её валидирует API): так воркер
@@ -368,7 +371,7 @@ def compute_spectrum(
         entry.note = f"n_fft={n_fft}, epoch={params.epoch_length_ms:g}ms"
     band_powers = _band_powers(freqs, psd_mean, cfg.freq_bands)
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     positions = channel_positions(channels)
     missed = [name for name in channels if name not in positions]
     if missed:
@@ -385,13 +388,13 @@ def compute_spectrum(
         epochs_done=len(epochs),
         epochs_total=len(epochs),
     )
-    bands_out: List[Dict[str, Any]] = []
+    bands_out: list[dict[str, Any]] = []
     written = 0
     with journal.step(
         "spectrum", "topomaps", params_key=signature, epochs=len(epochs),
     ) as entry:
         for name, (fmin, fmax) in cfg.freq_bands.items():
-            url: Optional[str] = None
+            url: str | None = None
             values = _channel_band_power(freqs, psd_mean, channels, fmin, fmax)
             if len(values) >= 3:
                 size = _write_topomap(
@@ -443,9 +446,9 @@ def _write_topomap(
     recording_id: str,
     signature: str,
     band: str,
-    positions: Dict[str, np.ndarray],
-    values: Dict[str, float],
-) -> Optional[int]:
+    positions: dict[str, np.ndarray],
+    values: dict[str, float],
+) -> int | None:
     """Строит и атомарно кладёт топокарту на диск; сбой кэша не критичен.
 
     Возвращает размер PNG (``None`` — картинка не построена): размер нужен
@@ -463,7 +466,7 @@ def _write_topomap(
 
 def cached_topomap(
     recording: Recording, cfg: Settings, params: SpectrumParams, band: str,
-) -> Tuple[bytes, str]:
+) -> tuple[bytes, str]:
     """PNG топокарты + ETag; при промахе кэша картинка строится заново.
 
     Ленивый пересчёт (как у пирамиды сигналов, 2.5): браузер может запросить

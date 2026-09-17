@@ -1,24 +1,33 @@
 """Pydantic-модели ответов DipLock (F4: контракт API вместо «сырых» dict)."""
 from datetime import datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 # Статусы фоновой задачи
 JobState = Literal["queued", "running", "succeeded", "failed"]
+# Тот же набор значениями: нужен там, где состояние приходит извне типа
+# (восстановление задачи из файла `job_store`) и его надо сузить обратно к Literal.
+JOB_STATES: tuple[JobState, ...] = ("queued", "running", "succeeded", "failed")
 
 
 class TrajectoryPoint(BaseModel):
     """Одна точка траектории диполя: время + позиция/ориентация + качество."""
 
     time_ms: float = Field(description="Время от начала эпохи, мс")
-    pos_head: List[float] = Field(description="Позиция в системе координат головы, мм")
-    ori_head: List[float] = Field(description="Ориентация диполя (единичный вектор)")
+    pos_head: list[float] = Field(description="Позиция в системе координат головы, мм")
+    ori_head: list[float] = Field(description="Ориентация диполя (единичный вектор)")
     amplitude_nam: float = Field(description="Амплитуда, нАм")
     gof: float = Field(description="Goodness of fit, 0..1")
-    mni_coords: Optional[List[float]] = Field(default=None, description="Координаты MNI, мм")
-    anatomical_structure: Optional[str] = Field(default=None, description="Анатомическая область (aparc.a2009s)")
-    brodmann_area: Optional[str] = Field(default=None, description="Поле Бродмана, например BA17-lh")
+    mni_coords: list[float] | None = Field(default=None, description="Координаты MNI, мм")
+    anatomical_structure: str | None = Field(
+        default=None,
+        description=(
+            "Анатомическая структура по MNI-координате (aparc+aseg — тот же атлас, "
+            "что у контуров срезов и быстрого расчёта); null — вне метки"
+        ),
+    )
+    brodmann_area: str | None = Field(default=None, description="Поле Бродмана, например BA17-lh")
 
 
 class DipoleFit(BaseModel):
@@ -26,9 +35,9 @@ class DipoleFit(BaseModel):
 
     epoch_index: int
     n_time_points: int = 0
-    trajectory: List[TrajectoryPoint] = Field(default_factory=list)
-    best_fit: Optional[TrajectoryPoint] = None
-    error: Optional[str] = Field(default=None, description="Ошибка фитинга эпохи (если была)")
+    trajectory: list[TrajectoryPoint] = Field(default_factory=list)
+    best_fit: TrajectoryPoint | None = None
+    error: str | None = Field(default=None, description="Ошибка фитинга эпохи (если была)")
 
     @field_validator("best_fit", mode="before")
     @classmethod
@@ -40,15 +49,33 @@ class DipoleFit(BaseModel):
 class BestFitDipole(BaseModel):
     """Компактный лучший диполь эпохи — для таблицы локализации и БД."""
 
-    epoch_index: Optional[int] = None
-    time_ms: Optional[float] = None
-    mni_x: Optional[float] = None
-    mni_y: Optional[float] = None
-    mni_z: Optional[float] = None
-    amplitude_nam: Optional[float] = None
-    gof: Optional[float] = None
-    anatomical_roi: Optional[str] = None
-    brodmann_area: Optional[str] = None
+    epoch_index: int | None = None
+    time_ms: float | None = None
+    mni_x: float | None = None
+    mni_y: float | None = None
+    mni_z: float | None = None
+    amplitude_nam: float | None = None
+    gof: float | None = None
+    anatomical_roi: str | None = None
+    brodmann_area: str | None = None
+
+
+class EpochSummary(BaseModel):
+    """Одна эпоха нарезки: окно, флаг отбраковки и мощности по диапазонам (F21).
+
+    ``epoch_index`` — номер по порядку в сессии (ключ связи с ``dipoles`` и
+    ``best_fit_dipoles``), он же ``epochs.epoch_index`` в БД. ``band_powers``
+    пуст у эпох, отброшенных reject-фильтром: их PSD не считался.
+    """
+
+    epoch_index: int
+    start_time_sec: float = Field(description="Начало эпохи в записи, с")
+    duration_ms: float
+    has_artifact: bool = Field(description="Эпоха не прошла reject-фильтр (отброшена)")
+    band_powers: dict[str, float] = Field(
+        default_factory=dict,
+        description="Мощности по диапазонам, ключи вида `alpha_power` (пусто у отброшенных)",
+    )
 
 
 class ArtifactTypes(BaseModel):
@@ -78,7 +105,7 @@ class ArtifactZoneOut(BaseModel):
     kind: ArtifactKind
     onset_sec: float
     duration_sec: float
-    channels: List[str] = Field(default_factory=list)
+    channels: list[str] = Field(default_factory=list)
 
 
 class PreprocessResult(BaseModel):
@@ -96,17 +123,17 @@ class PreprocessResult(BaseModel):
     stage: PreprocessStage
 
     # Стадия `filter`: какие параметры фильтра/референса зафиксированы
-    channels: List[str] = Field(default_factory=list, description="Каналы после монтажа 10-20")
-    band_hz: Optional[List[float]] = Field(
+    channels: list[str] = Field(default_factory=list, description="Каналы после монтажа 10-20")
+    band_hz: list[float] | None = Field(
         default=None, description="Полоса пропускания после предподготовки, Гц (None — без фильтра)"
     )
-    notch_hz: Optional[float] = Field(default=None, description="Частота notch-фильтра, Гц (None — выключен)")
+    notch_hz: float | None = Field(default=None, description="Частота notch-фильтра, Гц (None — выключен)")
     reference: str = Field(default="average", description="Референс: average | custom")
     sfreq: float = 0.0
     duration_sec: float = 0.0
 
     # Стадия `artifacts`: зоны для слоёв вьюера (срез 2.6)
-    artifacts: List[ArtifactZoneOut] = Field(default_factory=list)
+    artifacts: list[ArtifactZoneOut] = Field(default_factory=list)
     artifact_types: ArtifactTypes = Field(default_factory=ArtifactTypes)
     ica_applied: bool = False
 
@@ -114,11 +141,11 @@ class PreprocessResult(BaseModel):
     epoch_length_ms: float = 0.0
     n_epochs_total: int = 0
     n_epochs_used: int = 0
-    rejected_epochs: List[int] = Field(
+    rejected_epochs: list[int] = Field(
         default_factory=list, description="Индексы эпох, отброшенных reject-фильтром"
     )
 
-    warnings: List[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = Field(default=0.0, description="Длительность расчёта, сек")
 
 
@@ -128,11 +155,11 @@ class RecordingMeta(BaseModel):
     recording_id: str
     filename: str
     n_channels: int = Field(description="Число каналов в файле")
-    channels: List[str] = Field(
+    channels: list[str] = Field(
         default_factory=list,
         description="Каналы, сопоставленные с монтажом 10-20 (в порядке монтажа)",
     )
-    unmatched_channels: List[str] = Field(
+    unmatched_channels: list[str] = Field(
         default_factory=list, description="Каналы файла, не вошедшие в монтаж 10-20"
     )
     sfreq: float = Field(description="Частота дискретизации, Гц")
@@ -140,10 +167,10 @@ class RecordingMeta(BaseModel):
     units_autoscaled: bool = Field(
         description="Применён авто-пересчёт единиц (файл без physical dimension)"
     )
-    edf_units: Optional[str] = Field(
+    edf_units: str | None = Field(
         default=None, description="Явные единицы из EDF_UNITS; None = автоопределение"
     )
-    warnings: List[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     created_at: datetime = Field(
         description="Время сессии просмотра; при повторной загрузке того же файла освежается"
     )
@@ -174,7 +201,7 @@ class RecordingSignalsHeader(BaseModel):
 
     recording_id: str
     level: int = Field(description="Уровень пирамиды (множитель зума ×1…×16)")
-    channels: List[str] = Field(description="Каналы в порядке отрисовки (как в паспорте записи)")
+    channels: list[str] = Field(description="Каналы в порядке отрисовки (как в паспорте записи)")
     sfreq: float = Field(description="Частота дискретизации огибающей, Гц")
     duration_sec: float
     n_points: int = Field(description="Точек на канал (по одной корзине)")
@@ -225,7 +252,7 @@ class PipelineInfo(BaseModel):
     python_version: str
     epoch_length_ms: float
     freq_band: str
-    single_freq: Optional[float] = None
+    single_freq: float | None = None
     dipole_fit_decim: int
     dipole_fit_max_epochs: int
     z_threshold: float
@@ -233,7 +260,7 @@ class PipelineInfo(BaseModel):
     reject_threshold_uv: float
     ica_requested: bool = False
     ica_applied: bool = Field(default=False, description="ICA реально применена (нужны EOG-каналы)")
-    edf_units: Optional[str] = Field(default=None, description="None = автоопределение единиц")
+    edf_units: str | None = Field(default=None, description="None = автоопределение единиц")
     duration_sec: float = Field(default=0.0, description="Длительность расчёта, сек")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -249,8 +276,8 @@ class SurfaceRef(BaseModel):
 class HemiMesh(BaseModel):
     """Меш одного полушария (децимированный для frontend)."""
 
-    vertices: List[List[float]]
-    faces: List[List[int]]
+    vertices: list[list[float]]
+    faces: list[list[int]]
     vertex_count: int
     face_count: int
 
@@ -270,7 +297,7 @@ class BrodmannAreaOut(BaseModel):
 
     name: str
     hemi: str
-    vertices: List[int]
+    vertices: list[int]
     n_vertices: int
 
 
@@ -278,13 +305,13 @@ class BrodmannIndexOut(BaseModel):
     """GET /api/v1/surface/brodmann — все поля Бродмана (тяжёлый ассет)."""
 
     version: str
-    areas: Dict[str, BrodmannAreaOut]
+    areas: dict[str, BrodmannAreaOut]
 
 
 class BrodmannLabelsOut(BaseModel):
     """GET /api/v1/brodmann-labels — только имена меток (лёгкий ответ для UI)."""
 
-    brodmann_areas: List[str]
+    brodmann_areas: list[str]
     count: int
     version: str
 
@@ -293,7 +320,7 @@ class MriPlaneOut(BaseModel):
     """Плоскость срезов МРТ: ось наведения, диапазон значений и число срезов."""
 
     axis: str = Field(description="Ось MNI, по которой наводится срез (x/y/z)")
-    range_mm: List[float] = Field(description="Диапазон значений среза, мм")
+    range_mm: list[float] = Field(description="Диапазон значений среза, мм")
     count: int = Field(description="Число срезов на сетке тома")
 
 
@@ -311,11 +338,11 @@ class MriSlicesOut(BaseModel):
     version: str
     encoding: str = Field(description="Формат картинки среза (png-gray8-alpha)")
     spacing_mm: float
-    bounds: Dict[str, List[float]] = Field(description="Границы тома по осям MNI, мм")
-    intensity_window: List[float] = Field(
+    bounds: dict[str, list[float]] = Field(description="Границы тома по осям MNI, мм")
+    intensity_window: list[float] = Field(
         description="Окно яркости: перцентили внутри маски мозга, в единицах тома"
     )
-    planes: Dict[str, MriPlaneOut] = Field(description="Плоскости: axial/sagittal/coronal")
+    planes: dict[str, MriPlaneOut] = Field(description="Плоскости: axial/sagittal/coronal")
     slice_url: str
 
 
@@ -325,7 +352,7 @@ class ContourShapeOut(BaseModel):
     id: str = Field(description="Идентификатор метки: имя структуры атласа или поле (`BA17-lh`)")
     name: str = Field(description="Короткое имя метки как в атласе (без перевода)")
     label: str = Field(description="Подпись для UI (русская, где есть перевод)")
-    hulls: List[List[List[float]]] = Field(
+    hulls: list[list[list[float]]] = Field(
         description=(
             "Замкнутые полигоны [горизонталь_мм, вертикаль_мм] среза; "
             "дырки — отдельные полигоны, заливка по правилу even-odd"
@@ -348,8 +375,8 @@ class ContourSliceOut(BaseModel):
             "разметка объёма коры (метки PALS живут на поверхности, а не в объёме)"
         )
     )
-    structures: List[ContourShapeOut] = Field(default_factory=list)
-    areas: List[ContourShapeOut] = Field(default_factory=list)
+    structures: list[ContourShapeOut] = Field(default_factory=list)
+    areas: list[ContourShapeOut] = Field(default_factory=list)
 
 
 class ContoursRef(BaseModel):
@@ -370,8 +397,8 @@ class ContoursOut(BaseModel):
     simplify_mm: float = Field(description="Допуск упрощения контуров, мм")
     min_area_mm2: float = Field(description="Минимальная площадь метки на срезе, мм²")
     method: str
-    bounds: Dict[str, List[float]] = Field(description="Границы сетки по осям MNI, мм")
-    planes: Dict[str, MriPlaneOut] = Field(description="Плоскости: axial/sagittal/coronal")
+    bounds: dict[str, list[float]] = Field(description="Границы сетки по осям MNI, мм")
+    planes: dict[str, MriPlaneOut] = Field(description="Плоскости: axial/sagittal/coronal")
     n_structures: int = Field(description="Меток анатомических структур в атласе")
     n_areas: int = Field(description="Полей Бродмана в атласе")
     url: str
@@ -389,11 +416,11 @@ class SpectrumBandOut(BaseModel):
     name: str = Field(description="Ключ диапазона из `freq_bands` (delta…gamma)")
     fmin: float
     fmax: float
-    power_uv2: Optional[float] = Field(
+    power_uv2: float | None = Field(
         default=None,
         description="Средняя мощность в диапазоне, мкВ²/Гц; None — частоты не попали в полосу фильтра",
     )
-    topomap_url: Optional[str] = Field(
+    topomap_url: str | None = Field(
         default=None, description="URL топокарты диапазона (PNG, ETag); None — не построена"
     )
 
@@ -407,26 +434,26 @@ class SpectrumResult(BaseModel):
     """
 
     recording_id: str
-    channels: List[str] = Field(description="Каналы, попавшие в расчёт (порядок монтажа)")
-    missed_channels: List[str] = Field(
+    channels: list[str] = Field(description="Каналы, попавшие в расчёт (порядок монтажа)")
+    missed_channels: list[str] = Field(
         default_factory=list, description="Каналы без позиции в монтаже — в топокарту не входят"
     )
     sfreq: float
     epoch_length_ms: float
     n_epochs: int = Field(description="Сколько эпох попало в PSD")
     n_fft: int = Field(description="Длина окна Welch, отсчётов")
-    filter_band_hz: Optional[List[float]] = Field(
+    filter_band_hz: list[float] | None = Field(
         default=None, description="Полоса фильтра, на которой считался спектр; None — без фильтра"
     )
-    notch_hz: Optional[float] = None
+    notch_hz: float | None = None
     reject_threshold_uv: float = Field(
         default=150.0, description="Порог reject эпох: входит в URL/ETag топокарты"
     )
-    freqs: List[float] = Field(description="Частоты PSD, Гц")
-    psd_mean_uv2: List[float] = Field(description="PSD, усреднённый по каналам, мкВ²/Гц")
-    bands: List[SpectrumBandOut] = Field(default_factory=list)
+    freqs: list[float] = Field(description="Частоты PSD, Гц")
+    psd_mean_uv2: list[float] = Field(description="PSD, усреднённый по каналам, мкВ²/Гц")
+    bands: list[SpectrumBandOut] = Field(default_factory=list)
     topomap_version: str = Field(description="Версия топокарт (в URL — против «залипания» кэша)")
-    warnings: List[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = 0.0
 
 
@@ -442,15 +469,15 @@ class DipoleScanPointOut(BaseModel):
 
     epoch_index: int
     time_ms: float = Field(description="Время пика GFP внутри эпохи, мс")
-    head_coords: List[float] = Field(description="Позиция в системе координат головы, мм")
-    mni_coords: Optional[List[float]] = Field(
+    head_coords: list[float] = Field(description="Позиция в системе координат головы, мм")
+    mni_coords: list[float] | None = Field(
         default=None, description="MNI (мм); None — fsaverage недоступен, точка не наводится"
     )
-    moment: List[float] = Field(description="Единичный вектор момента диполя (направление)")
+    moment: list[float] = Field(description="Единичный вектор момента диполя (направление)")
     amplitude_nam: float = Field(description="Амплитуда момента, нА·м")
     gof: float = Field(description="Goodness of fit, 0..1")
-    brodmann_area: Optional[str] = Field(default=None, description="Поле Бродмана, например BA17-lh")
-    anatomical_structure: Optional[str] = Field(
+    brodmann_area: str | None = Field(default=None, description="Поле Бродмана, например BA17-lh")
+    anatomical_structure: str | None = Field(
         default=None,
         description=(
             "Анатомическая структура по MNI-координате (aparc+aseg — тот же атлас, "
@@ -464,17 +491,17 @@ class DipoleScanResult(BaseModel):
 
     recording_id: str
     method: str = Field(description="Метод расчёта: `fast_grid` — перебор сетки, сферическая модель")
-    channels: List[str]
+    channels: list[str]
     sfreq: float
     epoch_length_ms: float
     reject_threshold_uv: float
-    filter_band_hz: Optional[List[float]] = None
-    notch_hz: Optional[float] = None
+    filter_band_hz: list[float] | None = None
+    notch_hz: float | None = None
     n_epochs_total: int = Field(description="Сколько эпох нарезано (включая отброшенные)")
     n_epochs_used: int = Field(description="Сколько эпох прошло reject-фильтр")
     grid_mm: float = Field(description="Шаг объёмной сетки поиска, мм")
-    points: List[DipoleScanPointOut] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
+    points: list[DipoleScanPointOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = 0.0
 
 
@@ -489,24 +516,32 @@ class SpectrogramResult(BaseModel):
 
     recording_id: str
     channel: str = Field(description="Канал, по которому посчитана спектрограмма")
-    channels: List[str] = Field(default_factory=list, description="Каналы записи, попавшие в расчёт")
+    channels: list[str] = Field(default_factory=list, description="Каналы записи, попавшие в расчёт")
     sfreq: float
     duration_sec: float = Field(description="Длительность записи, с")
     window_ms: float = Field(description="Длина окна STFT, мс")
     overlap_pct: float = Field(description="Перекрытие окон, %")
     fmax_hz: float = Field(description="Верхняя частота сетки, Гц")
     n_fft: int = Field(description="Длина окна FFT, отсчётов")
-    filter_band_hz: Optional[List[float]] = Field(
+    filter_band_hz: list[float] | None = Field(
         default=None, description="Полоса фильтра, на которой считалась спектрограмма; None — без фильтра"
     )
-    notch_hz: Optional[float] = None
-    freqs: List[float] = Field(description="Частоты сетки (строки), Гц")
-    times: List[float] = Field(description="Времена центров окон (столбцы), с")
+    notch_hz: float | None = None
+    freqs: list[float] = Field(description="Частоты сетки (строки), Гц")
+    times: list[float] = Field(description="Времена центров окон (столбцы), с")
+    reference: str = Field(
+        default="average",
+        description="Ссылка, на которой считалась спектрограмма (нужна ленивому пересчёту сетки, A11)",
+    )
+    reference_channels: list[str] = Field(
+        default_factory=list,
+        description="Каналы своей ссылки; пусто — средняя по каналам",
+    )
     db_min: float = Field(description="Пол шкалы, дБ")
     db_max: float = Field(description="Потолок шкалы, дБ")
     grid_url: str = Field(description="URL бинарной сетки (float32, frequency-major)")
     grid_version: str = Field(description="Отпечаток расчёта: входит в URL/ETag сетки")
-    warnings: List[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = 0.0
 
 
@@ -525,10 +560,25 @@ class AnalyzeResponse(BaseModel):
     n_epochs_dropped: int = Field(default=0, description="Отброшено reject-фильтром")
     n_artifacts: int
     artifact_types: ArtifactTypes
-    frequency_powers: Dict[str, float]
+    frequency_powers: dict[str, float]
     surface: SurfaceRef
-    dipoles: List[DipoleFit]
-    best_fit_dipoles: List[BestFitDipole]
+    dipoles: list[DipoleFit]
+    best_fit_dipoles: list[BestFitDipole]
+    epochs: list[EpochSummary] = Field(
+        default_factory=list,
+        description=(
+            "Все нарезанные эпохи (включая отброшенные) — источник строк таблицы `epochs` "
+            "и связи `dipoles.epoch_id` в БД (F21)"
+        ),
+    )
+    n_dipole_fit: int = Field(default=0, description="Сколько эпох дало хотя бы один диполь (F18)")
+    n_dipole_errors: int = Field(default=0, description="Сколько эпох точного фитинга упало (F18)")
+    dipole_error_samples: list[str] = Field(
+        default_factory=list, description="Первые тексты ошибок фитинга (до 5): счётчик без текста не помогает"
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Предупреждения пайплайна: клиент обязан показать их пользователю"
+    )
     results_file: str
     pipeline: PipelineInfo
 
@@ -539,7 +589,7 @@ class JobCreated(BaseModel):
     job_id: str
     status: JobState
     poll_url: str
-    result_url: Optional[str] = None
+    result_url: str | None = None
 
 
 class JobStatus(BaseModel):
@@ -553,14 +603,14 @@ class JobStatus(BaseModel):
     message: str = ""
     epochs_done: int = Field(default=0, description="Сколько эпох уже обработано (детальный прогресс)")
     epochs_total: int = Field(default=0, description="Сколько эпох в текущем этапе (0 — этап без эпох)")
-    filename: Optional[str] = None
-    session_id: Optional[str] = None
+    filename: str | None = None
+    session_id: str | None = None
     created_at: datetime
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    elapsed_sec: Optional[float] = None
-    error: Optional[str] = None
-    result_url: Optional[str] = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    elapsed_sec: float | None = None
+    error: str | None = None
+    result_url: str | None = None
 
 
 class ArtifactThresholds(BaseModel):
@@ -586,7 +636,7 @@ class MetaResponse(BaseModel):
     numpy_version: str
     scipy_version: str
     sqlalchemy_version: str
-    trimesh_version: Optional[str] = None
+    trimesh_version: str | None = None
     subjects_dir: str
     fsaverage_trans: str
     upload_dir: str
@@ -595,10 +645,10 @@ class MetaResponse(BaseModel):
     database_backend: str
     surface_version: str
     surface_url: str
-    standard_channels: List[str]
-    epoch_lengths_ms: List[float]
-    freq_bands: Dict[str, List[float]]
-    signal_levels: List[int] = Field(
+    standard_channels: list[str]
+    epoch_lengths_ms: list[float]
+    freq_bands: dict[str, list[float]]
+    signal_levels: list[int] = Field(
         default_factory=list, description="Уровни пирамиды сигналов для вьюера (×1…×16)"
     )
     signal_base_points: int = Field(
@@ -607,8 +657,18 @@ class MetaResponse(BaseModel):
     artifact_thresholds: ArtifactThresholds
     dipole_fit_decim: int
     dipole_fit_max_epochs: int
+    dipole_fit_n_jobs: int = Field(description="Потоков на эпоху в точном фитинге (F19)")
+    dipole_fit_sec_per_point: float = Field(
+        description="Оценка времени одной точки траектории, с — подсказка «сколько ждать» до запуска",
+    )
+    dipole_fit_experimental: bool = Field(
+        description=(
+            "Точный фитинг помечен экспериментальным: дефолты (все эпохи, decim=5) "
+            "означают часы счёта, поэтому синхронный /analyze для него не рекомендуется"
+        ),
+    )
     max_concurrent_jobs: int
-    cors_origins: List[str]
+    cors_origins: list[str]
     mri_slices: MriSliceRef = Field(
         description="Срезы МРТ (T1) для проекций: версия, базовый URL, шаг сетки"
     )

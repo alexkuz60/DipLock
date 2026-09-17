@@ -9,21 +9,23 @@
 ``docs/rules/api-jobs.md``): молча зажимать значения нельзя, пользователь
 должен видеть, что именно не так.
 """
-from typing import Any, List, Mapping, Optional, Tuple
+from collections.abc import Mapping
+from typing import Any
 
 from fastapi import HTTPException
 
 from app.core.config import settings
+from app.schemas.analysis import PreprocessStage
 from app.services.dipole_scanner import DipoleScanParams
 from app.services.preprocess import PreprocessParams
+from app.services.spectral import SpectrumParams
 from app.services.spectrogram import SpectrogramParams
 from app.services.spectrogram import validate_params as _validate_spectrogram_params
-from app.services.spectral import SpectrumParams
 
 
 def parse_filter_band(
-    band_min: Optional[float], band_max: Optional[float],
-) -> Optional[Tuple[float, float]]:
+    band_min: float | None, band_max: float | None,
+) -> tuple[float, float] | None:
     """Полоса фильтра из формы: пара значений либо «без фильтра».
 
     Односторонняя полоса — ошибка: молча догадываться о второй границе нельзя,
@@ -41,7 +43,7 @@ def parse_filter_band(
     return (band_min, band_max)
 
 
-def parse_reference_channels(raw: Optional[str]) -> Optional[List[str]]:
+def parse_reference_channels(raw: str | None) -> list[str] | None:
     """Разбирает список каналов референса из формы (``F3,F4`` → ``['F3','F4']``)."""
     if not raw:
         return None
@@ -59,7 +61,7 @@ def require_epoch_length(epoch_length_ms: float) -> None:
 
 
 def validate_analysis_request(
-    epoch_length_ms: float, freq_band: str, single_freq: Optional[float],
+    epoch_length_ms: float, freq_band: str, single_freq: float | None,
 ) -> None:
     """Проверка параметров файлового анализа (``/analyze`` и ``/jobs``)."""
     require_epoch_length(epoch_length_ms)
@@ -74,12 +76,12 @@ def validate_analysis_request(
 
 def preprocess_params(
     *,
-    stage: str,
-    band_min: Optional[float],
-    band_max: Optional[float],
-    notch_hz: Optional[float],
+    stage: PreprocessStage,
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
     reference: str,
-    reference_channels: Optional[str],
+    reference_channels: str | None,
     z_threshold: float,
     pp_threshold_uv: float,
     flat_line_uv: float,
@@ -110,11 +112,11 @@ def preprocess_params(
 
 def spectrum_params(
     *,
-    band_min: Optional[float],
-    band_max: Optional[float],
-    notch_hz: Optional[float],
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
     reference: str,
-    reference_channels: Optional[str],
+    reference_channels: str | None,
     epoch_length_ms: float,
     reject_threshold_uv: float,
 ) -> SpectrumParams:
@@ -134,11 +136,11 @@ def spectrum_params(
 def spectrogram_params(
     *,
     channel: str,
-    band_min: Optional[float],
-    band_max: Optional[float],
-    notch_hz: Optional[float],
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
     reference: str,
-    reference_channels: Optional[str],
+    reference_channels: str | None,
     window_ms: float,
     overlap_pct: float,
     fmax_hz: float,
@@ -157,7 +159,7 @@ def spectrogram_params(
     try:
         _validate_spectrogram_params(params, settings)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return params
 
 
@@ -165,15 +167,20 @@ def stored_spectrogram_params(result: Mapping[str, Any]) -> SpectrogramParams:
     """Параметры сетки спектрограммы из **результата задачи** (``grid.bin``).
 
     Значения берутся у того расчёта, который показан на экране: сетка — это его
-    данные, а не «текущие настройки панели». Референс в результат задачи не
-    пишется, поэтому подставляется значение по умолчанию — известное расхождение
-    при ``reference != "average"`` (находка A11 в ``audit-2026-09.md``).
+    данные, а не «текущие настройки панели». Референс тоже пишется в результат
+    (``reference``/``reference_channels``, A11): подставлять «average» на слово
+    нельзя — иначе ленивый пересчёт посчитал бы сетку другой ссылкой, а ETag
+    (отпечаток параметров) остался бы прежним. Fallback — для результатов,
+    записанных до правки (`results_dir/jobs/*.json`).
     """
     band = result.get("filter_band_hz")
+    reference_channels = result.get("reference_channels") or None
     return SpectrogramParams(
         channel=str(result["channel"]),
         filter_band=(band[0], band[1]) if band and len(band) == 2 else None,
         notch_hz=result.get("notch_hz"),
+        reference=str(result.get("reference") or "average"),
+        reference_channels=list(reference_channels) if reference_channels else None,
         window_ms=float(result["window_ms"]),
         overlap_pct=float(result["overlap_pct"]),
         fmax_hz=float(result["fmax_hz"]),
@@ -182,11 +189,11 @@ def stored_spectrogram_params(result: Mapping[str, Any]) -> SpectrogramParams:
 
 def dipole_scan_params(
     *,
-    band_min: Optional[float],
-    band_max: Optional[float],
-    notch_hz: Optional[float],
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
     reference: str,
-    reference_channels: Optional[str],
+    reference_channels: str | None,
     epoch_length_ms: float,
     reject_threshold_uv: float,
     grid_mm: float,

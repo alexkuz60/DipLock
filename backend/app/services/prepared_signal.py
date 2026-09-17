@@ -35,7 +35,6 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 import mne
 
@@ -57,12 +56,12 @@ class _SignalKey:
     """
 
     recording_id: str
-    units: Optional[str]
-    channels: Tuple[str, ...]
-    reference: Tuple[str, ...]
-    l_freq: Optional[float]
-    h_freq: Optional[float]
-    notch_hz: Optional[float]
+    units: str | None
+    channels: tuple[str, ...]
+    reference: tuple[str, ...]
+    l_freq: float | None
+    h_freq: float | None
+    notch_hz: float | None
 
     def label(self) -> str:
         """Человекочитаемое описание набора параметров для логов."""
@@ -86,7 +85,11 @@ class _SignalKey:
             ",".join(self.reference) or "average",
             str(self.l_freq), str(self.h_freq), str(self.notch_hz),
         ]
-        return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:12]
+        # sha1 здесь — не криптография, а короткий ключ RAM-кэша (12 hex):
+        # коллизия стоила бы лишь лишнего попадания/промаха, не подделки данных.
+        return hashlib.sha1(  # noqa: S324 — ключ кэша, не защита данных
+            "|".join(parts).encode("utf-8"),
+        ).hexdigest()[:12]
 
 
 # LRU подготовленных сигналов и счётчики попаданий (диагностика: «стало ли
@@ -96,7 +99,7 @@ _LOCK = threading.RLock()
 # Локи построения по ключу: два потока job-очереди (MAX_CONCURRENT_JOBS=2) не
 # должны читать один и тот же EDF дважды, но и не должны сериализоваться на
 # разных записях.
-_BUILD_LOCKS: Dict[_SignalKey, threading.Lock] = {}
+_BUILD_LOCKS: dict[_SignalKey, threading.Lock] = {}
 _STATS = {"hits": 0, "misses": 0, "evictions": 0}
 
 
@@ -108,10 +111,10 @@ def _limit(cfg: Settings) -> int:
 def _key(
     recording: Recording,
     cfg: Settings,
-    l_freq: Optional[float],
-    h_freq: Optional[float],
-    notch_hz: Optional[float],
-    reference_channels: Optional[List[str]],
+    l_freq: float | None,
+    h_freq: float | None,
+    notch_hz: float | None,
+    reference_channels: list[str] | None,
 ) -> _SignalKey:
     """Собирает ключ кэша из всех параметров, влияющих на сигнал."""
     return _SignalKey(
@@ -145,10 +148,10 @@ def _evict(limit: int) -> None:
 def _load(
     recording: Recording,
     cfg: Settings,
-    l_freq: Optional[float],
-    h_freq: Optional[float],
-    notch_hz: Optional[float],
-    reference_channels: Optional[List[str]],
+    l_freq: float | None,
+    h_freq: float | None,
+    notch_hz: float | None,
+    reference_channels: list[str] | None,
 ) -> mne.io.BaseRaw:
     """Читает EDF и применяет предподготовку (промах кэша или кэш выключен)."""
     return load_edf(
@@ -162,7 +165,7 @@ def _load(
     )
 
 
-def _file_size(path: str) -> Optional[int]:
+def _file_size(path: str) -> int | None:
     """Размер файла записи в байтах (``None`` — файл недоступен: это не ошибка шага)."""
     try:
         return os.path.getsize(path)
@@ -173,11 +176,11 @@ def _file_size(path: str) -> Optional[int]:
 def prepared_raw(
     recording: Recording,
     cfg: Settings,
-    l_freq: Optional[float] = None,
-    h_freq: Optional[float] = None,
-    notch_hz: Optional[float] = None,
-    reference_channels: Optional[List[str]] = None,
-    pipeline: Optional[str] = None,
+    l_freq: float | None = None,
+    h_freq: float | None = None,
+    notch_hz: float | None = None,
+    reference_channels: list[str] | None = None,
+    pipeline: str | None = None,
 ) -> mne.io.BaseRaw:
     """Подготовленный сигнал записи: ``load_edf`` с кэшем по параметрам расчёта.
 
@@ -255,7 +258,7 @@ def prepared_raw(
         return raw
 
 
-def prepared_cache_stats(cfg: Optional[Settings] = None) -> Dict[str, int]:
+def prepared_cache_stats(cfg: Settings | None = None) -> dict[str, int]:
     """Счётчики кэша: попадания, промахи, убранные из памяти наборы и их число сейчас."""
     with _LOCK:
         stats = dict(_STATS)
@@ -265,7 +268,7 @@ def prepared_cache_stats(cfg: Optional[Settings] = None) -> Dict[str, int]:
     return stats
 
 
-def clear_prepared_cache(recording_id: Optional[str] = None) -> None:
+def clear_prepared_cache(recording_id: str | None = None) -> None:
     """Сбрасывает кэш: одну запись или весь.
 
     Вызывается при вытеснении записи из реестра (``_drop_signal_cache``): кэш

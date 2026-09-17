@@ -44,8 +44,9 @@ import hashlib
 import logging
 import struct
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -65,13 +66,13 @@ _HEADER_LEN_FMT = "<I"
 # Окно STFT по умолчанию: 500 мс — компромисс между временным разрешением
 # (полсекунды видно глазами) и частотным (2 Гц — α от θ отличим).
 SPECTROGRAM_WINDOW_MS = 500.0
-SPECTROGRAM_WINDOW_RANGE_MS: Tuple[float, float] = (64.0, 4000.0)
+SPECTROGRAM_WINDOW_RANGE_MS: tuple[float, float] = (64.0, 4000.0)
 SPECTROGRAM_OVERLAP_PCT = 75.0
-SPECTROGRAM_OVERLAP_RANGE_PCT: Tuple[float, float] = (0.0, 95.0)
+SPECTROGRAM_OVERLAP_RANGE_PCT: tuple[float, float] = (0.0, 95.0)
 # Верхняя частота сетки по умолчанию: 40 Гц — верхняя граница ЭЭГ-ритмов.
 # Граница ввода — 120 Гц: выше начинается область, которой в ЭЭГ нет.
 SPECTROGRAM_FMAX_HZ = 40.0
-SPECTROGRAM_FMAX_RANGE_HZ: Tuple[float, float] = (1.0, 120.0)
+SPECTROGRAM_FMAX_RANGE_HZ: tuple[float, float] = (1.0, 120.0)
 
 # Пол шкалы дБ относительно потолка (шум ниже пола в палитру не попадает)
 SPECTROGRAM_DB_FLOOR = 60.0
@@ -94,10 +95,10 @@ class SpectrogramParams:
     """Параметры расчёта спектрограммы (плоская проекция формы запроса)."""
 
     channel: str = ""
-    filter_band: Optional[Tuple[float, float]] = None
-    notch_hz: Optional[float] = None
+    filter_band: tuple[float, float] | None = None
+    notch_hz: float | None = None
     reference: str = "average"
-    reference_channels: Optional[List[str]] = None
+    reference_channels: list[str] | None = None
     window_ms: float = SPECTROGRAM_WINDOW_MS
     overlap_pct: float = SPECTROGRAM_OVERLAP_PCT
     fmax_hz: float = SPECTROGRAM_FMAX_HZ
@@ -142,6 +143,9 @@ def spectrogram_signature(
         f"overlap={params.overlap_pct:g}",
         f"fmax={params.fmax_hz:g}",
         f"ref={params.reference}",
+        # Каналы своей ссылки обязаны входить в отпечаток (A11): иначе сетка,
+        # посчитанная со ссылкой «F3,F4», отдавалась бы как сетка другой ссылки.
+        f"ref_ch={','.join(params.reference_channels or [])}",
         ",".join(channels),
     )).encode("utf-8"))
     return digest.hexdigest()[:16]
@@ -157,7 +161,7 @@ def grid_url(cfg: Settings, recording_id: str, job_id: str) -> str:
     return f"{cfg.api_prefix}/recordings/{recording_id}/spectrogram/{job_id}/grid.bin"
 
 
-def clear_spectrogram_cache(cfg: Settings, recording_id: Optional[str] = None) -> None:
+def clear_spectrogram_cache(cfg: Settings, recording_id: str | None = None) -> None:
     """Удаляет дисковый кэш спектрограмм: одну запись или весь (тесты и реестр)."""
     parts = ("spectrograms", recording_id) if recording_id else ("spectrograms",)
     cache_clear(cfg.cache_dir, *parts)
@@ -168,15 +172,15 @@ def stft_grid(
     sfreq: float,
     params: SpectrogramParams,
     progress: Any = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
     """STFT одного канала: ``(freqs, times, db, n_fft)``.
 
     Чистая функция (без MNE и диска) — её и проверяет тест сервиса: тон 10 Гц
     обязан дать максимум на 10 Гц, а уровень — расти вместе с амплитудой.
     """
     report = progress or (lambda *args, **kwargs: None)
-    n_times = int(data_uv.shape[0])
-    n_per_seg = max(8, int(round(params.window_ms / 1000.0 * sfreq)))
+    n_times = data_uv.shape[0]
+    n_per_seg = max(8, round(params.window_ms / 1000.0 * sfreq))
     if n_per_seg > n_times:
         raise SpectrogramError(
             f"Запись короче окна STFT ({n_times} отсчётов < {n_per_seg}): "
@@ -188,7 +192,7 @@ def stft_grid(
     while n_fft < n_per_seg:
         n_fft *= 2
 
-    hop = max(1, int(round(n_per_seg * (1.0 - params.overlap_pct / 100.0))))
+    hop = max(1, round(n_per_seg * (1.0 - params.overlap_pct / 100.0)))
     starts = np.arange(0, n_times - n_per_seg + 1, hop, dtype=np.int64)
     if starts.size == 0:
         starts = np.array([0], dtype=np.int64)
@@ -228,7 +232,7 @@ def stft_grid(
     return freqs[keep], times, np.asarray(db[:, keep].T), n_fft
 
 
-def _levels(db: np.ndarray) -> Tuple[float, float]:
+def _levels(db: np.ndarray) -> tuple[float, float]:
     """Потолок и пол шкалы дБ: процентиль, а не максимум (выброс не «съедает» картинку)."""
     finite = db[np.isfinite(db)]
     if finite.size == 0:
@@ -248,7 +252,7 @@ def build_grid_blob(header: SpectrogramGridHeader, db: np.ndarray) -> bytes:
     return MAGIC + struct.pack(_HEADER_LEN_FMT, len(raw)) + raw + payload
 
 
-def read_grid_blob(data: bytes) -> Tuple[SpectrogramGridHeader, np.ndarray]:
+def read_grid_blob(data: bytes) -> tuple[SpectrogramGridHeader, np.ndarray]:
     """Разбирает контейнер сетки обратно (нужно тестам и ленивому пересчёту)."""
     if len(data) < 8 or data[:4] != MAGIC:
         raise SpectrogramError("Неожиданный формат сетки спектрограммы")
@@ -268,15 +272,15 @@ def read_grid_blob(data: bytes) -> Tuple[SpectrogramGridHeader, np.ndarray]:
 
 def _prepare_signal(
     recording: Recording, cfg: Settings, params: SpectrogramParams,
-) -> Tuple[np.ndarray, float, List[str]]:
+) -> tuple[np.ndarray, float, list[str]]:
     """Читает запись и отдаёт данные одного канала в мкВ: ``(data, sfreq, channels)``.
 
     Сигнал берётся из кэша подготовленного сигнала (A4): смена канала или окна
     STFT — параметры просмотра, и они не должны заставлять перечитывать EDF,
     если параметры фильтра те же.
     """
-    l_freq: Optional[float] = None
-    h_freq: Optional[float] = None
+    l_freq: float | None = None
+    h_freq: float | None = None
     if params.filter_band is not None:
         l_freq, h_freq = params.filter_band
 
@@ -309,7 +313,7 @@ def compute_spectrogram(
     cfg: Settings,
     params: SpectrogramParams,
     progress: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Считает сетку STFT, кладёт её на диск и отдаёт dict под ``SpectrogramResult``.
 
     Воркер не зависит от схемы ответа (её валидирует API), поэтому результат —
@@ -359,7 +363,7 @@ def compute_spectrogram(
         entry.bytes_out = len(blob)
         _write_grid(cfg, recording.recording_id, signature, blob)
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     if times.size and times[-1] < duration_sec - 1e-6:
         # Хвост записи короче окна: последние окна в сетку не попали
         warnings.append(
@@ -385,6 +389,11 @@ def compute_spectrogram(
         "n_fft": n_fft,
         "filter_band_hz": list(params.filter_band) if params.filter_band else None,
         "notch_hz": params.notch_hz,
+        # Референс — параметр расчёта, а не просмотра (A11): без него ленивый
+        # пересчёт сетки (cached_grid) подставил бы «average» и посчитал бы
+        # другую спектрограмму под тем же ETag.
+        "reference": params.reference,
+        "reference_channels": list(params.reference_channels or []),
         "freqs": [float(value) for value in freqs],
         "times": [float(value) for value in times],
         "db_min": round(db_min, 3),
@@ -401,7 +410,7 @@ def _write_grid(cfg: Settings, recording_id: str, signature: str, blob: bytes) -
     cache_write(grid_path(cfg, recording_id, signature), blob, label="Кэш спектрограммы")
 
 
-def cached_grid(recording: Recording, cfg: Settings, params: SpectrogramParams) -> Tuple[bytes, str]:
+def cached_grid(recording: Recording, cfg: Settings, params: SpectrogramParams) -> tuple[bytes, str]:
     """Сетка + версия из дискового кэша; при промахе считается заново.
 
     Ленивый пересчёт — как у топокарт (3.4) и пирамиды сигналов (2.5): браузер

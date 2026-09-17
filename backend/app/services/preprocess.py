@@ -24,7 +24,7 @@
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from app.core.config import Settings
 from app.schemas.analysis import ArtifactZoneOut, PreprocessStage
@@ -52,10 +52,10 @@ class PreprocessParams:
 
     stage: PreprocessStage = "filter"
     # Стадия `filter`
-    filter_band: Optional[Tuple[float, float]] = None
-    notch_hz: Optional[float] = None
+    filter_band: tuple[float, float] | None = None
+    notch_hz: float | None = None
     reference: str = "average"
-    reference_channels: Optional[List[str]] = None
+    reference_channels: list[str] | None = None
     # Стадия `artifacts`
     z_threshold: float = 5.0
     pp_threshold_uv: float = 100.0
@@ -77,8 +77,8 @@ def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) 
     Сигнал приходит из кэша подготовленного сигнала (A4): стадии `artifacts` и
     `epochs` с теми же параметрами не читают EDF заново.
     """
-    l_freq: Optional[float] = None
-    h_freq: Optional[float] = None
+    l_freq: float | None = None
+    h_freq: float | None = None
     if params.filter_band is not None:
         l_freq, h_freq = params.filter_band
 
@@ -95,13 +95,13 @@ def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) 
         )
     except ValueError as exc:
         raise PreprocessError(str(exc)) from exc
-    except Exception as exc:  # noqa: BLE001 — отдаём UI понятный текст, не traceback
+    except Exception as exc:
         raise PreprocessError(f"Не удалось прочитать EDF: {exc}") from exc
 
 
 def _detect(
     raw: Any, cfg: Settings, params: PreprocessParams, progress: Any,
-) -> Tuple[Any, Dict[str, Any]]:
+) -> tuple[Any, dict[str, Any]]:
     """Детекция артефактов с порогами из параметров стадии.
 
     ``flat_line_*`` в сервисе берутся из настроек, поэтому передаём копию
@@ -120,7 +120,7 @@ def _detect(
     )
 
 
-def _zones(stats: Dict[str, Any]) -> List[ArtifactZoneOut]:
+def _zones(stats: dict[str, Any]) -> list[ArtifactZoneOut]:
     """Зоны артефактов из статистики детектора (для слоёв вьюера)."""
     return [ArtifactZoneOut(**zone) for zone in stats.get("zones", [])]
 
@@ -132,7 +132,7 @@ def _params_note(params: PreprocessParams, extra: str = "") -> str:
     1.4 с» не отвечает, чем именно этот запуск отличался от соседнего
     (`docs/data_map.md` §9, поле ``note``).
     """
-    parts: List[str] = []
+    parts: list[str] = []
     if params.filter_band is not None:
         parts.append(f"band={params.filter_band[0]:g}-{params.filter_band[1]:g}")
     if params.notch_hz:
@@ -160,7 +160,7 @@ def run_preprocess(
     cfg: Settings,
     params: PreprocessParams,
     progress: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Считает одну стадию предподготовки; результат — ``PreprocessResult``.
 
     Возвращает dict (его валидирует ``PreprocessResult`` в API): так воркер не
@@ -169,7 +169,7 @@ def run_preprocess(
     started = time.perf_counter()
     progress("load_edf", message="Чтение EDF, монтаж 10-20")
 
-    def _journal(epochs: Optional[int] = None, extra: str = "") -> None:
+    def _journal(epochs: int | None = None, extra: str = "") -> None:
         """Одна строка журнала на стадию (шаг целиком, не «эпоха за эпохой»)."""
         journal.record(
             f"preprocess-{params.stage}", params.stage,
@@ -179,9 +179,9 @@ def run_preprocess(
         )
 
     raw = _prepare_raw(recording, cfg, params)
-    warnings: List[str] = []
+    warnings: list[str] = []
 
-    base: Dict[str, Any] = {
+    base: dict[str, Any] = {
         "recording_id": recording.recording_id,
         "stage": params.stage,
         "channels": list(raw.ch_names),

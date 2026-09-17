@@ -50,6 +50,9 @@ export const metaFixture: MetaResponse = {
   },
   dipole_fit_decim: 5,
   dipole_fit_max_epochs: 0,
+  dipole_fit_n_jobs: 1,
+  dipole_fit_sec_per_point: 5.4,
+  dipole_fit_experimental: true,
   max_concurrent_jobs: 2,
   cors_origins: ['http://localhost:5173'],
   mri_slices: {
@@ -392,6 +395,8 @@ export function spectrogramResultFixture(
     n_fft: 256,
     filter_band_hz: [1, 40],
     notch_hz: null,
+    reference: 'average',
+    reference_channels: [],
     freqs: [0, 10, 20],
     times: [0.5, 0.75, 1, 1.25],
     db_min: -60,

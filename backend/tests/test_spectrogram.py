@@ -13,6 +13,7 @@ import time
 import numpy as np
 import pytest
 
+from app.api.params import stored_spectrogram_params
 from app.core.config import settings
 from app.schemas.analysis import SpectrogramGridHeader
 from app.services.recordings import recording_registry
@@ -156,7 +157,7 @@ def test_short_recording_and_too_many_frames_are_reported():
         # 120 с на 250 Гц с окном 64 мс и перекрытием 95 %: шаг — 1 отсчёт,
         # то есть ~30 000 окон, а предохранитель стоит на 20 000.
         stft_grid(
-            np.zeros(int(120 * 250)), 250.0,
+            np.zeros(120 * 250), 250.0,
             SpectrogramParams(channel="Fp1", window_ms=64.0, overlap_pct=95.0),
         )
 
@@ -187,6 +188,13 @@ def test_grid_blob_reads_back_and_signature_follows_params():
         SpectrogramParams(channel="Fp1", window_ms=250.0, overlap_pct=75.0, fmax_hz=40.0),
         settings, channels,
     ), "окно входит в подпись: старый кэш не залипает"
+    assert same != spectrogram_signature(
+        SpectrogramParams(
+            channel="Fp1", window_ms=500.0, overlap_pct=75.0, fmax_hz=40.0,
+            reference="custom", reference_channels=["Fp1", "Fp2"],
+        ),
+        settings, channels,
+    ), "каналы своей ссылки входят в подпись (A11): сетка другой ссылки не отдаётся"
 
 
 def test_params_are_rejected_not_clamped():
@@ -226,6 +234,25 @@ def test_compute_spectrogram_writes_grid_cache(tmp_path):
     # Тон 10 Гц в своей строке выше среднего уровня сетки
     row = int(np.argmin(np.abs(np.asarray(result["freqs"]) - 10.0)))
     assert float(np.mean(values[row])) > float(np.mean(values)) + 10.0
+
+
+def test_compute_spectrogram_reports_reference(tmp_path):
+    """Результат несёт референс расчёта: ленивый пересчёт его не подменит (A11)."""
+    recording = _register(tmp_path, _tone_edf(tmp_path))
+    params = SpectrogramParams(
+        channel="Fp1", window_ms=500.0, overlap_pct=75.0, fmax_hz=40.0,
+        reference="custom", reference_channels=["Fp2"],
+    )
+
+    result = compute_spectrogram(recording, settings, params)
+
+    assert result["reference"] == "custom"
+    assert result["reference_channels"] == ["Fp2"]
+    # Круг «задача → grid.bin» без потерь: те же параметры и та же подпись
+    assert stored_spectrogram_params(result) == params
+    assert spectrogram_signature(
+        stored_spectrogram_params(result), settings, result["channels"],
+    ) == result["grid_version"]
 
 
 def test_spectrogram_job_flow(client, tmp_path):

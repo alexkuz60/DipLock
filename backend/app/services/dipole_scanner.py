@@ -40,9 +40,10 @@
 """
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any
 
 import mne
 import numpy as np
@@ -65,7 +66,7 @@ GRID_STEP_MM = 7.0
 
 # Сетка — шар вокруг центра мозга в системе координат головы, мм. Центр взят
 # чуть выше нуля: кора fsaverage лежит в диапазоне z ≈ 0…90 мм.
-GRID_CENTER_MM: Tuple[float, float, float] = (0.0, 0.0, 40.0)
+GRID_CENTER_MM: tuple[float, float, float] = (0.0, 0.0, 40.0)
 GRID_RADIUS_MM = 70.0
 
 # Диполь не ставится ближе 5 мм к электроду (как `min_dist` у `mne.fit_dipole`):
@@ -87,19 +88,19 @@ class DipoleScanError(ValueError):
 class DipoleScanParams:
     """Параметры быстрого расчёта диполей (плоская проекция формы запроса)."""
 
-    filter_band: Optional[Tuple[float, float]] = None
-    notch_hz: Optional[float] = None
+    filter_band: tuple[float, float] | None = None
+    notch_hz: float | None = None
     epoch_length_ms: float = 1000.0
     reject_threshold_uv: float = 150.0
     reference: str = "average"
-    reference_channels: Optional[List[str]] = None
+    reference_channels: list[str] | None = None
     grid_mm: float = GRID_STEP_MM
 
 
 @lru_cache(maxsize=8)
 def candidate_grid(
     step_mm: float = GRID_STEP_MM,
-    center_mm: Tuple[float, float, float] = GRID_CENTER_MM,
+    center_mm: tuple[float, float, float] = GRID_CENTER_MM,
     radius_mm: float = GRID_RADIUS_MM,
 ) -> np.ndarray:
     """Узлы объёмной сетки поиска в метрах: шар вокруг центра мозга.
@@ -119,7 +120,7 @@ def candidate_grid(
 
 def _leadfield(
     positions_m: np.ndarray, grid_m: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Свинцовое поле точечного диполя: ``G`` (канал × узел × 3) и расстояния.
 
     Φ_i = (m · (r_i − r_q)) / (4πσ |r_i − r_q|³). Домножение на 1/(4πσ) делает
@@ -137,7 +138,7 @@ def scan_point(
     data_v: np.ndarray,
     grid_m: np.ndarray,
     min_distance_m: float = MIN_SENSOR_DISTANCE_MM / 1000.0,
-) -> Tuple[np.ndarray, np.ndarray, float, float]:
+) -> tuple[np.ndarray, np.ndarray, float, float]:
     """Лучший диполь одного отсчёта: ``(позиция, единичный момент, |m|, GOF)``.
 
     Считает свинцовое поле, центрирует его по каналам (average reference),
@@ -183,7 +184,7 @@ def scan_point(
 
 
 @lru_cache(maxsize=1)
-def _mri_head_transform(trans_path: str) -> Optional[Any]:
+def _mri_head_transform(trans_path: str) -> Any | None:
     """Transform mri↔head из файла fsaverage (None — данных нет).
 
     Возвращается именно ``mne.Transform``: `head_to_mni` не принимает путь
@@ -198,7 +199,7 @@ def _mri_head_transform(trans_path: str) -> Optional[Any]:
 
 def _localize_point(
     position_m: np.ndarray, cfg: Settings,
-) -> Tuple[Optional[List[float]], Optional[str]]:
+) -> tuple[list[float] | None, str | None]:
     """MNI-координаты и поле Бродмана позиции; ``(None, None)`` — fsaverage нет.
 
     Ошибка локализации не отменяет расчёт: раздел покажет точку в системе
@@ -215,21 +216,21 @@ def _localize_point(
             subjects_dir=str(cfg.subjects_dir),
             verbose=False,
         )[0]
-    except Exception as exc:  # noqa: BLE001 — локализация не обязательна
+    except Exception as exc:
         logger.warning("MNI недоступно для точки %s: %s", position_m, exc)
         return None, None
 
-    area: Optional[str] = None
+    area: str | None = None
     try:
         from app.services.dipole_fitter import _find_ba, _get_ba_centers
 
         area = _find_ba(mni, _get_ba_centers(str(cfg.subjects_dir)))
-    except Exception as exc:  # noqa: BLE001 — атлас может отсутствовать
+    except Exception as exc:
         logger.info("Поле Бродмана не определено: %s", exc)
     return [float(value) for value in mni], area
 
 
-def _structure_of(cfg: Settings, mni_coords: Optional[List[float]]) -> Optional[str]:
+def _structure_of(cfg: Settings, mni_coords: list[float] | None) -> str | None:
     """Анатомическая структура по MNI-координате точки (``aparc+aseg``).
 
     Берётся тем же атласом, что и контуры срезов (`services/atlas_contours.py`),
@@ -246,7 +247,7 @@ def _structure_of(cfg: Settings, mni_coords: Optional[List[float]]) -> Optional[
         from app.services.atlas_contours import structure_at
 
         return structure_at(cfg, mni_coords)
-    except Exception as exc:  # noqa: BLE001 — атлас не обязателен для расчёта
+    except Exception as exc:
         logger.info("Структура по MNI не определена: %s", exc)
         return None
 
@@ -257,8 +258,8 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParam
     Сигнал — из кэша подготовленного сигнала (A4): повторный запуск с теми же
     параметрами фильтра и нарезки не читает EDF заново.
     """
-    l_freq: Optional[float] = None
-    h_freq: Optional[float] = None
+    l_freq: float | None = None
+    h_freq: float | None = None
     if params.filter_band is not None:
         l_freq, h_freq = params.filter_band
 
@@ -293,8 +294,8 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParam
 
 
 def _electrode_matrix(
-    channels: Sequence[str], positions: Dict[str, np.ndarray],
-) -> Tuple[List[str], np.ndarray, List[int]]:
+    channels: Sequence[str], positions: dict[str, np.ndarray],
+) -> tuple[list[str], np.ndarray, list[int]]:
     """Каналы с позициями, их координаты (м) и индексы в исходном порядке.
 
     Позиции электродов нужны для свинцового поля: канал без позиции в монтаже
@@ -316,7 +317,7 @@ def compute_dipole_scan(
     cfg: Settings,
     params: DipoleScanParams,
     progress: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Быстрый расчёт диполей по эпохам: одна точка на эпоху (пик GFP).
 
     Возвращает dict под схему ``DipoleScanResult`` (её валидирует API). Прогресс
@@ -342,7 +343,7 @@ def compute_dipole_scan(
     n_epochs = data.shape[0]
     grid_m = candidate_grid(params.grid_mm)
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     dropped = len(epochs.drop_log) - n_epochs
     if dropped:
         warnings.append(
@@ -360,7 +361,7 @@ def compute_dipole_scan(
     peak_index = np.argmax(gfp, axis=1)
     times = np.asarray(epochs.times, dtype=float)
 
-    points: List[Dict[str, Any]] = []
+    points: list[dict[str, Any]] = []
     mni_available = True
     # Меряем цикл двумя строками журнала: перебор сетки и локализация (head_to_mni
     # + структура атласа) — самая дорогая часть по замерам аудита (0.25–0.36 с на

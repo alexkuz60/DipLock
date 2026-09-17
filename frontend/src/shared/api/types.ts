@@ -39,6 +39,17 @@ export type BestFitDipole = {
   brodmann_area: string | null
 }
 
+/** Одна эпоха нарезки: окно, флаг отбраковки и мощности по диапазонам (F21) */
+export type EpochSummary = {
+  epoch_index: number
+  start_time_sec: number
+  duration_ms: number
+  /** Эпоха не прошла reject-фильтр (отброшена) */
+  has_artifact: boolean
+  /** Мощности по диапазонам, ключи вида `alpha_power` (пусто у отброшенных) */
+  band_powers: Record<string, number>
+}
+
 export type ArtifactTypes = {
   zscore_outlier: number
   peak_to_peak: number
@@ -230,6 +241,16 @@ export type AnalyzeResponse = {
   surface: SurfaceRef
   dipoles: DipoleFit[]
   best_fit_dipoles: BestFitDipole[]
+  /** Все нарезанные эпохи (включая отброшенные) — строки таблицы `epochs` в БД (F21) */
+  epochs: EpochSummary[]
+  /** Сколько эпох точного фитинга дало хотя бы один диполь (F18) */
+  n_dipole_fit: number
+  /** Сколько эпох точного фитинга упало: задача может быть успешной без диполей */
+  n_dipole_errors: number
+  /** Первые тексты ошибок фитинга (до 5) — по ним понятно, что чинить */
+  dipole_error_samples: string[]
+  /** Предупреждения пайплайна: UI обязан показать их, а не только статус задачи */
+  warnings: string[]
   results_file: string
   pipeline: PipelineInfo
 }
@@ -299,6 +320,10 @@ export type MetaResponse = {
   artifact_thresholds: ArtifactThresholds
   dipole_fit_decim: number
   dipole_fit_max_epochs: number
+  dipole_fit_n_jobs: number
+  dipole_fit_sec_per_point: number
+  /** Точный фитинг помечен экспериментальным: дефолты означают часы счёта */
+  dipole_fit_experimental: boolean
   max_concurrent_jobs: number
   cors_origins: string[]
   /** Срезы МРТ для проекций мозга: версия ассета, базовый URL, шаг сетки */
@@ -387,6 +412,10 @@ export type SpectrogramResult = {
   n_fft: number
   filter_band_hz: number[] | null
   notch_hz: number | null
+  /** Референс расчёта сетки: параметр расчёта, не просмотра (A11) */
+  reference: string
+  /** Каналы своей ссылки; пусто — средняя по каналам */
+  reference_channels: string[]
   /** Частоты сетки (строки), Гц */
   freqs: number[]
   /** Времена центров окон (столбцы), с */

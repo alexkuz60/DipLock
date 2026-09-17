@@ -61,6 +61,17 @@ def _fake_analysis_result(session_id: str = "session-test", filename: str = "rec
             "url": f"{_PREFIX}/surface",
             "brodmann_url": f"{_PREFIX}/surface/brodmann",
         },
+        "epochs": [
+            {
+                "epoch_index": 0, "start_time_sec": 0.0, "duration_ms": 2000.0,
+                "has_artifact": False,
+                "band_powers": {"delta_power": 1.0, "alpha_power": 2.0},
+            },
+            {
+                "epoch_index": 1, "start_time_sec": 2.0, "duration_ms": 2000.0,
+                "has_artifact": True, "band_powers": {},
+            },
+        ],
         "dipoles": [{
             "epoch_index": 0,
             "n_time_points": 1,
@@ -120,7 +131,7 @@ def isolated_io(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "results_dir", str(tmp_path / "results"))
     monkeypatch.setattr(settings, "cache_dir", str(tmp_path / "cache"))
 
-    async def _no_db(result):  # noqa: ARG001
+    async def _no_db(result):
         return None
 
     monkeypatch.setattr(analysis_pipeline, "save_analysis_to_db", _no_db)
@@ -167,7 +178,7 @@ def test_openapi_documents_response_schemas(client):
     spec = client.get("/openapi.json").json()
     schemas = spec["components"]["schemas"]
     for name in (
-        "AnalyzeResponse", "DipoleFit", "TrajectoryPoint", "BestFitDipole",
+        "AnalyzeResponse", "EpochSummary", "DipoleFit", "TrajectoryPoint", "BestFitDipole",
         "ArtifactTypes", "PipelineInfo", "SurfaceRef", "SurfaceOut",
         "BrodmannAreaOut", "BrodmannLabelsOut", "JobCreated", "JobStatus", "MetaResponse",
     ):
@@ -276,6 +287,9 @@ def test_analyze_returns_contract_and_cleans_upload(client, isolated_io, fake_pi
     assert body["surface"]["url"] == f"{_PREFIX}/surface"
     assert body["pipeline"]["app_version"] == settings.app_version
     assert body["best_fit_dipoles"][0]["brodmann_area"] == "BA17-lh"
+    # эпохи (включая отброшенные) доезжают до клиента и БД (F21)
+    assert [epoch["has_artifact"] for epoch in body["epochs"]] == [False, True]
+    assert body["epochs"][0]["band_powers"]["alpha_power"] == 2.0
     # траектория не дублируется в best_fit_dipoles (payload меньше)
     assert "trajectory" not in body["best_fit_dipoles"][0]
 
@@ -331,7 +345,7 @@ def test_job_unknown_ids_and_pending_result(client, isolated_io, fake_pipeline):
 def test_failed_job_reports_error_and_409_on_result(client, isolated_io, monkeypatch):
     """Ошибка пайплайна не роняет сервер: статус failed + текст ошибки в UI."""
 
-    def _boom(progress, *args, **kwargs):  # noqa: ARG001
+    def _boom(progress, *args, **kwargs):
         raise ValueError("Все эпохи отброшены reject-фильтром")
 
     monkeypatch.setattr(analysis_pipeline, "run_analysis", _boom)

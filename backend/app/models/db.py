@@ -1,9 +1,9 @@
 """SQLAlchemy модели для локального режима (SQLite)."""
-import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, String, Float, Integer, DateTime, JSON, ForeignKey
 from datetime import datetime
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
@@ -12,8 +12,11 @@ from app.core.config import settings
 DATABASE_URL = settings.database_url
 
 engine = create_async_engine(DATABASE_URL, echo=False)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-Base = declarative_base()
+AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+class Base(DeclarativeBase):
+    """Базовый класс моделей: ``DeclarativeBase`` (SQLAlchemy 2.0) вместо ``declarative_base()``."""
 
 
 class Session(Base):

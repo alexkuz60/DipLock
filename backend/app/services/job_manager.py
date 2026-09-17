@@ -21,11 +21,13 @@
 import asyncio
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any
 
 from app.core.config import Settings, settings
+from app.schemas.analysis import JOB_STATES, JobState
 from app.services import job_store, journal
 
 logger = logging.getLogger(__name__)
@@ -34,16 +36,24 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[..., None]
 
 
-def noop_progress(stage: str, progress: Optional[float] = None, message: str = "") -> None:
+def noop_progress(
+    stage: str,
+    progress: float | None = None,
+    message: str = "",
+    epochs_done: int | None = None,
+    epochs_total: int | None = None,
+) -> None:
     """Заглушка колбэка прогресса: этапы задачи некому показывать.
 
     Нужна синхронному ``POST /analyze``: он считает полный пайплайн в одном
-    запросе, и прогресс-бар рисовать негде.
+    запросе, и прогресс-бар рисовать негде. Параметры ``epochs_done``/
+    ``epochs_total`` принимаются, чтобы подпись совпадала с колбэком задачи
+    (`job_manager`) — сервисы вызывают прогресс единообразно.
     """
 
 
 # Этапы пайплайна анализа и их «целевой» прогресс (для UI-прогресс-бара)
-PIPELINE_STAGES: Dict[str, float] = {
+PIPELINE_STAGES: dict[str, float] = {
     "queued": 0.0,
     "load_edf": 0.10,
     "artifacts": 0.30,
@@ -56,7 +66,7 @@ PIPELINE_STAGES: Dict[str, float] = {
 }
 
 # Человекочитаемые подписи этапов (русский UI)
-STAGE_TITLES: Dict[str, str] = {
+STAGE_TITLES: dict[str, str] = {
     "queued": "В очереди",
     "load_edf": "Чтение EDF",
     "artifacts": "Детекция артефактов",
@@ -79,23 +89,23 @@ class Job:
 
     job_id: str
     kind: str
-    filename: Optional[str] = None
-    status: str = "queued"  # queued | running | succeeded | failed
+    filename: str | None = None
+    status: JobState = "queued"  # queued | running | succeeded | failed
     stage: str = "queued"
     progress: float = 0.0
     message: str = ""
     created_at: datetime = field(default_factory=datetime.utcnow)
-    started_at: Optional[datetime] = None
-    finished_at: Optional[datetime] = None
-    error: Optional[str] = None
-    session_id: Optional[str] = None
-    result: Optional[Dict[str, Any]] = None
-    meta: Dict[str, Any] = field(default_factory=dict)
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: str | None = None
+    session_id: str | None = None
+    result: dict[str, Any] | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
     # Детальный прогресс этапов с эпохами (срез 3.4): «12 из 30 эпох» читается
     # лучше, чем плавающая дробь 0.42 — UI рисует по ним прогресс-бар задачи.
     epochs_done: int = 0
     epochs_total: int = 0
-    task: Optional[asyncio.Task] = field(default=None, repr=False)
+    task: asyncio.Task | None = field(default=None, repr=False)
     restored: bool = False
     """true — задача поднята с диска (``job_store``), а не исполнялась этим процессом."""
 
@@ -108,10 +118,10 @@ class Job:
     def set_progress(
         self,
         stage: str,
-        progress: Optional[float] = None,
+        progress: float | None = None,
         message: str = "",
-        epochs_done: Optional[int] = None,
-        epochs_total: Optional[int] = None,
+        epochs_done: int | None = None,
+        epochs_total: int | None = None,
     ) -> None:
         """Обновляет этап/прогресс. Вызывается из воркер-потока (атомарно по GIL).
 
@@ -138,16 +148,16 @@ class Job:
 
         def _cb(
             stage: str,
-            progress: Optional[float] = None,
+            progress: float | None = None,
             message: str = "",
-            epochs_done: Optional[int] = None,
-            epochs_total: Optional[int] = None,
+            epochs_done: int | None = None,
+            epochs_total: int | None = None,
         ) -> None:
             self.set_progress(stage, progress, message, epochs_done, epochs_total)
 
         return _cb
 
-    def finish(self, result: Dict[str, Any]) -> None:
+    def finish(self, result: dict[str, Any]) -> None:
         """Успешное завершение: фиксируем результат и прогресс 1.0."""
         self.result = result
         self.session_id = result.get("session_id")
@@ -163,14 +173,14 @@ class Job:
         self.message = f"Ошибка: {error}"
 
     @property
-    def elapsed_sec(self) -> Optional[float]:
+    def elapsed_sec(self) -> float | None:
         """Длительность выполнения в секундах (None, если ещё не начиналась)."""
         if self.started_at is None:
             return None
         end = self.finished_at or datetime.utcnow()
         return round((end - self.started_at).total_seconds(), 3)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """Примитивы для сериализации в ``JobStatus`` (без result — он тяжёлый)."""
         return {
             "job_id": self.job_id,
@@ -190,14 +200,14 @@ class Job:
             "error": self.error,
         }
 
-    def to_record(self) -> Dict[str, Any]:
+    def to_record(self) -> dict[str, Any]:
         """Задача для файла на диске: примитивы + ``meta`` + ``result`` (A8).
 
         Всё, что нужно, чтобы после рестарта процесса отдать ``GET /jobs/{id}``
         и результат задачи: даты — строками ISO (обратно ``from_record``).
         """
 
-        def iso(value: Optional[datetime]) -> Optional[str]:
+        def iso(value: datetime | None) -> str | None:
             return value.isoformat() if value is not None else None
 
         return {
@@ -220,14 +230,14 @@ class Job:
         }
 
     @classmethod
-    def from_record(cls, record: Dict[str, Any]) -> "Job":
+    def from_record(cls, record: dict[str, Any]) -> "Job":
         """Восстанавливает задачу из файла (``job_store.load_records``).
 
         ``restored=True``: задача исполнялась прежним процессом, у неё нет
         ``asyncio.Task``, но статус, ошибка и результат читаются как у живой.
         """
 
-        def moment(key: str, default: Optional[datetime] = None) -> Optional[datetime]:
+        def moment(key: str, default: datetime | None = None) -> datetime | None:
             raw = record.get(key)
             if not isinstance(raw, str):
                 return default
@@ -237,11 +247,15 @@ class Job:
                 return default
 
         created_at = moment("created_at") or datetime.utcnow()
+        # Состояние из файла задачи сужаем к ``JobState``: повреждённый файл не
+        # должен показывать в UI состояние вне контракта API.
+        restored_status = str(record.get("status") or "succeeded")
+        status: JobState = restored_status if restored_status in JOB_STATES else "succeeded"
         return cls(
             job_id=str(record.get("job_id")),
             kind=str(record.get("kind") or "analyze"),
             filename=record.get("filename"),
-            status=str(record.get("status") or "succeeded"),
+            status=status,
             stage=str(record.get("stage") or "done"),
             progress=float(record.get("progress") or 0.0),
             message=str(record.get("message") or ""),
@@ -265,16 +279,16 @@ class JobManager:
         self._max_concurrent = max(1, int(max_concurrent))
         self._history_limit = max(1, int(history_limit))
         self._semaphore = asyncio.Semaphore(self._max_concurrent)
-        self._jobs: Dict[str, Job] = {}
-        self._order: List[str] = []
-        self._tasks: Set[asyncio.Task] = set()
+        self._jobs: dict[str, Job] = {}
+        self._order: list[str] = []
+        self._tasks: set[asyncio.Task] = set()
 
     @property
     def max_concurrent(self) -> int:
         """Сколько тяжёлых расчётов может идти одновременно."""
         return self._max_concurrent
 
-    def create(self, kind: str, filename: Optional[str] = None, **meta: Any) -> Job:
+    def create(self, kind: str, filename: str | None = None, **meta: Any) -> Job:
         """Регистрирует задачу в состоянии ``queued``."""
         job = Job(job_id=str(uuid.uuid4()), kind=kind, filename=filename, meta=dict(meta))
         self._jobs[job.job_id] = job
@@ -285,10 +299,10 @@ class JobManager:
     def submit(
         self,
         kind: str,
-        filename: Optional[str],
+        filename: str | None,
         fn: Callable,
         *args: Any,
-        on_success: Optional[Callable[..., Any]] = None,
+        on_success: Callable[..., Any] | None = None,
         **kwargs: Any,
     ) -> Job:
         """Создаёт задачу и запускает её фоном; возвращает сразу (для HTTP 202).
@@ -310,7 +324,7 @@ class JobManager:
         job: Job,
         fn: Callable,
         *args: Any,
-        on_success: Optional[Callable[..., Any]] = None,
+        on_success: Callable[..., Any] | None = None,
         **kwargs: Any,
     ) -> Job:
         """Ждёт свободный слот, выполняет воркер в потоке, фиксирует итог."""
@@ -326,14 +340,14 @@ class JobManager:
                 logger.info(
                     "Задача %s (%s) выполнена за %.1f с", job.job_id, job.kind, job.elapsed_sec or 0.0,
                 )
-            except Exception as exc:  # noqa: BLE001 — это ошибка задачи, а не запроса
+            except Exception as exc:
                 job.fail(exc)
                 logger.exception("Задача %s (%s) завершилась ошибкой", job.job_id, job.kind)
             else:
                 if on_success is not None:
                     try:
                         await on_success(job, result)
-                    except Exception:  # noqa: BLE001 — постобработка не отменяет успех
+                    except Exception:
                         logger.exception("Постобработка задачи %s не выполнена", job.job_id)
         # Итог задачи (успех или ошибка) — на диск: иначе после рестарта процесса
         # история и результат теряются (A8). Запись в потоке (результат бывает на
@@ -343,16 +357,16 @@ class JobManager:
         return job
 
 
-    def get(self, job_id: str) -> Optional[Job]:
+    def get(self, job_id: str) -> Job | None:
         """Задача по id (или None)."""
         return self._jobs.get(job_id)
 
-    def list_jobs(self, limit: Optional[int] = None) -> List[Job]:
+    def list_jobs(self, limit: int | None = None) -> list[Job]:
         """Задачи в порядке создания (новые — в конце), последние ``limit`` штук."""
         ids = self._order[-(limit or self._history_limit):]
         return [self._jobs[jid] for jid in ids if jid in self._jobs]
 
-    def restore(self, cfg: Optional[Settings] = None) -> int:
+    def restore(self, cfg: Settings | None = None) -> int:
         """Поднимает завершённые задачи с диска; возвращает их число (A8).
 
         Без этого после рестарта процесса ``GET /jobs`` пуст, а сохранённые

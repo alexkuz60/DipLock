@@ -21,7 +21,6 @@ from app.api.params import (
 from app.core.config import settings
 from app.services.spectrogram import SPECTROGRAM_WINDOW_RANGE_MS
 
-
 # ---------- полоса фильтра ----------
 
 def test_parse_filter_band_none_means_no_filter():
@@ -202,3 +201,26 @@ def test_stored_spectrogram_params_accept_missing_band():
     })
 
     assert params.filter_band is None
+
+
+def test_stored_spectrogram_params_read_reference():
+    """Референс сетки берётся из результата задачи, а не подставляется молча (A11)."""
+    params = stored_spectrogram_params({
+        "channel": "Fp1", "filter_band_hz": None, "notch_hz": None,
+        "reference": "custom", "reference_channels": ["F3", "F4"],
+        "window_ms": 500.0, "overlap_pct": 75.0, "fmax_hz": 40.0,
+    })
+
+    assert params.reference == "custom"
+    assert params.reference_channels == ["F3", "F4"]
+
+
+def test_stored_spectrogram_params_fall_back_for_old_results():
+    """Результаты, записанные до A11 (без ``reference``), читаются как ``average``."""
+    params = stored_spectrogram_params({
+        "channel": "Fz", "filter_band_hz": None, "notch_hz": None,
+        "window_ms": 500.0, "overlap_pct": 75.0, "fmax_hz": 40.0,
+    })
+
+    assert params.reference == "average"
+    assert params.reference_channels is None
