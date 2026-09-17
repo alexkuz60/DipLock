@@ -1,9 +1,12 @@
 """Авто-детекция артефактов: z-score, порог, ICA, flat-line."""
-import numpy as np
+
+import logging
+
 import mne
+import numpy as np
 from scipy import ndimage
-from typing import Tuple, Dict
-from app.core.config import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def detect_artifacts(
@@ -12,7 +15,7 @@ def detect_artifacts(
     z_threshold: float = 5.0,
     pp_threshold_uv: float = 100.0,
     run_ica: bool = True,
-) -> Tuple[mne.Annotations, dict]:
+) -> tuple[mne.Annotations, dict]:
     """Детекция артефактов: z-score, peak-to-peak, flat-line, ICA-EOG.
 
     ``run_ica=False`` полностью пропускает ICA-ветку (быстрый профиль);
@@ -108,8 +111,10 @@ def detect_artifacts(
             # Компоненты EOG не привязаны к каналу: помечаем весь монтаж
             if bads:
                 add_zone("ica_eog", 0.0, float(raw.times[-1]), list(raw.ch_names))
-        except Exception:
-            pass
+        except Exception as exc:
+            # ICA-EOG — необязательный шаг: сбой не должен срывать z-score и
+            # peak-to-peak, но причина обязана попасть в лог (правило S110).
+            logger.warning("ICA-EOG не применена: %s", exc)
 
     total = sum(stats.values())
     return annotations, {"total": total, "by_type": stats, "ica_applied": ica_applied, "zones": zones}

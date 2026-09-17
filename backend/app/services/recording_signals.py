@@ -17,7 +17,6 @@ import hashlib
 import logging
 import struct
 import time
-from typing import List, Optional, Tuple
 
 import mne
 import numpy as np
@@ -44,24 +43,24 @@ class SignalBuildError(ValueError):
     """Ошибка параметров/чтения сигналов — превращается в 400 в API."""
 
 
-def _available_levels(settings: Settings) -> Tuple[int, ...]:
+def _available_levels(settings: Settings) -> tuple[int, ...]:
     """Уровни пирамиды из конфига (только положительные, по возрастанию)."""
     levels = tuple(sorted({int(level) for level in settings.signal_levels if int(level) > 0}))
     return levels or (1,)
 
 
-def _resolve_indices(raw: mne.io.BaseRaw, wanted: List[str]) -> Tuple[List[str], List[int]]:
+def _resolve_indices(raw: mne.io.BaseRaw, wanted: list[str]) -> tuple[list[str], list[int]]:
     """Индексы каналов EDF для имён из паспорта записи (нормализация 10-20).
 
     Имена в паспорте уже нормализованы, а ``raw.ch_names`` — как в файле
     («EEG F7», «T3»…), поэтому сопоставляем по ``normalize_channel_name``.
     """
     index_of: dict[str, int] = {}
-    for position, name in enumerate(raw.ch_names):
-        index_of.setdefault(normalize_channel_name(name), position)
+    for slot, name in enumerate(raw.ch_names):
+        index_of.setdefault(normalize_channel_name(name), slot)
 
-    channels: List[str] = []
-    indices: List[int] = []
+    channels: list[str] = []
+    indices: list[int] = []
     for name in wanted:
         position = index_of.get(name)
         if position is None or name in channels:
@@ -78,7 +77,7 @@ def _open_raw(recording: Recording, settings: Settings) -> mne.io.BaseRaw:
         kwargs["units"] = settings.edf_units
     try:
         return mne.io.read_raw_edf(recording.path, **kwargs)
-    except Exception as exc:  # noqa: BLE001 — отдаём UI понятный текст
+    except Exception as exc:
         raise SignalBuildError(f"Не удалось прочитать EDF: {exc}") from exc
 
 
@@ -162,12 +161,12 @@ def signal_etag(recording: Recording, level: int, settings: Settings) -> str:
     digest = hashlib.sha256()
     digest.update(
         f"{recording.recording_id}|{level}|{recording.meta.get('sfreq')}|"
-        f"{recording.meta.get('duration_sec')}|{settings.signal_base_points}".encode("utf-8")
+        f"{recording.meta.get('duration_sec')}|{settings.signal_base_points}".encode()
     )
     return digest.hexdigest()[:16]
 
 
-def build_signal_blob(recording: Recording, level: int, settings: Settings) -> Tuple[bytes, str]:
+def build_signal_blob(recording: Recording, level: int, settings: Settings) -> tuple[bytes, str]:
     """Контейнер сигналов уровня ``level`` + ETag (диск + пересчёт при промахе).
 
     Бросает ``SignalBuildError`` (→ 400) при неверном уровне или отсутствии данных.
@@ -201,7 +200,7 @@ def build_signal_blob(recording: Recording, level: int, settings: Settings) -> T
     return blob, etag
 
 
-def clear_signal_cache(settings: Settings, recording_id: Optional[str] = None) -> None:
+def clear_signal_cache(settings: Settings, recording_id: str | None = None) -> None:
     """Удаляет дисковый кэш сигналов: одну запись или весь (тесты и реестр)."""
     parts = ("signals", recording_id) if recording_id else ("signals",)
     cache_clear(settings.cache_dir, *parts)

@@ -16,7 +16,8 @@
   незавершённый или упавший — 409 (UI показывает ``detail`` как есть).
 """
 import logging
-from typing import Any, Callable, Dict, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -32,7 +33,7 @@ from app.services.spectrogram import SpectrogramParams, compute_spectrogram
 logger = logging.getLogger(__name__)
 
 # Виды задач, чей результат лежит рядом с записью, а не в `/jobs/{id}/result`
-RECORDING_JOB_KINDS: Tuple[str, ...] = ("preprocess", "spectrum", "dipoles", "spectrogram")
+RECORDING_JOB_KINDS: tuple[str, ...] = ("preprocess", "spectrum", "dipoles", "spectrogram")
 
 
 def require_recording(recording_id: str) -> Recording:
@@ -47,7 +48,7 @@ def require_recording(recording_id: str) -> Recording:
 
 def worker_preprocess(
     progress: ProgressCallback, recording: Recording, params: PreprocessParams,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Воркер задачи предподготовки (поток): одна стадия на запись.
 
     Загрузку не удаляем (в отличие от ``/jobs``): файл записи принадлежит
@@ -58,26 +59,26 @@ def worker_preprocess(
 
 def worker_spectrum(
     progress: ProgressCallback, recording: Recording, params: SpectrumParams,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Воркер задачи спектра (поток): Welch PSD + топокарты диапазонов."""
     return compute_spectrum(recording, settings, params, progress)
 
 
 def worker_spectrogram(
     progress: ProgressCallback, recording: Recording, params: SpectrogramParams,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Воркер задачи спектрограммы (поток): STFT одного канала → сетка дБ."""
     return compute_spectrogram(recording, settings, params, progress)
 
 
 def worker_dipole_scan(
     progress: ProgressCallback, recording: Recording, params: DipoleScanParams,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Воркер быстрого расчёта диполей (поток): перебор сетки по эпохам."""
     return compute_dipole_scan(recording, settings, params, progress)
 
 
-WORKERS: Dict[str, Callable[..., Dict[str, Any]]] = {
+WORKERS: dict[str, Callable[..., dict[str, Any]]] = {
     "preprocess": worker_preprocess,
     "spectrum": worker_spectrum,
     "spectrogram": worker_spectrogram,
@@ -90,7 +91,7 @@ def submit_recording_job(
     recording: Recording,
     params: Any,
     *,
-    meta: Optional[Dict[str, Any]] = None,
+    meta: dict[str, Any] | None = None,
 ) -> JobCreated:
     """Ставит задачу записи в очередь и собирает ``JobCreated`` (202 + ``job_id``)."""
     job = job_manager.submit(
@@ -116,7 +117,7 @@ def job_status(job: Any) -> JobStatus:
     ``SpectrogramResult``).
     """
     prefix = settings.api_prefix
-    result_url: Optional[str] = None
+    result_url: str | None = None
     if job.status == "succeeded":
         recording_id = job.meta.get("recording_id")
         if recording_id and job.kind in RECORDING_JOB_KINDS:

@@ -30,8 +30,9 @@
 import json
 import logging
 import os
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any
 
 from app.core.config import Settings
 from app.services.cache_store import cache_path, cache_write
@@ -66,7 +67,7 @@ def job_path(cfg: Settings, job_id: str) -> str:
     return cache_path(jobs_dir(cfg), f"{safe_id}.json")
 
 
-def _serialize(payload: Dict[str, Any]) -> Optional[bytes]:
+def _serialize(payload: dict[str, Any]) -> bytes | None:
     """JSON-байты записи; ``None`` — данные не сериализуются (не роняем задачу)."""
     try:
         return json.dumps(payload, ensure_ascii=False, default=str).encode("utf-8")
@@ -75,7 +76,7 @@ def _serialize(payload: Dict[str, Any]) -> Optional[bytes]:
         return None
 
 
-def save_record(cfg: Settings, record: Dict[str, Any]) -> Optional[str]:
+def save_record(cfg: Settings, record: dict[str, Any]) -> str | None:
     """Пишет задачу на диск; ``None`` — не сохраняли (выключено, сбой, нет id)."""
     if not cfg.job_store_enabled:
         return None
@@ -111,7 +112,7 @@ def save_record(cfg: Settings, record: Dict[str, Any]) -> Optional[str]:
     return path
 
 
-def load_records(cfg: Settings, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+def load_records(cfg: Settings, limit: int | None = None) -> list[dict[str, Any]]:
     """Файлы задач от старых к новым (``limit`` — только последние N).
 
     Битый или чужой по версии файл пропускается: результат задачи — не источник
@@ -120,7 +121,7 @@ def load_records(cfg: Settings, limit: Optional[int] = None) -> List[Dict[str, A
     root = jobs_dir(cfg)
     if not os.path.isdir(root):
         return []
-    entries: List[tuple] = []
+    entries: list[tuple] = []
     for name in sorted(os.listdir(root)):
         if not name.endswith(".json"):
             continue
@@ -133,10 +134,10 @@ def load_records(cfg: Settings, limit: Optional[int] = None) -> List[Dict[str, A
     if limit is not None and limit > 0:
         entries = entries[-limit:]
 
-    records: List[Dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
     for _, _, path in entries:
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 payload = json.load(fh)
         except (OSError, ValueError):
             logger.warning("Файл задачи не читается (%s) — пропущен", path)
@@ -151,9 +152,9 @@ def load_records(cfg: Settings, limit: Optional[int] = None) -> List[Dict[str, A
 def prune_records(
     cfg: Settings,
     *,
-    known_recording_ids: Optional[Set[str]] = None,
-    limit: Optional[int] = None,
-) -> List[str]:
+    known_recording_ids: set[str] | None = None,
+    limit: int | None = None,
+) -> list[str]:
     """Убирает файлы задач лишних/исчезнувших записей; возвращает их ``job_id``.
 
     Два повода снести файл (оба — про жизненный цикл данных, а не про размер):
@@ -166,16 +167,19 @@ def prune_records(
     ``known_recording_ids=None`` — обход по записям не делаем (только лимит).
     """
     records = load_records(cfg, limit=None)
-    removed: List[str] = []
-    kept: List[Dict[str, Any]] = []
+    removed: list[str] = []
+    kept: list[dict[str, Any]] = []
 
     for record in records:
         job_id = str(record.get("job_id"))
         recording_id = (record.get("meta") or {}).get("recording_id")
-        if known_recording_ids is not None and recording_id:
-            if str(recording_id) not in known_recording_ids:
-                removed.append(job_id)
-                continue
+        if (
+            known_recording_ids is not None
+            and recording_id
+            and str(recording_id) not in known_recording_ids
+        ):
+            removed.append(job_id)
+            continue
         kept.append(record)
 
     if limit is not None and limit > 0 and len(kept) > limit:

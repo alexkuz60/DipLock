@@ -15,9 +15,11 @@ UI — **Vite 6 + React 19 + TypeScript (strict) + Tailwind CSS v4 + TanStack Qu
 ```bash
 # --- backend ---
 cd backend && python -m venv venv
-venv/bin/pip install -r requirements.txt              # + requirements-dev.txt для тестов
+venv/bin/pip install -r requirements.txt              # + requirements-dev.txt для тестов, ruff, mypy
 venv/bin/uvicorn app.main:app --reload --port 8000    # рабочая директория — backend/
 venv/bin/python -m pytest                             # тесты backend
+venv/bin/ruff check app tests scripts                 # линтер (конфиг: backend/pyproject.toml)
+venv/bin/mypy app                                     # проверка типов
 
 # проверка API (Swagger: http://localhost:8000/docs)
 curl http://localhost:8000/health        # {"status":"ok",...}
@@ -58,7 +60,7 @@ backend/app/
 ├── services/          # КАЖДЫЙ модуль = один шаг пайплайна
 │   ├── edf_loader.py  # read_raw_edf → pick/montage/reference/filter
 │   ├── artifact_detector.py, epoch_segmenter.py, bandpass_filter.py
-│   ├── dipole_fitter.py     # точный фитинг: mne.fit_dipole по эпохам (медленно)
+│   ├── dipole_fitter.py     # точный фитинг (эксперим.): mne.fit_dipole по эпохам, цена в /meta
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
 │   ├── preprocess.py      # стадии предподготовки записи: filter/artifacts/epochs (2.7)
@@ -78,9 +80,11 @@ backend/app/
 │   └── atlas_contours.py  # контуры структур и полей Бродмана на срезе (вектор, ETag) (3.9)
 backend/scripts/       # dedupe_recordings.py (чистка дублей в data/edf),
                        # build_atlas_contours.py (прогрев кэша контуров, 3.9)
+backend/pyproject.toml # конфиг ruff + mypy
 frontend/              # UI (Vite+React+TS), сборка → backend/app/static/ui
 data/                  # локальные данные (edf/results/cache) — НЕ коммитить
 docs/ui.md             # спецификация UI и дорожная карта фаз
+.github/workflows/     # CI: ruff+mypy+pytest и lint+tsc+Vitest+build
 ```
 
 ## Конвенции
@@ -131,7 +135,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов (шесть кэшей, отпечаток ассетов, файл задачи) |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
-| `docs/rules/tests.md` | полный инвентарь покрытия (559 Vitest / 305 pytest) |
+| `docs/rules/tests.md` | покрытие (564 Vitest / 327 pytest), ruff/mypy и CI |
 | `docs/rules/docs.md` | **правило ведения документации** — новое правило идёт в файл по теме, а не сюда |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |
@@ -148,9 +152,12 @@ docs/ui.md             # спецификация UI и дорожная кар�
 Фреймворки: **pytest** (`backend/tests/`, конфиг `backend/pytest.ini`) и **Vitest** (`frontend/src/**/*.test.tsx`).
 
 ```bash
-cd backend && venv/bin/pip install -r requirements-dev.txt   # + pytest / pytest -m "not integration"
+cd backend && venv/bin/pip install -r requirements-dev.txt   # + pytest / ruff / mypy
 cd frontend && npm run test                                  # Vitest (jsdom)
 ```
+
+`ruff`/`mypy` (команды выше) и тесты гоняет CI — `.github/workflows/ci.yml`: **изменение готово, когда
+линтер и типы чисты** (конфиг — `backend/pyproject.toml`, правила — `docs/rules/tests.md`).
 
 Тесты быстрые (без сети): синтетический ЭЭГ (`backend/tests/conftest.py`) + `TestClient`; ветки с
 реальными данными (`~/mne_data`, `data/edf/test.edf`) помечаются маркером `integration` и скипаются
@@ -163,8 +170,8 @@ cd frontend && npm run test                                  # Vitest (jsdom)
 - CORS: не комбинировать `allow_origins=["*"]` с `allow_credentials=True`.
 - Валидировать размер загружаемых EDF-файлов.
 - MNE API дрейфует между версиями: `psd_welch`→`compute_psd`, `standard_1020`→`colin27_1020`,
-  `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`.
-  Проверяйте актуальный API через тесты.
+  `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`,
+  `fit_dipole` → **кортеж** `(dipoles, residual)`. Проверяйте актуальный API через тесты.
 - Фильтровать band-specific фильтром continuous **raw** до нарезки, а не короткие эпохи.
 
 Остальные правила (форматы `DPS1`/`DPS2`, дедуп загрузок, BEM fsaverage, ассеты МРТ и атласа,

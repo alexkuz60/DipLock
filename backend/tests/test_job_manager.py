@@ -3,7 +3,7 @@ import asyncio
 import threading
 import time
 
-from app.services.job_manager import JobManager, STAGE_TITLES
+from app.services.job_manager import STAGE_TITLES, JobManager
 
 
 def test_job_success_reports_stages_and_result():
@@ -67,7 +67,7 @@ def test_job_failure_keeps_error_text():
     async def _run():
         manager = JobManager()
 
-        def worker(progress):  # noqa: ARG001
+        def worker(progress):
             raise ValueError("Все эпохи отброшены reject-фильтром")
 
         job = manager.submit("analyze", "bad.edf", worker)
@@ -89,7 +89,7 @@ def test_job_on_success_runs_in_event_loop():
         manager = JobManager()
         calls = []
 
-        def worker(progress):  # noqa: ARG001
+        def worker(progress):
             return {"session_id": "s3"}
 
         async def on_success(job, result):
@@ -113,7 +113,7 @@ def test_job_manager_limits_concurrency():
     lock = threading.Lock()
     state = {"active": 0, "peak": 0}
 
-    def worker(progress):  # noqa: ARG001
+    def worker(progress):
         with lock:
             state["active"] += 1
             state["peak"] = max(state["peak"], state["active"])
@@ -141,7 +141,7 @@ def test_history_limit_drops_oldest_finished_jobs():
     """История ограничена: завершённые старые задачи вытесняются новыми."""
     manager = JobManager(max_concurrent=1, history_limit=2)
 
-    def worker(progress):  # noqa: ARG001
+    def worker(progress):
         return {"session_id": "h"}
 
     async def _run():

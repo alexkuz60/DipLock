@@ -18,7 +18,7 @@ import pytest
 from app.core.config import settings
 from app.services import job_store
 from app.services.orphans import RECORDING_CACHE_SUBDIRS, sweep_orphans
-from app.services.recordings import RecordingRegistry, recording_registry
+from app.services.recordings import RecordingRegistry
 
 
 @pytest.fixture
@@ -165,10 +165,10 @@ def test_sweep_is_safe_when_registry_fails(isolated):
     class _Broken:
         """Реестр-заглушка: любое обращение к нему падает."""
 
-        def prune_orphans(self, cfg):  # noqa: ARG002
+        def prune_orphans(self, cfg):
             raise RuntimeError("реестр сломан")
 
-        def known_ids(self, cfg):  # noqa: ARG002
+        def known_ids(self, cfg):
             raise RuntimeError("реестр сломан")
 
     report = sweep_orphans(settings, registry=_Broken())

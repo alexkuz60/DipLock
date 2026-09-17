@@ -17,11 +17,11 @@ import pytest
 
 from app.core.config import settings
 from app.services.dipole_scanner import (
-    DipoleScanError,
-    DipoleScanParams,
     GRID_CENTER_MM,
     GRID_RADIUS_MM,
     GRID_STEP_MM,
+    DipoleScanError,
+    DipoleScanParams,
     _leadfield,
     candidate_grid,
     compute_dipole_scan,

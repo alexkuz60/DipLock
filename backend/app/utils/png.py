@@ -11,7 +11,6 @@ Pillow (новая зависимость в бэкенде) смысла нет
 """
 import struct
 import zlib
-from typing import Optional
 
 import numpy as np
 
@@ -37,7 +36,7 @@ def _chunk(tag: bytes, payload: bytes) -> bytes:
     ))
 
 
-def encode_png_gray8(gray: np.ndarray, alpha: Optional[np.ndarray] = None) -> bytes:
+def encode_png_gray8(gray: np.ndarray, alpha: np.ndarray | None = None) -> bytes:
     """PNG из массива ``uint8`` формы (height, width).
 
     :param gray: яркость 0…255, строки — сверху вниз.

@@ -27,7 +27,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 import mne
 
@@ -59,8 +59,8 @@ class Recording:
     path: str
     upload_dir: str
     created_at: float
-    meta: Dict[str, Any]
-    digest: Optional[str] = None
+    meta: dict[str, Any]
+    digest: str | None = None
     """sha256 содержимого файла — по нему опознаётся повторная загрузка."""
     deduplicated: bool = False
     """true — запись отдана повторно, только что записанная копия не понадобилась."""
@@ -79,10 +79,10 @@ def file_digest(path: str) -> str:
         return hashlib.file_digest(fh, "sha256").hexdigest()
 
 
-def read_sidecar(upload_dir: str) -> Optional[Dict[str, Any]]:
+def read_sidecar(upload_dir: str) -> dict[str, Any] | None:
     """Читает сайдкар каталога записи (None — нет, битый или чужой версии)."""
     try:
-        with open(sidecar_path(upload_dir), "r", encoding="utf-8") as fh:
+        with open(sidecar_path(upload_dir), encoding="utf-8") as fh:
             payload = json.load(fh)
     except (OSError, ValueError):
         return None
@@ -115,8 +115,8 @@ def write_sidecar(recording: Recording) -> bool:
 
 
 def _recording_from_sidecar(
-    upload_dir: str, payload: Optional[Dict[str, Any]],
-) -> Optional[Recording]:
+    upload_dir: str, payload: dict[str, Any] | None,
+) -> Recording | None:
     """Собирает запись из сайдкара; None — сайдкара нет, он неполон или файл пропал."""
     if not payload:
         return None
@@ -139,8 +139,11 @@ def _recording_from_sidecar(
             meta["created_at"] = datetime.fromisoformat(raw_created)
         except ValueError:
             meta["created_at"] = datetime.utcnow()
+    # ``payload`` разобран из JSON: до ``float()`` значение имеет тип ``Any``,
+    # и нечисловое значение обязано уехать в ``except`` (как раньше).
+    stored_created: Any = payload.get("created_at")
     try:
-        created_at = float(payload.get("created_at"))
+        created_at = float(stored_created)
     except (TypeError, ValueError):
         created_at = os.path.getmtime(path)
 
@@ -156,13 +159,13 @@ def _recording_from_sidecar(
     )
 
 
-def read_recording_meta(path: str, cfg: Settings, filename: str) -> Dict[str, Any]:
+def read_recording_meta(path: str, cfg: Settings, filename: str) -> dict[str, Any]:
     """Читает паспорт EDF: заголовок + короткое окно данных для оценки масштаба.
 
     Обработки (фильтры, монтаж, референс, артефакты) здесь нет — только то, что
     нужно карточке записи и вьюеру треков.
     """
-    kwargs: Dict[str, Any] = {"preload": False, "stim_channel": False}
+    kwargs: dict[str, Any] = {"preload": False, "stim_channel": False}
     if cfg.edf_units:
         kwargs["units"] = cfg.edf_units
     try:
@@ -187,7 +190,7 @@ def read_recording_meta(path: str, cfg: Settings, filename: str) -> Dict[str, An
     channels = [name for name in cfg.standard_channels if name in matched]
     unmatched = [name for name in normalized if name not in matched]
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     if units_autoscaled:
         warnings.append(
             "EDF без physical dimension: масштаб трактуется как микровольты "
@@ -253,12 +256,12 @@ class RecordingRegistry:
         self,
         max_recordings: int,
         ttl_hours: float,
-        upload_dir: Optional[str] = None,
+        upload_dir: str | None = None,
     ) -> None:
         self._max = max(1, max_recordings)
         self._ttl_sec = ttl_hours * 3600.0
         self._upload_dir = upload_dir
-        self._items: Dict[str, Recording] = {}
+        self._items: dict[str, Recording] = {}
         self._indexed = False
 
     # --- индекс каталогов на диске (дедуп переживает рестарт) ---------------
@@ -267,10 +270,10 @@ class RecordingRegistry:
         """Каталог загрузок: заданный при создании или из настроек."""
         return self._upload_dir or cfg.upload_dir
 
-    def _scan_sidecars(self, cfg: Settings) -> Dict[str, Recording]:
+    def _scan_sidecars(self, cfg: Settings) -> dict[str, Recording]:
         """Читает сайдкары каталогов загрузок: отпечаток + паспорт каждой записи."""
         root = self._root(cfg)
-        found: Dict[str, Recording] = {}
+        found: dict[str, Recording] = {}
         if not os.path.isdir(root):
             return found
         for name in sorted(os.listdir(root)):
@@ -297,7 +300,7 @@ class RecordingRegistry:
         """Каталог загрузок реестра (обход сирот сверяет по нему «запись на диске»)."""
         return self._root(cfg)
 
-    def known_ids(self, cfg: Settings) -> Set[str]:
+    def known_ids(self, cfg: Settings) -> set[str]:
         """id всех живых записей: с диска (сайдкары) и из памяти.
 
         Список нужен обходу сирот (``services/orphans.py``, A6): кэши и файлы
@@ -309,7 +312,7 @@ class RecordingRegistry:
         self._drop_expired()
         return set(self._items)
 
-    def find_by_digest(self, digest: Optional[str], cfg: Settings) -> Optional[Recording]:
+    def find_by_digest(self, digest: str | None, cfg: Settings) -> Recording | None:
         """Запись, чей файл совпадает по отпечатку sha256 (None — такой нет)."""
         if not digest:
             return None
@@ -343,7 +346,7 @@ class RecordingRegistry:
         upload_dir: str,
         filename: str,
         cfg: Settings,
-        digest: Optional[str] = None,
+        digest: str | None = None,
     ) -> Recording:
         """Регистрирует запись; при совпадении отпечатка — переиспользует прежнюю.
 
@@ -383,7 +386,7 @@ class RecordingRegistry:
         )
         return recording
 
-    def prune_orphans(self, cfg: Settings) -> List[str]:
+    def prune_orphans(self, cfg: Settings) -> list[str]:
         """Удаляет каталоги без живой записи старше TTL: легаси и мусор прошлых запусков.
 
         Реестр — in-memory, поэтому каталоги прежних запусков процесса лимит
@@ -400,7 +403,7 @@ class RecordingRegistry:
         if not os.path.isdir(root):
             return []
         deadline = time.time() - self._ttl_sec
-        removed: List[str] = []
+        removed: list[str] = []
         for name in sorted(os.listdir(root)):
             upload_dir = os.path.join(root, name)
             if not os.path.isdir(upload_dir) or name in self._items:
@@ -416,7 +419,7 @@ class RecordingRegistry:
             logger.info("Удалены устаревшие каталоги записей: %s", ", ".join(removed))
         return removed
 
-    def get(self, recording_id: str) -> Optional[Recording]:
+    def get(self, recording_id: str) -> Recording | None:
         """Запись по id (None — неизвестна, устарела или файл уже удалён)."""
         self._drop_expired()
         rec = self._items.get(recording_id)
@@ -424,7 +427,7 @@ class RecordingRegistry:
             return None
         return rec
 
-    def list(self) -> List[Recording]:
+    def list(self) -> list[Recording]:
         """Живые записи в порядке создания (для будущего списка в UI)."""
         self._drop_expired()
         return [

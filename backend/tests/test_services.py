@@ -6,7 +6,6 @@ from app.core.config import settings
 from app.services.bandpass_filter import apply_band_filter, compute_band_power
 from app.services.epoch_segmenter import segment_epochs
 
-
 # ---------- compute_band_power ----------
 
 def test_compute_band_power_all_bands_present(epochs_alpha):

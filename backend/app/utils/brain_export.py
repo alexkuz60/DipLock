@@ -1,13 +1,19 @@
 """Экспорт surface-мешей FSAverage в JSON."""
-import mne
+import contextlib
 import os
-from app.core.config import settings
+
+import mne
+
+from app.core.config import settings as default_settings
 
 
 def export_fsaverage_surface(settings=None):
-    # Используем переданный settings ИЛИ глобальный синглтон (без повторного чтения .env)
-    if settings is None:
-        settings = globals()["settings"]
+    """Экспортирует меши fsaverage (lh/rh) и BA-индексы.
+
+    ``settings`` — необязательное переопределение конфига (тесты и скрипты);
+    по умолчанию берётся глобальный синглтон ``app.core.config.settings``.
+    """
+    settings = settings or default_settings
     subjects_dir = settings.subjects_dir
 
     if not os.path.isdir(f"{subjects_dir}/fsaverage"):
@@ -20,14 +26,12 @@ def export_fsaverage_surface(settings=None):
 
         # Децимация для frontend (необязательная оптимизация: не ломаем экспорт)
         if len(verts) > 10000:
-            try:
+            with contextlib.suppress(Exception):
                 import trimesh
                 mesh = trimesh.Trimesh(verts, faces)
                 # trimesh 5.x: первый позиционный аргумент — percent, нужен face_count
                 mesh = mesh.simplify_quadric_decimation(face_count=8000)
                 verts, faces = mesh.vertices, mesh.faces
-            except Exception:
-                pass
 
         surfaces[hemi] = {
             "vertices": verts.tolist(),

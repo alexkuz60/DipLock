@@ -14,12 +14,12 @@
 только дедупу записей просмотра; ``/analyze`` и ``/jobs`` его не заказывают —
 они удаляют файл сразу после чтения.
 """
+import asyncio
 import hashlib
 import os
 import re
 import shutil
 import uuid
-from typing import Optional, Tuple
 
 from fastapi import HTTPException, UploadFile
 
@@ -35,7 +35,7 @@ _UNSAFE_NAME_RE = re.compile(r"[^A-Za-z0-9._+-]+")
 _MAX_NAME_LEN = 128
 
 
-def safe_edf_name(filename: Optional[str]) -> str:
+def safe_edf_name(filename: str | None) -> str:
     """Санитизация имени загружаемого файла (F10).
 
     Отбрасывает каталоги (в т.ч. ``../`` и Windows-пути), заменяет небезопасные
@@ -51,7 +51,7 @@ def safe_edf_name(filename: Optional[str]) -> str:
 
 async def save_upload(
     file: UploadFile, safe_name: str, with_digest: bool = False,
-) -> Tuple[str, str, Optional[str]]:
+) -> tuple[str, str, str | None]:
     """Сохраняет загрузку в отдельный каталог с контролем размера (F10).
 
     Возвращает ``(путь_к_файлу, каталог_загрузки, sha256)``; каталог удаляет
@@ -65,7 +65,10 @@ async def save_upload(
     size = 0
     digest = hashlib.sha256() if with_digest else None
     try:
-        with open(tmp_path, "wb") as out:
+        # Файл открывается, пишется и закрывается в рабочем потоке: event-loop не
+        # должен ждать диск ни на открытии, ни на чанке (ASYNC230, F10).
+        out = await asyncio.to_thread(open, tmp_path, "wb")
+        try:
             while chunk := await file.read(_UPLOAD_CHUNK):
                 size += len(chunk)
                 if size > MAX_UPLOAD_SIZE:
@@ -75,7 +78,9 @@ async def save_upload(
                     )
                 if digest is not None:
                     digest.update(chunk)
-                out.write(chunk)
+                await asyncio.to_thread(out.write, chunk)
+        finally:
+            await asyncio.to_thread(out.close)
     except BaseException:
         shutil.rmtree(upload_dir, ignore_errors=True)
         raise

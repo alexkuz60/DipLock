@@ -32,8 +32,8 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
 
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND_DIR not in sys.path:  # запуск файлом, а не модулем
@@ -64,7 +64,7 @@ class RecordDir:
     has_sidecar: bool
 
 
-def _record_path(upload_dir: str) -> Optional[str]:
+def _record_path(upload_dir: str) -> str | None:
     """EDF внутри каталога записи: имя из сайдкара или единственный ``*.edf``."""
     payload = read_sidecar(upload_dir)
     if payload:
@@ -77,9 +77,9 @@ def _record_path(upload_dir: str) -> Optional[str]:
     return None
 
 
-def scan_records(root: str) -> List[RecordDir]:
+def scan_records(root: str) -> list[RecordDir]:
     """Каталоги записей каталога загрузок: отпечаток, размер, время создания."""
-    records: List[RecordDir] = []
+    records: list[RecordDir] = []
     if not os.path.isdir(root):
         return records
     for name in sorted(os.listdir(root)):
@@ -113,14 +113,14 @@ def scan_records(root: str) -> List[RecordDir]:
 
 def plan_cleanup(
     records: Sequence[RecordDir], keep: str = "newest",
-) -> Tuple[List[RecordDir], List[RecordDir]]:
+) -> tuple[list[RecordDir], list[RecordDir]]:
     """Делит записи на «оставить» и «удалить»: по одному каталогу на отпечаток."""
-    groups: Dict[str, List[RecordDir]] = {}
+    groups: dict[str, list[RecordDir]] = {}
     for record in records:
         groups.setdefault(record.digest, []).append(record)
 
-    kept: List[RecordDir] = []
-    removed: List[RecordDir] = []
+    kept: list[RecordDir] = []
+    removed: list[RecordDir] = []
     for group in groups.values():
         ordered = sorted(group, key=lambda r: r.created_at, reverse=(keep == "newest"))
         kept.append(ordered[0])
@@ -174,7 +174,7 @@ def _mb(size: int) -> str:
     return f"{size / (1024 * 1024):.1f} МБ"
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Разбирает аргументы, печатает план и (с ``--apply``) выполняет уборку."""
     parser = argparse.ArgumentParser(description="Дедуп и уборка каталога записей EDF")
     parser.add_argument("--upload-dir", default=settings.upload_dir, help="каталог загрузок")

@@ -1,8 +1,8 @@
 """DipLock FastAPI entry-point."""
 import logging
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,7 +73,7 @@ app.include_router(api_router, prefix=settings.api_prefix)
 
 def _read_html(path: str) -> str:
     """Читает HTML-файл (utf-8)."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return f.read()
 
 
@@ -119,11 +119,11 @@ async def legacy_page():
 
 
 @app.get("/init-status")
-async def init_status() -> Dict:
+async def init_status() -> dict:
     """Проверка готовности всех компонентов для стартовой страницы."""
     import mne
 
-    checks: Dict[str, str] = {}
+    checks: dict[str, str] = {}
 
     # 1. MNE-Python
     try:
@@ -155,8 +155,9 @@ async def init_status() -> Dict:
             os.makedirs(os.path.dirname(str(db_path)) or ".", exist_ok=True)
             checks["database"] = "ready"
         else:
-            from app.models.db import engine
             from sqlalchemy import text
+
+            from app.models.db import engine
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
             checks["database"] = "ready"

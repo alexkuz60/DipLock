@@ -10,7 +10,8 @@
 import asyncio
 import json
 import os
-from typing import Any, Callable, Dict, List
+from collections.abc import Callable
+from typing import Any
 
 import pytest
 
@@ -31,10 +32,10 @@ def isolated_results(tmp_path, monkeypatch):
     return results
 
 
-def _worker(spec: Dict[str, Any]) -> Callable:
+def _worker(spec: dict[str, Any]) -> Callable:
     """Воркер по описанию: бросает ``error`` или возвращает ``result``."""
 
-    def worker(progress):  # noqa: ARG001
+    def worker(progress):
         if spec.get("error") is not None:
             raise spec["error"]
         return spec.get("result", {"recording_id": "rec", "value": 1})
@@ -42,7 +43,7 @@ def _worker(spec: Dict[str, Any]) -> Callable:
     return worker
 
 
-def _run_jobs(manager: JobManager, specs: List[Dict[str, Any]]) -> List[Job]:
+def _run_jobs(manager: JobManager, specs: list[dict[str, Any]]) -> list[Job]:
     """Прогоняет задачи менеджера в одном event-loop и возвращает их."""
 
     async def _run():

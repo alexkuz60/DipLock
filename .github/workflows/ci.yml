@@ -1,0 +1,61 @@
+name: CI
+
+# Страховка перед рефакторингом: четыре входа (lint, типы, тесты, сборка UI)
+# должны быть зелёными до и после изменений. Локально — те же команды, см.
+# docs/rules/tests.md; конфигурация backend-инструментов — backend/pyproject.toml.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: backend (ruff + mypy + pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # Научные данные (~/mne_data) в CI отсутствуют — тесты с реальными томами
+      # помечены маркером `integration` и исключаются (docs/rules/tests.md).
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Установка зависимостей
+        run: pip install -r requirements-dev.txt
+      - name: ruff (линтер)
+        run: ruff check app tests scripts
+      - name: mypy (типы)
+        run: mypy app
+      - name: pytest (без integration)
+        run: python -m pytest -q -m "not integration"
+
+  frontend:
+    name: frontend (eslint + tsc + vitest + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Установка зависимостей
+        run: npm ci
+      - name: eslint
+        run: npm run lint
+      - name: tsc --noEmit
+        run: npm run typecheck
+      - name: Vitest
+        run: npm run test
+      - name: Сборка UI (в backend/app/static/ui)
+        run: npm run build

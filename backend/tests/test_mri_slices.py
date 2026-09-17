@@ -13,7 +13,6 @@ import os
 import re
 from dataclasses import replace
 from pathlib import Path
-from typing import Dict, Tuple
 
 import numpy as np
 import pytest
@@ -177,7 +176,7 @@ def test_volume_cache_rejects_other_grid_version(tmp_path):
     paths = ms._cache_paths(ms._MriCtx("subjects", str(tmp_path), _PREFIX), "abc123")
     ms._write_volume_cache(paths, _ramp_volume("x"))
 
-    with open(paths[1], "r", encoding="utf-8") as fh:
+    with open(paths[1], encoding="utf-8") as fh:
         meta = json.load(fh)
     meta["grid_version"] = ms.MRI_GRID_VERSION + 1
     with open(paths[1], "w", encoding="utf-8") as fh:
@@ -265,7 +264,7 @@ def test_geometry_matches_frontend():
 
     bounds_block = re.search(r"MNI_BRAIN_BOUNDS[^=]*=\s*\{(.*?)\n\}", text, re.S)
     assert bounds_block, "в mriProjections.ts не найдены границы MNI"
-    ts_bounds: Dict[str, Tuple[float, float]] = {
+    ts_bounds: dict[str, tuple[float, float]] = {
         axis: (float(low), float(high))
         for axis, low, high in re.findall(
             r"(\w+):\s*\[\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\]", bounds_block.group(1)

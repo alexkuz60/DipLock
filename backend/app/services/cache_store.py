@@ -26,10 +26,10 @@
 это не кэш, а носитель дедупа, у него своя семантика отказа (см.
 ``docs/rules/data-and-caches.md``).
 """
+import contextlib
 import logging
 import os
 import shutil
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def cache_path(cache_dir: str, *parts: str) -> str:
     return os.path.join(str(cache_dir), *parts)
 
 
-def cache_read(path: str) -> Optional[bytes]:
+def cache_read(path: str) -> bytes | None:
     """Читает файл кэша; ``None`` — файла нет или он не читается (это промах)."""
     try:
         with open(path, "rb") as fh:
@@ -72,10 +72,8 @@ def cache_write(path: str, data: bytes, label: str = "Кэш") -> bool:
         logger.warning("%s не записан (%s): %s", label, path, exc)
         # Обрывок временного файла не оставляем: следующий прогон прочитал бы
         # его как «объект не той длины» и упал вместо пересчёта.
-        try:
+        with contextlib.suppress(OSError):
             os.remove(tmp)
-        except OSError:
-            pass
         return False
 
 

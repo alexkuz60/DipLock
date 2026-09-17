@@ -35,10 +35,11 @@ import json
 import logging
 import os
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, cast
 
 import mne
 import nibabel as nib
@@ -52,8 +53,6 @@ from app.services.asset_versions import (
     CONTOUR_AREA_ID_OFFSET,
     CONTOUR_SIMPLIFY_MM,
     CONTOUR_SPACING_MM,
-    CONTOUR_STAMP_RELATIVE,
-    CONTOUR_VERSION,
     MIN_SHAPE_AREA_MM2,
 )
 from app.services.cache_store import cache_path, cache_write
@@ -79,10 +78,10 @@ logger = logging.getLogger(__name__)
 # (A7, этап 6).
 
 # Оси MNI в порядке массива томов (x, y, z) — как в ``mri_slices``.
-_AXIS_POS: Dict[str, int] = {"x": 0, "y": 1, "z": 2}
+_AXIS_POS: dict[str, int] = {"x": 0, "y": 1, "z": 2}
 
 # Смещение id полей Бродмана по полушариям (источник — ``asset_versions``).
-_AREA_ID_OFFSET: Dict[str, int] = CONTOUR_AREA_ID_OFFSET
+_AREA_ID_OFFSET: dict[str, int] = CONTOUR_AREA_ID_OFFSET
 
 
 # Метки, которые структурами не являются: «unknown» — неразмеченный обрезок коры,
@@ -136,8 +135,8 @@ def _resample_nearest(data: np.ndarray, affine: np.ndarray) -> np.ndarray:
     """
     inverse = np.linalg.inv(np.asarray(affine, dtype=np.float64))
     shape = data.shape
-    index_by_voxel_axis: Dict[int, np.ndarray] = {}
-    mni_axis_of_voxel_axis: Dict[int, str] = {}
+    index_by_voxel_axis: dict[int, np.ndarray] = {}
+    mni_axis_of_voxel_axis: dict[int, str] = {}
     for position, axis in enumerate(("x", "y", "z")):
         column = np.abs(inverse[:3, position])
         total = float(column.sum())
@@ -181,10 +180,10 @@ def _resample_nearest(data: np.ndarray, affine: np.ndarray) -> np.ndarray:
 
 
 @lru_cache(maxsize=1)
-def _lut_names() -> Dict[int, str]:
+def _lut_names() -> dict[int, str]:
     """``id → имя`` из FreeSurferColorLUT.txt (файл поставляется вместе с MNE)."""
     path = Path(mne.__file__).parent / "data" / "FreeSurferColorLUT.txt"
-    names: Dict[int, str] = {}
+    names: dict[int, str] = {}
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError as exc:  # pragma: no cover — файл есть в любой установке MNE
@@ -205,7 +204,7 @@ def _lut_names() -> Dict[int, str]:
 
 
 # Русские подписи: UI-тексты на русском, а имена атласа — английские.
-_CORTEX_RU: Dict[str, str] = {
+_CORTEX_RU: dict[str, str] = {
     "superiorfrontal": "верхняя лобная извилина",
     "rostralmiddlefrontal": "ростральная средняя лобная извилина",
     "caudalmiddlefrontal": "каудальная средняя лобная извилина",
@@ -236,7 +235,7 @@ _CORTEX_RU: Dict[str, str] = {
     "insula": "островковая доля",
 }
 
-_ASEG_RU: Dict[str, str] = {
+_ASEG_RU: dict[str, str] = {
     "Left-Cerebral-White-Matter": "белое вещество (слева)",
     "Right-Cerebral-White-Matter": "белое вещество (справа)",
     "Left-Lateral-Ventricle": "боковой желудочек (слева)",
@@ -279,13 +278,13 @@ _ASEG_RU: Dict[str, str] = {
 }
 
 
-def _structure_names() -> Dict[int, Tuple[str, str]]:
+def _structure_names() -> dict[int, tuple[str, str]]:
     """``id → (имя атласа, русская подпись)`` для меток ``aparc+aseg``.
 
     Незнакомая метка отдаётся английским именем LUT (или «метка N»), а не
     выдуманным переводом: подпись должна быть проверяемой.
     """
-    names: Dict[int, Tuple[str, str]] = {}
+    names: dict[int, tuple[str, str]] = {}
     for label_id, lut_name in _lut_names().items():
         if any(marker in lut_name for marker in _EXCLUDED_STRUCTURE_MARKERS):
             continue
@@ -308,10 +307,10 @@ class ContourVolumes:
 
     structures: np.ndarray
     areas: np.ndarray
-    structure_names: Dict[int, str]
-    structure_labels: Dict[int, str]
-    area_names: Dict[int, str]
-    area_labels: Dict[int, str]
+    structure_names: dict[int, str]
+    structure_labels: dict[int, str]
+    area_names: dict[int, str]
+    area_labels: dict[int, str]
     version: str
     spacing_mm: float = CONTOUR_SPACING_MM
 
@@ -328,12 +327,14 @@ def _area_label(area_name: str) -> str:
 def _structure_volume(ctx: _ContourCtx) -> np.ndarray:
     """Метки ``aparc+aseg`` на MNI-сетке 1 мм (ближайший воксель)."""
     path = os.path.join(ctx.subjects_dir, "fsaverage/mri/aparc+aseg.mgz")
-    image = nib.load(path)
+    # ``nib.load`` отдаёт базовый ``FileBasedImage``; mgz-томат — ``MGHImage``
+    # (shape/affine/dataobj) — сужаем тип для проверки типов.
+    image = cast("nib.MGHImage", nib.load(path))
     data = np.asanyarray(image.dataobj)
     return _resample_nearest(data, image.affine).astype(np.int16)
 
 
-def _brodmann_volume(ctx: _ContourCtx) -> Tuple[np.ndarray, Dict[int, str]]:
+def _brodmann_volume(ctx: _ContourCtx) -> tuple[np.ndarray, dict[int, str]]:
     """Производная объёмная разметка полей Бродмана: ближайшая вершина коры.
 
     Узлы коры (``lh/rh.ribbon.mgz``) получают метку **ближайшей вершины**
@@ -343,9 +344,12 @@ def _brodmann_volume(ctx: _ContourCtx) -> Tuple[np.ndarray, Dict[int, str]]:
     поля Бродмана, и выдавать их за них нельзя.
     """
     areas = np.zeros(mri_shape(CONTOUR_SPACING_MM), dtype=np.int16)
-    names: Dict[int, str] = {}
+    names: dict[int, str] = {}
     for hemi in ("lh", "rh"):
-        ribbon = nib.load(os.path.join(ctx.subjects_dir, f"fsaverage/mri/{hemi}.ribbon.mgz"))
+        ribbon = cast(
+            "nib.MGHImage",
+            nib.load(os.path.join(ctx.subjects_dir, f"fsaverage/mri/{hemi}.ribbon.mgz")),
+        )
         ribbon_mni = _resample_nearest(np.asanyarray(ribbon.dataobj) > 0, ribbon.affine)
         index = np.argwhere(ribbon_mni)
         if index.size == 0:
@@ -356,7 +360,7 @@ def _brodmann_volume(ctx: _ContourCtx) -> Tuple[np.ndarray, Dict[int, str]]:
         labels, _, raw_names = nib.freesurfer.read_annot(
             os.path.join(ctx.subjects_dir, f"fsaverage/label/{hemi}.PALS_B12_Brodmann.annot")
         )
-        allowed: Dict[int, str] = {}
+        allowed: dict[int, str] = {}
         for position, raw in enumerate(raw_names):
             name = raw.decode("utf-8", errors="replace")
             if name.startswith("Brodmann."):
@@ -392,7 +396,7 @@ def _brodmann_volume(ctx: _ContourCtx) -> Tuple[np.ndarray, Dict[int, str]]:
     return areas, names
 
 
-def _read_cache(path: str) -> Optional[Tuple[np.ndarray, np.ndarray, Dict[int, str]]]:
+def _read_cache(path: str) -> tuple[np.ndarray, np.ndarray, dict[int, str]] | None:
     """Объёмы из дискового кэша (или ``None``, если кэша нет/он нечитаем)."""
     if not os.path.exists(path):
         return None
@@ -411,7 +415,7 @@ def _read_cache(path: str) -> Optional[Tuple[np.ndarray, np.ndarray, Dict[int, s
 
 
 def _write_cache(
-    path: str, structures: np.ndarray, areas: np.ndarray, area_names: Dict[int, str]
+    path: str, structures: np.ndarray, areas: np.ndarray, area_names: dict[int, str]
 ) -> None:
     """Атомарная запись кэша; сбой не критичен (кэш — только оптимизация).
 
@@ -471,7 +475,7 @@ def load_volumes(ctx: _ContourCtx) -> ContourVolumes:
     )
 
 
-def _axis_index(axis: str, mm: float, spacing_mm: float) -> Optional[int]:
+def _axis_index(axis: str, mm: float, spacing_mm: float) -> int | None:
     """Индекс узла сетки вдоль оси MNI: ближайший узел или ``None`` (точка вне тома).
 
     Округление — «половина вверх», как у ``slice_index`` срезов МРТ
@@ -498,7 +502,7 @@ def structure_id_at(volumes: ContourVolumes, mni_mm: Sequence[float]) -> int:
         return 0
     indices = [
         _axis_index(axis, value, volumes.spacing_mm)
-        for axis, value in zip(("x", "y", "z"), mni_mm)
+        for axis, value in zip(("x", "y", "z"), mni_mm, strict=True)
     ]
     if any(index is None for index in indices):
         return 0
@@ -506,7 +510,7 @@ def structure_id_at(volumes: ContourVolumes, mni_mm: Sequence[float]) -> int:
     return int(volumes.structures[x, y, z])
 
 
-def structure_at(settings: Settings, mni_mm: Sequence[float]) -> Optional[str]:
+def structure_at(settings: Settings, mni_mm: Sequence[float]) -> str | None:
     """Анатомическая структура по MNI-координате точки — подпись для результата.
 
     Тем же атласом (``aparc+aseg``), что и контуры срезов: подпись структуры в
@@ -520,7 +524,7 @@ def structure_at(settings: Settings, mni_mm: Sequence[float]) -> Optional[str]:
     """
     try:
         volumes = load_volumes(_ContourCtx.from_settings(settings))
-    except Exception as exc:  # noqa: BLE001 — атлас не обязателен для расчёта
+    except Exception as exc:
         logger.info("Структура по MNI недоступна: %s", exc)
         return None
 
@@ -546,16 +550,16 @@ def _shape_payloads(
     volume: np.ndarray,
     plane: str,
     index: int,
-    names: Dict[int, str],
-    labels: Dict[int, str],
-) -> List[Dict[str, Any]]:
+    names: dict[int, str],
+    labels: dict[int, str],
+) -> list[dict[str, Any]]:
     """Контуры всех меток среза: полигоны в мм MNI + подписи, крупные — первыми."""
     values = _slice_of(volume, plane, index)
     horizontal, vertical = PLANE_AXES[plane]
     x_mm = axis_grid(horizontal, CONTOUR_SPACING_MM)
     y_mm = axis_grid(vertical, CONTOUR_SPACING_MM)
 
-    payloads: List[Dict[str, Any]] = []
+    payloads: list[dict[str, Any]] = []
     for raw_label in np.unique(values):
         label_id = int(raw_label)
         if label_id == 0 or label_id not in names:
@@ -586,7 +590,7 @@ def _shape_payloads(
     return payloads
 
 
-def slice_contours(settings: Settings, plane: str, mm: float) -> Dict[str, Any]:
+def slice_contours(settings: Settings, plane: str, mm: float) -> dict[str, Any]:
     """Контуры одного среза: анатомические структуры и поля Бродмана (мм MNI).
 
     Срез вне диапазона плоскости — ошибка (``ValueError``): UI зажимает значение
@@ -618,7 +622,7 @@ def slice_contours(settings: Settings, plane: str, mm: float) -> Dict[str, Any]:
     }
 
 
-def contours_ref(settings: Settings) -> Dict[str, Any]:
+def contours_ref(settings: Settings) -> dict[str, Any]:
     """Ссылка на контуры для ``/meta``: версия, базовый URL, шаг, метод (без сборки)."""
     return {
         "version": asset_version(settings),
@@ -628,7 +632,7 @@ def contours_ref(settings: Settings) -> Dict[str, Any]:
     }
 
 
-def contours_meta(settings: Settings) -> Dict[str, Any]:
+def contours_meta(settings: Settings) -> dict[str, Any]:
     """Метаданные контуров: плоскости, шаг, метод и число доступных меток.
 
     Требует объёмы (собирает кэш при первом обращении) — это отдельный тяжёлый

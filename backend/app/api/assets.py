@@ -16,7 +16,7 @@
 Версию ассета считает сервис (``*_version``/``asset_version``): клиент кэширует
 по URL + ETag, сам ответ отдаётся готовыми байтами из дискового кэша.
 """
-from typing import Dict, Mapping, Optional
+from collections.abc import Mapping
 
 from fastapi import Response
 
@@ -40,7 +40,7 @@ def normalize_etag(value: str) -> str:
     return value.strip().strip('"')
 
 
-def etag_matches(if_none_match: Optional[str], version: str) -> bool:
+def etag_matches(if_none_match: str | None, version: str) -> bool:
     """Проверяет ``If-None-Match`` против версии ассета.
 
     Заголовок — список тегов через запятую, поэтому сравниваем по частям, а не
@@ -60,10 +60,10 @@ def asset_response(
     data: bytes,
     version: str,
     *,
-    if_none_match: Optional[str] = None,
+    if_none_match: str | None = None,
     media_type: str = "application/json",
     cache_control: str = CACHE_PUBLIC_DAY,
-    headers: Optional[Mapping[str, str]] = None,
+    headers: Mapping[str, str] | None = None,
 ) -> Response:
     """Отдаёт ассет: ``200`` с телом и ETag либо ``304`` без тела (F6, A2).
 
@@ -71,7 +71,7 @@ def asset_response(
     отвечали одинаково. ``headers`` — дополнительные заголовки ассета (``X-…``);
     они попадают и в ``304``: клиент видит те же метаданные, что и в ``200``.
     """
-    response_headers: Dict[str, str] = {
+    response_headers: dict[str, str] = {
         "ETag": f'"{version}"',
         "Cache-Control": cache_control,
     }

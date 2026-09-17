@@ -1,16 +1,16 @@
 """Версии окружения: для /meta, /init-status и provenance результата (F16)."""
 import sys
-from typing import Dict, Optional
+from contextlib import suppress
 
 
-def library_versions() -> Dict[str, Optional[str]]:
+def library_versions() -> dict[str, str | None]:
     """Версии Python и научных библиотек (``trimesh`` опционален → None)."""
     import mne
     import numpy
     import scipy
     import sqlalchemy
 
-    versions: Dict[str, Optional[str]] = {
+    versions: dict[str, str | None] = {
         "python": sys.version.split()[0],
         "mne": mne.__version__,
         "numpy": numpy.__version__,
@@ -18,10 +18,8 @@ def library_versions() -> Dict[str, Optional[str]]:
         "sqlalchemy": sqlalchemy.__version__,
         "trimesh": None,
     }
-    try:
+    with suppress(Exception):  # trimesh опционален (децимация мешей)
         import trimesh
 
         versions["trimesh"] = trimesh.__version__
-    except Exception:  # trimesh опционален (децимация мешей)
-        pass
     return versions

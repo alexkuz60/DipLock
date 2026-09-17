@@ -17,7 +17,6 @@ import logging
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, List, Optional, Tuple
 
 from app.core.config import Settings
 from app.services import asset_versions, journal
@@ -50,7 +49,7 @@ def surface_version(ctx: _AssetCtx) -> str:
 
 
 
-def _cache_paths(ctx: _AssetCtx, version: str) -> Tuple[str, str]:
+def _cache_paths(ctx: _AssetCtx, version: str) -> tuple[str, str]:
     """Пути файлов кэша: (меш, индексы Brodmann)."""
     return (
         cache_path(ctx.cache_dir, "surface", f"surface-{version}.json"),
@@ -59,7 +58,7 @@ def _cache_paths(ctx: _AssetCtx, version: str) -> Tuple[str, str]:
 
 
 @lru_cache(maxsize=4)
-def _build_assets(ctx: _AssetCtx) -> Tuple[bytes, bytes, str]:
+def _build_assets(ctx: _AssetCtx) -> tuple[bytes, bytes, str]:
     """Строит байты меша и BA-индексов (или берёт их с диска) + версию ассета."""
     started = time.perf_counter()
     version = surface_version(ctx)
@@ -76,7 +75,7 @@ def _build_assets(ctx: _AssetCtx) -> Tuple[bytes, bytes, str]:
         return mesh_cached, ba_cached, version
 
     payload = export_fsaverage_surface(ctx)
-    ba_labels: Dict[str, Dict] = payload.pop("ba_labels", {}) or {}
+    ba_labels: dict[str, dict] = payload.pop("ba_labels", {}) or {}
 
     mesh_payload = {
         "version": version,
@@ -108,7 +107,7 @@ def _build_assets(ctx: _AssetCtx) -> Tuple[bytes, bytes, str]:
 
 
 @lru_cache(maxsize=2)
-def _parsed_brodmann(ctx: _AssetCtx) -> Dict[str, Dict]:
+def _parsed_brodmann(ctx: _AssetCtx) -> dict[str, dict]:
     """Распаренные BA-метки (парсим кэш один раз на версию ассета)."""
     _, ba_bytes, _ = _build_assets(ctx)
     return json.loads(ba_bytes).get("areas", {})
@@ -119,7 +118,7 @@ def asset_version(settings: Settings) -> str:
     return surface_version(_AssetCtx.from_settings(settings))
 
 
-def surface_ref(settings: Settings) -> Dict[str, str]:
+def surface_ref(settings: Settings) -> dict[str, str]:
     """Ссылка на кэшируемый меш: версия считается без построения данных (O(1)).
 
     Возвращает поля ``SurfaceRef`` (``version``/``url``/``brodmann_url``) — схема
@@ -133,24 +132,24 @@ def surface_ref(settings: Settings) -> Dict[str, str]:
     }
 
 
-def get_surface_bytes(settings: Settings) -> Tuple[bytes, str]:
+def get_surface_bytes(settings: Settings) -> tuple[bytes, str]:
     """Байты JSON меша fsaverage + версия ассета (для ETag/Cache-Control)."""
     mesh_bytes, _, version = _build_assets(_AssetCtx.from_settings(settings))
     return mesh_bytes, version
 
 
-def get_brodmann_bytes(settings: Settings) -> Tuple[bytes, str]:
+def get_brodmann_bytes(settings: Settings) -> tuple[bytes, str]:
     """Байты JSON всех полей Бродмана + версия ассета."""
     _, ba_bytes, version = _build_assets(_AssetCtx.from_settings(settings))
     return ba_bytes, version
 
 
-def get_brodmann_area(settings: Settings, name: str) -> Optional[Dict]:
+def get_brodmann_area(settings: Settings, name: str) -> dict | None:
     """Индексы вершин одного поля Бродмана (или None, если метки нет)."""
     return _parsed_brodmann(_AssetCtx.from_settings(settings)).get(name)
 
 
-def brodmann_area_names(settings: Settings) -> List[str]:
+def brodmann_area_names(settings: Settings) -> list[str]:
     """Имена всех доступных полей Бродмана (лёгкий ответ для UI)."""
     return sorted(_parsed_brodmann(_AssetCtx.from_settings(settings)))
 

@@ -80,9 +80,8 @@ def test_read_journal_turns_dashes_into_null():
 
 def test_step_records_error_and_reraises():
     """Упавший шаг тоже виден в журнале: «почему упало» ищут не только по логу."""
-    with pytest.raises(ValueError):
-        with journal.step("dipoles", "grid_scan", note="grid=7mm"):
-            raise ValueError("нет эпох")
+    with pytest.raises(ValueError), journal.step("dipoles", "grid_scan", note="grid=7mm"):
+        raise ValueError("нет эпох")
 
     (line,) = _raw_lines()
 

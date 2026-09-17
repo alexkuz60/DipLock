@@ -28,10 +28,11 @@
 они живут по версии, а не по записи), журнал шагов и корневые файлы каталога
 загрузок (``data/edf/test.edf`` из репозитория).
 """
+import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from app.core.config import Settings, settings
 from app.services import job_store
@@ -49,9 +50,9 @@ RECORDING_CACHE_SUBDIRS = ("signals", "spectra", "spectrograms")
 class SweepReport:
     """Что нашёл и убрал обход сирот (для лога, скрипта и тестов)."""
 
-    upload_dirs: List[str] = field(default_factory=list)
-    cache_dirs: List[str] = field(default_factory=list)
-    job_files: List[str] = field(default_factory=list)
+    upload_dirs: list[str] = field(default_factory=list)
+    cache_dirs: list[str] = field(default_factory=list)
+    job_files: list[str] = field(default_factory=list)
     freed_bytes: int = 0
 
     @property
@@ -59,7 +60,7 @@ class SweepReport:
         """Сколько объектов удалено всего."""
         return len(self.upload_dirs) + len(self.cache_dirs) + len(self.job_files)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """Отчёт примитивами — для лога и печати в скрипте."""
         return {
             "upload_dirs": len(self.upload_dirs),
@@ -88,20 +89,18 @@ def _size_of(path: str) -> int:
 
 def _drop_path(path: str) -> None:
     """Удаляет файл внутри каталога кэша; отсутствие и ошибки не поднимаются наружу."""
-    try:
+    with contextlib.suppress(OSError):
         os.remove(path)
-    except OSError:
-        pass
 
 
-def _sweep_cache_dirs(cfg: Settings, protected_ids: Set[str]) -> Tuple[List[str], int]:
+def _sweep_cache_dirs(cfg: Settings, protected_ids: set[str]) -> tuple[list[str], int]:
     """Удаляет кэши записей вне ``protected_ids``: (имена, освобождено байт).
 
     Каталог сносится через ``cache_clear`` (единственный способ убрать подкаталог
     кэша, правило 9 в ``docs/rules/data-and-caches.md``), одиночный файл — с
     диска: ``shutil.rmtree`` файл не удаляет, а молча пропускает.
     """
-    removed: List[str] = []
+    removed: list[str] = []
     freed = 0
     for subdir in RECORDING_CACHE_SUBDIRS:
         root = cache_path(cfg.cache_dir, subdir)
@@ -120,7 +119,7 @@ def _sweep_cache_dirs(cfg: Settings, protected_ids: Set[str]) -> Tuple[List[str]
     return removed, freed
 
 
-def _disk_recording_ids(root: str) -> Set[str]:
+def _disk_recording_ids(root: str) -> set[str]:
     """Имена каталогов записей, лежащих на диске (даже без сайдкара).
 
     Каталог без валидного сайдкара реестр не восстанавливает, но запись
@@ -133,9 +132,9 @@ def _disk_recording_ids(root: str) -> Set[str]:
 
 
 def sweep_orphans(
-    cfg: Optional[Settings] = None,
+    cfg: Settings | None = None,
     *,
-    registry: Optional[RecordingRegistry] = None,
+    registry: RecordingRegistry | None = None,
 ) -> SweepReport:
     """Один проход по сиротам: каталоги загрузок, кэши, файлы задач.
 
@@ -159,7 +158,7 @@ def sweep_orphans(
                 limit=cfg.jobs_history_limit,
             )
         )
-    except Exception:  # noqa: BLE001 — уборка не имеет права ронять старт
+    except Exception:
         logger.exception("Обход сирот прерван")
 
     if report.total:

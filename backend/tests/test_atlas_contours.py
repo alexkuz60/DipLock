@@ -10,7 +10,6 @@
 """
 import os
 from pathlib import Path
-from typing import Tuple
 
 import numpy as np
 import pytest
@@ -19,6 +18,7 @@ from app.api import routes
 from app.core.config import settings
 from app.services import atlas_contours as ac
 from app.services import mri_slices as ms
+from app.services.asset_versions import CONTOUR_STAMP_RELATIVE
 from app.utils.marching_squares import (
     polygon_area_mm2,
     simplify_polyline,
@@ -41,10 +41,10 @@ _CORONAL_AFFINE = np.array(
 def _axis_index(axis: str, mm: float) -> int:
     """Индекс узла MNI-сетки для значения в мм (обратная к ``axis_grid``)."""
     low, _ = ms.MRI_BOUNDS[axis]
-    return int(round((mm - low) / ms.MRI_SPACING_MM))
+    return round((mm - low) / ms.MRI_SPACING_MM)
 
 
-def _ramp_coronal_volume(scale: int = 4, shape: Tuple[int, int, int] = (64, 64, 64)):
+def _ramp_coronal_volume(scale: int = 4, shape: tuple[int, int, int] = (64, 64, 64)):
     """Том-«линейка» с укладкой fsaverage: значение кодирует номер вокселя.
 
     Оси вокселей и оси MNI не совпадают, а шаг крупный (``scale`` мм), поэтому
@@ -91,7 +91,7 @@ def test_marching_squares_ring_keeps_hole_as_own_polygon():
     assert areas[0] < 20.0 < 90.0 < areas[1]
     hole = min(loops, key=polygon_area_mm2)
     points = np.asarray(hole)
-    assert 3.5 <= points.min() and points.max() <= 7.7
+    assert points.min() >= 3.5 and points.max() <= 7.7
 
 
 def test_marching_squares_empty_and_validation():
@@ -343,7 +343,7 @@ def test_meta_exposes_contours_ref(client):
 
 # --- Интеграция: реальные атласы fsaverage (~/mne_data) ---
 
-_HAS_ATLAS = os.path.exists(os.path.join(settings.subjects_dir, ac.CONTOUR_STAMP_RELATIVE[0]))
+_HAS_ATLAS = os.path.exists(os.path.join(settings.subjects_dir, CONTOUR_STAMP_RELATIVE[0]))
 _skip_no_atlas = pytest.mark.skipif(
     not _HAS_ATLAS, reason="нет атласов fsaverage (~/mne_data): интеграционный тест пропущен"
 )

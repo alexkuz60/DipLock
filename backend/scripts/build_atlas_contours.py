@@ -19,7 +19,7 @@ import logging
 import os
 import sys
 import time
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 _BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BACKEND_DIR not in sys.path:  # запуск файлом, а не модулем
@@ -31,10 +31,10 @@ from app.services import atlas_contours as contours  # noqa: E402
 logger = logging.getLogger("build_atlas_contours")
 
 # Срезы, которые показываются по умолчанию: три плоскости через AC–PC.
-DEFAULT_SLICES: Tuple[str, ...] = ("axial:0", "sagittal:12", "coronal:-20")
+DEFAULT_SLICES: tuple[str, ...] = ("axial:0", "sagittal:12", "coronal:-20")
 
 
-def parse_slice(value: str) -> Tuple[str, float]:
+def parse_slice(value: str) -> tuple[str, float]:
     """``ПЛОСКОСТЬ:ММ`` → (плоскость, мм); формат ошибки виден сразу."""
     plane, _, raw_mm = value.partition(":")
     if plane not in contours.PLANE_AXES or not raw_mm:
@@ -48,7 +48,7 @@ def parse_slice(value: str) -> Tuple[str, float]:
         raise argparse.ArgumentTypeError(f"{value!r}: {exc}") from exc
 
 
-def build(force: bool) -> Tuple[dict, float]:
+def build(force: bool) -> tuple[dict, float]:
     """Собирает объёмы (или берёт кэш) и возвращает метаданные и время сборки."""
     cache_path = contours.cache_file(settings)
     if force and os.path.exists(cache_path):
@@ -60,7 +60,7 @@ def build(force: bool) -> Tuple[dict, float]:
     return meta, time.perf_counter() - started
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Сборка и прогрев кэша контуров атласа (структуры + поля Бродмана)"
     )
@@ -87,7 +87,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Кэш: {cache_path} ({size_mb:.1f} МБ)")
     print(f"Сборка: {build_seconds:.2f} с (кэш на диске — дальше запросы к срезам без неё)")
 
-    entries: List[Tuple[str, float]] = args.slices or list(map(parse_slice, DEFAULT_SLICES))
+    entries: list[tuple[str, float]] = args.slices or list(map(parse_slice, DEFAULT_SLICES))
     for plane, mm in entries:
         started = time.perf_counter()
         payload = contours.slice_contours(settings, plane, mm)

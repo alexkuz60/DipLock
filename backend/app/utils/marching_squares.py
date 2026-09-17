@@ -23,8 +23,9 @@
 Точки — в тех же единицах, что переданы осям (мм MNI): модуль не знает ни про
 плоскости, ни про раскладку UI, ни про перевороты осей. Знаки — дело вызывающего.
 """
+from collections.abc import Sequence
+
 import numpy as np
-from typing import Dict, List, Sequence, Tuple
 
 # Рёбра клетки (в «удвоенных» индексах — целые числа, поэтому склейка петель
 # идёт по словарю кортежей int, без сравнения float):
@@ -35,7 +36,7 @@ _AB, _BC, _CD, _DA = 0, 1, 2, 3
 # Код клетки = биты A|B<<1|C<<2|D<<3; значение — рёбра, которые пересекает контур.
 # Седла (5 и 10) разрешаются фиксированно: выбор одной из двух схем на клетку
 # в 1 мм — это сдвиг контура на полпикселя, а не «дырка» в геометрии.
-_CASE_EDGES: Dict[int, Tuple[Tuple[int, int], ...]] = {
+_CASE_EDGES: dict[int, tuple[tuple[int, int], ...]] = {
     1: ((_AB, _DA),),
     2: ((_AB, _BC),),
     3: ((_DA, _BC),),
@@ -53,7 +54,7 @@ _CASE_EDGES: Dict[int, Tuple[Tuple[int, int], ...]] = {
 }
 
 
-def polygon_area_mm2(points: Sequence[Tuple[float, float]]) -> float:
+def polygon_area_mm2(points: Sequence[tuple[float, float]]) -> float:
     """Площадь замкнутого полигона по формуле шнуровки (мм², по модулю)."""
     if len(points) < 3:
         return 0.0
@@ -63,8 +64,8 @@ def polygon_area_mm2(points: Sequence[Tuple[float, float]]) -> float:
 
 
 def simplify_polyline(
-    points: Sequence[Tuple[float, float]], tolerance_mm: float
-) -> List[Tuple[float, float]]:
+    points: Sequence[tuple[float, float]], tolerance_mm: float
+) -> list[tuple[float, float]]:
     """Упрощение ломаной алгоритмом Дугласа—Пекера (толеранс в мм).
 
     Сетка 1 мм даёт по точке на пиксель контура: у крупной структуры это сотни
@@ -75,7 +76,7 @@ def simplify_polyline(
     if len(pts) < 3 or tolerance_mm <= 0:
         return pts
 
-    def rdp(chunk: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    def rdp(chunk: list[tuple[float, float]]) -> list[tuple[float, float]]:
         if len(chunk) < 3:
             return chunk
         start = np.asarray(chunk[0], dtype=np.float64)
@@ -100,7 +101,7 @@ def simplify_polyline(
     return rdp(pts)
 
 
-def _edge_points(index: np.ndarray, edge: int) -> Tuple[np.ndarray, np.ndarray]:
+def _edge_points(index: np.ndarray, edge: int) -> tuple[np.ndarray, np.ndarray]:
     """Координаты середин рёбер клеток (в удвоенных индексах) для одного ребра."""
     i, j = index[:, 0], index[:, 1]
     if edge == _AB:
@@ -113,11 +114,11 @@ def _edge_points(index: np.ndarray, edge: int) -> Tuple[np.ndarray, np.ndarray]:
 
 
 def _trace_loops(
-    adjacency: Dict[Tuple[int, int], List[Tuple[int, int]]]
-) -> List[List[Tuple[int, int]]]:
+    adjacency: dict[tuple[int, int], list[tuple[int, int]]]
+) -> list[list[tuple[int, int]]]:
     """Склеивает сегменты контура в замкнутые петли (координаты — удвоенные индексы)."""
     used: set = set()
-    loops: List[List[Tuple[int, int]]] = []
+    loops: list[list[tuple[int, int]]] = []
     for start, neighbours in adjacency.items():
         for neighbour in neighbours:
             key = frozenset((start, neighbour))
@@ -149,11 +150,11 @@ def _trace_loops(
 
 def trace_mask_contours(
     mask: np.ndarray,
-    x_mm: Sequence[float],
-    y_mm: Sequence[float],
+    x_mm: np.ndarray | Sequence[float],
+    y_mm: np.ndarray | Sequence[float],
     *,
     simplify_mm: float = 0.6,
-) -> List[List[Tuple[float, float]]]:
+) -> list[list[tuple[float, float]]]:
     """Контуры бинарной маски как список замкнутых полигонов в мм.
 
     ``mask[a, b]`` — сэмплы по осям ``x_mm`` и ``y_mm`` (равномерная сетка).
@@ -181,13 +182,15 @@ def trace_mask_contours(
         return []
     codes = cells[index[:, 0], index[:, 1]]
 
-    adjacency: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
+    adjacency: dict[tuple[int, int], list[tuple[int, int]]] = {}
     for code in np.unique(codes):
         subset = index[codes == code]
         for first, second in _CASE_EDGES[int(code)]:
             ax, ay = _edge_points(subset, first)
             bx, by = _edge_points(subset, second)
-            for px, py, qx, qy in zip(ax, ay, bx, by):
+            # Длины массивов заданы ``_edge_points`` (по одному на сэмпл клетки),
+            # ``strict=False`` сохраняет прежнюю семантику склейки петель.
+            for px, py, qx, qy in zip(ax, ay, bx, by, strict=False):
                 a = (int(px), int(py))
                 b = (int(qx), int(qy))
                 adjacency.setdefault(a, []).append(b)
@@ -202,9 +205,9 @@ def trace_mask_contours(
     low_x, high_x = float(x_values.min()), float(x_values.max())
     low_y, high_y = float(y_values.min()), float(y_values.max())
 
-    contours: List[List[Tuple[float, float]]] = []
+    contours: list[list[tuple[float, float]]] = []
     for loop in _trace_loops(adjacency):
-        points: List[Tuple[float, float]] = []
+        points: list[tuple[float, float]] = []
         for px, py in loop:
             x = origin_x + ((px - 2) / 2.0) * step_x
             y = origin_y + ((py - 2) / 2.0) * step_y

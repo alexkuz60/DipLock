@@ -31,7 +31,7 @@ import os
 import time
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, cast
 
 import numpy as np
 
@@ -57,25 +57,25 @@ logger = logging.getLogger(__name__)
 # Ось MNI, по которой наводится срез, и оси видимой плоскости: [горизонталь,
 # вертикаль]. Порядок и знаки — как в UI, иначе картинка окажется зеркальной.
 
-PLANE_AXIS: Dict[str, str] = {"axial": "z", "sagittal": "x", "coronal": "y"}
-PLANE_AXES: Dict[str, Tuple[str, str]] = {
+PLANE_AXIS: dict[str, str] = {"axial": "z", "sagittal": "x", "coronal": "y"}
+PLANE_AXES: dict[str, tuple[str, str]] = {
     "axial": ("x", "y"),
     "sagittal": ("y", "z"),
     "coronal": ("x", "z"),
 }
-PLANE_HORIZONTAL_SIGN: Dict[str, int] = {"axial": -1, "sagittal": 1, "coronal": -1}
-PLANE_VERTICAL_SIGN: Dict[str, int] = {"axial": 1, "sagittal": 1, "coronal": 1}
-PLANES: Tuple[str, ...] = ("axial", "sagittal", "coronal")
+PLANE_HORIZONTAL_SIGN: dict[str, int] = {"axial": -1, "sagittal": 1, "coronal": -1}
+PLANE_VERTICAL_SIGN: dict[str, int] = {"axial": 1, "sagittal": 1, "coronal": 1}
+PLANES: tuple[str, ...] = ("axial", "sagittal", "coronal")
 
 # Позиция оси MNI в массиве тома: том хранится в порядке x, y, z (по возрастанию
 # MNI), поэтому «воксельная» раскладка fsaverage здесь уже не видна.
-_AXIS_POS: Dict[str, int] = {"x": 0, "y": 1, "z": 2}
+_AXIS_POS: dict[str, int] = {"x": 0, "y": 1, "z": 2}
 
 
 def axis_count(axis: str, spacing_mm: float = MRI_SPACING_MM) -> int:
     """Число узлов сетки вдоль оси (границы включительно)."""
     low, high = MRI_BOUNDS[axis]
-    return int(round((high - low) / spacing_mm)) + 1
+    return round((high - low) / spacing_mm) + 1
 
 
 def axis_grid(axis: str, spacing_mm: float = MRI_SPACING_MM) -> np.ndarray:
@@ -84,7 +84,7 @@ def axis_grid(axis: str, spacing_mm: float = MRI_SPACING_MM) -> np.ndarray:
     return low + np.arange(axis_count(axis, spacing_mm), dtype=np.float64) * spacing_mm
 
 
-def mri_shape(spacing_mm: float = MRI_SPACING_MM) -> Tuple[int, int, int]:
+def mri_shape(spacing_mm: float = MRI_SPACING_MM) -> tuple[int, int, int]:
     """Форма тома на сетке: (x, y, z)."""
     counts = [axis_count(axis, spacing_mm) for axis in ("x", "y", "z")]
     return counts[0], counts[1], counts[2]
@@ -137,12 +137,12 @@ def slice_mm(plane: str, mm: float, spacing_mm: float = MRI_SPACING_MM) -> float
     return float(low + slice_index(plane, mm, spacing_mm) * spacing_mm)
 
 
-def plane_slice_range(plane: str) -> Tuple[float, float]:
+def plane_slice_range(plane: str) -> tuple[float, float]:
     """Диапазон значений среза плоскости (границы сетки)."""
     return MRI_BOUNDS[PLANE_AXIS[plane]]
 
 
-def slice_corners_mni(plane: str, mm: float) -> Tuple[Dict[str, float], Dict[str, float]]:
+def slice_corners_mni(plane: str, mm: float) -> tuple[dict[str, float], dict[str, float]]:
     """MNI-координаты углов картинки среза: (верхний левый, нижний правый).
 
     Функция чистая (том не нужен) — по ней проверяется, что столбец 0 картинки
@@ -151,7 +151,7 @@ def slice_corners_mni(plane: str, mm: float) -> Tuple[Dict[str, float], Dict[str
     horizontal, vertical = PLANE_AXES[plane]
     cols, rows = plane_columns_mni(plane), plane_rows_mni(plane)
 
-    def point(column: float, row: float) -> Dict[str, float]:
+    def point(column: float, row: float) -> dict[str, float]:
         coords = {horizontal: float(column), vertical: float(row)}
         coords[PLANE_AXIS[plane]] = slice_mm(plane, mm)
         return {axis: coords[axis] for axis in ("x", "y", "z")}
@@ -172,9 +172,9 @@ class MriVolume:
     alpha: np.ndarray
     version: str
     spacing_mm: float = MRI_SPACING_MM
-    window: Tuple[float, float] = (0.0, 0.0)
+    window: tuple[float, float] = (0.0, 0.0)
 
-    def slice(self, plane: str, index: int) -> Tuple[np.ndarray, np.ndarray]:
+    def slice(self, plane: str, index: int) -> tuple[np.ndarray, np.ndarray]:
         """Срез как (яркость, альфа) формы (строки, столбцы) в раскладке UI.
 
         Столбцы — горизонтальная ось плоскости, строки — вертикальная,
@@ -192,7 +192,7 @@ class MriVolume:
             gray, alpha = gray[:, ::-1], alpha[:, ::-1]
         return gray.copy(), alpha.copy()
 
-    def slice_png(self, plane: str, mm: float) -> Tuple[bytes, float]:
+    def slice_png(self, plane: str, mm: float) -> tuple[bytes, float]:
         """PNG среза + фактическое (квантованное) значение среза в мм."""
         actual_mm = slice_mm(plane, mm, self.spacing_mm)
         index = slice_index(plane, mm, self.spacing_mm)
@@ -223,7 +223,7 @@ def mri_version(ctx: _MriCtx) -> str:
 
 
 
-def _cache_paths(ctx: _MriCtx, version: str) -> Tuple[str, str]:
+def _cache_paths(ctx: _MriCtx, version: str) -> tuple[str, str]:
     """Пути кэша тома: (массив npz, паспорт сборки json)."""
     return (
         cache_path(ctx.cache_dir, "mri", f"volume-{version}.npz"),
@@ -231,12 +231,12 @@ def _cache_paths(ctx: _MriCtx, version: str) -> Tuple[str, str]:
     )
 
 
-def _read_volume_cache(paths: Tuple[str, str]) -> Optional[MriVolume]:
+def _read_volume_cache(paths: tuple[str, str]) -> MriVolume | None:
     """Том из дискового кэша; ``None`` — если кэша нет или он от другой сборки."""
     npz_path, meta_path = paths
     try:
-        with open(meta_path, "r", encoding="utf-8") as fh:
-            meta: Dict[str, Any] = json.load(fh)
+        with open(meta_path, encoding="utf-8") as fh:
+            meta: dict[str, Any] = json.load(fh)
         with np.load(npz_path) as data:
             gray, alpha = data["gray"], data["alpha"]
     except (OSError, KeyError, ValueError, EOFError):
@@ -254,7 +254,7 @@ def _read_volume_cache(paths: Tuple[str, str]) -> Optional[MriVolume]:
     )
 
 
-def _write_volume_cache(paths: Tuple[str, str], volume: MriVolume) -> None:
+def _write_volume_cache(paths: tuple[str, str], volume: MriVolume) -> None:
     """Атомарная запись кэша; сбой не критичен (кэш — только оптимизация).
 
     Архив собирается в память: ``np.savez_compressed`` дописывает ``.npz`` к
@@ -276,7 +276,7 @@ def _write_volume_cache(paths: Tuple[str, str], volume: MriVolume) -> None:
     cache_write(meta_path, json.dumps(meta).encode("utf-8"), label="Кэш тома МРТ (паспорт)")
 
 
-def _voxel_axis_of(affine: np.ndarray) -> Dict[str, int]:
+def _voxel_axis_of(affine: np.ndarray) -> dict[str, int]:
     """Ось MNI → ось вокселей тома. Косые матрицы не поддерживаем осознанно.
 
     Строка обратной матрицы — это **ось вокселей** (её уравнение даёт индекс), а
@@ -287,7 +287,7 @@ def _voxel_axis_of(affine: np.ndarray) -> Dict[str, int]:
     местами, и срез покажет не ту анатомию (см. ``voxel_indices``).
     """
     linear = np.linalg.inv(affine)[:3, :3]
-    result: Dict[str, int] = {}
+    result: dict[str, int] = {}
     for voxel_axis in range(3):
         weights = np.abs(linear[voxel_axis])
         mni_axis = int(np.argmax(weights))
@@ -306,7 +306,7 @@ def _voxel_axis_of(affine: np.ndarray) -> Dict[str, int]:
     return result
 
 
-def voxel_indices(affine: np.ndarray, shape: Tuple[int, ...]) -> List[np.ndarray]:
+def voxel_indices(affine: np.ndarray, shape: tuple[int, ...]) -> list[np.ndarray]:
     """Индексы вокселей тома для узлов MNI-сетки — списком **по осям вокселей**.
 
     Каждая ось вокселей берёт уравнение (строку обратной матрицы) именно у своей
@@ -317,7 +317,7 @@ def voxel_indices(affine: np.ndarray, shape: Tuple[int, ...]) -> List[np.ndarray
     """
     inverse = np.linalg.inv(affine)
     axis_of_voxel = {voxel_axis: axis for axis, voxel_axis in _voxel_axis_of(affine).items()}
-    indices: List[np.ndarray] = []
+    indices: list[np.ndarray] = []
     for voxel_axis in range(3):
         axis = axis_of_voxel[voxel_axis]
         mni_index = ("x", "y", "z").index(axis)
@@ -328,7 +328,7 @@ def voxel_indices(affine: np.ndarray, shape: Tuple[int, ...]) -> List[np.ndarray
     return indices
 
 
-def _mni_order(voxel_axis_of: Dict[str, int]) -> Tuple[int, int, int]:
+def _mni_order(voxel_axis_of: dict[str, int]) -> tuple[int, int, int]:
     """Перестановка осей сэмплированного массива (воксельные) в порядок MNI."""
     order = [0, 0, 0]
     for index, axis in enumerate(("x", "y", "z")):
@@ -344,8 +344,11 @@ def _build_volume(ctx: _MriCtx, version: str) -> MriVolume:
     mask_path = os.path.join(ctx.subjects_dir, MRI_STAMP_RELATIVE[1])
     if not (os.path.exists(t1_path) and os.path.exists(mask_path)):
         raise FileNotFoundError(f"Нет тома МРТ fsaverage: {t1_path}")
-    t1_image = nib.load(t1_path)
-    mask_image = nib.load(mask_path)
+    # ``nib.load`` возвращает базовый ``FileBasedImage``: у mgz-томов fsaverage
+    # (T1/brainmask/aparc+aseg) это ``MGHImage`` с shape/affine/dataobj —
+    # сужаем тип явно, чтобы проверка типов видела реальные атрибуты.
+    t1_image = cast("nib.MGHImage", nib.load(t1_path))
+    mask_image = cast("nib.MGHImage", nib.load(mask_path))
     if tuple(mask_image.shape) != tuple(t1_image.shape):
         raise ValueError("T1 и brainmask разошлись по форме — данные fsaverage повреждены")
 
@@ -410,7 +413,7 @@ def asset_version(settings: Settings) -> str:
     return mri_version(_MriCtx.from_settings(settings))
 
 
-def slice_png(settings: Settings, plane: str, mm: float) -> Tuple[bytes, str, float]:
+def slice_png(settings: Settings, plane: str, mm: float) -> tuple[bytes, str, float]:
     """PNG среза + версия ассета + фактическое (квантованное сеткой) значение среза.
 
     Срез вне диапазона плоскости — ошибка (``ValueError``): UI зажимает значение
@@ -428,7 +431,7 @@ def slice_png(settings: Settings, plane: str, mm: float) -> Tuple[bytes, str, fl
     return data, volume.version, actual_mm
 
 
-def slice_ref(settings: Settings) -> Dict[str, Any]:
+def slice_ref(settings: Settings) -> dict[str, Any]:
     """Ссылка на срезы для ``/meta``: версия, базовый URL, шаг сетки (без тома)."""
     return {
         "version": asset_version(settings),
@@ -437,7 +440,7 @@ def slice_ref(settings: Settings) -> Dict[str, Any]:
     }
 
 
-def mri_meta(settings: Settings) -> Dict[str, Any]:
+def mri_meta(settings: Settings) -> dict[str, Any]:
     """Метаданные срезов: границы, шаг сетки, плоскости и окно интенсивности.
 
     Требует том (собирает кэш при первом обращении) — это отдельный тяжёлый

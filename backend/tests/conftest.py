@@ -99,7 +99,7 @@ def write_minimal_edf(path, ch_names, data_uv, sfreq, record_sec=1.0):
     """
     ns = len(ch_names)
     n_times = data_uv.shape[1]
-    samps_per_record = int(round(sfreq * record_sec))
+    samps_per_record = round(sfreq * record_sec)
     n_records = int(np.ceil(n_times / samps_per_record))
     pad = n_records * samps_per_record - n_times
     if pad:

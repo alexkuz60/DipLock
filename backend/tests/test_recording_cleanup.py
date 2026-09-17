@@ -11,7 +11,7 @@ from app.services.recordings import SIDECAR_NAME, file_digest, read_sidecar
 from scripts.dedupe_recordings import main, plan_cleanup, scan_records
 
 
-def _make_record(root, name: str, edf_file, mtime: float = None):
+def _make_record(root, name: str, edf_file, mtime: float | None = None):
     """Каталог записи с копией тестового EDF (старое время — по желанию)."""
     upload_dir = root / name
     upload_dir.mkdir()

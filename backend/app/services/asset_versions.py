@@ -33,7 +33,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from typing import Any
 
 # Длина «тега» отпечатка: 16 hex-символов хватает и на ETag, и на имя файла
 # кэша, и на ``?v=`` в URL (та же длина была у прежних трёх реализаций).
@@ -45,7 +45,7 @@ TAG_LENGTH = 16
 # 1 — начальный номер: до этапа 6 версия считалась без него, и поднять её при
 # изменении шагов сборки было нечем.
 SURFACE_VERSION = 1
-SURFACE_STAMP_RELATIVE: Tuple[str, ...] = (
+SURFACE_STAMP_RELATIVE: tuple[str, ...] = (
     "fsaverage/surf/lh.inflated",
     "fsaverage/surf/rh.inflated",
     "fsaverage/label/lh.PALS_B12_Brodmann.annot",
@@ -61,7 +61,7 @@ MRI_SPACING_MM = 1.0
 # (интеграционный тест сверяет их с реальным томом). Это же — границы фигур на
 # фронтенде (`MNI_BRAIN_BOUNDS`): картинка среза ровно накрывает прямоугольник
 # плоскости, поэтому обе стороны обязаны сойтись до миллиметра.
-MRI_BOUNDS: Dict[str, Tuple[float, float]] = {
+MRI_BOUNDS: dict[str, tuple[float, float]] = {
     "x": (-80.0, 80.0),
     "y": (-116.0, 80.0),
     "z": (-82.0, 90.0),
@@ -72,7 +72,7 @@ MRI_BOUNDS: Dict[str, Tuple[float, float]] = {
 MRI_WINDOW_PERCENTILES = (1.0, 99.0)
 # Файлы тома, по «отпечатку» которых считается версия ассета (ETag).
 # Порядок значим: [0] — том T1, [1] — маска мозга (так их читает сборка).
-MRI_STAMP_RELATIVE: Tuple[str, ...] = (
+MRI_STAMP_RELATIVE: tuple[str, ...] = (
     "fsaverage/mri/T1.mgz",
     "fsaverage/mri/brainmask.mgz",
 )
@@ -92,8 +92,8 @@ MIN_SHAPE_AREA_MM2 = 25.0
 BRODMANN_METHOD = "nearest_cortex_vertex"
 # Смещение id полей Бродмана по полушариям: в annot обоих полушарий id лежат в
 # одном диапазоне (2…67), и без смещения разметки lh и rh слились бы в одну.
-CONTOUR_AREA_ID_OFFSET: Dict[str, int] = {"lh": 0, "rh": 10000}
-CONTOUR_STAMP_RELATIVE: Tuple[str, ...] = (
+CONTOUR_AREA_ID_OFFSET: dict[str, int] = {"lh": 0, "rh": 10000}
+CONTOUR_STAMP_RELATIVE: tuple[str, ...] = (
     "fsaverage/mri/aparc+aseg.mgz",
     "fsaverage/mri/lh.ribbon.mgz",
     "fsaverage/mri/rh.ribbon.mgz",
@@ -117,12 +117,12 @@ class AssetSpec:
     kind: str
     title: str
     version: int
-    params: Dict[str, Any]
-    stamp_files: Tuple[str, ...]
+    params: dict[str, Any]
+    stamp_files: tuple[str, ...]
 
 
 # Реестр ассетов: единственное место, где ассет объявляет свои входы.
-ASSET_SPECS: Dict[str, AssetSpec] = {
+ASSET_SPECS: dict[str, AssetSpec] = {
     "surface": AssetSpec(
         kind="surface",
         title="Меш fsaverage и поля Бродмана",
@@ -166,7 +166,7 @@ ASSET_SPECS: Dict[str, AssetSpec] = {
     ),
 }
 
-ASSET_KINDS: Tuple[str, ...] = tuple(ASSET_SPECS)
+ASSET_KINDS: tuple[str, ...] = tuple(ASSET_SPECS)
 
 
 def spec(kind: str) -> AssetSpec:
@@ -196,7 +196,7 @@ def file_stamp(subjects_dir: str, relative_path: str) -> str:
 def fingerprint_of(asset: AssetSpec, subjects_dir: str) -> str:
     """Отпечаток ассета по его входам (публичен ради теста чувствительности)."""
     digest = hashlib.sha256()
-    digest.update(f"{asset.kind}:{asset.version}".encode("utf-8"))
+    digest.update(f"{asset.kind}:{asset.version}".encode())
     digest.update(
         json.dumps(asset.params, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
     )
@@ -219,6 +219,6 @@ def version_of(kind: str) -> int:
     return spec(kind).version
 
 
-def asset_versions(subjects_dir: str) -> Dict[str, str]:
+def asset_versions(subjects_dir: str) -> dict[str, str]:
     """Отпечатки всех ассетов — для диагностики (тесты, отладка кэша)."""
     return {kind: fingerprint(kind, subjects_dir) for kind in ASSET_KINDS}
