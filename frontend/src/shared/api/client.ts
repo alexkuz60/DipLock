@@ -91,6 +91,35 @@ export function apiErrorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+/** Вид задачи расчёта по записи: адреса её двух запросов отличает последний сегмент. */
+export type RecordingJobKind = 'preprocess' | 'spectrum' | 'dipoles' | 'spectrogram'
+
+/**
+ * Пара запросов «запустить задачу / прочитать результат» (A10).
+ *
+ * Раньше это были восемь отдельных методов, отличавшихся только строкой URL:
+ * новая задача добавляла ещё две копии адреса, а расхождение с сервером ловил
+ * только тест-двойник. Теперь адрес собирается из одного `kind`.
+ * Ожидание завершения — единый поллинг `shared/lib/jobPolling.ts`.
+ */
+export type RecordingJob<TResult> = {
+  /** Запуск: `202` + `job_id`; форма — `FormData`, как ждёт FastAPI. */
+  start: (recordingId: string, form: FormData, signal?: AbortSignal) => Promise<JobCreated>
+  /** Результат завершённой задачи (адрес — тот же `kind` + `job_id`). */
+  result: (recordingId: string, jobId: string, signal?: AbortSignal) => Promise<TResult>
+}
+
+/** Собрать пару запросов задачи по её виду: адрес живёт в одном месте. */
+function recordingJob<TResult>(kind: RecordingJobKind): RecordingJob<TResult> {
+  const path = (recordingId: string) => `${API_PREFIX}/recordings/${recordingId}/${kind}`
+  return {
+    start: (recordingId, form, signal) =>
+      request<JobCreated>(path(recordingId), { method: 'POST', body: form, signal }),
+    result: (recordingId, jobId, signal) =>
+      request<TResult>(`${path(recordingId)}/${jobId}`, { signal }),
+  }
+}
+
 export const api = {
   /** Версии, пути и активные параметры сервера. */
   meta: (signal?: AbortSignal) => request<MetaResponse>(`${API_PREFIX}/meta`, { signal }),
@@ -146,74 +175,25 @@ export const api = {
   },
 
   /**
-   * Запуск стадии предподготовки записи (срез 2.7): одна стадия = одна задача.
-   * Возвращает 202 + `job_id`; прогресс — `api.job`, результат — `api.preprocessResult`.
+   * Стадии предподготовки записи (срез 2.7): одна стадия = одна задача.
+   * В форме — `stage` и параметры стадии; прогресс — `api.job`.
    */
-  preprocessJob: (recordingId: string, form: FormData, signal?: AbortSignal) =>
-    request<JobCreated>(`${API_PREFIX}/recordings/${recordingId}/preprocess`, {
-      method: 'POST',
-      body: form,
-      signal,
-    }),
+  preprocess: recordingJob<PreprocessResult>('preprocess'),
 
-  /** Результат завершённой стадии предподготовки. */
-  preprocessResult: (recordingId: string, jobId: string, signal?: AbortSignal) =>
-    request<PreprocessResult>(
-      `${API_PREFIX}/recordings/${recordingId}/preprocess/${jobId}`,
-      { signal },
-    ),
+  /** Спектр по диапазонам (срез 3.4): числа PSD и ссылки на топокарты. */
+  spectrum: recordingJob<SpectrumResult>('spectrum'),
 
   /**
-   * Запуск расчёта спектра по диапазонам (срез 3.4): 202 + `job_id`.
-   * Результат — `api.spectrumResult` (числа PSD + ссылки на топокарты).
-   */
-  spectrumJob: (recordingId: string, form: FormData, signal?: AbortSignal) =>
-    request<JobCreated>(`${API_PREFIX}/recordings/${recordingId}/spectrum`, {
-      method: 'POST',
-      body: form,
-      signal,
-    }),
-
-  /** Результат расчёта спектра: диапазоны, PSD и URL топокарт. */
-  spectrumResult: (recordingId: string, jobId: string, signal?: AbortSignal) =>
-    request<SpectrumResult>(`${API_PREFIX}/recordings/${recordingId}/spectrum/${jobId}`, {
-      signal,
-    }),
-
-  /**
-   * Запуск быстрого расчёта диполей (срез 3.4): одна точка на эпоху, сетка узлов.
+   * Быстрый расчёт диполей (срез 3.4): одна точка на эпоху, перебор сетки узлов.
    * Точный профиль (`mne.fit_dipole`) — отдельный срез, здесь `method: 'fast_grid'`.
    */
-  dipoleScanJob: (recordingId: string, form: FormData, signal?: AbortSignal) =>
-    request<JobCreated>(`${API_PREFIX}/recordings/${recordingId}/dipoles`, {
-      method: 'POST',
-      body: form,
-      signal,
-    }),
-
-  /** Результат быстрого расчёта: точки (MNI, момент, амплитуда, GOF). */
-  dipoleScanResult: (recordingId: string, jobId: string, signal?: AbortSignal) =>
-    request<DipoleScanResult>(`${API_PREFIX}/recordings/${recordingId}/dipoles/${jobId}`, {
-      signal,
-    }),
+  dipoles: recordingJob<DipoleScanResult>('dipoles'),
 
   /**
-   * Запуск расчёта спектрограммы канала («ЭЭГ»): 202 + `job_id`.
-   * В форме — канал, полоса фильтра и параметры окна STFT.
+   * Спектрограмма канала («ЭЭГ»): в форме — канал, полоса фильтра и окно STFT.
+   * Сетку чисел (`DPS2`) читает отдельный запрос — `api.spectrogramGrid`.
    */
-  spectrogramJob: (recordingId: string, form: FormData, signal?: AbortSignal) =>
-    request<JobCreated>(`${API_PREFIX}/recordings/${recordingId}/spectrogram`, {
-      method: 'POST',
-      body: form,
-      signal,
-    }),
-
-  /** Метаданные спектрограммы: оси, шкала дБ и ссылка на сетку чисел. */
-  spectrogramResult: (recordingId: string, jobId: string, signal?: AbortSignal) =>
-    request<SpectrogramResult>(
-      `${API_PREFIX}/recordings/${recordingId}/spectrogram/${jobId}`,
-      { signal },
-    ),
+  spectrogram: recordingJob<SpectrogramResult>('spectrogram'),
 
   /**
    * Сетка спектрограммы: бинарный контейнер float32 (``DPS2``, частото-мажорно).

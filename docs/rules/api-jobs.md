@@ -67,6 +67,10 @@
    (сборка `result_url` и запуск), и в `_drop_signal_cache` (чистка кэшей записи — дисковых и
    RAM-кэша подготовленного сигнала) — иначе результат «потеряется» после вытеснения.
    Сейчас kind: `analyze`, `preprocess`, `spectrum`, `dipoles`, `spectrogram`.
+   На стороне UI задача описана **одной парой** методов клиента (`recordingJob(kind)` в
+   `shared/api/client.ts`: `start` + `result`), а ожидание завершения — единым `waitForJob`
+   (`shared/lib/jobPolling.ts`); своих копий поллинга в сторах нет (правило 7 —
+   `docs/rules/frontend-state.md`).
 3. **Тяжёлое — не в `async def`.** MNE/CPU-операции идут в job-очередь (`job_manager`) или в
    `asyncio.to_thread`; блокирующий вызов в хэндлере вешает событийный цикл для всех клиентов.
 4. **ETag/304 и версии ассетов** — только через `app/api/assets.py` (`asset_response`): кавычки

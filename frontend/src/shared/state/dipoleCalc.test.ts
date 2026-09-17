@@ -6,9 +6,12 @@
  * (порог «КД», шаг сетки, длина эпохи) правятся без единого запроса и с зажимом
  * в рамки контролов. Результат «Сбросить» убирает, параметры — нет.
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { api } from '@/shared/api/client'
 import { BANDWIDTH_RANGE, SINGLE_FREQ_RANGE } from '@/shared/lib/calcFilter'
 import { mockApiFetch } from '@/test/apiMocks'
+import { deferred } from '@/test/deferred'
+import type { JobStatus } from '@/shared/api/types'
 import {
   CALC_PARAM_DEFAULTS,
   PLAYBACK_DEFAULTS,
@@ -56,6 +59,11 @@ describe('состояние расчёта диполей', () => {
   beforeEach(() => {
     localStorage.clear()
     resetState()
+  })
+
+  afterEach(() => {
+    // Отменяем подмену `api.job` из тестов отмены поллинга
+    vi.restoreAllMocks()
   })
 
   it('начинает с закрытой панелью, без порога и с параметрами по умолчанию', () => {
@@ -375,6 +383,25 @@ describe('состояние расчёта диполей', () => {
     expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/spectrum')
     expect(useDipoleCalc.getState().spectrum?.bands).toHaveLength(5)
     expect(useDipoleCalc.getState().spectrumJob?.status).toBe('succeeded')
+  })
+
+  it('«Сбросить расчёт» прекращает опрос задачи: прежний ответ не возвращает результат', async () => {
+    // Задача «висит» на опросе: её ответ приходит уже после сброса расчёта
+    const stale = deferred<JobStatus>()
+    const jobSpy = vi.spyOn(api, 'job').mockImplementationOnce(() => stale.promise)
+    mockApiFetch({ calcJob: calcJobFixture })
+
+    const pending = useDipoleCalc.getState().runCalculation('rec-1')
+    await vi.waitFor(() => expect(jobSpy).toHaveBeenCalledTimes(1))
+    useDipoleCalc.getState().reset()
+    stale.resolve(calcJobFixture)
+    await pending
+
+    // Отменённый запуск не вернул ни задачу, ни результат (поллинг бросил отмену)
+    const state = useDipoleCalc.getState()
+    expect(state.job).toBeNull()
+    expect(state.result).toBeNull()
+    expect(state.error).toBeNull()
   })
 
   it('«Сбросить расчёт» убирает результаты, но сохраняет параметры и панель', () => {

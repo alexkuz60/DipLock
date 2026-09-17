@@ -3,6 +3,42 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 17.09.2026 — этап 4: единый поллинг задач и пары запросов клиента (A10)
+
+Закрытый пункт `todo.md` (перенесён дословно): **«Этап 4: `shared/lib/jobPolling.ts` вместо трёх
+копий `waitForJob`; по одному методу клиента на пару job/result (A10)»**.
+
+Что сделано:
+
+- **`shared/lib/jobPolling.ts` — один поллинг на весь UI.** `waitForJob(jobId, isCurrent, onTick)`
+  опрашивает `GET /jobs/{id}` до `succeeded`, отдавая каждый опрос в `onTick`; ошибка задачи —
+  `JobFailedError` с текстом сервера, устаревший запуск — `JobCancelledError` (+ `isCancelled`).
+  Пауза между опросами (`JOB_POLL_MS = 400`) общая, а не своя у каждого раздела.
+- **Один механизм отмены вместо трёх токенов.** `createRunToken()` отдаёт `next()` (новая попытка:
+  новый расчёт, новая стадия), `cancel()` (сброс раздела, «Закрыть запись») и `isCurrent(token)`.
+  В сторах исчезли `let stageRunToken = 0` / `let calcRunToken: number | undefined` /
+  `let eegRunToken` и ручные сравнения `token !== ...` в четырёх местах на файл, а также две копии
+  `isCancelled` и три копии `waitForJob`. Поведение прежнее: устаревший ответ не трогает состояние
+  и не показывается ошибкой.
+- **Клиент: пара методов на задачу вместо двух с дублированным URL.** `RecordingJob<TResult>` +
+  фабрика `recordingJob(kind)` в `shared/api/client.ts`; восемь методов (`preprocessJob`/
+  `preprocessResult`, `spectrumJob`/`spectrumResult`, `dipoleScanJob`/`dipoleScanResult`,
+  `spectrogramJob`/`spectrogramResult`) свёрнуты в четыре пары `api.preprocess`, `api.spectrum`,
+  `api.dipoles`, `api.spectrogram` (`start` + `result`). Адреса на проводе не менялись — тест-двойник
+  `test/apiMocks.ts` и существующие тесты прошли без правок.
+- **Тесты:** `shared/lib/jobPolling.test.ts` (6: опрос до `succeeded` с прогрессом, пауза
+  `JOB_POLL_MS` на фейковых таймерах, текст ошибки сервера и подстановка без текста, отмена закрывает
+  цикл без лишних запросов, семантика `createRunToken`), `state/dipoleCalc.test.ts` (+1: «Сбросить
+  расчёт» прекращает опрос — отложенный ответ задачи не возвращает результат),
+  `state/edfRecording.test.ts` (+1: «Закрыть запись» отменяет поллинг стадии); помощник отложенных
+  ответов — `test/deferred.ts`. 551 → **559** тестов Vitest (48 → 49 файлов); `npm run typecheck`,
+  `npm run lint` — чисто.
+- **Документация:** `docs/rules/frontend-state.md` (правило 7 «ожидание задачи — одно на весь UI»,
+  раздел долга переписан: поллинг и пары клиента закрыты, остаток — `CalcJob`/отпечатки расчёта в
+  сторе «Диполей» и осознанно разные конструкторы состояния задачи у разделов), `docs/rules/api-jobs.md`
+  (правило 2), `docs/rules/tests.md`, `frontend/README.md`, `AGENTS.md` (15,1 КБ), `todo.md`,
+  `audit-2026-09.md` (A10 закрыта, §5 этап 4).
+
 ## 17.09.2026 — этап 3: тонкие роуты и единый ETag/304 (A1 + A2)
 
 Закрытый пункт `todo.md` (перенесён дословно): **«Этап 3: единый ETag/304 (`_asset_response`

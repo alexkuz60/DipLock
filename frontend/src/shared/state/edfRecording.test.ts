@@ -2,7 +2,10 @@
  * Тесты состояния раздела EDF: паспорт сессии, запрос диалога выбора файла,
  * локальная валидация до отправки на сервер и догрузка кадров сигналов (2.5).
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { api } from '@/shared/api/client'
+import type { JobStatus } from '@/shared/api/types'
+import { deferred } from '@/test/deferred'
 import {
   EMPTY_PASSPORT,
   acceptEdfFile,
@@ -291,6 +294,11 @@ describe('запуск стадии по кнопке (срез 2.7)', () => {
     })
   })
 
+  afterEach(() => {
+    // Отменяем подмену `api.job` из теста отмены поллинга
+    vi.restoreAllMocks()
+  })
+
   it('runStage: задача → слои результата + снимок параметров стадии', async () => {
     mockApiFetch()
     useEdfRecording.setState({ recording: recordingFixture })
@@ -381,5 +389,24 @@ describe('запуск стадии по кнопке (срез 2.7)', () => {
     useEdfRecording.getState().closeRecording()
 
     expect(useEdfRecording.getState().stageJobs).toEqual({})
+  })
+
+  it('закрытие записи отменяет поллинг: ответ прежней задачи не трогает состояние', async () => {
+    // Стадия «висит» на опросе: её ответ приходит уже после закрытия записи
+    const stale = deferred<JobStatus>()
+    const jobSpy = vi.spyOn(api, 'job').mockImplementationOnce(() => stale.promise)
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture })
+
+    const pending = useEdfRecording.getState().runStage('artifacts')
+    await vi.waitFor(() => expect(jobSpy).toHaveBeenCalledTimes(1))
+    useEdfRecording.getState().closeRecording()
+    stale.resolve(preprocessJobFixture)
+    await pending
+
+    // Поллинг бросил отмену: прогресс прежней стадии не вернулся в состояние
+    expect(useEdfRecording.getState().recording).toBeNull()
+    expect(useEdfRecording.getState().stageJobs).toEqual({})
+    expect(useEdfRecording.getState().layers).toBeNull()
   })
 })

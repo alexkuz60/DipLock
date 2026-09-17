@@ -103,6 +103,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
   правила и инварианты — `docs/rules/data-and-caches.md`.
 - **Frontend**: новый раздел UI = запись в `frontend/src/app/sections/registry.ts` + компонент в
   `routes.tsx`; UI-тексты и подсказки — на русском, конвенции — `frontend/README.md`.
+  Ожидание задач — общее (`shared/lib/jobPolling.ts`), адреса — парами (`recordingJob(kind)`).
 - **Ссылка раздела в рейле — `className` строкой** (`IconRail`: активность считает локальная
   `isSectionActive` от `useLocation`, ссылка помечается `aria-current`):
   `NavLink`-функцию `className` внутри `Tooltip asChild` ломает Radix `Slot` — он склеивает
@@ -134,7 +135,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов (шесть кэшей, три версии) |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
-| `docs/rules/tests.md` | полный инвентарь покрытия (551 Vitest / 270 pytest) |
+| `docs/rules/tests.md` | полный инвентарь покрытия (559 Vitest / 270 pytest) |
 | `docs/rules/docs.md` | **правило ведения документации** — новое правило идёт в файл по теме, а не сюда |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |

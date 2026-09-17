@@ -15,6 +15,7 @@ import type { PreprocessResult, RecordingMeta } from '@/shared/api/types'
 import { uploadRecording } from '@/shared/api/upload'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
 import { makeDemoSignal } from '@/shared/lib/demoSignal'
+import { createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
 import { decodeSignalFrame, frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
 import {
   DEMO_LAYERS_SEED,
@@ -48,17 +49,11 @@ function releaseLevel(
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 
 /**
- * Сколько ждём между опросами задачи предподготовки.
- * Стадии короткие (фильтр/артефакты/эпохи на готовой записи), поэтому поллинг
- * частый: UI должен показывать прогресс без заметной задержки.
+ * Токен запуска стадий: закрытие записи или новый запуск стадии делают ответы
+ * прежних задач неактуальными, и они не должны трогать состояние. Механизм
+ * отмены (номер попытки + проверка актуальности) — общий, `shared/lib/jobPolling.ts`.
  */
-const STAGE_POLL_MS = 400
-
-/**
- * Отмена задач предподготовки: закрытие записи или новый запуск стадии делают
- * ответы прежних задач неактуальными, и они не должны трогать состояние.
- */
-let stageRunToken = 0
+const stageRunToken = createRunToken()
 
 /** Полоса фильтра из пресета панели: `null` — пресет «Без фильтра» */
 export function filterBandOf(params: EdfParams): [number, number] | null {
@@ -131,23 +126,6 @@ export function layersFromResult(
     next.epochLengthMs = result.epoch_length_ms > 0 ? result.epoch_length_ms : null
   }
   return next
-}
-
-/** Ждёт завершения задачи, сообщая о прогрессе; `token` отменяет устаревшие запуски. */
-async function waitForJob(
-  jobId: string,
-  token: number,
-  onTick: (progress: number, message: string, stage: string) => void,
-): Promise<void> {
-  for (;;) {
-    if (token !== stageRunToken) throw new Error('cancelled')
-    const job = await api.job(jobId)
-    if (token !== stageRunToken) throw new Error('cancelled')
-    onTick(job.progress, job.message, job.stage)
-    if (job.status === 'succeeded') return
-    if (job.status === 'failed') throw new Error(job.error ?? 'Задача завершилась ошибкой')
-    await new Promise((resolve) => setTimeout(resolve, STAGE_POLL_MS))
-  }
 }
 
 /**
@@ -373,7 +351,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     // именно по этим значениям), а стадия снова покажет «параметры изменены».
     const params = useEdfParams.getState().params
     const signature = stageSignature(params, stage)
-    const token = ++stageRunToken
+    const token = stageRunToken.next()
+    const isCurrent = () => stageRunToken.isCurrent(token)
 
     set((state) => ({
       stageJobs: {
@@ -383,7 +362,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     }))
 
     const fail = (message: string) => {
-      if (token !== stageRunToken) return
+      if (!isCurrent()) return
       set((state) => ({
         stageJobs: {
           ...state.stageJobs,
@@ -399,29 +378,28 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     }
 
     try {
-      const created = await api.preprocessJob(
+      const created = await api.preprocess.start(
         recording.recording_id,
         buildPreprocessForm(stage, params),
       )
-      await waitForJob(created.job_id, token, (progress, message, jobStage) => {
-        if (token !== stageRunToken) return
+      await waitForJob(created.job_id, isCurrent, (status) => {
         set((state) => ({
           stageJobs: {
             ...state.stageJobs,
             [stage]: {
               status: 'running',
-              progress,
-              message,
-              stage: jobStage,
+              progress: status.progress,
+              message: status.message,
+              stage: status.stage,
               error: null,
             },
           },
         }))
       })
-      if (token !== stageRunToken) return
+      if (!isCurrent()) return
 
-      const result = await api.preprocessResult(recording.recording_id, created.job_id)
-      if (token !== stageRunToken) return
+      const result = await api.preprocess.result(recording.recording_id, created.job_id)
+      if (!isCurrent()) return
 
       set((state) => ({
         layers: layersFromResult(result, state.layers),
@@ -435,7 +413,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       useEdfParams.getState().markStageApplied(stage, signature)
     } catch (error) {
       // Отмена (закрытие записи/новый запуск) — не ошибка пользователя
-      if (token !== stageRunToken) return
+      if (isCancelled(error) || !isCurrent()) return
       fail(apiErrorText(error))
     }
   },
@@ -454,7 +432,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
 
   closeRecording: () => {
     // Отменяем поллинг: ответы прежних стадий не должны трогать новое состояние
-    stageRunToken += 1
+    stageRunToken.cancel()
     set({
       recording: null,
       uploadProgress: null,

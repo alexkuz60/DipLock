@@ -52,14 +52,21 @@
    не пересчитан» без подмены чисел.
 6. Чистая логика — в `shared/lib/*` (без React): геометрия, строки таблицы, парсеры контейнеров,
    интерполяция кадра. Компонент рисует, но не считает.
+7. **Ожидание задачи — одно на весь UI** (`shared/lib/jobPolling.ts`): `waitForJob` (опрос
+   `GET /jobs/{id}` до `succeeded` с отдачей прогресса) + токен запуска `createRunToken` +
+   `isCancelled`. Своих копий поллинга и своих токенов в сторах быть не должно: новая задача =
+   пара методов клиента (`recordingJob(kind)` в `shared/api/client.ts`) + вызов `waitForJob`.
+   Отмена — состояние **своей** попытки: `token.next()` (новый расчёт/стадия), `token.cancel()`
+   (сброс раздела, «Закрыть запись»), проверка `isCurrent()` после каждого `await`.
 
 ## Известный долг фронтенда (см. `audit-2026-09.md`)
 
-- Три копии `waitForJob` (поллинг задач: `edfRecording.ts`, `eegParams.ts`, `dipoleCalc.ts`) и три
-  независимых токена отмены (`stageRunToken` / `eegRunToken` / `calcRunToken`); `isCancelled`
-  продублирован в двух файлах.
-- `CalcJob`, `resultMatchesParams`, `PLAYBACK_DEFAULTS` живут в `dipoleCalc.ts`, но ими пользуются
-  каркас (`AppShell`) и раздел «Таблица»: стор расчёта стал общим модулем. Раздел «ЭЭГ» держит
-  собственный дубль поллинга в `eegParams.ts`.
-- Четыре пары методов HTTP-клиента (`preprocess*`, `spectrum*`, `dipoleScan*`, `spectrogram*` —
-  8 методов в `shared/api/client.ts`) отличаются только строкой URL.
+- `CalcJob`, `calcJobFromStatus`, `calcJobSummary` (срез 3.4), `resultMatchesParams`,
+  `resultSignature`, `PLAYBACK_DEFAULTS` живут в сторе `dipoleCalc.ts`, но ими пользуются каркас
+  (`AppShell`), раздел «Таблица», «ЭЭГ» и проекции диполей: стор расчёта стал общим модулем —
+  просится отдельный `shared/lib/calcJob.ts` (тип задачи) и `shared/lib/calcParams.ts` (отпечатки).
+  Ожидание задач и токены отмены сюда **не** входят — они уже общие (`shared/lib/jobPolling.ts`).
+- Конструкторы состояния задачи у разделов свои и различаются осознанно: у «Диполей»
+  `succeededJob` ставит `epochsDone = epochsTotal` и сохраняет этап, у «ЭЭГ» — текст
+  «Спектрограмма готова» и этап `done`, а `failedJob` там сохраняет прогресс. При выносе в общий
+  модуль эти отличия нельзя терять: их видит подпись задачи в тулс-хедере.

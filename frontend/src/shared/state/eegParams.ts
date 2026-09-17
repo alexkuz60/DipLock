@@ -32,6 +32,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api, apiErrorText } from '@/shared/api/client'
 import type { SpectrogramResult } from '@/shared/api/types'
+import { createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
 import {
   BANDWIDTH_RANGE,
   SINGLE_FREQ_RANGE,
@@ -259,35 +260,12 @@ export function normalizeEegParams(params: EegParams): EegParams {
   }
 }
 
-/** Сколько ждём между опросами задачи: STFT считается секунды, прогресс виден сразу */
-const EEG_POLL_MS = 400
-
 /**
- * Токен запуска: новый расчёт или сброс делают ответы прежних задач
- * неактуальными, и они не должны трогать состояние.
+ * Токен запуска спектрограммы: новый расчёт или сброс делают ответы прежних
+ * задач неактуальными, и они не должны трогать состояние. Механизм отмены
+ * (номер попытки + проверка актуальности) — общий, `shared/lib/jobPolling.ts`.
  */
-let eegRunToken: number | undefined
-
-/** Ждёт завершения задачи, сообщая прогресс; устаревшие запуски бросают. */
-async function waitForJob(
-  jobId: string,
-  token: number,
-  onTick: (job: CalcJob) => void,
-): Promise<void> {
-  for (;;) {
-    if (token !== eegRunToken) throw new Error('cancelled')
-    const status = await api.job(jobId)
-    if (token !== eegRunToken) throw new Error('cancelled')
-    onTick(calcJobFromStatus(status))
-    if (status.status === 'succeeded') return
-    if (status.status === 'failed') throw new Error(status.error ?? 'Задача завершилась ошибкой')
-    await new Promise((resolve) => setTimeout(resolve, EEG_POLL_MS))
-  }
-}
-
-function isCancelled(error: unknown): boolean {
-  return error instanceof Error && error.message === 'cancelled'
-}
+const eegRunToken = createRunToken()
 
 /** Состояние задачи сразу после запуска: полоса прогресса появляется без задержки. */
 function runningJob(): CalcJob {
@@ -456,18 +434,18 @@ export const useEegParams = create<EegState>()(
       runSpectrogram: async (recordingId, channel) => {
         if (!recordingId || !channel) return
         const params = { ...get().params, channel }
-        const token = (eegRunToken = (eegRunToken ?? 0) + 1)
+        const token = eegRunToken.next()
+        const isCurrent = () => eegRunToken.isCurrent(token)
         set({ job: runningJob(), error: null, gridError: null })
         try {
           const form = buildSpectrogramForm(params, channel)
-          const created = await api.spectrogramJob(recordingId, form)
-          await waitForJob(created.job_id, token, (job) => {
-            if (token !== eegRunToken) return
-            set({ job })
-          })
-          if (token !== eegRunToken) return
-          const result = await api.spectrogramResult(recordingId, created.job_id)
-          if (token !== eegRunToken) return
+          const created = await api.spectrogram.start(recordingId, form)
+          await waitForJob(created.job_id, isCurrent, (status) =>
+            set({ job: calcJobFromStatus(status) }),
+          )
+          if (!isCurrent()) return
+          const result = await api.spectrogram.result(recordingId, created.job_id)
+          if (!isCurrent()) return
           // Сетка грузится отдельным запросом: если она не приехала, метаданные
           // результата всё равно показываются, а причина объясняется своим текстом.
           let grid: SpectrogramGrid | null = null
@@ -478,10 +456,10 @@ export const useEegParams = create<EegState>()(
           } catch (gridFailure) {
             gridError = apiErrorText(gridFailure)
           }
-          if (token !== eegRunToken) return
+          if (!isCurrent()) return
           set({ result, grid, gridError, job: succeededJob(get().job) })
         } catch (failure) {
-          if (token !== eegRunToken || isCancelled(failure)) return
+          if (isCancelled(failure) || !isCurrent()) return
           set({
             job: failedJob(get().job, apiErrorText(failure)),
             error: apiErrorText(failure),
@@ -491,7 +469,7 @@ export const useEegParams = create<EegState>()(
 
       reset: () => {
         // Отменяем поллинг: ответы прежних задач не должны трогать новое состояние
-        eegRunToken = (eegRunToken ?? 0) + 1
+        eegRunToken.cancel()
         set((state) => ({
           job: null,
           result: null,

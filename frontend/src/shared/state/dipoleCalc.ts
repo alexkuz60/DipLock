@@ -48,6 +48,7 @@ import {
   singleFreqBand,
   type CalcFilterPresetId,
 } from '@/shared/lib/calcFilter'
+import { createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import {
   DEFAULT_PLAYBACK_SPEED,
@@ -254,34 +255,11 @@ export function resultMatchesParams(result: DipoleScanResult, params: CalcParams
 }
 
 /**
- * Сколько ждём между опросами задачи. Расчёт диполей идёт по эпохам и может
- * занять десятки секунд, поэтому поллинг частый: прогресс виден без задержки.
+ * Токен запуска расчёта: новый расчёт, новый спектр или сброс делают ответы
+ * прежних задач неактуальными, и они не должны трогать состояние. Механизм
+ * отмены (номер попытки + проверка актуальности) — общий, `shared/lib/jobPolling.ts`.
  */
-const CALC_POLL_MS = 400
-
-/**
- * Токен запуска: новый расчёт или сброс делают ответы прежних задач
- * неактуальными, и они не должны трогать состояние (`undefined` до первого
- * запуска — сравнение с числом всегда даёт «устарело»).
- */
-let calcRunToken: number | undefined
-
-/** Ждёт завершения задачи, сообщая прогресс; устаревшие запуски бросают. */
-async function waitForJob(
-  jobId: string,
-  token: number,
-  onTick: (job: CalcJob) => void,
-): Promise<void> {
-  for (;;) {
-    if (token !== calcRunToken) throw new Error('cancelled')
-    const status = await api.job(jobId)
-    if (token !== calcRunToken) throw new Error('cancelled')
-    onTick(calcJobFromStatus(status))
-    if (status.status === 'succeeded') return
-    if (status.status === 'failed') throw new Error(status.error ?? 'Задача завершилась ошибкой')
-    await new Promise((resolve) => setTimeout(resolve, CALC_POLL_MS))
-  }
-}
+const calcRunToken = createRunToken()
 
 export type DipoleCalcState = {
   /** Открытая выдвижная панель раздела (`none` — закрыта) */
@@ -519,20 +497,20 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       runCalculation: async (recordingId) => {
         if (!recordingId) return
         const params = get().params
-        const token = (calcRunToken = (calcRunToken ?? 0) + 1)
+        const token = calcRunToken.next()
+        const isCurrent = () => calcRunToken.isCurrent(token)
         set({
           job: runningJob(),
           error: null,
         })
         try {
-          const created = await api.dipoleScanJob(recordingId, buildDipoleForm(params))
-          await waitForJob(created.job_id, token, (job) => {
-            if (token !== calcRunToken) return
-            set({ job })
-          })
-          if (token !== calcRunToken) return
-          const result = await api.dipoleScanResult(recordingId, created.job_id)
-          if (token !== calcRunToken) return
+          const created = await api.dipoles.start(recordingId, buildDipoleForm(params))
+          await waitForJob(created.job_id, isCurrent, (status) =>
+            set({ job: calcJobFromStatus(status) }),
+          )
+          if (!isCurrent()) return
+          const result = await api.dipoles.result(recordingId, created.job_id)
+          if (!isCurrent()) return
           // Новый результат — новый кадр воспроизведения: прежняя эпоха относилась
           // к другой нарезке (номер эпохи без результата ничего не значит)
           set({
@@ -547,7 +525,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             },
           })
         } catch (error) {
-          if (token !== calcRunToken || isCancelled(error)) return
+          if (isCancelled(error) || !isCurrent()) return
           set({ job: failedJob(get().job, apiErrorText(error)), error: apiErrorText(error) })
         }
       },
@@ -555,20 +533,20 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       runSpectrum: async (recordingId) => {
         if (!recordingId) return
         const params = get().params
-        const token = (calcRunToken = (calcRunToken ?? 0) + 1)
+        const token = calcRunToken.next()
+        const isCurrent = () => calcRunToken.isCurrent(token)
         set({ spectrumJob: runningJob(), spectrumError: null })
         try {
-          const created = await api.spectrumJob(recordingId, buildSpectrumForm(params))
-          await waitForJob(created.job_id, token, (job) => {
-            if (token !== calcRunToken) return
-            set({ spectrumJob: job })
-          })
-          if (token !== calcRunToken) return
-          const spectrum = await api.spectrumResult(recordingId, created.job_id)
-          if (token !== calcRunToken) return
+          const created = await api.spectrum.start(recordingId, buildSpectrumForm(params))
+          await waitForJob(created.job_id, isCurrent, (status) =>
+            set({ spectrumJob: calcJobFromStatus(status) }),
+          )
+          if (!isCurrent()) return
+          const spectrum = await api.spectrum.result(recordingId, created.job_id)
+          if (!isCurrent()) return
           set({ spectrum, spectrumJob: succeededJob(get().spectrumJob) })
         } catch (error) {
-          if (token !== calcRunToken || isCancelled(error)) return
+          if (isCancelled(error) || !isCurrent()) return
           set({
             spectrumJob: failedJob(get().spectrumJob, apiErrorText(error)),
             spectrumError: apiErrorText(error),
@@ -578,7 +556,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
 
       reset: () => {
         // Отменяем поллинг: ответы прежних задач не должны трогать новое состояние
-        calcRunToken = (calcRunToken ?? 0) + 1
+        calcRunToken.cancel()
         set({
           job: null,
           result: null,
@@ -669,11 +647,6 @@ export function normalizeCalcParams(params: CalcParams): CalcParams {
     gridMm: clamp(params.gridMm, GRID_MM_RANGE),
     rejectThresholdUv: Math.max(0, params.rejectThresholdUv),
   }
-}
-
-/** Запуск отменён (сброс/новый расчёт) — это не ошибка пользователя. */
-function isCancelled(error: unknown): boolean {
-  return error instanceof Error && error.message === 'cancelled'
 }
 
 function runningJob(): CalcJob {
