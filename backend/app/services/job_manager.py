@@ -11,9 +11,12 @@
 * шаги расчёта видны в журнале (`services/journal.py`) с ``job_id`` задачи:
   ``job_scope`` ставит контекст вокруг потока, а сервисы пишут замеры сами.
 
-Хранилище — in-memory (история ограничена ``jobs_history_limit``): для локального
-десктопного режима этого достаточно, результат задачи дополнительно пишется в
-``results_dir`` и в БД.
+Хранилище — in-memory (история ограничена ``jobs_history_limit``) **плюс** файл
+задачи на диске: завершённые задачи пишутся ``services/job_store.py``
+(``results_dir/jobs/<job_id>.json``) и поднимаются обратно на старте приложения
+(``restore``), поэтому история и ссылки на результат переживают рестарт процесса
+(A8, этап 6). Файл задачи — не кэш: он не участвует в ETag/``cache_clear`` и
+сносится обходом сирот вместе с кэшами исчезнувшей записи.
 """
 import asyncio
 import logging
@@ -22,8 +25,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from app.core.config import settings
-from app.services import journal
+from app.core.config import Settings, settings
+from app.services import job_store, journal
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,8 @@ class Job:
     epochs_done: int = 0
     epochs_total: int = 0
     task: Optional[asyncio.Task] = field(default=None, repr=False)
+    restored: bool = False
+    """true — задача поднята с диска (``job_store``), а не исполнялась этим процессом."""
 
     def mark_started(self) -> None:
         """Переводит задачу в ``running`` (слот семафора получен)."""
@@ -185,6 +190,73 @@ class Job:
             "error": self.error,
         }
 
+    def to_record(self) -> Dict[str, Any]:
+        """Задача для файла на диске: примитивы + ``meta`` + ``result`` (A8).
+
+        Всё, что нужно, чтобы после рестарта процесса отдать ``GET /jobs/{id}``
+        и результат задачи: даты — строками ISO (обратно ``from_record``).
+        """
+
+        def iso(value: Optional[datetime]) -> Optional[str]:
+            return value.isoformat() if value is not None else None
+
+        return {
+            "job_id": self.job_id,
+            "kind": self.kind,
+            "filename": self.filename,
+            "status": self.status,
+            "stage": self.stage,
+            "progress": self.progress,
+            "message": self.message,
+            "epochs_done": self.epochs_done,
+            "epochs_total": self.epochs_total,
+            "created_at": iso(self.created_at),
+            "started_at": iso(self.started_at),
+            "finished_at": iso(self.finished_at),
+            "error": self.error,
+            "session_id": self.session_id,
+            "meta": self.meta,
+            "result": self.result,
+        }
+
+    @classmethod
+    def from_record(cls, record: Dict[str, Any]) -> "Job":
+        """Восстанавливает задачу из файла (``job_store.load_records``).
+
+        ``restored=True``: задача исполнялась прежним процессом, у неё нет
+        ``asyncio.Task``, но статус, ошибка и результат читаются как у живой.
+        """
+
+        def moment(key: str, default: Optional[datetime] = None) -> Optional[datetime]:
+            raw = record.get(key)
+            if not isinstance(raw, str):
+                return default
+            try:
+                return datetime.fromisoformat(raw)
+            except ValueError:
+                return default
+
+        created_at = moment("created_at") or datetime.utcnow()
+        return cls(
+            job_id=str(record.get("job_id")),
+            kind=str(record.get("kind") or "analyze"),
+            filename=record.get("filename"),
+            status=str(record.get("status") or "succeeded"),
+            stage=str(record.get("stage") or "done"),
+            progress=float(record.get("progress") or 0.0),
+            message=str(record.get("message") or ""),
+            created_at=created_at,
+            started_at=moment("started_at"),
+            finished_at=moment("finished_at", created_at),
+            error=record.get("error"),
+            session_id=record.get("session_id"),
+            result=record.get("result"),
+            meta=dict(record.get("meta") or {}),
+            epochs_done=int(record.get("epochs_done") or 0),
+            epochs_total=int(record.get("epochs_total") or 0),
+            restored=True,
+        )
+
 
 class JobManager:
     """Реестр задач с ограничением параллелизма и историей."""
@@ -263,7 +335,13 @@ class JobManager:
                         await on_success(job, result)
                     except Exception:  # noqa: BLE001 — постобработка не отменяет успех
                         logger.exception("Постобработка задачи %s не выполнена", job.job_id)
+        # Итог задачи (успех или ошибка) — на диск: иначе после рестарта процесса
+        # история и результат теряются (A8). Запись в потоке (результат бывает на
+        # мегабайты, а это event-loop) и **после** освобождения слота семафора:
+        # запись файла не должна занимать место параллельного расчёта.
+        await asyncio.to_thread(job_store.save_record, settings, job.to_record())
         return job
+
 
     def get(self, job_id: str) -> Optional[Job]:
         """Задача по id (или None)."""
@@ -273,6 +351,27 @@ class JobManager:
         """Задачи в порядке создания (новые — в конце), последние ``limit`` штук."""
         ids = self._order[-(limit or self._history_limit):]
         return [self._jobs[jid] for jid in ids if jid in self._jobs]
+
+    def restore(self, cfg: Optional[Settings] = None) -> int:
+        """Поднимает завершённые задачи с диска; возвращает их число (A8).
+
+        Без этого после рестарта процесса ``GET /jobs`` пуст, а сохранённые
+        результаты недостижимы по URL — именно так и было до этапа 6. Задачи,
+        уже известные реестру (повторный вызов), не дублируются; битые и чужие
+        по версии файлы пропускает ``job_store.load_records``.
+        """
+        cfg = cfg or settings
+        restored = 0
+        for record in job_store.load_records(cfg, limit=self._history_limit):
+            job = Job.from_record(record)
+            if not job.job_id or job.job_id in self._jobs:
+                continue
+            self._jobs[job.job_id] = job
+            self._order.append(job.job_id)
+            restored += 1
+        if restored:
+            logger.info("История задач поднята с диска: %d", restored)
+        return restored
 
     def _trim_history(self) -> None:
         """Удаляет завершённые задачи сверх лимита истории (активные не трогаем)."""

@@ -127,9 +127,19 @@ def job_status(job: Any) -> JobStatus:
 
 
 def _require_finished(job: Any) -> None:
-    """409, если задача идёт или упала: результат отдавать ещё нечего."""
+    """409, если задача идёт или упала: результат отдавать ещё нечего.
+
+    Тексты разные осознанно (правило 6 в ``docs/rules/api-jobs.md``): «не
+    завершена» — ждём, «результат не сохранён» — задача была завершена, но её
+    результат не влез в предел файла задачи (A8), ждать бессмысленно.
+    """
     if job.status == "failed":
         raise HTTPException(status_code=409, detail=f"Задача завершилась ошибкой: {job.error}")
+    if job.status == "succeeded" and job.result is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Результат задачи не сохранён на диск (слишком большой) — запустите расчёт заново",
+        )
     if job.status != "succeeded" or job.result is None:
         raise HTTPException(
             status_code=409,

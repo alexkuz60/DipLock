@@ -11,8 +11,13 @@
    (``--keep newest|oldest``, по умолчанию newest), остальные удаляет;
 3. оставленным каталогам без сайдкара пишет ``recording.json`` (отпечаток +
    паспорт) — после этого дедуп работает сразу, без повторных загрузок;
-4. по флагу ``--prune`` заодно сносит устаревшие каталоги без живого владельца
-   (``RecordingRegistry.prune_orphans``, TTL из настроек).
+4. по флагу ``--prune`` заодно запускает обход сирот
+   (``services/orphans.py``): устаревшие каталоги записей, кэши и файлы задач
+   исчезнувших записей. Тот же обход выполняется при старте приложения — скрипт
+   нужен, когда процесс не перезапускают. Обход всегда идёт по каталогам из
+   ``settings`` (``UPLOAD_DIR``/``CACHE_DIR``/``RESULTS_DIR``), а ``--upload-dir``
+   относится только к дедупу: сироты кэшей определяются «запись в реестре или на
+   диске», и чужой корень сделал бы живыми чужие записи.
 
 Без ``--apply`` печатает только план и итог. Корневые **файлы** каталога загрузок
 (например ``data/edf/test.edf`` из репозитория) не рассматриваются: обход идёт
@@ -35,12 +40,12 @@ if _BACKEND_DIR not in sys.path:  # запуск файлом, а не моду�
     sys.path.insert(0, _BACKEND_DIR)
 
 from app.core.config import Settings, settings  # noqa: E402
+from app.services.orphans import sweep_orphans  # noqa: E402
 from app.services.recordings import (  # noqa: E402
     Recording,
     file_digest,
     read_recording_meta,
     read_sidecar,
-    recording_registry,
     write_sidecar,
 )
 
@@ -175,7 +180,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument("--upload-dir", default=settings.upload_dir, help="каталог загрузок")
     parser.add_argument("--keep", choices=("newest", "oldest"), default="newest")
     parser.add_argument("--apply", action="store_true", help="выполнить уборку (иначе — план)")
-    parser.add_argument("--prune", action="store_true", help="снести устаревшие каталоги (TTL)")
+    parser.add_argument("--prune", action="store_true",
+                        help="обход сирот: каталоги записей, их кэши и файлы задач")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -207,8 +213,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Записано сайдкаров: {written}")
 
     if args.prune:
-        pruned = recording_registry.prune_orphans(settings)
-        print(f"Убрано устаревших каталогов: {len(pruned)}")
+        # Обход сирот — тот же, что при старте приложения (A6): каталоги записей,
+        # их кэши и файлы задач исчезнувших записей. Корень берётся из settings:
+        # «живой» запись определяется парой «реестр + каталог на диске», и подмена
+        # корня сделала бы живыми записи чужого каталога.
+        report = sweep_orphans(settings)
+        print(f"Обход сирот (каталог загрузок {settings.upload_dir}): "
+              f"каталогов записей {len(report.upload_dirs)}, кэшей {len(report.cache_dirs)}, "
+              f"файлов задач {len(report.job_files)} "
+              f"(освобождено {report.freed_bytes / 1024.0:.1f} КБ)")
     return 0
 
 

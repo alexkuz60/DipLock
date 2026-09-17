@@ -3,36 +3,28 @@
 Меш `lh/rh.inflated` и атлас `PALS_B12_Brodmann` не меняются между запусками,
 поэтому:
 
-* версия ассета считается по «отпечатку» файлов (размер + mtime) — O(1), без чтения данных;
+* версия ассета считается по «отпечатку» входов (размер + mtime файлов, номер
+  сборки и её параметры) — O(1), без чтения данных; сам расчёт отпечатка живёт
+  в ``services/asset_versions.py`` (A7, этап 6), здесь — только вызов;
 * JSON строится один раз и кладётся на диск в ``settings.cache_dir/surface``;
 * готовые байты держим в памяти (``lru_cache``) — отдача без парсинга и сериализации.
 
 Итог: вместо 2.86 МБ и ~1.6 с пересчёта на каждый запрос — мгновенный кэшируемый
 ассет; тяжёлые индексы вершин Brodmann (≈2 МБ) вынесены в отдельный эндпоинт.
 """
-import hashlib
 import json
 import logging
-import os
 import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 from app.core.config import Settings
-from app.services import journal
+from app.services import asset_versions, journal
 from app.services.cache_store import cache_path, cache_read, cache_write
 from app.utils.brain_export import export_fsaverage_surface
 
 logger = logging.getLogger(__name__)
-
-# Файлы, по которым определяется версия ассета (меш + атлас)
-_STAMP_RELATIVE = (
-    "fsaverage/surf/lh.inflated",
-    "fsaverage/surf/rh.inflated",
-    "fsaverage/label/lh.PALS_B12_Brodmann.annot",
-    "fsaverage/label/rh.PALS_B12_Brodmann.annot",
-)
 
 
 @dataclass(frozen=True)
@@ -53,17 +45,9 @@ class _AssetCtx:
 
 
 def surface_version(ctx: _AssetCtx) -> str:
-    """Версия ассета по «отпечатку» файлов fsaverage (используется как ETag)."""
-    digest = hashlib.sha256()
-    digest.update(ctx.subjects_dir.encode("utf-8"))
-    for rel in _STAMP_RELATIVE:
-        path = os.path.join(ctx.subjects_dir, rel)
-        try:
-            stat = os.stat(path)
-            digest.update(f"{rel}:{stat.st_size}:{int(stat.st_mtime)}".encode("utf-8"))
-        except OSError:
-            digest.update(f"{rel}:missing".encode("utf-8"))
-    return digest.hexdigest()[:16]
+    """Версия ассета по «отпечатку» входов fsaverage (используется как ETag)."""
+    return asset_versions.fingerprint("surface", ctx.subjects_dir)
+
 
 
 def _cache_paths(ctx: _AssetCtx, version: str) -> Tuple[str, str]:

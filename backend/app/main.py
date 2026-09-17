@@ -1,6 +1,8 @@
 """DipLock FastAPI entry-point."""
+import logging
 import os
-from typing import Dict
+from contextlib import asynccontextmanager
+from typing import AsyncIterator, Dict
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,17 +12,44 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router as api_router
 from app.core.config import settings
+from app.services.job_manager import job_manager
+from app.services.orphans import sweep_orphans
 from app.utils.versions import library_versions
+
+logger = logging.getLogger(__name__)
 
 # Статика: legacy-страница (index.html) и собранный frontend (ui/)
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 UI_DIR = os.path.join(STATIC_DIR, "ui")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Старт приложения: уборка сирот и подъём истории задач (этап 6).
+
+    Реестр записей — in-memory, поэтому всё, что осталось от прошлых запусков
+    процесса, никто не уберёт: каталоги без сайдкара, кэши и файлы задач
+    исчезнувших записей (A6) живут вечно. Здесь они сносятся один раз при старте
+    (``services/orphans.py``), а завершённые задачи поднимаются с диска, чтобы
+    история и ссылки на результат не терялись (A8). Обе операции best-effort:
+    сбой уборки не мешает сервису подняться.
+    """
+    report = sweep_orphans(settings)
+    if report.total:
+        logger.info("Уборка сирот при старте: %s", report.as_dict())
+    restored = job_manager.restore(settings)
+    if restored:
+        logger.info("Поднято задач из файлов на диске: %d", restored)
+    yield
+
+
 app = FastAPI(
     title=settings.app_name,
     description="Анализ ЭЭГ и расчёт токовых диполей в 3D",
     version=settings.app_version,
+    lifespan=lifespan,
 )
+
 
 # CORS: конкретные origins из settings (без "*" + credentials). Vite dev-server
 # ходит через proxy (CORS не нужен), но 5173 разрешён и напрямую (F14).

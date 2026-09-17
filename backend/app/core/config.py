@@ -109,6 +109,15 @@ class Settings(BaseSettings):
     # (старое поколение перезаписывается): журнал не растёт без предела.
     journal_max_bytes: int = Field(default=5_000_000, env="JOURNAL_MAX_BYTES")
 
+    # Результаты задач (A8, этап 6): завершённая задача пишется на диск
+    # (`results_dir/jobs/<job_id>.json`), поэтому история и результат переживают
+    # рестарт процесса. Тяжёлые бинарные артефакты (сетки, PNG) остаются в
+    # дисковых кэшах — в файл задачи идёт только сводка; результат больше
+    # `JOB_RESULT_MAX_BYTES` не сохраняется (история важнее результата).
+    job_store_enabled: bool = Field(default=True, env="JOB_STORE_ENABLED")
+    job_result_max_bytes: int = Field(default=2_000_000, env="JOB_RESULT_MAX_BYTES")
+
+
     # Единицы EDF: None = автоопределение MNE + эвристика масштаба (см. edf_loader)
     edf_units: Optional[str] = Field(default=None, env="EDF_UNITS")
 

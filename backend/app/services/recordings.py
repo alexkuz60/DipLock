@@ -14,8 +14,10 @@
 файлом — в сайдкаре ``recording.json`` каталога записи, поэтому дедуп переживает
 рестарт процесса (в dev ``--reload`` перезапускает его на каждое изменение кода):
 индекс каталогов собирается с диска лениво, при первом обращении. Каталоги
-прошлых запусков без живого владельца (легаси без сайдкара) удаляются
-``prune_orphans`` — но не автоматически: см. ``backend/scripts/dedupe_recordings.py``.
+прошлых запусков без живого владельца (легаси без сайдкара) удаляет
+``prune_orphans``, а кэши и файлы задач исчезнувших записей — общий обход сирот
+``services/orphans.py``: он вызывается на старте приложения и из скрипта
+``backend/scripts/dedupe_recordings.py`` (A6, этап 6).
 """
 import hashlib
 import json
@@ -25,7 +27,7 @@ import shutil
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import mne
 
@@ -291,6 +293,22 @@ class RecordingRegistry:
         if adopted:
             logger.info("Восстановлено записей из каталога загрузок: %d", len(adopted))
 
+    def upload_root(self, cfg: Settings) -> str:
+        """Каталог загрузок реестра (обход сирот сверяет по нему «запись на диске»)."""
+        return self._root(cfg)
+
+    def known_ids(self, cfg: Settings) -> Set[str]:
+        """id всех живых записей: с диска (сайдкары) и из памяти.
+
+        Список нужен обходу сирот (``services/orphans.py``, A6): кэши и файлы
+        задач этих записей трогать нельзя, а всё остальное под ``cache_dir`` —
+        мусор прежних запусков. Устаревшие записи здесь же вытесняются со своими
+        кэшами (``_drop_expired`` → ``_drop`` → ``_drop_signal_cache``).
+        """
+        self._ensure_index(cfg)
+        self._drop_expired()
+        return set(self._items)
+
     def find_by_digest(self, digest: Optional[str], cfg: Settings) -> Optional[Recording]:
         """Запись, чей файл совпадает по отпечатку sha256 (None — такой нет)."""
         if not digest:
@@ -371,8 +389,9 @@ class RecordingRegistry:
         Реестр — in-memory, поэтому каталоги прежних запусков процесса лимит
         истории не видит: без этой уборки они копились бы вечно. Живые записи не
         трогаются, корневые файлы каталога загрузок (например, ``test.edf`` из
-        репозитория) не рассматриваются — удаляются только каталоги. Автовызова
-        нет: уборку запускает ``backend/scripts/dedupe_recordings.py``.
+        репозитория) не рассматриваются — удаляются только каталоги. Вызывается
+        обходом сирот (``services/orphans.py``) при старте приложения и из
+        ``backend/scripts/dedupe_recordings.py`` (A6, этап 6).
         """
         self._ensure_index(cfg)
         if self._ttl_sec <= 0:

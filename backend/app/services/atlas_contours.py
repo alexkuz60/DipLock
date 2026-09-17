@@ -30,7 +30,6 @@
 (``PLANE_HORIZONTAL_SIGN``/``mniToNormalized``): раскладка картинки и контуров
 считается одной функцией, иначе контур «уехал» бы относительно среза.
 """
-import hashlib
 import io
 import json
 import logging
@@ -47,11 +46,19 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from app.core.config import Settings
-from app.services import journal
+from app.services import asset_versions, journal
+from app.services.asset_versions import (
+    BRODMANN_METHOD,
+    CONTOUR_AREA_ID_OFFSET,
+    CONTOUR_SIMPLIFY_MM,
+    CONTOUR_SPACING_MM,
+    CONTOUR_STAMP_RELATIVE,
+    CONTOUR_VERSION,
+    MIN_SHAPE_AREA_MM2,
+)
 from app.services.cache_store import cache_path, cache_write
 from app.services.mri_slices import (
     MRI_BOUNDS,
-    MRI_SPACING_MM,
     PLANE_AXES,
     PLANE_AXIS,
     axis_count,
@@ -65,42 +72,18 @@ from app.utils.marching_squares import polygon_area_mm2, trace_mask_contours
 
 logger = logging.getLogger(__name__)
 
-# Версия пайплайна построения объёмов меток (выборка узлов, метод BA-разметки).
-# Меняете шаги сборки — поднимайте число, иначе на диске подхватится старый кэш.
-# 2 — разметки полушарий разведены по id (в annot обоих полушарий id совпадают).
-CONTOUR_VERSION = 2
-
-# Шаг сетки контуров: тот же, что у срезов МРТ (контур обязан совпасть с картинкой).
-CONTOUR_SPACING_MM = MRI_SPACING_MM
-
-# Файлы, по «отпечатку» которых считается версия ассета (ETag и ``?v=`` в UI).
-CONTOUR_STAMP_RELATIVE = (
-    "fsaverage/mri/aparc+aseg.mgz",
-    "fsaverage/mri/lh.ribbon.mgz",
-    "fsaverage/mri/rh.ribbon.mgz",
-    "fsaverage/label/lh.PALS_B12_Brodmann.annot",
-    "fsaverage/label/rh.PALS_B12_Brodmann.annot",
-    "fsaverage/surf/lh.white",
-    "fsaverage/surf/rh.white",
-)
-
-# Метод производной BA-разметки — уходит в ответ и в ``/meta`` (честность картинки).
-BRODMANN_METHOD = "nearest_cortex_vertex"
-
-# Упрощение контура, мм: сетка 1 мм даёт точку на пиксель, для отрисовки и
-# хит-теста хватает десятых долей точности.
-CONTOUR_SIMPLIFY_MM = 0.6
-
-# Структура мельче этого на срез не рисуется: иначе «пыль» из обрезков коры,
-# которые на 1 мм-срезе выглядят как случайные штрихи.
-MIN_SHAPE_AREA_MM2 = 25.0
+# Входы ассета (номер сборки ``CONTOUR_VERSION``, шаг сетки, упрощение контура,
+# минимальная площадь, метод BA-разметки, смещение id полушарий и файлы атласа)
+# объявлены в ``services/asset_versions.py`` — оттуда считается версия для
+# ETag/имени файла кэша. Меняете шаги сборки — поднимайте номер **там**
+# (A7, этап 6).
 
 # Оси MNI в порядке массива томов (x, y, z) — как в ``mri_slices``.
 _AXIS_POS: Dict[str, int] = {"x": 0, "y": 1, "z": 2}
 
-# Смещение id полей Бродмана по полушариям: в annot обоих полушарий id лежат в
-# одном диапазоне (2…67), и без смещения разметки lh и rh слились бы в одну.
-_AREA_ID_OFFSET: Dict[str, int] = {"lh": 0, "rh": 10000}
+# Смещение id полей Бродмана по полушариям (источник — ``asset_versions``).
+_AREA_ID_OFFSET: Dict[str, int] = CONTOUR_AREA_ID_OFFSET
+
 
 # Метки, которые структурами не являются: «unknown» — неразмеченный обрезок коры,
 # и показывать его в легенде как анатомию нельзя.
@@ -129,17 +112,9 @@ class _ContourCtx:
 
 
 def contour_version(ctx: _ContourCtx) -> str:
-    """Версия ассета: «отпечаток» файлов атласа + версия шагов сборки (ETag)."""
-    digest = hashlib.sha256()
-    digest.update(f"{ctx.subjects_dir}:{CONTOUR_VERSION}:{CONTOUR_SPACING_MM}".encode("utf-8"))
-    for rel in CONTOUR_STAMP_RELATIVE:
-        path = os.path.join(ctx.subjects_dir, rel)
-        try:
-            stat = os.stat(path)
-            digest.update(f"{rel}:{stat.st_size}:{int(stat.st_mtime)}".encode("utf-8"))
-        except OSError:
-            digest.update(f"{rel}:missing".encode("utf-8"))
-    return digest.hexdigest()[:16]
+    """Версия ассета по «отпечатку» входов (ETag/имя файла кэша, A7)."""
+    return asset_versions.fingerprint("contours", ctx.subjects_dir)
+
 
 
 def asset_version(settings: Settings) -> str:

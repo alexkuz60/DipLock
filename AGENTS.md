@@ -19,13 +19,12 @@ venv/bin/pip install -r requirements.txt              # + requirements-dev.txt �
 venv/bin/uvicorn app.main:app --reload --port 8000    # рабочая директория — backend/
 venv/bin/python -m pytest                             # тесты backend
 
-# проверка API
+# проверка API (Swagger: http://localhost:8000/docs)
 curl http://localhost:8000/health        # {"status":"ok",...}
-curl http://localhost:8000/init-status   # готовность MNE/БД/fsaverage + versions/paths/ui
+curl http://localhost:8000/init-status   # готовность MNE/БД/fsaverage + версии/пути/UI
 curl http://localhost:8000/api/v1/meta   # версии, параметры расчёта, surface_version
 # спектрограмма канала («ЭЭГ»): задача → метаданные → сетка чисел (DPS2)
 curl -X POST -F channel=Fp1 -F window_ms=500 http://localhost:8000/api/v1/recordings/<id>/spectrogram
-# Swagger: http://localhost:8000/docs
 
 # --- frontend ---
 cd frontend && npm install
@@ -69,6 +68,9 @@ backend/app/
 │   ├── analysis_pipeline.py # пайплайн файлового анализа (/analyze, /jobs) + запись в БД (A1)
 │   ├── cache_store.py     # единый дисковый кэш: путь/чтение/атомарная запись/очистка (этап 2)
 │   ├── journal.py         # журнал шагов пайплайнов: GET /journal (этап 5)
+│   ├── job_store.py       # файл задачи на диске: история и результат (A8)
+│   ├── orphans.py         # обход сирот при старте (A6)
+│   ├── asset_versions.py  # единый отпечаток версий ассетов (A7)
 │   ├── prepared_signal.py # RAM-кэш подготовленного сигнала: EDF один раз на набор параметров (A4)
 │   ├── job_manager.py     # фоновые задачи: этапы, прогресс эпох, семафор (F7)
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
@@ -99,23 +101,16 @@ docs/ui.md             # спецификация UI и дорожная кар�
   одном месте, ручных `status_code=304` в роутах нет — ловит `tests/test_api_assets.py` (A1/A2).
 - Один шаг пайплайна = один модуль в `services/`, без смешивания ответственности.
 - Кэшируйте ресурсоёмкие объекты (поверхности FSAverage, transform, labels).
-- **Дисковые кэши — через `services/cache_store.py`** (своей копии «временный файл + `os.replace`»
-  в сервисе быть не должно), **подготовленный сигнал — через `services/prepared_signal.py`**;
-  правила и инварианты — `docs/rules/data-and-caches.md`.
+- **Данные — только через свои сервисы:** кэши — `cache_store.py`, подготовленный сигнал —
+  `prepared_signal.py`, версии ассетов — `asset_versions.py`, результат задачи — `job_store.py`,
+  сироты — `orphans.py`; инварианты — `docs/rules/data-and-caches.md`.
 - **Frontend**: новый раздел UI = запись в `frontend/src/app/sections/registry.ts` + компонент в
-  `routes.tsx`; UI-тексты и подсказки — на русском, конвенции — `frontend/README.md`.
-  Ожидание задач — общее (`shared/lib/jobPolling.ts`), адреса — парами (`recordingJob(kind)`).
-- **Ссылка раздела в рейле — `className` строкой** (`IconRail`: активность считает локальная
-  `isSectionActive` от `useLocation`, ссылка помечается `aria-current`):
-  `NavLink`-функцию `className` внутри `Tooltip asChild` ломает Radix `Slot` — он склеивает
-  className'ы в строку и кладёт в `class` **текст функции**, из-за чего стили рейла (рамка, фон,
-  подсветка активного) не применяются вовсе. Ловит `AppShell.test.tsx` (в `class` нет `=>`, у
-  активной ссылки `aria-current="page"`).
-- **UI не запускает обработку сам** (важно): параметры раздела живут в zustand-срезе
-  (`shared/state/`), правка параметра только помечает результат устаревшим и **не делает запросов**;
-  расчёт стартует исключительно по кнопке (`POST /api/v1/jobs`) — сначала контролы и визуализация
-  (можно на фикстурах), затем подключение расчёта. Новые контролы берите из `shared/ui/`
-  (`FieldRow`, `SegmentedControl`, `SelectField`, `NumberField`, `CheckboxRow`, `StatusPill`).
+  `routes.tsx`; тексты — на русском; ожидание задач — общее (`shared/lib/jobPolling.ts`), адреса —
+  парами (`recordingJob(kind)`); контролы — из `shared/ui/` (`FieldRow`, `SegmentedControl`,
+  `SelectField`, `NumberField`, `CheckboxRow`, `StatusPill`).
+- **Frontend-ловушки — `docs/rules/frontend-state.md` п.1 и п.7:** `className` ссылки рейла обязан
+  быть строкой (Radix `Slot` превращает функцию в текст и стили пропадают), а правка параметра
+  **не** запускает расчёт — считает только кнопка (`POST /api/v1/jobs`).
 
 ## НЕ коммитить
 
@@ -134,9 +129,9 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/eeg.md` | раздел «ЭЭГ»: трек канала и спектрограмма |
 | `docs/rules/api-jobs.md` | инвентарь роутов, правило «задача = job», ETag/304, ошибки |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
-| `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов (шесть кэшей, три версии) |
+| `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов (шесть кэшей, отпечаток ассетов, файл задачи) |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
-| `docs/rules/tests.md` | полный инвентарь покрытия (559 Vitest / 282 pytest) |
+| `docs/rules/tests.md` | полный инвентарь покрытия (559 Vitest / 305 pytest) |
 | `docs/rules/docs.md` | **правило ведения документации** — новое правило идёт в файл по теме, а не сюда |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |
@@ -159,9 +154,8 @@ cd frontend && npm run test                                  # Vitest (jsdom)
 
 Тесты быстрые (без сети): синтетический ЭЭГ (`backend/tests/conftest.py`) + `TestClient`; ветки с
 реальными данными (`~/mne_data`, `data/edf/test.edf`) помечаются маркером `integration` и скипаются
-без них.
-Полный инвентарь покрытия (что именно проверяет каждый файл) — `docs/rules/tests.md`; там же список
-тестов срезов 2.9–5. **Правило:** новый сервис/багфикс → тест (backend → pytest, frontend → Vitest).
+без них. Полный инвентарь покрытия — `docs/rules/tests.md` (там же тесты срезов 2.9–6).
+**Правило:** новый сервис/багфикс → тест (backend → pytest, frontend → Vitest).
 
 ## Ключевые правила безопасности (кратко)
 

@@ -24,7 +24,6 @@
 «мм MNI» и «мм RAS» — одно и то же, и сетка среза совпадает с координатами
 диполей и срезов UI. На воксельной сетке каждый клик требовал бы пересчёта.
 """
-import hashlib
 import io
 import json
 import logging
@@ -37,44 +36,27 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from app.core.config import Settings
-from app.services import journal
+from app.services import asset_versions, journal
+from app.services.asset_versions import (
+    MRI_BOUNDS,
+    MRI_GRID_VERSION,
+    MRI_SPACING_MM,
+    MRI_STAMP_RELATIVE,
+    MRI_WINDOW_PERCENTILES,
+)
 from app.services.cache_store import cache_path, cache_write
 from app.utils.png import encode_png_gray8
 
 logger = logging.getLogger(__name__)
 
-# Версия пайплайна построения тома (окно интенсивности, выравнивание сетки):
-# меняете шаги сборки — поднимайте число, иначе на диске подмешается старый кэш.
-# 2 — выборка узлов сетки берёт строку обратной матрицы по оси вокселей (у
-# коронарной укладки T1 оси y и z были перепутаны, срез показывал не ту анатомию).
-MRI_GRID_VERSION = 2
-
-# Шаг MNI-сетки, мм (воксель fsaverage тоже 1 мм, пересчёта масштаба нет).
-MRI_SPACING_MM = 1.0
-
-# Файлы тома, по «отпечатку» которых считается версия ассета (ETag).
-MRI_STAMP_RELATIVE = (
-    "fsaverage/mri/T1.mgz",
-    "fsaverage/mri/brainmask.mgz",
-)
-
-# Границы MNI-сетки: объём мозга с мозжечком и стволом по маске ``brainmask``
-# (интеграционный тест сверяет их с реальным томом). Это же — границы фигур на
-# фронтенде (`MNI_BRAIN_BOUNDS`): картинка среза ровно накрывает прямоугольник
-# плоскости, поэтому обе стороны обязаны сойтись до миллиметра.
-MRI_BOUNDS: Dict[str, Tuple[float, float]] = {
-    "x": (-80.0, 80.0),
-    "y": (-116.0, 80.0),
-    "z": (-82.0, 90.0),
-}
-
-# Окно интенсивности: перцентили яркости внутри маски мозга. 1/99 вместо
-# min/max — иначе пара выбросов «съедает» весь динамический диапазон, и срез
-# выглядит серой заливкой.
-MRI_WINDOW_PERCENTILES = (1.0, 99.0)
+# Входы ассета (номер сборки ``MRI_GRID_VERSION``, шаг и границы MNI-сетки, окно
+# интенсивности, файлы тома) объявлены в ``services/asset_versions.py``: оттуда
+# считается версия для ETag/имени файла кэша. Меняете шаги сборки — поднимайте
+# номер **там**, иначе на диске подмешается старый кэш (A7, этап 6).
 
 # Ось MNI, по которой наводится срез, и оси видимой плоскости: [горизонталь,
 # вертикаль]. Порядок и знаки — как в UI, иначе картинка окажется зеркальной.
+
 PLANE_AXIS: Dict[str, str] = {"axial": "z", "sagittal": "x", "coronal": "y"}
 PLANE_AXES: Dict[str, Tuple[str, str]] = {
     "axial": ("x", "y"),
@@ -236,17 +218,9 @@ class _MriCtx:
 
 
 def mri_version(ctx: _MriCtx) -> str:
-    """Версия ассета: «отпечаток» файлов тома + версия шагов сборки (ETag)."""
-    digest = hashlib.sha256()
-    digest.update(f"{ctx.subjects_dir}:{MRI_GRID_VERSION}:{MRI_SPACING_MM}".encode("utf-8"))
-    for rel in MRI_STAMP_RELATIVE:
-        path = os.path.join(ctx.subjects_dir, rel)
-        try:
-            stat = os.stat(path)
-            digest.update(f"{rel}:{stat.st_size}:{int(stat.st_mtime)}".encode("utf-8"))
-        except OSError:
-            digest.update(f"{rel}:missing".encode("utf-8"))
-    return digest.hexdigest()[:16]
+    """Версия ассета по «отпечатку» входов (ETag/имя файла кэша, A7)."""
+    return asset_versions.fingerprint("mri", ctx.subjects_dir)
+
 
 
 def _cache_paths(ctx: _MriCtx, version: str) -> Tuple[str, str]:
