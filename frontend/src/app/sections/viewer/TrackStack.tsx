@@ -30,21 +30,16 @@
  * обёртка, чтобы drag/колесо работали одинаково на всех треках.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
-import { ChevronDown, ChevronUp } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import uPlot from 'uplot'
-import 'uplot/dist/uPlot.min.css'
 import {
   anchoredCenter,
   clampCenter,
-  frameEnvelope,
   panByPixels,
-  pointsBudget,
   xToTime,
   zoomWindow,
-  type TimeWindow,
 } from '@/shared/lib/viewerMath'
 import type { SignalFrame } from '@/shared/lib/signalFrame'
+import { LABEL_WIDTH, TRACK_HEIGHT } from '@/shared/lib/trackOptions'
 import {
   artifactCounts,
   buildEpochCells,
@@ -57,7 +52,6 @@ import {
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue } from '@/shared/state/edfParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useEegParams } from '@/shared/state/eegParams'
-import { cx } from '@/shared/ui/cx'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import {
   ArtifactZoneLayer,
@@ -66,16 +60,7 @@ import {
   SelectedZoneCard,
 } from './TrackLayers'
 import { ExportActions } from './ExportActions'
-
-// Цвета холста: canvas не читает CSS-токены, значения синхронизированы с темой
-// (styles/index.css: --color-accent #4da3ff, --color-fg-2 #8695a8, --color-border).
-const STROKE = '#4da3ff'
-const ENVELOPE_FILL = 'rgba(77, 163, 255, 0.22)'
-const AXIS_TEXT = '#8695a8'
-const AXIS_GRID = 'rgba(44, 58, 77, 0.6)'
-
-const TRACK_HEIGHT = 64
-const LABEL_WIDTH = 56
+import { TrackRow } from './TrackRow'
 
 export type TrackStackProps = {
   signal: SignalFrame
@@ -86,204 +71,6 @@ export type TrackStackProps = {
    * рисует фикстуру — так он остаётся самостоятельным для отладки.
    */
   layers?: EdfViewerLayers
-}
-
-function formatTick(spanSec: number, value: number): string {
-  const digits = spanSec >= 60 ? 0 : spanSec >= 5 ? 1 : 2
-  return `${value.toFixed(digits)} с`
-}
-
-/** Диапазон оси Y: общий (±N мкВ) или авто по окну канала. */
-function yRangeFor(
-  mode: 'shared' | 'per_channel',
-  scaleUv: number,
-  envMin: number,
-  envMax: number,
-): [number, number] | 'auto' {
-  if (mode === 'shared') return [-scaleUv, scaleUv]
-  if (!Number.isFinite(envMin) || !Number.isFinite(envMax) || envMax <= envMin) return [-1, 1]
-  const pad = (envMax - envMin) * 0.08
-  return [envMin - pad, envMax + pad]
-}
-
-function makeTrackOptions(
-  width: number,
-  height: number,
-  window: TimeWindow,
-  yRange: [number, number],
-  showXAxis: boolean,
-): uPlot.Options {
-  return {
-    width,
-    height,
-    legend: { show: false },
-    cursor: { show: false },
-    padding: [4, 4, 0, 0],
-    scales: {
-      x: { time: false, min: window.t0, max: window.t1 },
-      y: { range: yRange },
-    },
-    axes: [
-      showXAxis
-        ? {
-            stroke: AXIS_TEXT,
-            font: '12px system-ui',
-            grid: { stroke: AXIS_GRID, width: 1 },
-            ticks: { show: false },
-            size: 26,
-            values: (self, splits) => {
-              const span = self.scales.x.max! - self.scales.x.min!
-              return splits.map((v) => formatTick(span, v))
-            },
-          }
-        : { show: false },
-      { show: false },
-    ],
-    series: [
-      {},
-      // min — невидимая опорная серия огибающей (нужна band'у)
-      { show: true, points: { show: false }, stroke: 'rgba(0,0,0,0)', width: 0.1 },
-      // max — видимая линия трека
-      { show: true, points: { show: false }, stroke: STROKE, width: 1.25 },
-    ],
-    bands: [{ series: [2, 1], fill: ENVELOPE_FILL, dir: 1 }],
-  }
-}
-
-type TrackRowProps = {
-  name: string
-  frame: SignalFrame
-  window: TimeWindow
-  width: number
-  /** Высота трека: обычная или высота видимой области у развёрнутого (срез 2.9) */
-  height: number
-  /** Трек развёрнут на всю высоту области */
-  expanded: boolean
-  amplitudeMode: 'shared' | 'per_channel'
-  amplitudeScaleUv: number
-  showXAxis: boolean
-  /** Клик по названию канала — открыть его в разделе «ЭЭГ» (срез 5) */
-  onLabelClick: (name: string) => void
-  /** Клик по стрелке у названия — развернуть/свернуть трек (срез 2.9) */
-  onToggleExpand: (name: string) => void
-  /** Отдаёт наружу canvas трека: из них собирается PNG-снапшот (срез 2.8) */
-  onCanvas: (name: string, canvas: HTMLCanvasElement | null) => void
-}
-
-function TrackRow({
-  name,
-  frame,
-  window,
-  width,
-  height,
-  expanded,
-  amplitudeMode,
-  amplitudeScaleUv,
-  showXAxis,
-  onLabelClick,
-  onToggleExpand,
-  onCanvas,
-}: TrackRowProps) {
-  const hostRef = useRef<HTMLDivElement>(null)
-  const chartRef = useRef<uPlot | null>(null)
-
-  const env = useMemo(
-    () =>
-      frameEnvelope(
-        frame.times,
-        frame.min[name] ?? [],
-        frame.max[name] ?? [],
-        window,
-        pointsBudget(width),
-        frame.decimated,
-      ),
-    [frame, name, window, width],
-  )
-  const yRange = useMemo(() => {
-    let lo = Infinity
-    let hi = -Infinity
-    for (let i = 0; i < env.min.length; i++) {
-      if (env.min[i] < lo) lo = env.min[i]
-      if (env.max[i] > hi) hi = env.max[i]
-    }
-    return yRangeFor(amplitudeMode, amplitudeScaleUv, lo, hi)
-  }, [env, amplitudeMode, amplitudeScaleUv])
-
-  // Создание/уничтожение чарта (ширина и окно применяются отдельно)
-  useEffect(() => {
-    const host = hostRef.current
-    if (!host || width <= 0) return
-    const chart = new uPlot(
-      makeTrackOptions(width, height, window, yRange === 'auto' ? [-1, 1] : yRange, showXAxis),
-      [[], [], []] as uPlot.AlignedData,
-      host,
-    )
-    chartRef.current = chart
-    // uPlot рисует сигнал в canvas — только его можно склеить в PNG-снапшот
-    onCanvas(name, chart.ctx?.canvas ?? null)
-    return () => {
-      chart.destroy()
-      chartRef.current = null
-      onCanvas(name, null)
-    }
-    // Пересоздаём при смене канала/ширины/высоты/режима шкалы; ось времени обновляется ниже
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, width, height, showXAxis, amplitudeMode, amplitudeScaleUv])
-
-  useEffect(() => {
-    chartRef.current?.setData([env.times, env.min, env.max] as uPlot.AlignedData, false)
-    chartRef.current?.setScale('x', { min: window.t0, max: window.t1 })
-  }, [env, window])
-
-  useEffect(() => {
-    if (yRange !== 'auto') return
-    // null = «подобрать автоматически из данных» (контракт uPlot для scale min/max)
-    chartRef.current?.setScale('y', { min: null as unknown as number, max: null as unknown as number })
-  }, [yRange])
-
-  return (
-    <div
-      className="flex items-stretch gap-1"
-      data-testid={`track-${name}`}
-      style={{ height }}
-    >
-      <div
-        className="flex shrink-0 flex-col items-end justify-center"
-        style={{ width: LABEL_WIDTH }}
-      >
-        <button
-          type="button"
-          data-testid={`track-label-${name}`}
-          aria-label={`Открыть канал ${name} в разделе «ЭЭГ»`}
-          title={`Открыть канал ${name} в разделе «ЭЭГ»: трек и спектрограмма STFT`}
-          onClick={() => onLabelClick(name)}
-          className="tnum w-full cursor-pointer truncate rounded text-right font-mono text-xs text-fg-2 hover:text-fg-0"
-        >
-          {name}
-        </button>
-        <button
-          type="button"
-          data-testid={`track-expand-${name}`}
-          data-expanded={expanded}
-          aria-pressed={expanded}
-          aria-label={expanded ? `Свернуть трек ${name}` : `Развернуть трек ${name}`}
-          title={expanded ? 'Свернуть трек' : 'Развернуть трек на всю высоту'}
-          onClick={() => onToggleExpand(name)}
-          className={cx(
-            'cursor-pointer rounded p-0.5',
-            expanded ? 'text-accent' : 'text-fg-2 hover:bg-bg-3 hover:text-fg-0',
-          )}
-        >
-          {expanded ? (
-            <ChevronUp className="size-3.5" aria-hidden />
-          ) : (
-            <ChevronDown className="size-3.5" aria-hidden />
-          )}
-        </button>
-      </div>
-      <div ref={hostRef} className="pointer-events-none min-w-0 flex-1" />
-    </div>
-  )
 }
 
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */

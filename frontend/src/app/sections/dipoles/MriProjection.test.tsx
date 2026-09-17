@@ -13,13 +13,13 @@ import {
   PROJECTION_PADDING,
   PROJECTION_PLANES,
   defaultSlices,
-  demoBrodmannAreas,
   mniToNormalized,
   normalizedToPx,
   planeEdgeLabels,
   projectionBox,
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
+import { demoBrodmannAreas } from '@/shared/lib/mriDemoShapes'
 import { MRI_SLICE_UNAVAILABLE } from '@/shared/lib/mriSlices'
 import type { MriSliceRef } from '@/shared/api/types'
 import {
