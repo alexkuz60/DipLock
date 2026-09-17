@@ -1,7 +1,7 @@
 /**
  * Тесты каркаса: рейл, тулс-хедер, сворачивание правой панели, хоткеи.
  */
-import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -38,6 +38,7 @@ describe('каркас приложения', () => {
     for (const name of [
       'Главная',
       'EDF — просмотр записи',
+      'ЭЭГ: трек и спектрограмма',
       'Расчёт диполей и локализация',
       'Таблица локализации',
       'Групповой анализ',
@@ -46,6 +47,44 @@ describe('каркас приложения', () => {
     ]) {
       expect(screen.getByRole('link', { name })).toBeInTheDocument()
     }
+
+    // Порядок иконок = порядок реестра: «ЭЭГ» стоит третьей, сразу после EDF (хоткей 3)
+    const rail = screen.getByRole('navigation', { name: 'Разделы приложения' })
+    expect(
+      within(rail)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('aria-label')),
+    ).toEqual([
+      'Главная',
+      'EDF — просмотр записи',
+      'ЭЭГ: трек и спектрограмма',
+      'Расчёт диполей и локализация',
+      'Таблица локализации',
+      'Групповой анализ',
+      'Настройки приложения',
+      'Состояние сервера',
+    ])
+  })
+
+  it('помечает активный раздел рейла настоящими классами, а не текстом функции (поправка среза 5)', () => {
+    renderApp('/edf')
+
+    const rail = screen.getByRole('navigation', { name: 'Разделы приложения' })
+    const links = within(rail).getAllByRole('link')
+
+    // Radix `Slot` (`Tooltip asChild`) склеивает className'ы в строку: от className-функции
+    // NavLink в `class` попадал её текст, и стили рейла не применялись вовсе
+    for (const link of links) {
+      expect(link.className).not.toContain('=>')
+      expect(link.className).toContain('items-center')
+    }
+
+    const edf = screen.getByRole('link', { name: 'EDF — просмотр записи' })
+    expect(edf).toHaveAttribute('aria-current', 'page')
+    expect(edf.className).toContain('border-accent')
+    expect(screen.getByRole('link', { name: 'ЭЭГ: трек и спектрограмма' })).not.toHaveAttribute(
+      'aria-current',
+    )
   })
 
   it('показывает тулс-хедер и рабочую область раздела', () => {
@@ -96,6 +135,23 @@ describe('каркас приложения', () => {
         screen.getByRole('heading', { level: 1, name: 'EDF — просмотр записи' }),
       ).toBeInTheDocument(),
     )
+  })
+
+  it('открывает раздел «ЭЭГ» по хоткею 3 и с горячей клавишей Space не путает разделы (срез 5)', async () => {
+    // «ЭЭГ» — третий раздел рейла, поэтому и клавиша третья; Space остаётся за «Диполями»
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+
+    renderApp('/')
+    fireEvent.keyDown(window, { key: '3' })
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('heading', { level: 1, name: 'ЭЭГ: трек и спектрограмма' }),
+      ).toBeInTheDocument(),
+    )
+    // В разделе «ЭЭГ» Space не перехватывается: там нет воспроизведения кадра
+    fireEvent.keyDown(window, { key: ' ', code: 'Space' })
+    expect(useDipoleCalc.getState().playback.playing).toBe(false)
   })
 
   it('держит рабочую область в высоте окна, а не в высоте содержимого', () => {

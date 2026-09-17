@@ -185,6 +185,37 @@ class RecordingSignalsHeader(BaseModel):
     layout: Literal["channel-major"] = "channel-major"
 
 
+class SpectrogramGridHeader(BaseModel):
+    """Заголовок бинарного ответа ``GET /recordings/{id}/spectrogram/{job}/grid.bin``.
+
+    Спектрограмма — **сетка чисел**, а не картинка: клиент рисует её сам (палитра,
+    окно дБ и сглаживание — параметры просмотра, а не расчёта). Container:
+
+    ``magic 'DPS2'`` | ``uint32 LE len(header)`` | ``header`` (JSON UTF-8) |
+    ``payload`` float32 LE, frequency-major: для каждой частоты из ``freqs``
+    подряд идут значения по временам из ``times``.
+
+    Значения — уровень в дБ (20·lg амплитуды, мкВ), шкала привязана к ``db_max``
+    и ``db_min`` (потолок и пол) — они же нужны клиенту, чтобы перевести окно
+    отображения в цвета.
+    """
+
+    recording_id: str
+    channel: str = Field(description="Канал, по которому посчитана спектрограмма")
+    window_ms: float = Field(description="Длина окна STFT, мс")
+    overlap_pct: float = Field(description="Перекрытие окон, %")
+    fmax_hz: float = Field(description="Верхняя частота сетки, Гц")
+    sfreq: float = Field(description="Частота дискретизации сигнала, Гц")
+    n_fft: int = Field(description="Длина окна FFT, отсчётов")
+    n_freqs: int = Field(description="Строк сетки (частоты)")
+    n_times: int = Field(description="Столбцов сетки (времена)")
+    db_min: float = Field(description="Пол шкалы, дБ (шум вне сигнала)")
+    db_max: float = Field(description="Потолок шкалы, дБ (99.9-й процентиль)")
+    dtype: Literal["float32"] = "float32"
+    byte_order: Literal["little"] = "little"
+    layout: Literal["frequency-major"] = "frequency-major"
+
+
 class PipelineInfo(BaseModel):
     """Провенанс результата: чем и с какими параметрами посчитано (F16)."""
 
@@ -443,6 +474,38 @@ class DipoleScanResult(BaseModel):
     n_epochs_used: int = Field(description="Сколько эпох прошло reject-фильтр")
     grid_mm: float = Field(description="Шаг объёмной сетки поиска, мм")
     points: List[DipoleScanPointOut] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
+
+
+class SpectrogramResult(BaseModel):
+    """Результат задачи спектрограммы канала (``kind=spectrogram``).
+
+    Считается STFT (короткое окно + перекрытие) по **одному** каналу записи —
+    это то, что рисует раздел «ЭЭГ» под треком. Сетка значений приходит не в
+    JSON, а бинарным контейнером (``SpectrogramGridHeader``, ``grid_url``):
+    строк на частоты × столбцов на времена слишком много для JSON-ответа.
+    """
+
+    recording_id: str
+    channel: str = Field(description="Канал, по которому посчитана спектрограмма")
+    channels: List[str] = Field(default_factory=list, description="Каналы записи, попавшие в расчёт")
+    sfreq: float
+    duration_sec: float = Field(description="Длительность записи, с")
+    window_ms: float = Field(description="Длина окна STFT, мс")
+    overlap_pct: float = Field(description="Перекрытие окон, %")
+    fmax_hz: float = Field(description="Верхняя частота сетки, Гц")
+    n_fft: int = Field(description="Длина окна FFT, отсчётов")
+    filter_band_hz: Optional[List[float]] = Field(
+        default=None, description="Полоса фильтра, на которой считалась спектрограмма; None — без фильтра"
+    )
+    notch_hz: Optional[float] = None
+    freqs: List[float] = Field(description="Частоты сетки (строки), Гц")
+    times: List[float] = Field(description="Времена центров окон (столбцы), с")
+    db_min: float = Field(description="Пол шкалы, дБ")
+    db_max: float = Field(description="Потолок шкалы, дБ")
+    grid_url: str = Field(description="URL бинарной сетки (float32, frequency-major)")
+    grid_version: str = Field(description="Отпечаток расчёта: входит в URL/ETag сетки")
     warnings: List[str] = Field(default_factory=list)
     duration_sec_calc: float = 0.0
 

@@ -2,18 +2,21 @@
  * Тесты вьюера треков (срез 2.3).
  *
  * uPlot подменён моком (см. `vitest.setup.ts`): тесты проверяют логику стека —
- * состав и порядок треков, окно времени, разворот трека по названию канала,
- * листание окна по команде из шапки и курсор по клику, а не пиксели.
+ * состав и порядок треков, окно времени, разворот трека стрелкой у названия,
+ * переход в раздел «ЭЭГ» кликом по названию канала, листание окна по команде из
+ * шапки и курсор по клику, а не пиксели.
  * Математика окна/огибающей покрыта в `viewerMath.test.ts`.
  */
 import { act, fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SignalData } from '@/shared/lib/demoSignal'
 import { frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
 import type { EdfViewerLayers } from '@/shared/lib/viewerLayers'
 import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import { EEG_PARAM_DEFAULTS, useEegParams } from '@/shared/state/eegParams'
 import { uplotCharts } from '@/test/uplot'
 
 import { TrackStack } from './TrackStack'
@@ -85,6 +88,16 @@ describe('вьюер треков', () => {
   beforeEach(() => {
     uplotCharts().length = 0
     localStorage.clear()
+    // Канал в «ЭЭГ» — состояние раздела назначения: тесты перехода не должны влиять друг на друга
+    useEegParams.setState({
+      params: { ...EEG_PARAM_DEFAULTS, filter: { ...EEG_PARAM_DEFAULTS.filter } },
+      job: null,
+      result: null,
+      grid: null,
+      error: null,
+      gridError: null,
+      eegNav: null,
+    })
   })
 
   it('рисует трек на каждый видимый канал в порядке монтажа', () => {
@@ -124,31 +137,54 @@ describe('вьюер треков', () => {
     expect(screen.getByText('×4')).toBeInTheDocument()
   })
 
-  it('клик по названию канала разворачивает трек, повторный — сворачивает (срез 2.9)', async () => {
+  it('стрелка у названия канала разворачивает трек, повторный клик — сворачивает (срез 2.9)', async () => {
     const user = userEvent.setup()
     paramsState({ visibleChannels: ['F3', 'F4', 'C3'] })
     renderWithProviders(<TrackStack signal={frameFixture()} />)
 
-    const label = screen.getByTestId('track-label-F4')
+    const expand = screen.getByTestId('track-expand-F4')
     expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '64px' })
 
-    await user.click(label)
+    await user.click(expand)
 
     // Высота области — 600 px (заглушка ResizeObserver), трек занимает её минус отступы
     expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '592px' })
-    expect(label).toHaveAttribute('data-expanded', 'true')
+    expect(expand).toHaveAttribute('data-expanded', 'true')
     // Развёрнутый трек не скрывает соседей: видимость каналов — только у панели «Каналы»
     expect(useEdfParams.getState().params.visibleChannels).toEqual(['F3', 'F4', 'C3'])
     expect(screen.getByTestId('track-F3')).toBeInTheDocument()
 
-    // Клик по другой подписи переключает разворот, повторный по той же — сворачивает
-    await user.click(screen.getByTestId('track-label-F3'))
+    // Клик по другой стрелке переключает разворот, повторный по той же — сворачивает
+    await user.click(screen.getByTestId('track-expand-F3'))
     expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '64px' })
     expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '592px' })
 
-    await user.click(screen.getByTestId('track-label-F3'))
+    await user.click(screen.getByTestId('track-expand-F3'))
     expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '64px' })
-    expect(screen.getByTestId('track-label-F3')).toHaveAttribute('data-expanded', 'false')
+    expect(screen.getByTestId('track-expand-F3')).toHaveAttribute('data-expanded', 'false')
+  })
+
+  it('клик по названию канала открывает его в разделе «ЭЭГ» (срез 5)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3', 'F4'] })
+    const fetchSpy = vi.fn()
+    vi.stubGlobal('fetch', fetchSpy)
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/edf" element={<TrackStack signal={frameFixture()} />} />
+        <Route path="/eeg" element={<p>раздел «ЭЭГ»</p>} />
+      </Routes>,
+      { route: '/edf' },
+    )
+
+    await user.click(screen.getByTestId('track-label-F4'))
+
+    // Название — это выбор канала: он уезжает в «ЭЭГ» явно, а не «если там пусто»
+    expect(useEegParams.getState().params.channel).toBe('F4')
+    expect(screen.getByText('раздел «ЭЭГ»')).toBeInTheDocument()
+    // Переход — смена раздела: обработку он не запускает
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it('скрытый в панели канал сбрасывает разворот трека', async () => {
@@ -156,7 +192,7 @@ describe('вьюер треков', () => {
     paramsState({ visibleChannels: ['F3', 'F4'] })
     renderWithProviders(<TrackStack signal={frameFixture()} />)
 
-    await user.click(screen.getByTestId('track-label-F4'))
+    await user.click(screen.getByTestId('track-expand-F4'))
     expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '592px' })
 
     act(() => useEdfParams.getState().toggleChannel('F4'))
@@ -241,7 +277,7 @@ describe('вьюер треков', () => {
     vi.stubGlobal('fetch', fetchSpy)
 
     renderWithProviders(<TrackStack signal={frameFixture()} />)
-    await user.click(screen.getByTestId('track-label-F3'))
+    await user.click(screen.getByTestId('track-expand-F3'))
 
     // Разворот трека — тоже параметр отрисовки: обработку он не запускает
     expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '592px' })

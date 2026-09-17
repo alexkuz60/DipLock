@@ -11,6 +11,10 @@ import { EdfPanel } from './EdfPanel'
 import { EdfSection } from './EdfSection'
 import { EdfToolHeaderActions } from './EdfToolActions'
 import { EdfZoomSelect } from './EdfZoomSelect'
+import { EegPanel } from './eeg/EegPanel'
+import { EegSection } from './eeg/EegSection'
+import { EegToolHeaderActions } from './eeg/EegToolActions'
+import { EegWindowControls } from './eeg/EegWindowControls'
 import { DipolesDrawer } from './dipoles/DipolesDrawer'
 import { DipolesPanel } from './dipoles/DipolesPanel'
 import { DipolesSection } from './dipoles/DipolesSection'
@@ -42,6 +46,12 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
     Panel: EdfPanel,
     ToolActions: EdfToolHeaderActions,
     HeaderExtra: EdfZoomSelect,
+  },
+  eeg: {
+    Component: EegSection,
+    Panel: EegPanel,
+    ToolActions: EegToolHeaderActions,
+    HeaderExtra: EegWindowControls,
   },
   dipoles: {
     Component: DipolesSection,

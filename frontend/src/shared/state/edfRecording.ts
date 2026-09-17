@@ -32,6 +32,7 @@ import {
   type RecalcStage,
 } from './edfParams'
 import { useDipoleCalc } from './dipoleCalc'
+import { useEegParams } from './eegParams'
 
 /** Снимает отметку «уровень в полёте», не мутируя прежний объект состояния. */
 function releaseLevel(
@@ -316,6 +317,9 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     // Расчёт диполей и спектр относятся к конкретной записи: результат прежней
     // записи на новую не переносим — точки и топокарты сбрасываются.
     useDipoleCalc.getState().reset()
+    // Спектрограмма «ЭЭГ» тоже принадлежит записи: канал и сетка прежней записи
+    // к новой отношения не имеют.
+    useEegParams.getState().reset()
   },
 
   openDemo: (channels) => {
@@ -471,6 +475,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     useEdfParams.getState().clearApplied()
     // Результаты расчёта диполей и спектра принадлежат закрытой записи
     useDipoleCalc.getState().reset()
+    useEegParams.getState().reset()
   },
 }))
 

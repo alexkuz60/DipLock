@@ -49,6 +49,8 @@ from app.schemas.analysis import (
     PreprocessStage,
     RecordingMeta,
     RecordingSignalsHeader,
+    SpectrogramGridHeader,
+    SpectrogramResult,
     SpectrumResult,
     SurfaceOut,
     SurfaceRef,
@@ -60,6 +62,13 @@ from app.services.spectral import (
     SpectrumParams,
     cached_topomap,
     compute_spectrum,
+)
+from app.services.spectrogram import (
+    SpectrogramParams,
+    cached_grid as cached_spectrogram_grid,
+    compute_spectrogram,
+    grid_url as spectrogram_grid_url,
+    validate_params as validate_spectrogram_params,
 )
 from app.services.recording_signals import (
     SignalBuildError,
@@ -436,10 +445,11 @@ def _job_status(job: Any) -> JobStatus:
     result_url: Optional[str] = None
     if job.status == "succeeded":
         recording_id = job.meta.get("recording_id")
-        # Задачи записи (предподготовка, спектр, диполи) держат результат рядом
-        # с записью: `/recordings/{id}/{kind}/{job_id}` — отдельные контракты
-        # (`PreprocessResult`, `SpectrumResult`, `DipoleScanResult`).
-        if recording_id and job.kind in ("preprocess", "spectrum", "dipoles"):
+        # Задачи записи (предподготовка, спектр, диполи, спектрограмма) держат
+        # результат рядом с записью: `/recordings/{id}/{kind}/{job_id}` —
+        # отдельные контракты (`PreprocessResult`, `SpectrumResult`,
+        # `DipoleScanResult`, `SpectrogramResult`).
+        if recording_id and job.kind in ("preprocess", "spectrum", "dipoles", "spectrogram"):
             result_url = f"{prefix}/recordings/{recording_id}/{job.kind}/{job.job_id}"
         else:
             result_url = f"{prefix}/jobs/{job.job_id}/result"
@@ -514,6 +524,15 @@ def _spectrum_job_worker(
 ) -> Dict[str, Any]:
     """Воркер задачи спектра (поток): Welch PSD + топокарты диапазонов."""
     return compute_spectrum(recording, settings, params, progress)
+
+
+def _spectrogram_job_worker(
+    progress: ProgressCallback,
+    recording: Any,
+    params: SpectrogramParams,
+) -> Dict[str, Any]:
+    """Воркер задачи спектрограммы (поток): STFT одного канала → сетка дБ."""
+    return compute_spectrogram(recording, settings, params, progress)
 
 
 def _dipole_scan_job_worker(
@@ -943,6 +962,132 @@ async def create_dipole_scan_job(
 async def get_dipole_scan_result(recording_id: str, job_id: str) -> DipoleScanResult:
     """Точки диполей (MNI, момент, амплитуда, GOF). 409 — задача идёт или упала."""
     return DipoleScanResult(**_recording_job(recording_id, job_id, "dipoles").result)
+
+
+@router.post(
+    "/recordings/{recording_id}/spectrogram", status_code=202, response_model=JobCreated,
+    summary="Запустить расчёт спектрограммы канала (STFT)",
+)
+async def create_spectrogram_job(
+    recording_id: str,
+    channel: str = Form("", description="Канал, по которому считается спектрограмма"),
+    band_min: Optional[float] = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: Optional[float] = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: Optional[float] = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: Optional[str] = Form(None, description="Каналы референса через запятую"),
+    window_ms: float = Form(500.0, description="Длина окна STFT, мс"),
+    overlap_pct: float = Form(75.0, description="Перекрытие окон, %"),
+    fmax_hz: float = Form(40.0, description="Верхняя частота сетки, Гц"),
+) -> JobCreated:
+    """Спектрограмма выбранного канала — фоновой задачей (202 + ``job_id``).
+
+    Ответ задачи (``GET /recordings/{id}/spectrogram/{job_id}``) отдаёт
+    **метаданные** сетки и ссылку на числа; сами числа приходят бинарным
+    контейнером (``…/grid.bin``, ``SpectrogramGridHeader``): строк на частоты ×
+    столбцов на времена слишком много для JSON-ответа. Палитра, окно дБ и
+    сглаживание — параметры просмотра UI, они сетку не пересчитывают.
+    """
+    recording = recording_registry.get(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
+        )
+    params = SpectrogramParams(
+        channel=channel,
+        filter_band=_optional_band(band_min, band_max),
+        notch_hz=notch_hz,
+        reference=reference,
+        reference_channels=_parse_reference_channels(reference_channels),
+        window_ms=window_ms,
+        overlap_pct=overlap_pct,
+        fmax_hz=fmax_hz,
+    )
+    try:
+        validate_spectrogram_params(params, settings)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    job = job_manager.submit(
+        "spectrogram", recording.filename, _spectrogram_job_worker, recording, params,
+        meta={"recording_id": recording_id, "channel": channel},
+    )
+    prefix = settings.api_prefix
+    logger.info("Создана задача спектрограммы %s (%s)", job.job_id, recording_id)
+    return JobCreated(
+        job_id=job.job_id,
+        status=job.status,
+        poll_url=f"{prefix}/jobs/{job.job_id}",
+        result_url=f"{prefix}/recordings/{recording_id}/spectrogram/{job.job_id}",
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/spectrogram/{job_id}", response_model=SpectrogramResult,
+    summary="Результат расчёта спектрограммы (метаданные сетки)",
+)
+async def get_spectrogram_result(recording_id: str, job_id: str) -> SpectrogramResult:
+    """Метаданные сетки + ссылка на числа. 409 — задача идёт или упала.
+
+    ``grid_url`` собирается здесь, а не в воркере: воркер не знает ``job_id``
+    (задача создаётся после него), а ссылка адресуется именно задаче.
+    """
+    job = _recording_job(recording_id, job_id, "spectrogram")
+    result = dict(job.result)
+    result["grid_url"] = spectrogram_grid_url(settings, recording_id, job_id)
+    return SpectrogramResult(**result)
+
+
+@router.get(
+    "/recordings/{recording_id}/spectrogram/{job_id}/grid.bin",
+    response_class=Response,
+    responses={200: {"model": SpectrogramGridHeader, "content": {"application/octet-stream": {}}}},
+    summary="Сетка спектрограммы: float32 дБ (ETag)",
+)
+async def get_spectrogram_grid(
+    recording_id: str,
+    job_id: str,
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """Сетка уровней (дБ) как бинарный контейнер ``DPS2`` с ETag/304.
+
+    Параметры расчёта берутся из **результата задачи**, а не из query: сетка
+    соответствует именно тому расчёту, который показан на экране. При промахе
+    дискового кэша сетка пересчитывается (как топокарты, 3.4).
+    """
+    job = _recording_job(recording_id, job_id, "spectrogram")
+    recording = recording_registry.get(recording_id)
+    if recording is None:
+        raise HTTPException(
+            status_code=404, detail=f"Запись {recording_id} не найдена или уже удалена",
+        )
+    result = job.result
+    band = result.get("filter_band_hz")
+    params = SpectrogramParams(
+        channel=result["channel"],
+        filter_band=(band[0], band[1]) if band and len(band) == 2 else None,
+        notch_hz=result.get("notch_hz"),
+        window_ms=float(result["window_ms"]),
+        overlap_pct=float(result["overlap_pct"]),
+        fmax_hz=float(result["fmax_hz"]),
+    )
+    try:
+        data, version = await asyncio.to_thread(
+            cached_spectrogram_grid, recording, settings, params,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    etag = f'"{version}-{params.channel}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=86400",
+        "X-Spectrogram-Channel": params.channel,
+        "X-Spectrogram-Version": version,
+    }
+    if if_none_match and etag in if_none_match:
+        return Response(status_code=304, headers=headers)
+    return Response(content=data, media_type="application/octet-stream", headers=headers)
+
 
 
 @router.post(

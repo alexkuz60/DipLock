@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { MAIN_SECTIONS, SECTIONS, UTILITY_SECTIONS, getSection } from './registry'
 
 describe('реестр разделов', () => {
-  it('содержит 5 рабочих и 2 служебных раздела', () => {
-    expect(SECTIONS).toHaveLength(7)
-    expect(MAIN_SECTIONS).toHaveLength(5)
+  it('содержит 6 рабочих и 2 служебных раздела', () => {
+    expect(SECTIONS).toHaveLength(8)
+    expect(MAIN_SECTIONS).toHaveLength(6)
     expect(UTILITY_SECTIONS).toHaveLength(2)
     expect(UTILITY_SECTIONS.map((section) => section.id)).toEqual(['settings', 'server'])
   })
@@ -15,8 +15,8 @@ describe('реестр разделов', () => {
     expect(new Set(SECTIONS.map((section) => section.route)).size).toBe(SECTIONS.length)
   })
 
-  it('у рабочих разделов хоткеи 1…5, у служебных — нет', () => {
-    expect(MAIN_SECTIONS.map((section) => section.hotkey)).toEqual(['1', '2', '3', '4', '5'])
+  it('у рабочих разделов хоткеи 1…6, у служебных — нет', () => {
+    expect(MAIN_SECTIONS.map((section) => section.hotkey)).toEqual(['1', '2', '3', '4', '5', '6'])
     expect(UTILITY_SECTIONS.every((section) => section.hotkey === '')).toBe(true)
   })
 

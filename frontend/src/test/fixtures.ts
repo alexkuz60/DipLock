@@ -11,6 +11,7 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  SpectrogramResult,
   SpectrumBandOut,
   SpectrumResult,
 } from '@/shared/api/types'
@@ -373,4 +374,52 @@ export const dipolePointWithoutMni = {
   ...dipolePoint(3, 200, [0, 0, 0], 80),
   mni_coords: null,
   anatomical_structure: null,
+}
+
+/** Результат расчёта спектрограммы («ЭЭГ»): метаданные сетки + ссылка на числа. */
+export function spectrogramResultFixture(
+  overrides: Partial<SpectrogramResult> = {},
+): SpectrogramResult {
+  return {
+    recording_id: recordingFixture.recording_id,
+    channel: 'Fp1',
+    channels: [...recordingFixture.channels],
+    sfreq: recordingFixture.sfreq,
+    duration_sec: recordingFixture.duration_sec,
+    window_ms: 1000,
+    overlap_pct: 75,
+    fmax_hz: 40,
+    n_fft: 256,
+    filter_band_hz: [1, 40],
+    notch_hz: null,
+    freqs: [0, 10, 20],
+    times: [0.5, 0.75, 1, 1.25],
+    db_min: -60,
+    db_max: 0,
+    grid_url: `/api/v1/recordings/${recordingFixture.recording_id}/spectrogram/job-spec-1/grid.bin`,
+    grid_version: 'spec1234abcd',
+    warnings: [],
+    duration_sec_calc: 0.4,
+    ...overrides,
+  }
+}
+
+/** Статус успешной задачи расчёта спектрограммы (поллинг в UI). */
+export const spectrogramJobFixture: JobStatus = {
+  job_id: 'job-spec-1',
+  kind: 'spectrogram',
+  status: 'succeeded',
+  stage: 'done',
+  progress: 1,
+  message: 'Спектрограмма готова',
+  epochs_done: 4,
+  epochs_total: 4,
+  filename: 'test.edf',
+  session_id: null,
+  created_at: '2026-09-15T09:00:00',
+  started_at: '2026-09-15T09:00:01',
+  finished_at: '2026-09-15T09:00:02',
+  elapsed_sec: 0.4,
+  error: null,
+  result_url: `/api/v1/recordings/${recordingFixture.recording_id}/spectrogram/job-spec-1`,
 }

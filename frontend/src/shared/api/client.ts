@@ -14,6 +14,7 @@ import type {
   MetaResponse,
   PreprocessResult,
   RecordingMeta,
+  SpectrogramResult,
   SpectrumResult,
 } from './types'
 
@@ -195,4 +196,37 @@ export const api = {
     request<DipoleScanResult>(`${API_PREFIX}/recordings/${recordingId}/dipoles/${jobId}`, {
       signal,
     }),
+
+  /**
+   * Запуск расчёта спектрограммы канала («ЭЭГ»): 202 + `job_id`.
+   * В форме — канал, полоса фильтра и параметры окна STFT.
+   */
+  spectrogramJob: (recordingId: string, form: FormData, signal?: AbortSignal) =>
+    request<JobCreated>(`${API_PREFIX}/recordings/${recordingId}/spectrogram`, {
+      method: 'POST',
+      body: form,
+      signal,
+    }),
+
+  /** Метаданные спектрограммы: оси, шкала дБ и ссылка на сетку чисел. */
+  spectrogramResult: (recordingId: string, jobId: string, signal?: AbortSignal) =>
+    request<SpectrogramResult>(
+      `${API_PREFIX}/recordings/${recordingId}/spectrogram/${jobId}`,
+      { signal },
+    ),
+
+  /**
+   * Сетка спектрограммы: бинарный контейнер float32 (``DPS2``, частото-мажорно).
+   * URL берётся из результата задачи (`shared/lib/eegSpectrogram.ts`).
+   */
+  spectrogramGrid: async (url: string, signal?: AbortSignal): Promise<ArrayBuffer> => {
+    let response: Response
+    try {
+      response = await fetch(url, { signal })
+    } catch (cause) {
+      throw new ApiError('Сервер недоступен (проверьте, запущен ли backend)', 0, cause)
+    }
+    if (!response.ok) await failWithBody(response)
+    return response.arrayBuffer()
+  },
 }

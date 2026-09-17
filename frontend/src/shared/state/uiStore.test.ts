@@ -21,6 +21,7 @@ describe('uiStore', () => {
   it('по умолчанию открывает панели рабочих разделов и закрывает новые', () => {
     expect(useUiStore.getState().rightPanelOpen).toEqual({
       edf: true,
+      eeg: true,
       dipoles: true,
       table: true,
       group: true,

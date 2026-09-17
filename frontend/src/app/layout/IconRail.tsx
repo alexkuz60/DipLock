@@ -1,12 +1,28 @@
-/** Левый рейл: иконки разделов (сверху основные, снизу служебные) + счётчик задач. */
-import { NavLink } from 'react-router-dom'
+/**
+ * Левый рейл: иконки разделов (сверху основные, снизу служебные) + счётчик задач.
+ *
+ * Активность раздела считается здесь, а класс — **строка** (срез 5, поправка):
+ * `NavLink` умеет `className`-функцию, но ссылка живёт внутри Radix `Slot`
+ * (`Tooltip asChild`), а тот склеивает className'ы в строку — от функции в `class`
+ * попадал её текст, и стили рейла (рамка, фон, подсветка активного) не применялись
+ * вовсе. Поэтому активный раздел вычисляем сами и помечаем `aria-current`.
+ */
+import { NavLink, useLocation } from 'react-router-dom'
 import { MAIN_SECTIONS, UTILITY_SECTIONS, type SectionConfig } from '@/app/sections/registry'
 import { useUiStore } from '@/shared/state/uiStore'
 import { cx } from '@/shared/ui/cx'
 import { Tooltip } from '@/shared/ui/Tooltip'
 
+/** Активен ли раздел: `/` — точное совпадение, остальные маршруты — с вложенными путями. */
+function isSectionActive(pathname: string, route: string): boolean {
+  if (route === '/') return pathname === '/'
+  return pathname === route || pathname.startsWith(`${route}/`)
+}
+
 export function RailLink({ section, badge }: { section: SectionConfig; badge?: number }) {
   const Icon = section.icon
+  const { pathname } = useLocation()
+  const active = isSectionActive(pathname, section.route)
   const tooltip = section.hotkey ? `${section.hint} · клавиша ${section.hotkey}` : section.hint
 
   return (
@@ -15,14 +31,13 @@ export function RailLink({ section, badge }: { section: SectionConfig; badge?: n
         to={section.route}
         end={section.route === '/'}
         aria-label={section.title}
-        className={({ isActive }) =>
-          cx(
-            'relative flex h-12 w-12 items-center justify-center rounded-xl border transition-colors',
-            isActive
-              ? 'border-accent/60 bg-accent-soft text-fg-0'
-              : 'border-transparent text-fg-1 hover:bg-bg-3 hover:text-fg-0',
-          )
-        }
+        aria-current={active ? 'page' : undefined}
+        className={cx(
+          'relative flex h-12 w-12 items-center justify-center rounded-xl border transition-colors',
+          active
+            ? 'border-accent/60 bg-accent-soft text-fg-0'
+            : 'border-transparent text-fg-1 hover:bg-bg-3 hover:text-fg-0',
+        )}
       >
         <Icon className="size-6" aria-hidden />
         {badge && badge > 0 ? (

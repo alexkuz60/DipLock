@@ -6,6 +6,7 @@
  * правый сайдбар и хоткей; маршруты берутся из `SECTION_ROUTES`.
  */
 import {
+  Activity,
   House,
   Layers,
   Radar,
@@ -16,7 +17,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
-export type SectionId = 'home' | 'edf' | 'dipoles' | 'table' | 'group' | 'settings' | 'server'
+export type SectionId = 'home' | 'edf' | 'eeg' | 'dipoles' | 'table' | 'group' | 'settings' | 'server'
 
 export type SectionConfig = {
   id: SectionId
@@ -63,11 +64,23 @@ export const SECTIONS: SectionConfig[] = [
     group: 'main',
   },
   {
+    id: 'eeg',
+    title: 'ЭЭГ: трек и спектрограмма',
+    shortTitle: 'ЭЭГ',
+    hint: 'ЭЭГ: один канал, трек и спектрограмма STFT',
+    hotkey: '3',
+    icon: Activity,
+    route: '/eeg',
+    hasToolHeader: true,
+    hasRightPanel: true,
+    group: 'main',
+  },
+  {
     id: 'dipoles',
     title: 'Расчёт диполей и локализация',
     shortTitle: 'Диполи',
     hint: 'Диполи: фильтры, 3 проекции, анимация',
-    hotkey: '3',
+    hotkey: '4',
     icon: Radar,
     route: '/dipoles',
     hasToolHeader: true,
@@ -79,7 +92,7 @@ export const SECTIONS: SectionConfig[] = [
     title: 'Таблица локализации',
     shortTitle: 'Таблица',
     hint: 'Таблица результатов локализации',
-    hotkey: '4',
+    hotkey: '5',
     icon: Table2,
     route: '/table',
     hasToolHeader: true,
@@ -91,7 +104,7 @@ export const SECTIONS: SectionConfig[] = [
     title: 'Групповой анализ',
     shortTitle: 'Групповой',
     hint: 'Групповой анализ записей БД',
-    hotkey: '5',
+    hotkey: '6',
     icon: Layers,
     route: '/group',
     hasToolHeader: true,

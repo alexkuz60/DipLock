@@ -212,11 +212,12 @@ def read_recording_meta(path: str, cfg: Settings, filename: str) -> Dict[str, An
 
 
 def _drop_signal_cache(recording_id: str) -> None:
-    """Удаляет производные кэши записи: пирамиду сигналов (2.5) и топокарты (3.4).
+    """Удаляет производные кэши записи: пирамиду сигналов (2.5), топокарты (3.4),
+    сетки спектрограмм («ЭЭГ»).
 
-    Импорт локальный: ``recording_signals``/``spectral`` импортируют ``recordings``,
-    и модульный импорт дал бы цикл. Кэши — только оптимизация, поэтому сбой и не
-    должен ронять очистку реестра.
+    Импорт локальный: ``recording_signals``/``spectral``/``spectrogram`` импортируют
+    ``recordings``, и модульный импорт дал бы цикл. Кэши — только оптимизация,
+    поэтому сбой и не должен ронять очистку реестра.
     """
     try:
         from app.services.recording_signals import clear_signal_cache
@@ -229,6 +230,12 @@ def _drop_signal_cache(recording_id: str) -> None:
     except ImportError:  # pragma: no cover — модуль всегда есть
         return
     clear_spectrum_cache(settings, recording_id)
+
+    try:
+        from app.services.spectrogram import clear_spectrogram_cache
+    except ImportError:  # pragma: no cover — модуль всегда есть
+        return
+    clear_spectrogram_cache(settings, recording_id)
 
 
 class RecordingRegistry:

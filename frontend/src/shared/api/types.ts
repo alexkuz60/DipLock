@@ -368,6 +368,38 @@ export type ContourSlice = {
   areas: ContourShape[]
 }
 
+/**
+ * Результат расчёта спектрограммы канала (`GET /recordings/{id}/spectrogram/{job}`).
+ *
+ * Считается STFT по одному каналу («ЭЭГ»): числа сетки приезжают отдельным
+ * бинарным контейнером (`grid_url`), а в JSON — метаданные и оси. Палитра, окно
+ * дБ и сглаживание — параметры просмотра, сетку они не пересчитывают.
+ */
+export type SpectrogramResult = {
+  recording_id: string
+  channel: string
+  channels: string[]
+  sfreq: number
+  duration_sec: number
+  window_ms: number
+  overlap_pct: number
+  fmax_hz: number
+  n_fft: number
+  filter_band_hz: number[] | null
+  notch_hz: number | null
+  /** Частоты сетки (строки), Гц */
+  freqs: number[]
+  /** Времена центров окон (столбцы), с */
+  times: number[]
+  db_min: number
+  db_max: number
+  grid_url: string
+  /** Отпечаток расчёта: уходит в URL сетки против «залипания» кэша браузера */
+  grid_version: string
+  warnings: string[]
+  duration_sec_calc: number
+}
+
 /** Статусы проверок готовности (GET /init-status) */
 export type CheckStatus = 'ready' | 'pending' | 'loading' | 'error' | 'unknown'
 

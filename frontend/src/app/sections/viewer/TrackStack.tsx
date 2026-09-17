@@ -11,8 +11,9 @@
  *
  * Интеракции: колесо — дискретный зум ×1…×16 (якорь в точке курсора),
  * drag — панорамирование, клик — поставить курсор (время под точкой клика,
- * курсор живёт до следующего клика), клик по подписи канала — развернуть трек
- * на всю высоту области (повторный клик — свернуть). Каналы включаются и
+ * курсор живёт до следующего клика), клик по названию канала — открыть этот
+ * канал в разделе «ЭЭГ» (срез 5), стрелка под названием — развернуть трек на
+ * всю высоту области (повторный клик — свернуть). Каналы включаются и
  * выключаются только чекбоксами панели «Каналы».
  *
  * Поверх треков — **слои результата** (срез 2.6, `viewerLayers.ts` + `TrackLayers.tsx`):
@@ -29,6 +30,8 @@
  * обёртка, чтобы drag/колесо работали одинаково на всех треках.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import {
@@ -53,6 +56,8 @@ import {
 } from '@/shared/lib/viewerLayers'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue } from '@/shared/state/edfParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import { useEegParams } from '@/shared/state/eegParams'
+import { cx } from '@/shared/ui/cx'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import {
   ArtifactZoneLayer,
@@ -157,8 +162,10 @@ type TrackRowProps = {
   amplitudeMode: 'shared' | 'per_channel'
   amplitudeScaleUv: number
   showXAxis: boolean
-  /** Клик по подписи канала — развернуть/свернуть трек */
+  /** Клик по названию канала — открыть его в разделе «ЭЭГ» (срез 5) */
   onLabelClick: (name: string) => void
+  /** Клик по стрелке у названия — развернуть/свернуть трек (срез 2.9) */
+  onToggleExpand: (name: string) => void
   /** Отдаёт наружу canvas трека: из них собирается PNG-снапшот (срез 2.8) */
   onCanvas: (name: string, canvas: HTMLCanvasElement | null) => void
 }
@@ -174,6 +181,7 @@ function TrackRow({
   amplitudeScaleUv,
   showXAxis,
   onLabelClick,
+  onToggleExpand,
   onCanvas,
 }: TrackRowProps) {
   const hostRef = useRef<HTMLDivElement>(null)
@@ -239,18 +247,40 @@ function TrackRow({
       data-testid={`track-${name}`}
       style={{ height }}
     >
-      <button
-        type="button"
-        data-testid={`track-label-${name}`}
-        data-expanded={expanded}
-        aria-pressed={expanded}
-        title={expanded ? 'Свернуть трек' : 'Развернуть трек на всю высоту'}
-        onClick={() => onLabelClick(name)}
-        className="tnum w-14 shrink-0 cursor-pointer self-center rounded text-right font-mono text-xs text-fg-2 hover:text-fg-0"
+      <div
+        className="flex shrink-0 flex-col items-end justify-center"
         style={{ width: LABEL_WIDTH }}
       >
-        {name}
-      </button>
+        <button
+          type="button"
+          data-testid={`track-label-${name}`}
+          aria-label={`Открыть канал ${name} в разделе «ЭЭГ»`}
+          title={`Открыть канал ${name} в разделе «ЭЭГ»: трек и спектрограмма STFT`}
+          onClick={() => onLabelClick(name)}
+          className="tnum w-full cursor-pointer truncate rounded text-right font-mono text-xs text-fg-2 hover:text-fg-0"
+        >
+          {name}
+        </button>
+        <button
+          type="button"
+          data-testid={`track-expand-${name}`}
+          data-expanded={expanded}
+          aria-pressed={expanded}
+          aria-label={expanded ? `Свернуть трек ${name}` : `Развернуть трек ${name}`}
+          title={expanded ? 'Свернуть трек' : 'Развернуть трек на всю высоту'}
+          onClick={() => onToggleExpand(name)}
+          className={cx(
+            'cursor-pointer rounded p-0.5',
+            expanded ? 'text-accent' : 'text-fg-2 hover:bg-bg-3 hover:text-fg-0',
+          )}
+        >
+          {expanded ? (
+            <ChevronUp className="size-3.5" aria-hidden />
+          ) : (
+            <ChevronDown className="size-3.5" aria-hidden />
+          )}
+        </button>
+      </div>
       <div ref={hostRef} className="pointer-events-none min-w-0 flex-1" />
     </div>
   )
@@ -259,6 +289,7 @@ function TrackRow({
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */
 export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const params = useEdfParamsValue()
+  const navigate = useNavigate()
   const toggleArtifactVisibility = useEdfParams((state) => state.toggleArtifactVisibility)
   /** Ручные пометки эпох живут при записи: они относятся к конкретной сессии */
   const epochMarks = useEdfRecording((state) => state.epochMarks)
@@ -272,9 +303,9 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const [cursor, setCursor] = useState<{ xPx: number; timeSec: number } | null>(null)
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
   /**
-   * Развёрнутый трек (срез 2.9) — локальное состояние вьюера: клик по подписи
-   * канала занимает всю высоту области, соседи остаются доступными скроллом.
-   * Изменение — только отрисовка, расчёт от него не устаревает.
+   * Развёрнутый трек (срез 2.9) — локальное состояние вьюера: клик по стрелке у
+   * названия канала занимает всю высоту области, соседи остаются доступными
+   * скроллом. Изменение — только отрисовка, расчёт от него не устаревает.
    */
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null)
   /**
@@ -496,8 +527,18 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     }
   }, [signal, centerSec])
 
-  /** Клик по подписи канала: развернуть трек на всю высоту / свернуть */
+  /**
+   * Клик по названию канала (срез 5): канал открывается в разделе «ЭЭГ» — там он
+   * уже выбран. Обработку клик не запускает: спектрограмма стартует только по
+   * кнопке в шапке раздела «ЭЭГ».
+   */
   function handleLabelClick(name: string) {
+    useEegParams.getState().setChannel(name)
+    navigate('/eeg')
+  }
+
+  /** Клик по стрелке у названия: развернуть трек на всю высоту / свернуть */
+  function handleToggleExpand(name: string) {
     setExpandedChannel((current) => (current === name ? null : name))
   }
 
@@ -609,8 +650,9 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
           amplitudeScaleUv={params.amplitudeScaleUv}
         />
         <span className="ml-auto truncate">
-          Колесо — зум · drag — панорама · клик — курсор · клик по названию — развернуть трек ·
-          Ctrl+двойной клик — блокировка эпохи
+          Колесо — зум · drag — панорама · клик — курсор · клик по названию — канал в
+          разделе «ЭЭГ» · стрелка у названия — развернуть трек · Ctrl+двойной клик — блокировка
+          эпохи
         </span>
       </div>
 
@@ -650,6 +692,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 amplitudeScaleUv={params.amplitudeScaleUv}
                 showXAxis={index === visible.length - 1}
                 onLabelClick={handleLabelClick}
+                onToggleExpand={handleToggleExpand}
                 onCanvas={registerCanvas}
               />
             ))

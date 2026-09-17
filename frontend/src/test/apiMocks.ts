@@ -10,9 +10,11 @@ import {
   preprocessJobFixture,
   preprocessResultFixture,
   recordingFixture,
+  spectrogramResultFixture,
   spectrumResultFixture,
 } from './fixtures'
 import { encodeSignalBlob } from './signalBlob'
+import { spectrogramBlobFixture } from './spectrogramBlob'
 import type {
   ContourSlice,
   DipoleScanResult,
@@ -22,6 +24,7 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  SpectrogramResult,
   SpectrumResult,
 } from '@/shared/api/types'
 
@@ -33,7 +36,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 /** 202-ответ запуска задачи расчёта (срез 3.4): id задачи и адреса поллинга. */
-function calcJobCreated(jobId: string, kind: 'spectrum' | 'dipoles'): Record<string, string> {
+function calcJobCreated(
+  jobId: string,
+  kind: 'spectrum' | 'dipoles' | 'spectrogram',
+): Record<string, string> {
   return {
     job_id: jobId,
     status: 'queued',
@@ -104,6 +110,10 @@ export type MockApiOptions = {
   spectrumResult?: SpectrumResult
   /** Явный результат быстрого расчёта диполей */
   dipoleScanResult?: DipoleScanResult
+  /** Явный результат спектрограммы («ЭЭГ») */
+  spectrogramResult?: SpectrogramResult
+  /** Статус задачи спектрограммы (поллинг) */
+  spectrogramJob?: JobStatus
   /** Смоделировать отказ запуска расчёта (404 записи) */
   calcStartFails?: boolean
   /**
@@ -150,6 +160,23 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         options.preprocessResult ?? preprocessResultFixture(requestedStage),
       )
     }
+    if (url.includes('/spectrogram')) {
+      // Ветка идёт раньше `/spectrum`: подстрока `spectrogram` содержит `spectrum`,
+      // и разбор спектра перехватил бы запросы спектрограммы
+      if (url.includes('/grid.bin')) {
+        return new Response(spectrogramBlobFixture(), {
+          status: 200,
+          headers: { 'Content-Type': 'application/octet-stream', ETag: '"mock-spectrogram"' },
+        })
+      }
+      if (method === 'POST') {
+        if (options.calcStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(calcJobCreated('job-spec-1', 'spectrogram'), 202)
+      }
+      return jsonResponse(options.spectrogramResult ?? spectrogramResultFixture())
+    }
     if (url.includes('/spectrum')) {
       if (url.includes('/topomap/')) {
         // Картинку топокарты в jsdom никто не декодирует — важно лишь, что URL живой
@@ -176,7 +203,9 @@ export function mockApiFetch(options: MockApiOptions = {}) {
       return jsonResponse(options.dipoleScanResult ?? dipoleScanResultFixture())
     }
     if (url.includes('/jobs/')) {
-      return jsonResponse(options.calcJob ?? options.preprocessJob ?? preprocessJobFixture)
+      return jsonResponse(
+        options.spectrogramJob ?? options.calcJob ?? options.preprocessJob ?? preprocessJobFixture,
+      )
     }
     if (url.includes('/signals')) {
       if (options.signalsFail) {

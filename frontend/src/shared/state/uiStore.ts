@@ -27,7 +27,7 @@ type UiState = {
 }
 
 const DEFAULTS = {
-  rightPanelOpen: { edf: true, dipoles: true, table: true, group: true } as Record<string, boolean>,
+  rightPanelOpen: { edf: true, eeg: true, dipoles: true, table: true, group: true } as Record<string, boolean>,
   fontScale: 'normal' as FontScale,
   density: 'normal' as Density,
   activeJobs: 0,
