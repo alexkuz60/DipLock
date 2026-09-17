@@ -46,8 +46,8 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 28 роутов: /analyze, /jobs, /recordings(+signals/preprocess/spectrum/
-│   │                  # dipoles/spectrogram), /surface(+brodmann,+mri), /brodmann-labels, /meta
+│   ├── routes.py      # 29 роутов: /analyze, /jobs, /recordings(+signals/preprocess/spectrum/
+│   │                  # dipoles/spectrogram), /surface(+brodmann,+mri), /brodmann-labels, /meta, /journal
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -68,13 +68,14 @@ backend/app/
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
 │   ├── analysis_pipeline.py # пайплайн файлового анализа (/analyze, /jobs) + запись в БД (A1)
 │   ├── cache_store.py     # единый дисковый кэш: путь/чтение/атомарная запись/очистка (этап 2)
+│   ├── journal.py         # журнал шагов пайплайнов: GET /journal (этап 5)
 │   ├── prepared_signal.py # RAM-кэш подготовленного сигнала: EDF один раз на набор параметров (A4)
 │   ├── job_manager.py     # фоновые задачи: этапы, прогресс эпох, семафор (F7)
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
 │   ├── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)
 │   └── atlas_contours.py  # контуры структур и полей Бродмана на срезе (вектор, ETag) (3.9)
-backend/scripts/       # dedupe_recordings.py — разовая чистка дублей в data/edf,
-                       # build_atlas_contours.py — прогрев кэша контуров (3.9)
+backend/scripts/       # dedupe_recordings.py (чистка дублей в data/edf),
+                       # build_atlas_contours.py (прогрев кэша контуров, 3.9)
 frontend/              # UI (Vite+React+TS), сборка → backend/app/static/ui
 data/                  # локальные данные (edf/results/cache) — НЕ коммитить
 docs/ui.md             # спецификация UI и дорожная карта фаз
@@ -135,7 +136,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов (шесть кэшей, три версии) |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
-| `docs/rules/tests.md` | полный инвентарь покрытия (559 Vitest / 270 pytest) |
+| `docs/rules/tests.md` | полный инвентарь покрытия (559 Vitest / 282 pytest) |
 | `docs/rules/docs.md` | **правило ведения документации** — новое правило идёт в файл по теме, а не сюда |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |

@@ -28,8 +28,11 @@ reference, полосовой и сетевой фильтры. Кнопка «�
 (130.7 с × 500 Гц × 18 каналов ≈ 9.4 МБ; десятиминутная запись ≈ 43 МБ), поэтому
 по умолчанию держим два набора, а не «сколько влезет».
 """
+import hashlib
 import logging
+import os
 import threading
+import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
@@ -37,6 +40,7 @@ from typing import Dict, List, Optional, Tuple
 import mne
 
 from app.core.config import Settings
+from app.services import journal
 from app.services.edf_loader import load_edf
 from app.services.recordings import Recording
 
@@ -69,6 +73,20 @@ class _SignalKey:
         notch = f", notch {self.notch_hz} Гц" if self.notch_hz else ""
         reference = ",".join(self.reference) if self.reference else "average"
         return f"{band}{notch}, референс {reference}"
+
+    def signature(self) -> str:
+        """Короткая сигнатура ключа — ``params_key`` строки журнала шагов.
+
+        Это ровно тот ключ, по которому кэшируется сигнал: две задачи с одной
+        сигнатурой делят подготовленный сигнал, и по журналу видно, была ли
+        между ними кэш-попадание.
+        """
+        parts = [
+            self.recording_id, self.units or "-", ",".join(self.channels),
+            ",".join(self.reference) or "average",
+            str(self.l_freq), str(self.h_freq), str(self.notch_hz),
+        ]
+        return hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:12]
 
 
 # LRU подготовленных сигналов и счётчики попаданий (диагностика: «стало ли
@@ -144,6 +162,14 @@ def _load(
     )
 
 
+def _file_size(path: str) -> Optional[int]:
+    """Размер файла записи в байтах (``None`` — файл недоступен: это не ошибка шага)."""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None
+
+
 def prepared_raw(
     recording: Recording,
     cfg: Settings,
@@ -151,14 +177,35 @@ def prepared_raw(
     h_freq: Optional[float] = None,
     notch_hz: Optional[float] = None,
     reference_channels: Optional[List[str]] = None,
+    pipeline: Optional[str] = None,
 ) -> mne.io.BaseRaw:
     """Подготовленный сигнал записи: ``load_edf`` с кэшем по параметрам расчёта.
 
     Возвращает сигнал, которым владеет вызывающий: его можно мутировать
     (``segment_epochs`` ставит аннотации) — кэш хранит собственную копию.
+
+    ``pipeline`` — имя пайплайна для журнала шагов (`docs/data_map.md` §9):
+    попадание в этот кэш — главный ответ на «почему повторный расчёт стоит как
+    первый». ``None`` означает «не измерять» (разовые вызовы, тесты).
     """
+    started = time.perf_counter()
     limit = _limit(cfg)
     key = _key(recording, cfg, l_freq, h_freq, notch_hz, reference_channels)
+
+    def _report(hit: bool, raw: mne.io.BaseRaw) -> None:
+        """Строка журнала о шаге чтения EDF (``cache_hit`` — попали ли в кэш)."""
+        if pipeline is None:
+            return
+        journal.record(
+            pipeline, "load_edf",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=key.signature(),
+            bytes_in=None if hit else _file_size(recording.path),
+            bytes_out=int(raw.info["nchan"]) * int(raw.n_times) * 8,  # float64-данные
+            cache_hit=hit,
+            note=key.label(),
+        )
+
     with _LOCK:
         # Лимит мог быть понижен между вызовами (в т.ч. до нуля — «кэш выключен»):
         # приводим размер к текущему лимиту до поиска.
@@ -171,11 +218,15 @@ def prepared_raw(
                 "Подготовленный сигнал: попадание в кэш (запись %s, %s)",
                 recording.recording_id, key.label(),
             )
-            return cached.copy()
+            hit_raw = cached.copy()
+            _report(True, hit_raw)
+            return hit_raw
 
     if limit <= 0:
         logger.info("Подготовленный сигнал: кэш выключен, читаю EDF (%s)", key.label())
-        return _load(recording, cfg, l_freq, h_freq, notch_hz, reference_channels)
+        raw = _load(recording, cfg, l_freq, h_freq, notch_hz, reference_channels)
+        _report(False, raw)
+        return raw
 
     with _build_lock(key):
         # Пока ждали лок, сигнал мог построить соседний поток — второй раз
@@ -185,9 +236,12 @@ def prepared_raw(
             if cached is not None:
                 _CACHE.move_to_end(key)
                 _STATS["hits"] += 1
-                return cached.copy()
+                hit_raw = cached.copy()
+                _report(True, hit_raw)
+                return hit_raw
 
         raw = _load(recording, cfg, l_freq, h_freq, notch_hz, reference_channels)
+        _report(False, raw)
         with _LOCK:
             _STATS["misses"] += 1
             _CACHE[key] = raw.copy()

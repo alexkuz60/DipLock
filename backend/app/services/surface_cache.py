@@ -14,11 +14,13 @@ import hashlib
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
 
 from app.core.config import Settings
+from app.services import journal
 from app.services.cache_store import cache_path, cache_read, cache_write
 from app.utils.brain_export import export_fsaverage_surface
 
@@ -75,11 +77,18 @@ def _cache_paths(ctx: _AssetCtx, version: str) -> Tuple[str, str]:
 @lru_cache(maxsize=4)
 def _build_assets(ctx: _AssetCtx) -> Tuple[bytes, bytes, str]:
     """Строит байты меша и BA-индексов (или берёт их с диска) + версию ассета."""
+    started = time.perf_counter()
     version = surface_version(ctx)
     mesh_path, ba_path = _cache_paths(ctx, version)
     mesh_cached, ba_cached = cache_read(mesh_path), cache_read(ba_path)
     if mesh_cached is not None and ba_cached is not None:
         logger.info("Поверхность fsaverage взята из кэша (version=%s)", version)
+        journal.record(
+            "asset-surface", "cache_read",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=version, cache_hit=True,
+            bytes_out=len(mesh_cached) + len(ba_cached), note="меш + BA, lru_cache в RAM",
+        )
         return mesh_cached, ba_cached, version
 
     payload = export_fsaverage_surface(ctx)
@@ -104,6 +113,12 @@ def _build_assets(ctx: _AssetCtx) -> Tuple[bytes, bytes, str]:
     logger.info(
         "Поверхность fsaverage построена (version=%s, меш=%.2f МБ, BA=%.2f МБ)",
         version, len(mesh_bytes) / 1e6, len(ba_bytes) / 1e6,
+    )
+    journal.record(
+        "asset-surface", "build",
+        ms=(time.perf_counter() - started) * 1000.0,
+        params_key=version, cache_hit=False,
+        bytes_out=len(mesh_bytes) + len(ba_bytes), note="меш + BA, source=fsaverage",
     )
     return mesh_bytes, ba_bytes, version
 

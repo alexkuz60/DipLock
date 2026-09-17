@@ -16,6 +16,7 @@
 import hashlib
 import logging
 import struct
+import time
 from typing import List, Optional, Tuple
 
 import mne
@@ -23,6 +24,7 @@ import numpy as np
 
 from app.core.config import Settings
 from app.schemas.analysis import RecordingSignalsHeader
+from app.services import journal
 from app.services.cache_store import cache_clear, cache_path, cache_read, cache_write
 from app.services.edf_loader import normalize_channel_name
 from app.services.recordings import Recording
@@ -175,15 +177,28 @@ def build_signal_blob(recording: Recording, level: int, settings: Settings) -> T
         raise SignalBuildError(f"Уровень {level} не поддерживается (доступны: {allowed})")
 
     path = _cache_path(settings, recording.recording_id, level)
+    etag = signal_etag(recording, level, settings)
+    started = time.perf_counter()
     blob = cache_read(path)
-    if blob is None:
+    if blob is not None:
+        journal.record(
+            "signals", "cache_read",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=etag, bytes_out=len(blob), cache_hit=True, note=f"level={level}",
+        )
+        return blob, etag
+
+    with journal.step(
+        "signals", "build_level", params_key=etag, cache_hit=False, note=f"level={level}",
+    ) as entry:
         blob = _build_level(recording, level, settings)
+        entry.bytes_out = len(blob)
         cache_write(path, blob, label="Кэш сигналов")
         logger.info(
             "Пирамида сигналов: запись %s, уровень ×%d (%.2f МБ)",
             recording.recording_id, level, len(blob) / 1e6,
         )
-    return blob, signal_etag(recording, level, settings)
+    return blob, etag
 
 
 def clear_signal_cache(settings: Settings, recording_id: Optional[str] = None) -> None:

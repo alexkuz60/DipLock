@@ -7,7 +7,9 @@
 * ``submit()`` создаёт задачу и возвращает её сразу (HTTP 202 + ``job_id``);
 * исполнение — в потоке (``asyncio.to_thread``), event-loop не блокируется;
 * ``asyncio.Semaphore`` ограничивает число одновременных тяжёлых расчётов;
-* воркер сообщает этап и прогресс колбэком — UI рисует прогресс-бар по этапам.
+* воркер сообщает этап и прогресс колбэком — UI рисует прогресс-бар по этапам;
+* шаги расчёта видны в журнале (`services/journal.py`) с ``job_id`` задачи:
+  ``job_scope`` ставит контекст вокруг потока, а сервисы пишут замеры сами.
 
 Хранилище — in-memory (история ограничена ``jobs_history_limit``): для локального
 десктопного режима этого достаточно, результат задачи дополнительно пишется в
@@ -21,6 +23,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from app.core.config import settings
+from app.services import journal
 
 logger = logging.getLogger(__name__)
 
@@ -242,7 +245,11 @@ class JobManager:
         async with self._semaphore:
             job.mark_started()
             try:
-                result = await asyncio.to_thread(fn, job.progress_cb(), *args, **kwargs)
+                # Шаги пайплайна помечаются `job_id` (журнал шагов, этап 5):
+                # `to_thread` копирует контекст, поэтому воркер и сервисы видят
+                # его без передачи параметров.
+                with journal.job_scope(job.job_id):
+                    result = await asyncio.to_thread(fn, job.progress_cb(), *args, **kwargs)
                 job.finish(result)
                 logger.info(
                     "Задача %s (%s) выполнена за %.1f с", job.job_id, job.kind, job.elapsed_sec or 0.0,

@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.config import Settings
 from app.schemas.analysis import ArtifactZoneOut, PreprocessStage
+from app.services import journal
 from app.services.artifact_detector import detect_artifacts
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import prepared_raw
@@ -89,6 +90,8 @@ def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) 
             h_freq=h_freq,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
+            # Имя пайплайна для журнала шагов: стадии различимы в замерах
+            pipeline=f"preprocess-{params.stage}",
         )
     except ValueError as exc:
         raise PreprocessError(str(exc)) from exc
@@ -122,6 +125,36 @@ def _zones(stats: Dict[str, Any]) -> List[ArtifactZoneOut]:
     return [ArtifactZoneOut(**zone) for zone in stats.get("zones", [])]
 
 
+def _params_note(params: PreprocessParams, extra: str = "") -> str:
+    """Короткий контекст стадии для журнала шагов: полоса, пороги, результат.
+
+    Параметры стадии в журнале нужны не для красоты: без них строка «filter
+    1.4 с» не отвечает, чем именно этот запуск отличался от соседнего
+    (`docs/data_map.md` §9, поле ``note``).
+    """
+    parts: List[str] = []
+    if params.filter_band is not None:
+        parts.append(f"band={params.filter_band[0]:g}-{params.filter_band[1]:g}")
+    if params.notch_hz:
+        parts.append(f"notch={params.notch_hz:g}")
+    if params.reference != "average":
+        parts.append(f"ref={params.reference}")
+    if params.stage == "artifacts":
+        parts.append(
+            f"z={params.z_threshold:g}, pp={params.pp_threshold_uv:g}, "
+            f"flat={params.flat_line_uv:g}/{params.flat_line_ms:g}"
+        )
+        if params.run_ica:
+            parts.append("ica=1")
+    if params.stage == "epochs":
+        parts.append(
+            f"epoch={params.epoch_length_ms:g}ms, reject={params.reject_threshold_uv:g}"
+        )
+    if extra:
+        parts.append(extra)
+    return ", ".join(parts)
+
+
 def run_preprocess(
     recording: Recording,
     cfg: Settings,
@@ -135,6 +168,15 @@ def run_preprocess(
     """
     started = time.perf_counter()
     progress("load_edf", message="Чтение EDF, монтаж 10-20")
+
+    def _journal(epochs: Optional[int] = None, extra: str = "") -> None:
+        """Одна строка журнала на стадию (шаг целиком, не «эпоха за эпохой»)."""
+        journal.record(
+            f"preprocess-{params.stage}", params.stage,
+            ms=(time.perf_counter() - started) * 1000.0,
+            note=_params_note(params, extra),
+            epochs=epochs,
+        )
 
     raw = _prepare_raw(recording, cfg, params)
     warnings: List[str] = []
@@ -159,6 +201,7 @@ def run_preprocess(
         })
         progress("done", 1.0, message="Фильтр и референс применены")
         base["duration_sec_calc"] = round(time.perf_counter() - started, 3)
+        _journal()
         return base
 
     annotations, stats = _detect(raw, cfg, params, progress)
@@ -175,6 +218,7 @@ def run_preprocess(
             )
         progress("done", 1.0, message=f"Найдено артефактов: {stats['total']}")
         base["duration_sec_calc"] = round(time.perf_counter() - started, 3)
+        _journal(extra=f"artifacts={stats['total']}")
         return base
 
     # Стадия `epochs`: нарезка + reject-фильтр. Отброшенные эпохи нужны UI для
@@ -203,4 +247,8 @@ def run_preprocess(
         )
     progress("done", 1.0, message=f"Эпох: {len(epochs)} из {len(epochs.drop_log)}")
     base["duration_sec_calc"] = round(time.perf_counter() - started, 3)
+    _journal(
+        epochs=len(epochs.drop_log),
+        extra=f"used={len(epochs)}, rejected={len(rejected)}",
+    )
     return base

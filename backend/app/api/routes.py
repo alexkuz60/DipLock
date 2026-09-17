@@ -79,7 +79,8 @@ from app.schemas.analysis import (
     SpectrumResult,
     SurfaceOut,
 )
-from app.services import analysis_pipeline
+from app.schemas.journal import JournalEntry, JournalOut
+from app.services import analysis_pipeline, journal
 from app.services.atlas_contours import (
     contours_meta,
     contours_ref as contour_ref,
@@ -866,3 +867,27 @@ async def get_meta() -> MetaResponse:
         mri_slices=_mri_ref(),
         contours=_contours_ref(),
     )
+
+
+@router.get("/journal", response_model=JournalOut, summary="Журнал шагов: пошаговые замеры")
+async def journal_tail(
+    limit: int = Query(200, ge=1, le=2000, description="Сколько последних строк вернуть"),
+    pipeline: Optional[str] = Query(
+        None, description="Фильтр по пайплайну: spectrum, dipoles, signals, asset-surface, …"
+    ),
+) -> JournalOut:
+    """Хвост журнала шагов (`docs/data_map.md` §9).
+
+    Замеры пишутся в продакшен-пути (один ``perf_counter`` и одна строка на шаг),
+    а этот роут их отдаёт: цифры для документации и для ответа «почему 8 секунд»
+    берутся отсюда, а не из «кажется, стало быстрее». Файла может не быть
+    (журнал выключен или ещё не писался) — это пустой список, а не 404.
+    """
+    return JournalOut(
+        enabled=bool(settings.journal_enabled),
+        journal_path=journal.journal_path(),
+        entries=[
+            JournalEntry(**entry) for entry in journal.read_journal(limit=limit, pipeline=pipeline)
+        ],
+    )
+

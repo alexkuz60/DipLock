@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **28 роутов**, префикс `/api/v1` из `settings.api_prefix`.
+- `backend/app/api/routes.py` — **29 роутов**, префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
   - `api/params.py` — формы → параметры сервисов и проверки с текстом для UI (400);
@@ -13,14 +13,16 @@
     `job_status`, `recording_job_result`, `job_by_id`, воркеры (`WORKERS`);
   - `api/uploads.py` — приём EDF: `safe_edf_name`, `save_upload`, `MAX_UPLOAD_SIZE`;
   - `services/analysis_pipeline.py` — пайплайн файлового анализа (`/analyze`, `/jobs`) и запись
-    результата в БД.
+    результата в БД;
+  - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
+    в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
-  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **33 HTTP-пути**.
+  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **34 HTTP-пути**.
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/types.ts`.
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (28 в `routes.py`)
+## Инвентарь эндпоинтов (29 в `routes.py`)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -49,6 +51,7 @@
 | 26 | `GET /brodmann-labels` | имена доступных полей Бродмана |
 | 27 | `GET /brain-surface` | устаревший алиас `/surface` |
 | 28 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты |
+| 29 | `GET /journal` | журнал шагов: последние замеры (`limit` 1–2000, фильтр `pipeline`) |
 
 **Чего в API нет осознанно:** листинга и удаления записей. «Закрыть запись» — **клиентское**
 действие (сброс состояния UI), файл остаётся на диске и сносится TTL-обходом реестра;
@@ -85,6 +88,8 @@
    общий текст показывал бы сбой локализации как «спектр не рассчитан».
 7. **Прогресс — по эпохам.** Пакетные задачи вызывают `set_progress(..., epochs_done=…,
    epochs_total=…)`: «эпох 12 из 30» читается лучше дробного прогресса; `Job.elapsed_sec` —
-   грубая длительность всего job, для пошаговых замеров есть журнал шагов (`docs/data_map.md`).
+   грубая длительность всего job, для пошаговых замеров есть журнал шагов (`GET /journal`,
+   формат — `docs/data_map.md` §9). Новый шаг пайплайна оборачивается `journal.step(...)`:
+   «числа о времени» в документации берутся **только** оттуда (`docs/rules/docs.md` п.6).
 8. **Валидация входа.** Размер загружаемого EDF проверяется до записи на диск; параметры расчёта
    зажаты схемами (`ge`/`le`) — UI дублирует зажимы, но сервер обязан проверять сам.

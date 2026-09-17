@@ -22,11 +22,20 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
+from app.services import journal
 from app.services.job_manager import Job, ProgressCallback, job_manager
 from app.services.surface_cache import surface_ref
 from app.utils.versions import library_versions
 
 logger = logging.getLogger(__name__)
+
+
+def _file_size(path: str) -> Optional[int]:
+    """Размер файла записи в байтах (``None`` — файл недоступен: не ошибка шага)."""
+    try:
+        return os.path.getsize(path)
+    except OSError:
+        return None
 
 
 def run_analysis(
@@ -58,43 +67,67 @@ def run_analysis(
     session_id = str(uuid.uuid4())
 
     progress("load_edf", message="Чтение EDF, монтаж 10-20, average reference")
-    raw = load_edf(filepath, settings.standard_channels, units=settings.edf_units)
+    with journal.step(
+        "analyze", "load_edf", bytes_in=_file_size(filepath), note=filename,
+    ) as entry:
+        raw = load_edf(filepath, settings.standard_channels, units=settings.edf_units)
+        entry.bytes_out = int(raw.info["nchan"]) * int(raw.n_times) * 8
 
     progress("artifacts", message="Детекция артефактов")
-    annotations, artifact_stats = detect_artifacts(
-        raw, settings, z_threshold, pp_threshold_uv, run_ica=run_ica,
-    )
+    with journal.step(
+        "analyze", "artifacts",
+        note=f"z={z_threshold:g}, pp={pp_threshold_uv:g}, ica={int(run_ica)}",
+    ) as entry:
+        annotations, artifact_stats = detect_artifacts(
+            raw, settings, z_threshold, pp_threshold_uv, run_ica=run_ica,
+        )
+        entry.note = f"{entry.note}, found={artifact_stats['total']}"
 
     # Band-specific фильтр применяем к continuous raw ДО нарезки: короткие
     # эпохи (250–1000 мс) короче FIR-фильтра и дают сильные искажения.
     if freq_band != "all" or single_freq is not None:
         progress("filter", message=f"Частотная фильтрация: {freq_band}")
-        raw = apply_band_filter(
-            raw, freq_band,
-            custom_min=custom_min_freq,
-            custom_max=custom_max_freq,
-            single_freq=single_freq,
-            bandwidth_hz=settings.default_single_freq_bandwidth_hz,
-        )
+        with journal.step(
+            "analyze", "filter",
+            note=f"band={freq_band}, single={single_freq}, custom={custom_min_freq}-{custom_max_freq}",
+        ):
+            raw = apply_band_filter(
+                raw, freq_band,
+                custom_min=custom_min_freq,
+                custom_max=custom_max_freq,
+                single_freq=single_freq,
+                bandwidth_hz=settings.default_single_freq_bandwidth_hz,
+            )
 
     progress("epochs", message=f"Нарезка эпох по {epoch_length_ms:.0f} мс")
-    epochs = segment_epochs(
-        raw, annotations,
-        epoch_length_ms=epoch_length_ms,
-        reject_threshold_uv=settings.reject_threshold_uv,
-    )
+    with journal.step(
+        "analyze", "epochs",
+        note=f"epoch={epoch_length_ms:g}ms, reject={settings.reject_threshold_uv:g}",
+    ) as entry:
+        epochs = segment_epochs(
+            raw, annotations,
+            epoch_length_ms=epoch_length_ms,
+            reject_threshold_uv=settings.reject_threshold_uv,
+        )
+        entry.epochs = int(len(epochs.drop_log) if hasattr(epochs, "drop_log") else len(epochs))
     # len(epochs.events) — все созданные эпохи, len(epochs) — прошедшие reject
     n_epochs_total = int(len(epochs.events))
     n_epochs_used = int(len(epochs))
 
     progress("band_power", message="Спектральная мощность по диапазонам")
-    freq_powers = compute_band_power(epochs, settings.freq_bands)
+    with journal.step("analyze", "band_power", epochs=n_epochs_used):
+        freq_powers = compute_band_power(epochs, settings.freq_bands)
 
     progress("dipoles", message="Фитинг диполей по эпохам")
-    dipoles = fit_dipoles_for_epochs(epochs, settings, freq_bands=freq_powers)
+    with journal.step(
+        "analyze", "dipoles", epochs=n_epochs_used,
+        note=f"decim={settings.dipole_fit_decim}, max_epochs={settings.dipole_fit_max_epochs}",
+    ):
+        dipoles = fit_dipoles_for_epochs(epochs, settings, freq_bands=freq_powers)
 
     progress("localize", message="Локализация: анатомия + поля Бродмана")
-    dipoles = localize_dipoles(dipoles, settings)
+    with journal.step("analyze", "localize", epochs=n_epochs_used):
+        dipoles = localize_dipoles(dipoles, settings)
 
     # Компактные best-fit диполи (таблица локализации + БД). Траектория сюда не
     # дублируется — она уже есть в dipoles[].trajectory.

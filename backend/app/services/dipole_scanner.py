@@ -48,6 +48,7 @@ import mne
 import numpy as np
 
 from app.core.config import Settings
+from app.services import journal
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
@@ -269,17 +270,23 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParam
             h_freq=h_freq,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
+            pipeline="dipoles",
         )
     except ValueError as exc:
         raise DipoleScanError(str(exc)) from exc
 
     try:
-        epochs = segment_epochs(
-            raw,
-            mne.Annotations([], [], []),
-            epoch_length_ms=params.epoch_length_ms,
-            reject_threshold_uv=params.reject_threshold_uv,
-        )
+        with journal.step(
+            "dipoles", "segment_epochs",
+            note=f"epoch={params.epoch_length_ms:g}ms, reject={params.reject_threshold_uv:g}",
+        ) as entry:
+            epochs = segment_epochs(
+                raw,
+                mne.Annotations([], [], []),
+                epoch_length_ms=params.epoch_length_ms,
+                reject_threshold_uv=params.reject_threshold_uv,
+            )
+            entry.epochs = len(epochs.drop_log)
     except ValueError as exc:
         raise DipoleScanError(str(exc)) from exc
     return raw, epochs
@@ -355,6 +362,11 @@ def compute_dipole_scan(
 
     points: List[Dict[str, Any]] = []
     mni_available = True
+    # Меряем цикл двумя строками журнала: перебор сетки и локализация (head_to_mni
+    # + структура атласа) — самая дорогая часть по замерам аудита (0.25–0.36 с на
+    # точку). Строку на эпоху журнал не получает: это сотни строк на запись.
+    scan_started = time.perf_counter()
+    localize_ms = 0.0
     for epoch_index in range(n_epochs):
         sample = peak_index[epoch_index]
         try:
@@ -365,7 +377,13 @@ def compute_dipole_scan(
             warnings.append(f"Эпоха {epoch_index + 1}: {exc}")
             continue
 
+        locate_started = time.perf_counter()
         mni_coords, area = _localize_point(position_m, cfg)
+        # Структура атласа читается здесь же: первое обращение собирает объёмы
+        # (≈1 с на test.edf — видно строкой `asset-contours`), и это время
+        # принадлежит локализации, а не перебору сетки.
+        structure = _structure_of(cfg, mni_coords)
+        localize_ms += (time.perf_counter() - locate_started) * 1000.0
         if mni_coords is None:
             mni_available = False
         points.append({
@@ -377,7 +395,7 @@ def compute_dipole_scan(
             "amplitude_nam": float(amplitude_am * 1e9),
             "gof": float(gof),
             "brodmann_area": area,
-            "anatomical_structure": _structure_of(cfg, mni_coords),
+            "anatomical_structure": structure,
         })
         report(
             "scan",
@@ -393,6 +411,25 @@ def compute_dipole_scan(
         )
     if not points:
         raise DipoleScanError("Ни одной эпохи не удалось локализовать")
+
+    # Две агрегированные строки вместо строки на эпоху: сумма локализации
+    # вычитается из общего времени цикла, поэтому «перебор сетки» — остаток.
+    scan_ms = (time.perf_counter() - scan_started) * 1000.0
+    journal.record(
+        "dipoles", "grid_scan",
+        ms=scan_ms - localize_ms,
+        note=(
+            f"grid={params.grid_mm:g}mm, nodes={int(grid_m.shape[0])}, "
+            f"points={len(points)}, без локализации"
+        ),
+        epochs=n_epochs,
+    )
+    journal.record(
+        "dipoles", "head_to_mni",
+        ms=localize_ms,
+        note="сумма по точкам: head_to_mni + структура атласа",
+        epochs=len(points),
+    )
 
     report(
         "done", 1.0,

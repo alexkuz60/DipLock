@@ -100,6 +100,15 @@ class Settings(BaseSettings):
         env="CACHE_DIR",
     )
 
+    # Журнал шагов (A5, этап 5): JSONL-файл пошаговых замеров под `cache_dir`
+    # (`journal.jsonl`). Включён по умолчанию: измерение — один `perf_counter`
+    # и одна строка лога на шаг, а без него «почему 8 секунд» выясняется
+    # повторным запуском с логами (`docs/data_map.md` §9).
+    journal_enabled: bool = Field(default=True, env="JOURNAL_ENABLED")
+    # Предел размера файла журнала перед ротацией в `journal.jsonl.1`
+    # (старое поколение перезаписывается): журнал не растёт без предела.
+    journal_max_bytes: int = Field(default=5_000_000, env="JOURNAL_MAX_BYTES")
+
     # Единицы EDF: None = автоопределение MNE + эвристика масштаба (см. edf_loader)
     edf_units: Optional[str] = Field(default=None, env="EDF_UNITS")
 

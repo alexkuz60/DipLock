@@ -55,6 +55,7 @@ import mne
 import numpy as np
 
 from app.core.config import Settings
+from app.services import journal
 from app.services.cache_store import cache_clear, cache_path, cache_write
 from app.services.edf_loader import _MONTAGE_NAMES
 from app.services.epoch_segmenter import segment_epochs
@@ -287,17 +288,23 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams)
             h_freq=h_freq,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
+            pipeline="spectrum",
         )
     except ValueError as exc:
         raise SpectrumError(str(exc)) from exc
 
     try:
-        epochs = segment_epochs(
-            raw,
-            mne.Annotations([], [], []),
-            epoch_length_ms=params.epoch_length_ms,
-            reject_threshold_uv=params.reject_threshold_uv,
-        )
+        with journal.step(
+            "spectrum", "segment_epochs",
+            note=f"epoch={params.epoch_length_ms:g}ms, reject={params.reject_threshold_uv:g}",
+        ) as entry:
+            epochs = segment_epochs(
+                raw,
+                mne.Annotations([], [], []),
+                epoch_length_ms=params.epoch_length_ms,
+                reject_threshold_uv=params.reject_threshold_uv,
+            )
+            entry.epochs = len(epochs.drop_log)
     except ValueError as exc:
         raise SpectrumError(str(exc)) from exc
     return raw, epochs
@@ -344,6 +351,9 @@ def compute_spectrum(
     channels = list(epochs.ch_names)
     if not channels:
         raise SpectrumError("В записи не нашлось каналов для спектра")
+    # Сигнатура результата (ETag топокарт) — до расчёта: она же `params_key`
+    # строк журнала, по ней видно, делили ли задачи кэш.
+    signature = spectrum_signature(params, cfg, channels)
 
     report(
         "spectrum",
@@ -351,7 +361,11 @@ def compute_spectrum(
         epochs_done=0,
         epochs_total=len(epochs),
     )
-    freqs, _psd, psd_mean, n_fft = _compute_psd(epochs, cfg, params)
+    with journal.step(
+        "spectrum", "psd", params_key=signature, epochs=len(epochs),
+    ) as entry:
+        freqs, _psd, psd_mean, n_fft = _compute_psd(epochs, cfg, params)
+        entry.note = f"n_fft={n_fft}, epoch={params.epoch_length_ms:g}ms"
     band_powers = _band_powers(freqs, psd_mean, cfg.freq_bands)
 
     warnings: List[str] = []
@@ -372,19 +386,31 @@ def compute_spectrum(
         epochs_total=len(epochs),
     )
     bands_out: List[Dict[str, Any]] = []
-    for name, (fmin, fmax) in cfg.freq_bands.items():
-        url: Optional[str] = None
-        values = _channel_band_power(freqs, psd_mean, channels, fmin, fmax)
-        if len(values) >= 3:
-            _write_topomap(cfg, recording.recording_id, signature, name, positions, values)
-            url = topomap_url(cfg, recording.recording_id, name)
-        bands_out.append({
-            "name": name,
-            "fmin": float(fmin),
-            "fmax": float(fmax),
-            "power_uv2": band_powers[name],
-            "topomap_url": url,
-        })
+    written = 0
+    with journal.step(
+        "spectrum", "topomaps", params_key=signature, epochs=len(epochs),
+    ) as entry:
+        for name, (fmin, fmax) in cfg.freq_bands.items():
+            url: Optional[str] = None
+            values = _channel_band_power(freqs, psd_mean, channels, fmin, fmax)
+            if len(values) >= 3:
+                size = _write_topomap(
+                    cfg, recording.recording_id, signature, name, positions, values,
+                )
+                written += size or 0
+                url = topomap_url(cfg, recording.recording_id, name)
+            bands_out.append({
+                "name": name,
+                "fmin": float(fmin),
+                "fmax": float(fmax),
+                "power_uv2": band_powers[name],
+                "topomap_url": url,
+            })
+        entry.bytes_out = written or None
+        entry.note = (
+            f"bands={len(cfg.freq_bands)}, "
+            f"written={sum(1 for band in bands_out if band['topomap_url'])}"
+        )
 
     report(
         "done", 1.0,
@@ -419,15 +445,20 @@ def _write_topomap(
     band: str,
     positions: Dict[str, np.ndarray],
     values: Dict[str, float],
-) -> None:
-    """Строит и атомарно кладёт топокарту на диск; сбой кэша не критичен."""
+) -> Optional[int]:
+    """Строит и атомарно кладёт топокарту на диск; сбой кэша не критичен.
+
+    Возвращает размер PNG (``None`` — картинка не построена): размер нужен
+    журналу шагов, чтобы «топокарты 120 мс» можно было сверить с объёмом записи.
+    """
     path = _topomap_path(cfg, recording_id, signature, band)
     try:
         data = topomap_png(positions, values)
     except SpectrumError as exc:
         logger.warning("Топокарта %s не построена: %s", band, exc)
-        return
+        return None
     cache_write(path, data, label="Кэш топокарт")
+    return len(data)
 
 
 def cached_topomap(
@@ -444,10 +475,21 @@ def cached_topomap(
     channels = list(recording.meta.get("channels") or [])
     signature = spectrum_signature(params, cfg, channels)
     path = _topomap_path(cfg, recording.recording_id, signature, band)
+    started = time.perf_counter()
     try:
         with open(path, "rb") as fh:
             data = fh.read()
+        journal.record(
+            "spectrum", "topomap_read",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=signature, bytes_out=len(data), cache_hit=True, note=f"band={band}",
+        )
     except OSError:
+        journal.record(
+            "spectrum", "topomap_read",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=signature, cache_hit=False, note=f"band={band}, reason=cold",
+        )
         compute_spectrum(recording, cfg, params)
         try:
             with open(path, "rb") as fh:

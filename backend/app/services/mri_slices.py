@@ -29,6 +29,7 @@ import io
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -36,6 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from app.core.config import Settings
+from app.services import journal
 from app.services.cache_store import cache_path, cache_write
 from app.utils.png import encode_png_gray8
 
@@ -405,14 +407,27 @@ def _build_volume(ctx: _MriCtx, version: str) -> MriVolume:
 @lru_cache(maxsize=2)
 def load_volume(ctx: _MriCtx) -> MriVolume:
     """Том на MNI-сетке: с дискового кэша или собранный заново (лениво, один раз)."""
+    started = time.perf_counter()
     version = mri_version(ctx)
     paths = _cache_paths(ctx, version)
     cached = _read_volume_cache(paths)
     if cached is not None:
         logger.info("Том МРТ взят из кэша (version=%s)", version)
+        journal.record(
+            "asset-mri", "cache_read",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=version, cache_hit=True,
+            bytes_out=int(cached.gray.nbytes + cached.alpha.nbytes), note="том на MNI-сетке",
+        )
         return cached
     volume = _build_volume(ctx, version)
     _write_volume_cache(paths, volume)
+    journal.record(
+        "asset-mri", "build",
+        ms=(time.perf_counter() - started) * 1000.0,
+        params_key=version, cache_hit=False,
+        bytes_out=int(volume.gray.nbytes + volume.alpha.nbytes), note="source=T1.mgz",
+    )
     return volume
 
 

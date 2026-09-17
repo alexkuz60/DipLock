@@ -35,6 +35,7 @@ import io
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -46,6 +47,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from app.core.config import Settings
+from app.services import journal
 from app.services.cache_store import cache_path, cache_write
 from app.services.mri_slices import (
     MRI_BOUNDS,
@@ -452,6 +454,7 @@ def _write_cache(
 @lru_cache(maxsize=2)
 def load_volumes(ctx: _ContourCtx) -> ContourVolumes:
     """Объёмы меток на MNI-сетке: с дискового кэша или собранные заново (лениво)."""
+    started = time.perf_counter()
     version = contour_version(ctx)
     path = _cache_path(ctx, version)
     cached = _read_cache(path)
@@ -462,9 +465,21 @@ def load_volumes(ctx: _ContourCtx) -> ContourVolumes:
         logger.info(
             "Объёмы контуров построены (version=%s, структуры=dims %s)", version, structures.shape
         )
+        journal.record(
+            "asset-contours", "build",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=version, cache_hit=False,
+            bytes_out=int(structures.nbytes + areas.nbytes), note="структуры + поля Бродмана",
+        )
     else:
         structures, areas, area_names = cached
         logger.info("Объёмы контуров взяты из кэша (version=%s)", version)
+        journal.record(
+            "asset-contours", "cache_read",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=version, cache_hit=True,
+            bytes_out=int(structures.nbytes + areas.nbytes), note="структуры + поля Бродмана",
+        )
 
     names = _structure_names()
     present_structures = {

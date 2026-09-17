@@ -51,6 +51,7 @@ import numpy as np
 
 from app.core.config import Settings
 from app.schemas.analysis import SpectrogramGridHeader
+from app.services import journal
 from app.services.cache_store import cache_clear, cache_path, cache_write
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
@@ -287,6 +288,7 @@ def _prepare_signal(
             h_freq=h_freq,
             notch_hz=params.notch_hz,
             reference_channels=params.reference_channels,
+            pipeline="spectrogram",
         )
     except ValueError as exc:
         raise SpectrogramError(str(exc)) from exc
@@ -320,7 +322,16 @@ def compute_spectrogram(
     report("load_edf", message="Чтение EDF, монтаж 10-20")
 
     data, sfreq, channels = _prepare_signal(recording, cfg, params)
-    freqs, times, db, n_fft = stft_grid(data, sfreq, params, progress=report)
+    with journal.step(
+        "spectrogram", "stft",
+        note=(
+            f"channel={params.channel}, window={params.window_ms:g}ms, "
+            f"overlap={params.overlap_pct:g}%, fmax={params.fmax_hz:g}"
+        ),
+    ) as entry:
+        freqs, times, db, n_fft = stft_grid(data, sfreq, params, progress=report)
+        entry.epochs = int(times.size)
+        entry.bytes_out = int(db.nbytes)
     if not freqs.size or not times.size:
         raise SpectrogramError("Сетка спектрограммы пуста: проверьте окно и верхнюю частоту")
 
@@ -340,7 +351,13 @@ def compute_spectrogram(
         db_min=round(db_min, 3),
         db_max=round(db_max, 3),
     )
-    _write_grid(cfg, recording.recording_id, signature, build_grid_blob(header, db))
+    with journal.step(
+        "spectrogram", "grid_write", params_key=signature,
+        epochs=int(times.size), note="формат DPS2",
+    ) as entry:
+        blob = build_grid_blob(header, db)
+        entry.bytes_out = len(blob)
+        _write_grid(cfg, recording.recording_id, signature, blob)
 
     warnings: List[str] = []
     if times.size and times[-1] < duration_sec - 1e-6:
@@ -395,11 +412,24 @@ def cached_grid(recording: Recording, cfg: Settings, params: SpectrogramParams) 
     channels = list(recording.meta.get("channels") or [])
     signature = spectrogram_signature(params, cfg, channels)
     path = grid_path(cfg, recording.recording_id, signature)
+    started = time.perf_counter()
     try:
         with open(path, "rb") as fh:
-            return fh.read(), signature
+            data = fh.read()
+        journal.record(
+            "spectrogram", "grid_read",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=signature, bytes_out=len(data), cache_hit=True,
+            note=f"channel={params.channel}",
+        )
+        return data, signature
     except OSError:
-        pass
+        journal.record(
+            "spectrogram", "grid_read",
+            ms=(time.perf_counter() - started) * 1000.0,
+            params_key=signature, cache_hit=False,
+            note=f"channel={params.channel}, reason=cold",
+        )
     compute_spectrogram(recording, cfg, params)
     try:
         with open(path, "rb") as fh:
