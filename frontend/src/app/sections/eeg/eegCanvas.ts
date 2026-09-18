@@ -15,6 +15,7 @@
  * мозга (3.1): hex в JS не дублируется.
  */
 import { ARTIFACT_COLOR_TOKENS, ARTIFACT_KINDS, type ArtifactKind } from '@/shared/lib/artifacts'
+import type { SpectrogramRaster } from '@/shared/lib/eegSpectrogram'
 import { themeColor } from '@/shared/lib/theme'
 import {
   EEG_LABEL_W,
@@ -41,8 +42,9 @@ export type CanvasTheme = {
 /**
  * Масштаб холста: bitmap-пикселей на CSS-пиксель (`devicePixelRatio`).
  *
- * Нужен там, где координаты **не** проходят через трансформацию контекста —
- * у `putImageData` (см. `putImageDataAt`). В jsdom и при 100 % масштабе — 1.
+ * Нужен там, где считается **бюджет** картинки в bitmap-пикселях (растр
+ * спектрограммы: `maxColumns × maxRows`), и там, где координаты не проходят через
+ * трансформацию контекста (`ctx.canvas.height`). В jsdom и при 100 % масштабе — 1.
  */
 export function canvasScale(): number {
   return typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
@@ -96,27 +98,48 @@ export function setupCanvas(
 }
 
 /**
- * Кладёт `ImageData` в область графика, уважая масштаб холста.
+
+/**
+ * Рисует растр спектрограммы в область графика, растягивая его до неё.
  *
- * `ctx.putImageData` — **единственная** операция canvas, которая игнорирует
- * трансформацию контекста: пиксели ложатся в bitmap-координаты. На экране с
- * `devicePixelRatio ≠ 1` (например 1.25) картинка, набранная в CSS-пикселях,
- * занимала бы лишь `1 / dpr` ширины области графика: спектрограмма обрывалась бы
- * задолго до правой линейки, а её ось и общий курсор уезжали за край картинки.
- * Поэтому пиксели набираются в разрешении холста, а вставляются при единичной
- * трансформации.
+ * Растр собран в **разрешении данных** (`spectrogramRaster`), а растягивает его
+ * композитор: `drawImage` с `imageSmoothingEnabled = false`. Поэтому работа
+ * пропорциональна числу ячеек сетки, а не площади экрана. `putImageData` для
+ * этого не годится по двум причинам: он **игнорирует трансформацию контекста**
+ * (пиксели легли бы в bitmap-координаты, то есть на экране с `devicePixelRatio
+ * ≠ 1` картинка заняла бы `1 / dpr` области графика) и не умеет масштабировать.
+ * Пиксели данных при растяжении не «размываются»: ячейка остаётся
+ * прямоугольником — столбец равен окну STFT, строка — полосе частот.
+ *
+ * Холст-посредник переиспользуется (`scratch`): его размер меняется вместе с
+ * растром, а не на каждый кадр (курсор и маркер частоты лишь перерисовывают
+ * поверх уже готовой картинки).
  */
-export function putImageDataAt(
+export function drawRaster(
   ctx: CanvasRenderingContext2D,
-  image: ImageData,
+  raster: SpectrogramRaster,
   leftPx: number,
-  topPx = 0,
-): void {
-  const scale = canvasScale()
+  widthPx: number,
+  heightPx: number,
+  scratch?: HTMLCanvasElement | null,
+): HTMLCanvasElement | null {
+  const canvas =
+    scratch ?? (typeof document !== 'undefined' ? document.createElement('canvas') : null)
+  if (!canvas) return null
+  if (canvas.width !== raster.columns || canvas.height !== raster.rows) {
+    canvas.width = raster.columns
+    canvas.height = raster.rows
+  }
+  const source = canvas.getContext('2d')
+  if (!source) return canvas
+  const image = source.createImageData(raster.columns, raster.rows)
+  image.data.set(raster.rgba)
+  source.putImageData(image, 0, 0)
   ctx.save()
-  ctx.setTransform(1, 0, 0, 1, 0, 0)
-  ctx.putImageData(image, Math.round(leftPx * scale), Math.round(topPx * scale))
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(canvas, leftPx, 0, Math.max(1, widthPx), Math.max(1, heightPx))
   ctx.restore()
+  return canvas
 }
 
 

@@ -177,6 +177,12 @@ export function hopMs(grid: SpectrogramGrid): number {
 /**
  * Скользящее среднее по одной оси сетки (границы — «edge»: значения не уезжают).
  * Ширина окна нечётная и не меньше 1: сглаживание не сдвигает картинку.
+ *
+ * Считается **бегущей суммой**: окно скользит на один отсчёт, поэтому из суммы
+ * уходит только крайний отсчёт, а приходит один новый — O(length) на строку
+ * вместо O(length · width). На сетке «часовой» записи (2000 × 28 800 при окне
+ * сглаживания 25 корзин) это разница между миллионами операций на каждую правку
+ * контрола и сотнями тысяч.
  */
 export function boxSmooth(
   values: Float32Array,
@@ -194,21 +200,22 @@ export function boxSmooth(
   const half = (width - 1) / 2
   const length = axis === 'time' ? columns : rows
   const other = axis === 'time' ? rows : columns
+  const stride = axis === 'time' ? 1 : columns
   for (let otherIndex = 0; otherIndex < other; otherIndex++) {
+    // Начало строки (ось времени) или столбца (ось частот) — общая для обеих осей формула
+    const base = axis === 'time' ? otherIndex * columns : otherIndex
+    // Сумма первого окна [0, half] — дальше она только сдвигается
+    let sum = 0
+    const edge = Math.min(length - 1, half)
+    for (let index = 0; index <= edge; index++) sum += values[base + index * stride] as number
     for (let index = 0; index < length; index++) {
-      let sum = 0
-      let count = 0
-      for (let offset = -half; offset <= half; offset++) {
-        const shifted = index + offset
-        if (shifted < 0 || shifted >= length) continue
-        const source =
-          axis === 'time' ? otherIndex * columns + shifted : shifted * columns + otherIndex
-        sum += values[source] as number
-        count += 1
-      }
-      const target =
-        axis === 'time' ? otherIndex * columns + index : index * columns + otherIndex
-      out[target] = count > 0 ? sum / count : (values[target] as number)
+      const last = Math.min(length - 1, index + half)
+      const first = Math.max(0, index - half)
+      out[base + index * stride] = sum / (last - first + 1)
+      const add = index + half + 1
+      if (add < length) sum += values[base + add * stride] as number
+      const remove = index - half
+      if (remove >= 0) sum -= values[base + remove * stride] as number
     }
   }
   return out
@@ -245,6 +252,93 @@ export function dbToUnit(db: number, range: [number, number], dbMax: number): nu
   const high = dbMax + Math.max(range[0], range[1])
   if (!(high > low)) return db >= high ? 1 : 0
   return Math.min(1, Math.max(0, (db - low) / (high - low)))
+}
+
+/**
+ * Готовый растр спектрограммы: RGBA-буфер **в разрешении данных**.
+ *
+ * Строка растра — частота (сверху потолок видимого окна), столбец — окно STFT.
+ * Растр намеренно не совпадает с холстом: область графика бывает 1470 CSS-пикселей
+ * при `devicePixelRatio = 2` (≈1.76 млн пикселей по 4 записи на каждый), а ячеек
+ * в видимом окне — несколько сотен тысяч. Растягивает растр композитор
+ * (`drawRaster` + `imageSmoothingEnabled = false`), поэтому работа пропорциональна
+ * **данным**, а не площади экрана.
+ *
+ * Бюджет холста (`maxColumns × maxRows` — размер области в bitmap-пикселях) —
+ * верхняя граница: если сетка плотнее пикселей (окно 1 ч, 28 800 окон STFT),
+ * столбцы и строки прореживаются ровно так же, как раньше прореживались пиксели,
+ * и растр никогда не становится больше полного холста.
+ */
+export type SpectrogramRaster = {
+  /** Столбцы: окна сетки слева направо */
+  columns: number
+  /** Строки: частоты сверху вниз (к потолку окна) */
+  rows: number
+  /** RGBA: `columns * rows * 4` */
+  rgba: Uint8ClampedArray
+}
+
+/**
+ * Собирает растр спектрограммы из чисел сетки: палитра, окно дБ и выбор ячеек.
+ *
+ * Формулы выбора ячейки — те же, что были в цикле по пикселям холста (`yToFreq`
+ * по вертикали, линейная доля окна по горизонтали): изменилось только **число**
+ * вычислений, а не картинка. Частота строки считается по обратной к `fmaxToY`
+ * шкале прямо здесь, чтобы модуль оставался листом без DOM и без импортов.
+ */
+export function spectrogramRaster(
+  grid: SpectrogramGrid,
+  shownWindow: { t0: number; t1: number },
+  freqWindow: [number, number],
+  dbRangeDb: [number, number],
+  lut: Uint8ClampedArray,
+  maxColumns: number,
+  maxRows: number,
+): SpectrogramRaster {
+  const { from, to } = timeIndexRange(grid.times, shownWindow)
+  const visibleColumns = Math.max(1, to - from + 1)
+  const columns = Math.max(1, Math.min(visibleColumns, Math.trunc(maxColumns) || 1))
+  const rows = Math.max(1, Math.min(Math.max(1, grid.nFreqs), Math.trunc(maxRows) || 1))
+  const rgba = new Uint8ClampedArray(columns * rows * 4)
+  if (grid.nFreqs === 0 || grid.nTimes === 0) return { columns, rows, rgba }
+
+  const low = Math.min(freqWindow[0], freqWindow[1])
+  const high = Math.max(freqWindow[0], freqWindow[1])
+  const span = Math.max(1e-6, shownWindow.t1 - shownWindow.t0)
+  const firstTime = grid.times[from] ?? 0
+  const topFreq = Math.max(1e-6, grid.freqs[grid.nFreqs - 1] as number)
+
+  // Столбцы — один раз на растр, а не на каждый пиксель экрана
+  const columnOf = new Int32Array(columns)
+  for (let x = 0; x < columns; x++) {
+    const time = shownWindow.t0 + (x / columns) * span
+    const ratio = (time - firstTime) / span
+    columnOf[x] = Math.min(
+      grid.nTimes - 1,
+      Math.max(0, Math.round(from + ratio * (to - from))),
+    )
+  }
+
+  for (let y = 0; y < rows; y++) {
+    // Частота пиксельной строки: `fmin` внизу, потолок окна сверху (обратная к `fmaxToY`)
+    const frequency = low + ((rows - y - 0.5) / rows) * (high - low)
+    const rowIndex = Math.min(
+      grid.nFreqs - 1,
+      Math.max(0, Math.round((frequency / topFreq) * (grid.nFreqs - 1))),
+    )
+    const rowOffset = rowIndex * grid.nTimes
+    const target = y * columns * 4
+    for (let x = 0; x < columns; x++) {
+      const value = grid.values[rowOffset + (columnOf[x] as number)] ?? grid.dbMin
+      const colour = Math.round(dbToUnit(value, dbRangeDb, grid.dbMax) * 255) * 3
+      const at = target + x * 4
+      rgba[at] = lut[colour] as number
+      rgba[at + 1] = lut[colour + 1] as number
+      rgba[at + 2] = lut[colour + 2] as number
+      rgba[at + 3] = 255
+    }
+  }
+  return { columns, rows, rgba }
 }
 
 /** Палитры спектрограммы: имя → подпись в панели. */

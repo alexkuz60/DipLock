@@ -58,6 +58,23 @@ describe('состояние раздела EDF', () => {
     })
   })
 
+  it('фикстура слоёв живёт только в демо-режиме: у записи слоёв до расчёта нет', () => {
+    useEdfRecording.getState().finishUpload(recordingFixture)
+
+    // Под реальный файл фикстура не подставляется: иначе её зоны и штриховка
+    // читались бы как результат детектора (ручная проверка, 19.09.2026)
+    expect(useEdfRecording.getState().layers).toBeNull()
+
+    useEdfRecording.getState().openDemo(['F3', 'F4'])
+    const demo = useEdfRecording.getState().layers
+    expect(demo?.source).toBe('demo')
+    expect(demo?.artifacts.length).toBeGreaterThan(0)
+    expect(demo?.rejectedEpochs.length).toBeGreaterThan(0)
+
+    useEdfRecording.getState().closeDemo()
+    expect(useEdfRecording.getState().layers).toBeNull()
+  })
+
   it('паспорт принадлежит сессии: заполняется именем файла и очищается с записью', () => {
     useEdfRecording.getState().finishUpload(recordingFixture)
 

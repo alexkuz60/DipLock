@@ -283,8 +283,10 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       signalsInFlight: {},
       signalsPending: 0,
       signalsError: null,
-      // Слои результата принадлежат записи: пока это фикстура под её длину и монтаж
-      layers: demoLayers(meta.duration_sec, meta.channels, DEMO_LAYERS_SEED),
+      // Слоёв у записи до первого расчёта нет: это честное «не рассчитано».
+      // Демо-фикстура под реальный файл не подставляется — её зоны и штриховка
+      // читались бы как результат детектора (ручная проверка, 19.09.2026).
+      layers: null,
       // Задачи прежней записи не переносим на новую
       stageJobs: {},
       // Ручные пометки эпох относятся к конкретной записи — начинаем с чистых
@@ -304,6 +306,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     const signal = makeDemoSignal(channels)
     set({
       demo: frameFromSignalData(signal),
+      // Единственное место, где слои берутся из фикстуры: демо-режим — это
+      // витрина отрисовки, а не результат обработки (`source: 'demo'`).
       layers: demoLayers(signal.durationSec, signal.channels, DEMO_LAYERS_SEED),
       epochMarks: [],
     })

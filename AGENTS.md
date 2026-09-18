@@ -47,8 +47,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 29 роутов: /analyze, /jobs, /recordings(+signals/preprocess/spectrum/
-│   │                  # dipoles/spectrogram), /surface(+brodmann,+mri), /brodmann-labels, /meta, /journal
+│   ├── routes.py      # 29 роутов (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -113,9 +112,8 @@ docs/ui.md             # спецификация UI и дорожная кар�
   `routes.tsx`; тексты — на русском; ожидание задач — общее (`shared/lib/jobPolling.ts`), адреса —
   парами (`recordingJob(kind)`); контролы — из `shared/ui/` (`FieldRow`, `SegmentedControl`,
   `SelectField`, `NumberField`, `CheckboxRow`, `StatusPill`).
-- **Frontend-ловушки — `docs/rules/frontend-state.md` п.1 и п.7:** `className` ссылки рейла обязан
-  быть строкой (Radix `Slot` превращает функцию в текст и стили пропадают), а правка параметра
-  **не** запускает расчёт — считает только кнопка (`POST /api/v1/jobs`).
+- **Frontend-ловушки:** `className` ссылки рейла обязан быть строкой, а правка параметра **не**
+  запускает расчёт (считает только кнопка) — `docs/rules/frontend-state.md`.
 
 ## НЕ коммитить
 
@@ -134,14 +132,15 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/eeg.md` | раздел «ЭЭГ»: трек канала и спектрограмма |
 | `docs/rules/api-jobs.md` | инвентарь роутов, правило «задача = job», ETag/304, ошибки |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
-| `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов (шесть кэшей, отпечаток ассетов, файл задачи) |
+| `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
-| `docs/rules/tests.md` | покрытие (564 Vitest / 327 pytest), ruff/mypy и CI |
-| `docs/rules/docs.md` | **правило ведения документации** — новое правило идёт в файл по теме, а не сюда |
+| `docs/rules/frontend-perf.md` | производительность клиента: замеры (`perf.ts`), правила отрисовки, границы воркеров/GPU |
+| `docs/rules/tests.md` | покрытие (629 Vitest / 327 pytest), ruff/mypy и CI |
+| `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |
 | `docs/history.md` | журнал закрытых работ (сюда переносится закрытое из `todo.md`) |
-| `audit.md`, `audit-2026-09.md` | долг и находки: F17–F21 (`audit.md` §7.7), A1–A11 (`audit-2026-09.md`) |
+| `audit.md`, `audit-2026-09.md` | долг и находки: F17–F21, A1–A11, P1–P9 (§7 — производительность клиента) |
 | `todo.md` | только открытые задачи (≤1 экрана) |
 | `README.md`, `frontend/README.md` | запуск проекта и детали фронтенда |
 
@@ -150,29 +149,20 @@ docs/ui.md             # спецификация UI и дорожная кар�
 
 ## Тесты (кратко)
 
-Фреймворки: **pytest** (`backend/tests/`, конфиг `backend/pytest.ini`) и **Vitest** (`frontend/src/**/*.test.tsx`).
-
-```bash
-cd backend && venv/bin/pip install -r requirements-dev.txt   # + pytest / ruff / mypy
-cd frontend && npm run test                                  # Vitest (jsdom)
-```
-
-`ruff`/`mypy` (команды выше) и тесты гоняет CI — `.github/workflows/ci.yml`: **изменение готово, когда
-линтер и типы чисты** (конфиг — `backend/pyproject.toml`, правила — `docs/rules/tests.md`).
-
-Тесты быстрые (без сети): синтетический ЭЭГ (`backend/tests/conftest.py`) + `TestClient`; ветки с
-реальными данными (`~/mne_data`, `data/edf/test.edf`) помечаются маркером `integration` и скипаются
-без них. Полный инвентарь покрытия — `docs/rules/tests.md` (там же тесты срезов 2.9–6).
-**Правило:** новый сервис/багфикс → тест (backend → pytest, frontend → Vitest).
+Фреймворки: **pytest** (`backend/tests/`, конфиг `backend/pytest.ini`) и **Vitest** (`frontend/src/**/*.test.tsx`);
+команды — выше. Тесты быстрые (без сети, синтетический ЭЭГ `backend/tests/conftest.py` + `TestClient`):
+ветки с реальными данными (`~/mne_data`, `data/edf/test.edf`) помечаются маркером `integration` и
+скипаются без них. `ruff`/`mypy` и тесты гоняет CI (`.github/workflows/ci.yml`): **изменение готово,
+когда линтер и типы чисты** (конфиг — `backend/pyproject.toml`).
+**Правило:** новый сервис/багфикс → тест (backend → pytest, frontend → Vitest). Инвентарь покрытия и
+замеры чисел тестов — `docs/rules/tests.md`.
 
 ## Ключевые правила безопасности (кратко)
 
 - Не передавать в `head_to_mni` путь-строку вместо `mne.Transform` (использовать `mne.read_trans`).
-- CORS: не комбинировать `allow_origins=["*"]` с `allow_credentials=True`.
-- Валидировать размер загружаемых EDF-файлов.
-- MNE API дрейфует между версиями: `psd_welch`→`compute_psd`, `standard_1020`→`colin27_1020`,
-  `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`,
-  `fit_dipole` → **кортеж** `(dipoles, residual)`. Проверяйте актуальный API через тесты.
+- CORS: не комбинировать `allow_origins=["*"]` с `allow_credentials=True`; размер загружаемых EDF валидировать.
+- MNE API дрейфует между версиями (`psd_welch`→`compute_psd`, `fit_dipole` → **кортеж** и др.) —
+  проверяйте актуальный API тестами, список — `docs/rules/safety.md`.
 - Фильтровать band-specific фильтром continuous **raw** до нарезки, а не короткие эпохи.
 
 Остальные правила (форматы `DPS1`/`DPS2`, дедуп загрузок, BEM fsaverage, ассеты МРТ и атласа,

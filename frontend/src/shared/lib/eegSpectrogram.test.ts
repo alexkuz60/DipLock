@@ -23,6 +23,7 @@ import {
   paletteLut,
   paletteRgb,
   smoothSpectrogram,
+  spectrogramRaster,
   spectrogramSummary,
   timeIndexRange,
 } from './eegSpectrogram'
@@ -130,6 +131,47 @@ describe('сглаживание — параметр просмотра', () =>
     expect(Array.from(smoothed)[2]).toBeCloseTo(5, 6)
   })
 
+  it('бегущая сумма совпадает с наивным окном на любых ширинах и осях', () => {
+    // Эталон — прежняя реализация «в лоб»: та же формула, но окно пересобирается
+    // на каждый отсчёт. Бегущая сумма (P1: O(length) вместо O(length · width))
+    // обязана давать те же значения — включая края, где окно обрезано длиной оси
+    const rows = 5
+    const columns = 7
+    const source = new Float32Array(rows * columns)
+    for (let i = 0; i < source.length; i++) source[i] = Math.sin(i * 1.7) * 40 - 20
+
+    for (const bins of [3, 5, 7, 9, 15]) {
+      for (const axis of ['time', 'freq'] as const) {
+        const fast = boxSmooth(source, rows, columns, bins, axis)
+        const naive = new Float32Array(source.length)
+        const width = Math.max(1, Math.trunc(bins) | 1)
+        const half = (width - 1) / 2
+        const length = axis === 'time' ? columns : rows
+        const other = axis === 'time' ? rows : columns
+        for (let otherIndex = 0; otherIndex < other; otherIndex++) {
+          for (let index = 0; index < length; index++) {
+            let sum = 0
+            let count = 0
+            for (let offset = -half; offset <= half; offset++) {
+              const shifted = index + offset
+              if (shifted < 0 || shifted >= length) continue
+              sum +=
+                axis === 'time'
+                  ? (source[otherIndex * columns + shifted] as number)
+                  : (source[shifted * columns + otherIndex] as number)
+              count += 1
+            }
+            const target = axis === 'time' ? otherIndex * columns + index : index * columns + otherIndex
+            naive[target] = sum / count
+          }
+        }
+        for (let i = 0; i < source.length; i++) {
+          expect(fast[i]).toBeCloseTo(naive[i] as number, 4)
+        }
+      }
+    }
+  })
+
   it('не пересчитывает сетку при нулевом сглаживании и делает новую при ненулевом', () => {
     const grid = decodeSpectrogramGrid(encodeSpectrogramBlob(header, values))
     expect(smoothSpectrogram(grid, 0, 0)).toBe(grid)
@@ -164,6 +206,109 @@ describe('сглаживание — параметр просмотра', () =>
     const peak = rows.indexOf(Math.max(...rows))
     expect(first.freqs[peak]).toBeGreaterThanOrEqual(8)
     expect(first.freqs[peak]).toBeLessThanOrEqual(13)
+  })
+})
+
+describe('растр в разрешении данных (P1: работа по сетке, а не по площади экрана)', () => {
+  const freqs40: [number, number] = [0, 40]
+
+  /** Плотная сетка: 200 частот × 5000 окон — как часовая запись с окном 500 мс. */
+  function denseGrid() {
+    const nFreqs = 200
+    const nTimes = 5000
+    const grid = demoSpectrogramGrid()
+    return {
+      ...grid,
+      nFreqs,
+      nTimes,
+      freqs: Float32Array.from({ length: nFreqs }, (_, i) => i * 0.2),
+      times: Float32Array.from({ length: nTimes }, (_, i) => i * 0.05),
+      values: new Float32Array(nFreqs * nTimes).fill(-30),
+    }
+  }
+
+  it('берёт разрешение сетки, когда данных меньше пикселей холста', () => {
+    const grid = demoSpectrogramGrid()
+    const lut = paletteLut('viridis')
+    const fullWindow = { t0: grid.times[0] as number, t1: grid.times[grid.nTimes - 1] as number }
+
+    // Окно — первые 100 окон из 240: видимых столбцов 100, строк — все 41
+    const raster = spectrogramRaster(
+      grid,
+      { t0: grid.times[0] as number, t1: grid.times[99] as number },
+      freqs40,
+      [-60, 0],
+      lut,
+      4000,
+      800,
+    )
+
+    expect(raster.columns).toBe(100)
+    expect(raster.rows).toBe(41)
+    expect(raster.rgba).toHaveLength(100 * 41 * 4)
+
+    // Бюджет холста больше данных: растр остаётся в разрешении сетки (240 × 41),
+    // а не растягивается до пикселей области графика
+    const whole = spectrogramRaster(grid, fullWindow, freqs40, [-60, 0], lut, 4000, 800)
+    expect(whole.columns).toBe(240)
+    expect(whole.rows).toBe(41)
+  })
+
+  it('ограничивает растр бюджетом холста, прореживая плотную сетку', () => {
+    const grid = denseGrid()
+    const lut = paletteLut('gray')
+    // Вся запись: 5000 окон × 0.05 с = 250 с
+    const record = { t0: 0, t1: 250 }
+
+    const full = spectrogramRaster(grid, record, freqs40, [-60, 0], lut, 4000, 800)
+    expect(full.columns).toBe(4000)
+    expect(full.rows).toBe(200)
+
+    // Узкий холст: столбцы прореживаются, строки — по числу частот сетки
+    const narrow = spectrogramRaster(grid, record, freqs40, [-60, 0], lut, 800, 400)
+    expect(narrow.columns).toBe(800)
+    expect(narrow.rows).toBe(200)
+    expect(narrow.rgba).toHaveLength(800 * 200 * 4)
+  })
+
+  it('красит ячейки палитрой по окну дБ: верхняя строка — потолок частот', () => {
+    const grid = demoSpectrogramGrid()
+    const lut = paletteLut('magma')
+    const dbRange: [number, number] = [-60, 0]
+    const fullWindow = { t0: grid.times[0] as number, t1: grid.times[grid.nTimes - 1] as number }
+    const raster = spectrogramRaster(grid, fullWindow, freqs40, dbRange, lut, 4000, 800)
+
+    // Верхняя строка растра — самая высокая частота окна (41-я строка сетки)
+    const topValue = grid.values[40 * grid.nTimes + 0] as number
+    const topColor = Math.round(dbToUnit(topValue, dbRange, grid.dbMax) * 255) * 3
+    expect(Array.from(raster.rgba.subarray(0, 3))).toEqual([
+      lut[topColor],
+      lut[topColor + 1],
+      lut[topColor + 2],
+    ])
+    expect(raster.rgba[3]).toBe(255)
+
+    // Нижняя строка — 0 Гц (первая строка сетки), столбец 0 — начало окна
+    const bottomOffset = (raster.rows - 1) * raster.columns * 4
+    const bottomValue = grid.values[0] as number
+    const bottomColor = Math.round(dbToUnit(bottomValue, dbRange, grid.dbMax) * 255) * 3
+    expect(Array.from(raster.rgba.subarray(bottomOffset, bottomOffset + 3))).toEqual([
+      lut[bottomColor],
+      lut[bottomColor + 1],
+      lut[bottomColor + 2],
+    ])
+  })
+
+  it('отдаёт пустой буфер на пустой сетке и не падает на вырожденном бюджете', () => {
+    const grid = demoSpectrogramGrid()
+    const empty = { ...grid, nFreqs: 0, nTimes: 0, values: new Float32Array(0), times: new Float32Array(0) }
+    const lut = paletteLut('gray')
+
+    const raster = spectrogramRaster(empty, { t0: 0, t1: 250 }, freqs40, [-60, 0], lut, 0, 0)
+
+    expect(raster.columns).toBe(1)
+    expect(raster.rows).toBe(1)
+    expect(Array.from(raster.rgba)).toEqual([0, 0, 0, 0])
   })
 })
 

@@ -19,6 +19,7 @@ import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { frameEnvelope, pointsBudget, type TimeWindow } from '@/shared/lib/viewerMath'
 import type { SignalFrame } from '@/shared/lib/signalFrame'
+import { perfCount } from '@/shared/lib/perf'
 import { LABEL_WIDTH, makeTrackOptions, yRangeFor } from '@/shared/lib/trackOptions'
 import { cx } from '@/shared/ui/cx'
 
@@ -59,18 +60,19 @@ export function TrackRow({
   const hostRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<uPlot | null>(null)
 
-  const env = useMemo(
-    () =>
-      frameEnvelope(
-        frame.times,
-        frame.min[name] ?? [],
-        frame.max[name] ?? [],
-        window,
-        pointsBudget(width),
-        frame.decimated,
-      ),
-    [frame, name, window, width],
-  )
+  const env = useMemo(() => {
+    // Счётчик пересчёта огибающей — замер P4 (`docs/rules/frontend-perf.md`):
+    // он должен расти при смене окна, а не при каждом рендере стека
+    perfCount('edf.envelope.recompute')
+    return frameEnvelope(
+      frame.times,
+      frame.min[name] ?? [],
+      frame.max[name] ?? [],
+      window,
+      pointsBudget(width),
+      frame.decimated,
+    )
+  }, [frame, name, window, width])
   /**
    * Диапазон оси Y считается по видимой огибающей, а не оставляется uPlot:
    * в режиме «по каналу» шкала обязана ужиматься под амплитуду конкретного
@@ -87,10 +89,22 @@ export function TrackRow({
     return yRangeFor(amplitudeMode, amplitudeScaleUv, lo, hi)
   }, [env, amplitudeMode, amplitudeScaleUv])
 
-  // Создание/уничтожение чарта (ширина и окно применяются отдельно)
+  /** Есть ли размер области: до первого замера `ResizeObserver` чарт не создаём */
+  const sized = width > 0 && height > 0
+
+  /*
+    Создание чарта — только при смене канала и признака оси времени. Размер и
+    шкала Y применяются **отдельными эффектами** (`setSize` / `setScale`), а не
+    пересозданием: раньше ресайз окна и переключение режима шкалы собирали заново
+    все 18+ чартов стека (`docs/rules/frontend-perf.md`, правило Р4).
+    `sized` в зависимостях — потому что до замера области размер нулевой, и без
+    этого признака чарт не появился бы вовсе (эффект больше не реагирует на
+    `width`).
+  */
   useEffect(() => {
     const host = hostRef.current
-    if (!host || width <= 0) return
+    if (!host || !sized) return
+    perfCount('edf.chart.create')
     const chart = new uPlot(
       makeTrackOptions(width, height, window, yRange, showXAxis),
       [[], [], []] as uPlot.AlignedData,
@@ -104,9 +118,18 @@ export function TrackRow({
       chartRef.current = null
       onCanvas(name, null)
     }
-    // Пересоздаём при смене канала/ширины/высоты/режима шкалы; ось времени обновляется ниже
+    // Канал и ось времени — в зависимостях; размер/шкала/окно обновляются ниже
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [name, width, height, showXAxis, amplitudeMode, amplitudeScaleUv])
+  }, [name, showXAxis, sized])
+
+  useEffect(() => {
+    if (!sized) return
+    chartRef.current?.setSize({ width, height })
+  }, [width, height, sized])
+
+  useEffect(() => {
+    chartRef.current?.setScale('y', { min: yRange[0], max: yRange[1] })
+  }, [yRange])
 
   useEffect(() => {
     chartRef.current?.setData([env.times, env.min, env.max] as uPlot.AlignedData, false)

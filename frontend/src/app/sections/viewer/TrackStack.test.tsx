@@ -17,7 +17,8 @@ import type { EdfViewerLayers } from '@/shared/lib/viewerLayers'
 import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { EEG_PARAM_DEFAULTS, useEegParams } from '@/shared/state/eegParams'
-import { uplotCharts } from '@/test/uplot'
+import { perfReset, perfStats } from '@/shared/lib/perf'
+import { uplotCharts, type MockUPlotChart } from '@/test/uplot'
 
 import { TrackStack } from './TrackStack'
 import { renderWithProviders } from '@/test/renderWithProviders'
@@ -255,6 +256,70 @@ describe('вьюер треков', () => {
 
     act(() => useEdfParams.getState().toggleChannel('F4'))
     expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '64px' })
+  })
+
+  it('панорама копит движение за жест и рендерит стек по кадру (P1)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], timeLevel: 2 })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    const region = screen.getByRole('region', { name: 'Треки ЭЭГ' })
+    // jsdom не считает раскладку: ширину области задаём сами (1024 − 56 − 8 = 960 px)
+    Object.defineProperty(region, 'clientWidth', { value: 1024, configurable: true })
+
+    // Окно ×4: 10 с / 4 = 2.5 с (3.75–6.25)
+    expect(screen.getByText('Окно 3.75–6.25 с')).toBeInTheDocument()
+    perfReset()
+
+    // Два сдвига по 96 px = 0.25 с каждый: окно сдвигается на 0.5 с целиком, а не
+    // на один шаг — раньше переподписка слушателей сбрасывала жест после первого
+    // движения, и «хвост» панорамы терялся (P5)
+    await user.pointer([
+      { keys: '[MouseLeft>]', target: region, coords: { clientX: 300, clientY: 40 } },
+      { coords: { clientX: 396, clientY: 40 } },
+      { coords: { clientX: 492, clientY: 40 } },
+      { keys: '[/MouseLeft]', coords: { clientX: 492, clientY: 40 } },
+    ])
+
+    expect(screen.getByText('Окно 3.25–5.75 с')).toBeInTheDocument()
+    // Кадр панорамы — счётчик P0: перерисовка сведена к кадрам, а не к событиям мыши
+    const panFrames = perfStats().find((stat) => stat.name === 'edf.pan.frame')
+    expect(panFrames?.count).toBeGreaterThan(0)
+    expect(panFrames?.count).toBeLessThanOrEqual(3)
+  })
+
+  it('клик по треку не пересчитывает огибающие каналов (P4)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3', 'F4', 'C3'], timeLevel: 0 })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    const region = screen.getByRole('region', { name: 'Треки ЭЭГ' })
+    region.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 1024, height: 600, right: 1024, bottom: 600 }) as DOMRect
+    perfReset()
+
+    await user.pointer({ keys: '[MouseLeft]', target: region, coords: { clientX: 300, clientY: 40 } })
+
+    // Курсор — только отрисовка: окно то же, значит огибающие не пересчитываются
+    expect(screen.getByText('2.500 с')).toBeInTheDocument()
+    expect(perfStats().find((stat) => stat.name === 'edf.envelope.recompute')).toBeUndefined()
+  })
+
+  it('разворот трека не пересобирает чарт: размер идёт через setSize (P1)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    expect(uplotCharts()).toHaveLength(1)
+    const chart = uplotCharts()[0] as MockUPlotChart
+
+    await user.click(screen.getByTestId('track-expand-F3'))
+
+    // Чарт тот же: пересоздание добавило бы в список второй, а старый уничтожило
+    expect(uplotCharts()).toHaveLength(1)
+    expect(chart.destroy).not.toHaveBeenCalled()
+    // Ширина области треков: 1024 − 56 (подписи) − 8 (зазор), высота — видимой области
+    expect(chart.setSize).toHaveBeenCalledWith({ width: 960, height: 592 })
   })
 
   it('клик по треку ставит курсор, а не гонится за мышью (срез 2.9)', async () => {
@@ -523,7 +588,7 @@ describe('слои результата вьюера', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('без пропа слоёв берёт демо-фикстуру под длину сигнала', () => {
+  it('демо-кадру без пропа даёт фикстуру под длину сигнала', () => {
     paramsState({ visibleChannels: ['F3'] })
     renderWithProviders(<TrackStack signal={frameFixture()} />)
 
@@ -531,6 +596,19 @@ describe('слои результата вьюера', () => {
     expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
     // Фикстура даёт минимум две зоны каждого типа — легенда не пустая
     expect(screen.getByTestId('legend-ica_eog').textContent).toMatch(/[2-4]/)
+  })
+
+  it('кадру записи без пропа слоёв не рисует: фикстура только демо', () => {
+    paramsState({ visibleChannels: ['F3'] })
+    renderWithProviders(<TrackStack signal={decimatedFrameFixture()} />)
+
+    // У записи до первого расчёта нет ни зон, ни легенды, ни подписи «слои:»
+    expect(screen.queryByTestId(/^zone-/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId(/^legend-/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId(/^epoch-hatch-/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/^слои:/)).not.toBeInTheDocument()
+    // Сетка эпох — геометрия по параметру панели, а не результат: она остаётся
+    expect(screen.getByTestId('epoch-edge-1')).toBeInTheDocument()
   })
 
   it('результат расчёта помечается в подписи иначе, чем фикстура', () => {

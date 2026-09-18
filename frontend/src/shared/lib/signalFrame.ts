@@ -53,6 +53,15 @@ export type SignalFrame = {
   level: number
 }
 
+/**
+ * Идентификатор источника демо-кадра (`SignalFrame.sourceId`).
+ *
+ * По нему вьюер отличает демо-режим от настоящей записи: детерминированную
+ * фикстуру слоёв (`demoLayers`) он рисует **только демо-кадру**, у записи до
+ * первого расчёта слоёв нет вовсе (правило `docs/rules/edf-viewer.md`).
+ */
+export const DEMO_SOURCE_ID = 'demo'
+
 export class SignalDecodeError extends Error {
   constructor(message: string) {
     super(message)
@@ -183,7 +192,10 @@ export function selectFrame(
  * Кадр из полноразрешённого сигнала (демо-фикстура, срез 2.3).
  * `min == max`: огибающая совпадает с линией, как и у неразреженных данных.
  */
-export function frameFromSignalData(signal: SignalData, sourceId = 'demo'): SignalFrame {
+export function frameFromSignalData(
+  signal: SignalData,
+  sourceId: string = DEMO_SOURCE_ID,
+): SignalFrame {
   const nPoints = Math.max(1, Math.round(signal.durationSec * signal.sfreq))
   const times = new Float32Array(nPoints)
   for (let i = 0; i < nPoints; i++) times[i] = i / signal.sfreq

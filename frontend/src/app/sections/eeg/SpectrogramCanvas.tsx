@@ -3,9 +3,12 @@
  *
  * Рисуется **по числам** с сервера (`SpectrogramGrid`): палитра, окно дБ и
  * сглаживание — параметры просмотра, поэтому их правка не делает запросов и не
- * пересчитывает STFT. Пиксели красит `ImageData` с таблицей цветов палитры
- * (`paletteLut`), а не `fillRect` на клетку: сетка бывает 257 × 5000, и поштучная
- * заливка была бы в разы дороже.
+ * пересчитывает STFT. Картинка собирается в **разрешении данных**
+ * (`spectrogramRaster`: строка — частота, столбец — окно STFT) и растягивается на
+ * область графика композитором (`drawRaster`), а не набирается попиксельно в
+ * разрешении холста: работа пропорциональна сетке, а не площади экрана. Растр
+ * кэшируется по своим входам, поэтому движение курсора перерисовывает только
+ * оверлеи (`docs/rules/frontend-perf.md`).
  *
  * Масштаб по времени:
  * * «Связано» — спектрограмма показывает то же окно, что и трек: ритм и форма
@@ -26,12 +29,12 @@ import { useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent } fr
 import type { TimeWindow } from '@/shared/lib/viewerMath'
 import type { ArtifactZone } from '@/shared/lib/viewerLayers'
 import {
-  dbToUnit,
   paletteLut,
   smoothSpectrogram,
-  timeIndexRange,
+  spectrogramRaster,
   type EegPaletteId,
   type SpectrogramGrid,
+  type SpectrogramRaster,
 } from '@/shared/lib/eegSpectrogram'
 import {
   formatHzTick,
@@ -46,6 +49,7 @@ import {
   windowFrame,
   yToFreq,
 } from '@/shared/lib/eegView'
+import { perfCount, perfSpan } from '@/shared/lib/perf'
 import {
   canvasScale,
   canvasTheme,
@@ -55,9 +59,9 @@ import {
   drawFreqMarker,
   drawGridLines,
   drawLeftLabel,
+  drawRaster,
   drawValueAxis,
   drawWindowFrame,
-  putImageDataAt,
   setupCanvas,
 } from './eegCanvas'
 
@@ -96,6 +100,42 @@ export type SpectrogramCanvasProps = {
   onFreqDrag: (dyPx: number) => void
 }
 
+/**
+ * Входы растровой картинки: от них зависит содержимое растра, и только они.
+ *
+ * Курсор, маркер частоты, линии сетки и рамка окна в этот набор **не входят**:
+ * это оверлеи, они рисуются поверх готового растра. Поэтому движение курсора
+ * больше не пересобирает картинку (правило — `docs/rules/frontend-perf.md`).
+ */
+type RasterInputs = {
+  smooth: SpectrogramGrid
+  palette: EegPaletteId
+  t0: number
+  t1: number
+  fmin: number
+  fmax: number
+  dbLow: number
+  dbHigh: number
+  maxColumns: number
+  maxRows: number
+}
+
+/** Совпали ли входы растра: сравнение по числам и по ссылке на сетку. */
+function sameRasterInputs(left: RasterInputs, right: RasterInputs): boolean {
+  return (
+    left.smooth === right.smooth &&
+    left.palette === right.palette &&
+    left.t0 === right.t0 &&
+    left.t1 === right.t1 &&
+    left.fmin === right.fmin &&
+    left.fmax === right.fmax &&
+    left.dbLow === right.dbLow &&
+    left.dbHigh === right.dbHigh &&
+    left.maxColumns === right.maxColumns &&
+    left.maxRows === right.maxRows
+  )
+}
+
 export function SpectrogramCanvas({
   grid,
   window,
@@ -121,6 +161,13 @@ export function SpectrogramCanvas({
     y: 0,
     moved: false,
   })
+  /**
+   * Кэш растра и холст-посредник (правило `docs/rules/frontend-perf.md`):
+   * картинка пересобирается только при смене своих входов, а оверлеи (курсор,
+   * маркер частоты, сетка, рамка) рисуются поверх готового растра.
+   */
+  const rasterRef = useRef<{ inputs: RasterInputs; raster: SpectrogramRaster } | null>(null)
+  const scratchRef = useRef<HTMLCanvasElement | null>(null)
   const lut = useMemo(() => paletteLut(palette), [palette])
   /** Сглаживание — «просмотр»: считается из уже полученных чисел (нет запросов) */
   const smooth = useMemo(
@@ -159,44 +206,44 @@ export function SpectrogramCanvas({
       return
     }
 
-    const span = Math.max(1e-6, shownWindow.t1 - shownWindow.t0)
-    const { from, to } = timeIndexRange(smooth.times, shownWindow)
-    const rows = smooth.nFreqs
-    const topFreq = Math.max(1e-6, smooth.freqs[rows - 1] as number)
-    // Пиксели набираются в **разрешении холста**: `putImageData` не проходит через
-    // трансформацию контекста (см. `putImageDataAt`), и картинка в CSS-пикселях
-    // заняла бы лишь 1 / dpr ширины области графика.
+    /*
+      Пиксели набираются **в разрешении данных**, а не в разрешении холста:
+      растр сетки (строка — частота, столбец — окно STFT) рисуется через
+      `drawImage`, и каждая его ячейка становится прямоугольником. Бюджет —
+      размер области в bitmap-пикселях: растр не может быть больше холста, и
+      прореживание плотной сетки остаётся прежним (`docs/rules/frontend-perf.md`).
+    */
     const scale = canvasScale()
-    const bitmapWidth = Math.max(1, Math.round(plotWidth * scale))
-    const bitmapHeight = Math.max(1, Math.round(height * scale))
-    // Столбец картинки — ближайшее окно сетки: интерполяция по времени
-    // «размывала бы» измеренный пик, а ширина окна уже выбрана в задаче.
-    const image = ctx.createImageData(bitmapWidth, bitmapHeight)
-    const data = image.data
-    for (let y = 0; y < bitmapHeight; y++) {
-      const frequency = yToFreq(y + 0.5, fmin, fmax, bitmapHeight)
-      const rowIndex = Math.min(
-        rows - 1,
-        Math.max(0, Math.round((frequency / topFreq) * (rows - 1))),
-      )
-      for (let x = 0; x < bitmapWidth; x++) {
-        const time = shownWindow.t0 + (x / bitmapWidth) * span
-        const ratio = (time - (smooth.times[from] as number)) / span
-        const column = Math.round(from + ratio * (to - from))
-        const value =
-          smooth.values[
-            rowIndex * smooth.nTimes + Math.min(smooth.nTimes - 1, Math.max(0, column))
-          ] ?? smooth.dbMin
-        const unit = dbToUnit(value, dbRangeDb, smooth.dbMax)
-        const colour = Math.round(unit * 255) * 3
-        const target = (y * bitmapWidth + x) * 4
-        data[target] = lut[colour] as number
-        data[target + 1] = lut[colour + 1] as number
-        data[target + 2] = lut[colour + 2] as number
-        data[target + 3] = 255
-      }
+    const maxColumns = Math.max(1, Math.round(plotWidth * scale))
+    const maxRows = Math.max(1, Math.round(height * scale))
+    const inputs: RasterInputs = {
+      smooth,
+      palette,
+      t0: shownWindow.t0,
+      t1: shownWindow.t1,
+      fmin,
+      fmax,
+      dbLow: dbRangeDb[0],
+      dbHigh: dbRangeDb[1],
+      maxColumns,
+      maxRows,
     }
-    putImageDataAt(ctx, image, left, 0)
+    // Растр пересобирается только при смене своих входов: движение курсора и
+    // перетаскивание маркера частоты перерисовывают оверлеи поверх готовой картинки
+    const cached = rasterRef.current
+    let raster: SpectrogramRaster
+    if (cached && sameRasterInputs(cached.inputs, inputs)) {
+      raster = cached.raster
+    } else {
+      perfCount('eeg.raster.rebuild')
+      raster = perfSpan('eeg.raster.build', () =>
+        spectrogramRaster(smooth, shownWindow, [fmin, fmax], dbRangeDb, lut, maxColumns, maxRows),
+      )
+      rasterRef.current = { inputs, raster }
+    }
+    scratchRef.current = perfSpan('eeg.raster.paint', () =>
+      drawRaster(ctx, raster, left, plotWidth, height, scratchRef.current),
+    )
 
     // Зоны артефактов — поверх картинки: спектрограмма не отличает всплеск от
     // ритма, а зона показывает, что в это время сигнал был помечен детектором
@@ -230,6 +277,7 @@ export function SpectrogramCanvas({
     shownFreq,
     overview,
     dbRangeDb,
+    palette,
     lines,
     zones,
     width,

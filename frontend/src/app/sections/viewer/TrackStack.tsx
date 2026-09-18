@@ -20,8 +20,10 @@
  * Поверх треков — **слои результата** (срез 2.6, `viewerLayers.ts` + `TrackLayers.tsx`):
  * зоны артефактов (клик → детали: тип, интервал, каналы), границы эпох с номерами и
  * штриховка отброшенных эпох. Слои — DOM поверх canvas, поэтому зум пересчитывает
- * только их позиции. До первого расчёта слои — демо-фикстура, после кнопок стадий
- * (`EdfRecalcButtons`, срез 2.7) — результат задачи.
+ * только их позиции. У записи слоёв до первого расчёта нет вовсе, после кнопок стадий
+ * (`EdfRecalcButtons`, срез 2.7) приходит результат задачи, а детерминированная
+ * фикстура (`demoLayers`) остаётся **только демо-кадру** — иначе её зоны и штриховка
+ * читались бы как детекция реального сигнала (ручная проверка, 19.09.2026).
  *
  * Экспорт окна (срез 2.8, `ExportActions` + `shared/lib/exportWindow.ts`): PNG-снапшот
  * склеивается из canvas'ов треков вместе с подписями, зонами и сеткой эпох, CSV — из
@@ -39,7 +41,8 @@ import {
   xToTime,
   zoomWindow,
 } from '@/shared/lib/viewerMath'
-import type { SignalFrame } from '@/shared/lib/signalFrame'
+import { DEMO_SOURCE_ID, type SignalFrame } from '@/shared/lib/signalFrame'
+import { perfCount } from '@/shared/lib/perf'
 import { LABEL_WIDTH, TRACK_HEIGHT } from '@/shared/lib/trackOptions'
 import {
   artifactCounts,
@@ -67,11 +70,11 @@ export type TrackStackProps = {
   signal: SignalFrame
   /**
    * Слои результата (зоны артефактов, отброшенные эпохи). Приходят из стора
-   * записи: до первого расчёта — демо-фикстура (`source: 'demo'`), после кнопок
-   * стадий — результат задачи (`source: 'result'`, срез 2.7). Без пропа вьюер
-   * рисует фикстуру — так он остаётся самостоятельным для отладки.
+   * записи: у записи до первого расчёта их нет (`null`), после кнопок стадий —
+   * результат задачи (`source: 'result'`, срез 2.7). Без пропа вьюер рисует
+   * фикстуру **только демо-кадру** — так он остаётся самостоятельным для отладки.
    */
-  layers?: EdfViewerLayers
+  layers?: EdfViewerLayers | null
 }
 
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */
@@ -88,6 +91,16 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   /** Высота видимой области треков — по ней разворачивается трек (срез 2.9) */
   const [viewportHeight, setViewportHeight] = useState(0)
   const [centerSec, setCenterSec] = useState(() => signal.durationSec / 2)
+  /**
+   * Центр окна для натив-обработчиков жестов: слушатели ставятся **один раз**, а
+   * значение читают из ref. Раньше эффект панорамы зависел от `centerSec`,
+   * переподписывался на каждом кадре перетаскивания и терял состояние жеста
+   * (`pending` начинал новую жизнь) — панорама срывалась после первого сдвига.
+   */
+  const centerRef = useRef(centerSec)
+  useEffect(() => {
+    centerRef.current = centerSec
+  }, [centerSec])
   const [cursor, setCursor] = useState<{ xPx: number; timeSec: number } | null>(null)
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
   /**
@@ -112,33 +125,40 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     canvasesRef.current[name] = canvas
   }, [])
 
-  // Слои результата: пока стадии не подключены — детерминированная фикстура.
-  // Ключ — источник сигнала (запись/демо) и каналы, а не объект кадра: при зуме
-  // сервер отдаёт новый кадр того же сигнала, и зоны не должны пересобираться.
+  // Слои результата. Ключ — источник сигнала (запись/демо) и каналы, а не объект
+  // кадра: при зуме сервер отдаёт новый кадр того же сигнала, и зоны не должны
+  // пересобираться. Фикстура — только демо-кадру: у записи до первого расчёта
+  // слоёв нет, иначе зоны и штриховка фикстуры читались бы как результат детектора.
   const channelKey = signal.channels.join(',')
   const layers = useMemo(
-    () => layersProp ?? demoLayers(signal.durationSec, signal.channels),
+    () =>
+      layersProp ??
+      (signal.sourceId === DEMO_SOURCE_ID
+        ? demoLayers(signal.durationSec, signal.channels)
+        : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [layersProp, signal.sourceId, signal.durationSec, channelKey],
   )
   const visibleZoneList = useMemo(
-    () => visibleZones(layers.artifacts, params.artifactVisibility),
-    [layers.artifacts, params.artifactVisibility],
+    () => visibleZones(layers?.artifacts ?? [], params.artifactVisibility),
+    [layers, params.artifactVisibility],
   )
-  const counts = useMemo(() => artifactCounts(layers.artifacts), [layers.artifacts])
+  const counts = useMemo(() => artifactCounts(layers?.artifacts ?? []), [layers])
   /**
-   * Длина эпохи сетки вьюера (срез 2.10): у слоя-результата — своя, у фикстуры —
-   * параметр панели. Индексы отброшенных эпох живут только внутри своей нарезки,
-   * поэтому смена длины эпохи в панели больше не «переезжает» штриховкой на
-   * другой участок записи — она помечает слой как устаревший (пилюля в полосе).
+   * Длина эпохи сетки вьюера (срез 2.10): у слоя-результата — своя, у фикстуры и
+   * до расчёта — параметр панели. Индексы отброшенных эпох живут только внутри
+   * своей нарезки, поэтому смена длины эпохи в панели больше не «переезжает»
+   * штриховкой на другой участок записи — она помечает слой как устаревший
+   * (пилюля в полосе).
    */
   const epochLengthMs = useMemo(
-    () => gridEpochLength(layers, params.epochLengthMs),
+    () => (layers ? gridEpochLength(layers, params.epochLengthMs) : params.epochLengthMs),
     [layers, params.epochLengthMs],
   )
   const epochs = useMemo(
-    () => buildEpochCells(signal.durationSec, epochLengthMs, layers.rejectedEpochs, epochMarks),
-    [signal.durationSec, epochLengthMs, layers.rejectedEpochs, epochMarks],
+    () =>
+      buildEpochCells(signal.durationSec, epochLengthMs, layers?.rejectedEpochs ?? [], epochMarks),
+    [signal.durationSec, epochLengthMs, layers, epochMarks],
   )
   /**
    * Сколько ручных пометок поставил пользователь (Ctrl+двойной клик).
@@ -154,20 +174,30 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const hasManualEdit = useMemo(() => epochs.some((cell) => cell.manual !== null), [epochs])
   /** Сетка результата не совпадает с длиной эпохи в панели — разметка не пересчитана */
   const staleEpochGrid =
-    layers.source === 'result' &&
+    layers?.source === 'result' &&
     layers.epochLengthMs !== null &&
     layers.epochLengthMs !== params.epochLengthMs
   const selectedZone = useMemo(
     () => visibleZoneList.find((zone) => zone.id === selectedZoneId) ?? null,
     [visibleZoneList, selectedZoneId],
   )
-  const hasLayers =
-    visibleZoneList.length > 0 ||
+  /**
+   * Оверлей слоёв рисуем, когда есть что показывать: слои (зоны, штриховка) или
+   * живая сетка эпох и ручные пометки — они считаются из параметров и от расчёта
+   * не зависят.
+   */
+  const showLayers =
+    layers !== null ||
     (params.epochBoundaries && epochs.length > 1) ||
-    params.droppedEpochsHatched ||
     // Ручная пометка эпохи — решение пользователя: она видна всегда, даже если
     // штриховку и границы он выключил
     hasManualEdit
+  /**
+   * Легенда типов артефактов — там, где есть источник зон: результат задачи или
+   * фикстура демо-режима. До первого расчёта у записи зон нет, и легенда с
+   * нулями только выдавала бы фикстурную разметку за результат.
+   */
+  const showLegend = layers !== null
 
   // Новая запись/демо — возвращаемся к «вся сессия». Зависимость именно от
   // источника, а не от объекта кадра: при зуме сервер отдаёт новый кадр того же
@@ -199,7 +229,16 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   }, [expandedChannel, params.visibleChannels])
 
   const factor = TIME_LEVELS[params.timeLevel] ?? 1
-  const window = zoomWindow(signal.durationSec, factor, centerSec)
+  /**
+   * Окно вьюера. Мемоизируется по **числам**, а не создаётся на каждый рендер:
+   * от идентичности окна зависит расчёт огибающей в `TrackRow`, и раньше любой
+   * рендер стека (клик по треку, выбор зоны, правка панели) заново считал
+   * огибающую всех каналов (`docs/rules/frontend-perf.md`, правило Р3).
+   */
+  const window = useMemo(
+    () => zoomWindow(signal.durationSec, factor, centerSec),
+    [signal.durationSec, factor, centerSec],
+  )
 
   /*
     Навигация из тулс-хедера (`<<` `<` `>` `>>`, срез 2.9): кнопки живут в шапке,
@@ -244,7 +283,13 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
    * в панели опций). Горизонтальный скролл при этом не нужен: окно времени
    * двигается drag-панорамированием (`overflow-x-hidden` у контейнера).
    */
-  // Drag = панорамирование
+  /*
+   * Drag = панорамирование. Слушатели ставятся **один раз** (их замыкание живёт
+   * всё время монтирования), центр окна читается из `centerRef`, а рендер стека
+   * сведён к одному кадру экрана (`requestAnimationFrame`): мышь шлёт события
+   * чаще, чем браузер рисует, а пересобирать 18+ треков на каждое событие
+   * незачем (`docs/rules/frontend-perf.md`, правило Р4).
+   */
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
@@ -257,6 +302,18 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     let pending = false
     let dragging = false
     let lastX = 0
+    let frame: number | null = null
+
+    /** Отдаёт накопленный сдвиг в состояние: один рендер стека на кадр экрана */
+    const commit = () => {
+      frame = null
+      perfCount('edf.pan.frame')
+      setCenterSec(centerRef.current)
+    }
+    const schedule = () => {
+      if (frame !== null) return
+      frame = requestAnimationFrame(commit)
+    }
 
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return
@@ -283,16 +340,31 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
       const win = zoomWindow(
         signal.durationSec,
         TIME_LEVELS[state.params.timeLevel],
-        centerSec,
+        centerRef.current,
       )
       const trackWidth = Math.max(1, el.clientWidth - LABEL_WIDTH - 8)
-      setCenterSec(panByPixels(centerSec, dx, win, trackWidth, signal.durationSec))
+      // Сдвиг копим в `centerRef` (ни одно движение не теряется), а состояние
+      // обновляем в кадре отрисовки — иначе стек пересобирался бы на каждое
+      // событие указателя
+      centerRef.current = panByPixels(
+        centerRef.current,
+        dx,
+        win,
+        trackWidth,
+        signal.durationSec,
+      )
+      schedule()
     }
     const onPointerUp = (event: PointerEvent) => {
       pending = false
       dragging = false
       el.style.cursor = ''
       if (el.hasPointerCapture?.(event.pointerId)) el.releasePointerCapture(event.pointerId)
+      // Последний сдвиг коммитим сразу: кадр ждать незачем, жест уже закончен
+      if (frame !== null) {
+        cancelAnimationFrame(frame)
+        commit()
+      }
     }
     el.addEventListener('pointerdown', onPointerDown)
     el.addEventListener('pointermove', onPointerMove)
@@ -303,8 +375,9 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
       el.removeEventListener('pointermove', onPointerMove)
       el.removeEventListener('pointerup', onPointerUp)
       el.removeEventListener('pointercancel', onPointerUp)
+      if (frame !== null) cancelAnimationFrame(frame)
     }
-  }, [signal, centerSec])
+  }, [signal.durationSec])
 
   /**
    * Клик по названию канала (срез 5): канал открывается в разделе «ЭЭГ» — там он
@@ -387,12 +460,12 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         <span data-testid="signal-source">
           {signal.level > 0 ? `огибающая, ${pointsPerChannel} т/канал` : 'полный сигнал'}
         </span>
-        {hasLayers ? (
+        {layers ? (
           <StatusPill
             tone="neutral"
             title={
               layers.source === 'demo'
-                ? 'Слои из демо-фикстуры (срез 2.6): результат появится после кнопок стадий в шапке раздела'
+                ? 'Демо-режим: зоны и штриховка — детерминированная фикстура (срез 2.6), а не расчёт. У записи слои появятся после кнопок стадий в шапке раздела.'
                 : 'Слои из результата задачи предподготовки: зоны артефактов и отброшенные эпохи (срез 2.7)'
             }
           >
@@ -435,7 +508,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         </span>
       </div>
 
-      {hasLayers ? (
+      {showLegend ? (
         <LayersLegend
           className="px-2 pb-1"
           counts={counts}
@@ -483,7 +556,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
             Открывает список эпох, затем зоны артефактов: зоны кликабельны и
             должны быть выше штриховки/линий.
           */}
-          {hasLayers ? (
+          {showLayers ? (
             <div
               data-testid="track-layers"
               className="pointer-events-none absolute inset-y-0"

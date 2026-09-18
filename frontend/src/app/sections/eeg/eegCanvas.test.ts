@@ -1,13 +1,15 @@
 /**
  * Тесты отрисовки холстов раздела «ЭЭГ» (срез 5, поправки ручной проверки).
  *
- * Проверяется то, чего не видно на экране с масштабом 100 %: `ctx.putImageData` —
- * единственная операция canvas, которая **игнорирует** трансформацию контекста,
- * поэтому пиксели спектрограммы обязаны набираться в разрешении холста и
- * вставляться при единичной трансформации. Без этого на экране с
- * `devicePixelRatio ≠ 1` картинка занимала лишь `1 / dpr` ширины области графика:
- * спектрограмма обрывалась до правой линейки, а её ось, курсор и маркер частоты
- * уезжали за край картинки — ровно то, что было в ручной проверке.
+ * Проверяется то, чего не видно на экране с масштабом 100 %: картинка спектрограммы
+ * приходит в холст **в разрешении данных** и растягивается композитором (`drawRaster`
+ * с `imageSmoothingEnabled = false`), а `putImageData` для этого не годится: он
+ * **игнорирует** трансформацию контекста и не умеет масштаб — на экране с
+ * `devicePixelRatio ≠ 1` картинка занимала бы лишь `1 / dpr` ширины области графика:
+ * спектрограмма обрывалась бы до правой линейки, а её ось, курсор и маркер частоты
+ * уезжали бы за край (ровно то, что было в ручной проверке среза 5). Размеры bitmap и
+ * трансформация холста — по-прежнему `setupCanvas`, а растр и его масштабирование —
+ * `drawRaster` (проверка добавлена срезом P1).
  *
  * Здесь же метки клика: линия частоты и линия уровня (у них общая реализация, поэтому
  * общая и подпись у столбца линеек), нулевая линия сигнала и рамка окна трека на
@@ -25,15 +27,16 @@ import {
   drawFreqMarker,
   drawLevelMarker,
   drawNullLine,
+  drawRaster,
   drawValueAxis,
   drawWindowFrame,
-  putImageDataAt,
   setupCanvas,
 } from './eegCanvas'
 
 type Calls = {
   setTransform: unknown[][]
   putImageData: unknown[][]
+  drawImage: unknown[][]
   moveTo: unknown[][]
   lineTo: unknown[][]
   fillRect: unknown[][]
@@ -52,6 +55,7 @@ function fakeContext(bitmapHeight = 200): {
   const calls: Calls = {
     setTransform: [],
     putImageData: [],
+    drawImage: [],
     moveTo: [],
     lineTo: [],
     fillRect: [],
@@ -78,6 +82,7 @@ function fakeContext(bitmapHeight = 200): {
     measureText: vi.fn(() => ({ width: 30 })),
     setTransform: record('setTransform'),
     putImageData: record('putImageData'),
+    drawImage: record('drawImage'),
     moveTo: record('moveTo'),
     lineTo: record('lineTo'),
     fillRect: record('fillRect'),
@@ -92,6 +97,7 @@ function fakeContext(bitmapHeight = 200): {
     textBaseline: '',
     globalAlpha: 1,
     lineWidth: 1,
+    imageSmoothingEnabled: true,
   } as unknown as CanvasRenderingContext2D
   return { ctx, calls, canvas }
 }
@@ -126,23 +132,42 @@ describe('холсты раздела «ЭЭГ»', () => {
     })
   })
 
-  it('вставляет пиксели в bitmap-координатах: putImageData не знает про трансформацию', () => {
-    withDevicePixelRatio(1.25, () => {
-      const { ctx, calls } = fakeContext()
-      const image = { width: 892, height: 276 } as ImageData
-      putImageDataAt(ctx, image, 76, 0)
-      // Трансформация снята только на время вставки: иначе пиксели легли бы в CSS-координаты
-      expect(calls.setTransform).toEqual([[1, 0, 0, 1, 0, 0]])
-      // 76 × 1.25 = 95: картинка начинается там же, где область графика на холсте
-      expect(calls.putImageData).toEqual([[image, 95, 0]])
-    })
-  })
-
-  it('при масштабе 1 пиксели ложатся как есть', () => {
+  it('растягивает растр данных на область графика без сглаживания (P1)', () => {
     const { ctx, calls } = fakeContext()
-    putImageDataAt(ctx, { width: 10, height: 10 } as ImageData, 76, 0)
-    expect(calls.putImageData[0]?.[1]).toBe(76)
-    expect(calls.putImageData[0]?.[2]).toBe(0)
+    const scratchCtx = {
+      createImageData: vi.fn((width: number, height: number) => ({
+        width,
+        height,
+        data: new Uint8ClampedArray(width * height * 4),
+      })),
+      putImageData: vi.fn(),
+    }
+    const scratch = { width: 0, height: 0, getContext: () => scratchCtx }
+    const raster = { columns: 3, rows: 2, rgba: new Uint8ClampedArray(3 * 2 * 4).fill(7) }
+
+    // Без готового посредника он создаётся сам: размер — по растру, а не по холсту
+    const createElement = vi
+      .spyOn(document, 'createElement')
+      .mockReturnValue(scratch as unknown as HTMLElement)
+    const created = drawRaster(ctx, raster, EEG_LABEL_W, 1000, 300)
+    createElement.mockRestore()
+
+    expect(created).toBe(scratch)
+    expect(scratch.width).toBe(3)
+    expect(scratch.height).toBe(2)
+    expect(scratchCtx.createImageData).toHaveBeenCalledWith(3, 2)
+    // Масштабирует композитор: drawImage в область графика, ячейки не размываются
+    expect(calls.drawImage).toEqual([[scratch, EEG_LABEL_W, 0, 1000, 300]])
+    expect(ctx.imageSmoothingEnabled).toBe(false)
+    // `putImageData` в сам холст не идёт: он бы положил растр 3 × 2 пикселя в угол
+    expect(calls.putImageData).toEqual([])
+
+    // Повторный вызов переиспользует холст: новый не создаётся
+    const secondCreate = vi.spyOn(document, 'createElement')
+    const again = drawRaster(ctx, raster, EEG_LABEL_W, 1000, 300, scratch as unknown as HTMLCanvasElement)
+    expect(again).toBe(scratch)
+    expect(secondCreate).not.toHaveBeenCalled()
+    secondCreate.mockRestore()
   })
 
   it('рисует маркер частоты линией через область графика и значением в столбце линеек', () => {

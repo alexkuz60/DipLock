@@ -85,7 +85,7 @@ describe('рабочая область раздела EDF', () => {
     expect(screen.getByText(/обработка артефактов и шума запускается отдельными действиями/)).toBeInTheDocument()
   })
 
-  it('пропускает слои записи в вьюер: зоны и легенда появляются вместе с треками', async () => {
+  it('реальной записи до расчёта слоёв не даёт: ни фикстуры, ни легенды', async () => {
     const user = userEvent.setup()
     mockApiFetch()
     stubUpload()
@@ -94,10 +94,14 @@ describe('рабочая область раздела EDF', () => {
     await user.upload(screen.getByLabelText('Выбрать файл EDF'), edfFile())
     await waitFor(() => expect(useEdfRecording.getState().signalFrames[1]).toBeTruthy())
 
-    // Слои построены под длину и монтаж записи и отрисованы поверх треков
-    expect(screen.getByTestId('track-layers')).toBeInTheDocument()
-    expect(screen.getAllByTestId(/^legend-/)).toHaveLength(4)
-    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
+    // Демо-фикстура под реальную запись не подставляется: её зоны и штриховка
+    // читались бы как детекция (ручная проверка, 19.09.2026)
+    expect(useEdfRecording.getState().layers).toBeNull()
+    expect(screen.queryByText('слои: демо-фикстура')).not.toBeInTheDocument()
+    expect(screen.queryByTestId(/^zone-/)).not.toBeInTheDocument()
+    expect(screen.queryByTestId(/^legend-/)).not.toBeInTheDocument()
+    // Живая сетка эпох по параметру панели остаётся: это геометрия, а не расчёт
+    expect(screen.getByTestId('epoch-edge-1')).toBeInTheDocument()
   })
 
   it('загружает выбранный файл: запись в сторе и треки вместо зоны загрузки', async () => {
@@ -180,6 +184,10 @@ describe('рабочая область раздела EDF', () => {
     expect(useEdfRecording.getState().demo).not.toBeNull()
     expect(await screen.findByText(/Демо-сигнал \(синтетика\)/)).toBeInTheDocument()
     expect(screen.getByTestId('track-stack')).toBeInTheDocument()
+    // Демо-режим — единственное место со слоями-фикстурой: зоны и легенда видны
+    expect(useEdfRecording.getState().layers?.source).toBe('demo')
+    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
+    expect(screen.getAllByTestId(/^legend-/)).toHaveLength(4)
     const urls = fetchMock.mock.calls.map(([url]) => String(url))
     expect(urls.every((url) => url.includes('/meta'))).toBe(true)
   })
