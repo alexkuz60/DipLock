@@ -12,10 +12,12 @@ import {
   PROJECTION_HINTS,
   PROJECTION_PADDING,
   PROJECTION_PLANES,
+  PROJECTION_SCALE,
   defaultSlices,
   mniToNormalized,
   normalizedToPx,
   planeEdgeLabels,
+  projectPoint,
   projectionBox,
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
@@ -24,11 +26,13 @@ import { MRI_SLICE_UNAVAILABLE } from '@/shared/lib/mriSlices'
 import type { MriSliceRef } from '@/shared/api/types'
 import {
   ARROW_LENGTH_MAX_PX,
+  DIPOLE_DOT_GROWTH_PX,
   DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
   DIPOLE_FRAME_HALO_RADIUS_PX,
   DIPOLE_RAY_STROKE_PX,
   FRAME_DIM_OPACITY,
+  OVERLAP_FILL_MIN_OPACITY,
   TRAIL_STROKE_PX,
   demoDipoleLayer,
   dipoleLayerFromScan,
@@ -226,7 +230,7 @@ describe('проекция мозга', () => {
     expect(screen.queryByTestId('layer-dipole-vectors-coronal')).not.toBeInTheDocument()
   })
 
-  it('рисует наконечник полигоном от длины луча, а не одним размером на проекцию', () => {
+  it('рисует наконечник залитым треугольником в уменьшенном габарите, а не фигурой на всю проекцию', () => {
     renderProjection('axial', { points: demoDipoleLayer(5, 2) })
 
     const arrow = screen.getByTestId('dipole-arrow-axial-0-0')
@@ -242,19 +246,22 @@ describe('проекция мозга', () => {
       Math.hypot(a.x - b.x, a.y - b.y)
 
     expect(vertices).toHaveLength(3)
+    // Наконечник залит цветом вектора (заливка возвращена: комок убрал уменьшенный габарит)
+    expect(arrow).toHaveAttribute('fill', 'var(--color-mri-dipole-vector)')
+    // Порядок точек — вершина, левое крыло, правое крыло
     const tip = { x: vertices[0][0], y: vertices[0][1] }
+    const left = { x: vertices[1][0], y: vertices[1][1] }
+    const right = { x: vertices[2][0], y: vertices[2][1] }
     // Наконечник продолжает луч: вершина дальше от точки, чем штрих
     expect(dist(tip, at)).toBeGreaterThan(dist(shaftEnd, at))
     // Длина наконечника — от длины луча и зажата, а не «на всю проекцию»
     expect(dist(tip, shaftEnd)).toBeGreaterThan(0)
-    expect(dist(tip, shaftEnd)).toBeLessThanOrEqual(ARROW_LENGTH_MAX_PX)
+    expect(dist(tip, shaftEnd)).toBeLessThanOrEqual(ARROW_LENGTH_MAX_PX + 1e-9)
     // Крылья симметричны: треугольник, а не «клин» в одну сторону
-    const left = { x: vertices[1][0], y: vertices[1][1] }
-    const right = { x: vertices[2][0], y: vertices[2][1] }
     expect(dist(tip, left)).toBeCloseTo(dist(tip, right), 6)
   })
 
-  it('рисует позиции белыми кольцами фиксированного размера при любой силе диполя', () => {
+  it('рисует позиции белыми кольцами: размер не зависит от силы диполя', () => {
     const layer = demoDipoleLayer(11, 4)
     const weak = { ...layer.points[0], id: 'weak', amplitudeNaM: 1 }
     const strong = { ...layer.points[1], id: 'strong', amplitudeNaM: 1000 }
@@ -274,6 +281,84 @@ describe('проекция мозга', () => {
     for (const ray of screen.queryAllByTestId(/^dipole-vector-axial-/)) {
       expect(ray).toHaveAttribute('stroke-width', String(DIPOLE_RAY_STROKE_PX))
     }
+  })
+
+  /**
+   * Кратность узла (поправка ручной проверки, 18.09.2026): в быстром режиме несколько
+   * эпох могут выбрать один узел сетки, поэтому размер кольца читает их число
+   * (Ø 6 px + 2 px за диполь), а когда диаметр упирается в предел `2 · grid_mm`
+   * (центр соседнего узла) — кратность показывает заливка от 25 %.
+   */
+  it('растит кольцо по кратности узла и включает заливку за пределом сетки', () => {
+    const layer = demoDipoleLayer(13, 3)
+    const single = { ...layer.points[0], id: 'single', overlapCount: 1 }
+    const pair = { ...layer.points[1], id: 'pair', overlapCount: 2 }
+    const crowded = { ...layer.points[2], id: 'crowded', overlapCount: 6 }
+
+    renderProjection('axial', {
+      gridMm: 5,
+      points: { points: [single, pair, crowded], source: 'demo' },
+      onSelectPoint: () => {},
+    })
+
+    // В jsdom раскладки нет: масштаб 1, атрибуты — экранные пиксели
+    expect(screen.getByTestId('dipole-dot-axial-single')).toHaveAttribute(
+      'r',
+      String(DIPOLE_DOT_RADIUS_PX),
+    )
+    expect(screen.getByTestId('dipole-dot-axial-pair')).toHaveAttribute(
+      'r',
+      String(DIPOLE_DOT_RADIUS_PX + DIPOLE_DOT_GROWTH_PX / 2),
+    )
+
+    // Предел 2 · grid_mm в единицах фигуры: дальше растёт только заливка
+    const capped = screen.getByTestId('dipole-dot-axial-crowded')
+    expect(capped).toHaveAttribute('r', String((2 * 5 * PROJECTION_SCALE) / 2))
+    expect(capped).not.toHaveAttribute('fill', 'none')
+    expect(Number(capped.getAttribute('fill-opacity'))).toBeGreaterThanOrEqual(
+      OVERLAP_FILL_MIN_OPACITY,
+    )
+    // Хит-зона растёт вместе с кольцом: по краю крупного кольца можно щёлкнуть
+    expect(
+      Number(screen.getByTestId('dipole-hit-axial-crowded').getAttribute('r')),
+    ).toBeGreaterThan(Number(capped.getAttribute('r')))
+  })
+
+  /**
+   * Цвет векторов (поправка ручной проверки): луч и наконечник приглушены
+   * (`--color-mri-dipole-vector`) относительно белых колец позиций — «куда» не
+   * спорит с «где». Выделение остаётся акцентным. Вектор кадра анимации — слой
+   * `playback`, его цвет проверяется в тестах воспроизведения и здесь не трогается.
+   */
+  it('приглушает векторы моментов, оставляя выделение акцентным', () => {
+    const layer = demoDipoleLayer(7, 2)
+    const selected = layer.points[0]
+    const other = layer.points[1]
+
+    renderProjection('axial', { points: layer, selectedPointId: selected.id })
+
+    // Обычный вектор — приглушённый красный, а не оранжевый диполя; залитый наконечник — тем же цветом
+    expect(screen.getByTestId(`dipole-vector-axial-${other.id}`)).toHaveAttribute(
+      'stroke',
+      'var(--color-mri-dipole-vector)',
+    )
+    expect(screen.getByTestId(`dipole-arrow-axial-${other.id}`)).toHaveAttribute(
+      'fill',
+      'var(--color-mri-dipole-vector)',
+    )
+    // Выделенный диполь подсвечен акцентом — и лучом, и наконечником; кольцо остаётся белым
+    expect(screen.getByTestId(`dipole-vector-axial-${selected.id}`)).toHaveAttribute(
+      'stroke',
+      'var(--color-accent)',
+    )
+    expect(screen.getByTestId(`dipole-arrow-axial-${selected.id}`)).toHaveAttribute(
+      'fill',
+      'var(--color-accent)',
+    )
+    expect(screen.getByTestId(`dipole-dot-axial-${selected.id}`)).toHaveAttribute(
+      'stroke',
+      'var(--color-mri-dipole-point)',
+    )
   })
 
   it('клик по точке выделяет диполь и наводит срезы на его позицию', () => {
@@ -360,6 +445,43 @@ describe('проекция мозга', () => {
     const [point, name] = onPick.mock.calls[0]
     expect(name).toBe(area.name)
     expect(point.z).toBe(0)
+  })
+
+  /**
+   * Перекрестие точки клика (поправка ручной проверки): клик наводит **все три**
+   * среза, и на каждой проекции рисуются XY-линии плоскостей этих срезов в точке
+   * клика — видно, где плоскости проходят, а не только «где точка».
+   */
+  it('рисует XY-линии плоскостей срезов в точке клика на каждой проекции', () => {
+    const reference = { x: 12, y: -34.5, z: 18 }
+
+    for (const plane of PROJECTION_PLANES) {
+      const view = renderProjection(plane, { reference })
+      const at = projectPoint(plane, reference)
+      const box = projectionBox(plane)
+      const vertical = screen.getByTestId(`reference-plane-${plane}-vertical`)
+      const horizontal = screen.getByTestId(`reference-plane-${plane}-horizontal`)
+
+      // Линии проходят через точку клика: вертикаль — по её x, горизонталь — по её y
+      expect(Number(vertical.getAttribute('x1'))).toBeCloseTo(at.x, 6)
+      expect(Number(vertical.getAttribute('x2'))).toBeCloseTo(at.x, 6)
+      expect(Number(horizontal.getAttribute('y1'))).toBeCloseTo(at.y, 6)
+      expect(Number(horizontal.getAttribute('y2'))).toBeCloseTo(at.y, 6)
+      // И тянутся по всей плоскости фигуры (внутри полей подписей), а не «штрихом»
+      expect(Number(vertical.getAttribute('y1'))).toBeCloseTo(PROJECTION_PADDING, 6)
+      expect(Number(vertical.getAttribute('y2'))).toBeCloseTo(box.height - PROJECTION_PADDING, 6)
+      expect(Number(horizontal.getAttribute('x1'))).toBeCloseTo(PROJECTION_PADDING, 6)
+      expect(Number(horizontal.getAttribute('x2'))).toBeCloseTo(box.width - PROJECTION_PADDING, 6)
+
+      view.unmount()
+    }
+  })
+
+  it('без точки клика перекрестия нет', () => {
+    renderProjection('axial')
+
+    expect(screen.queryByTestId('reference-axial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('reference-plane-axial-vertical')).not.toBeInTheDocument()
   })
 
   it('под курсором показывает координаты текстом, без маркера на фигуре', () => {

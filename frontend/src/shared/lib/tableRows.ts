@@ -84,6 +84,14 @@ export const TABLE_COLUMNS: TableColumn[] = [
   { key: 'y', label: 'MNI y, мм', hint: 'MNI y (мм): вперёд/назад от AC–PC', numeric: true, width: 'w-24' },
   { key: 'z', label: 'MNI z, мм', hint: 'MNI z (мм): вверх/вниз от AC–PC', numeric: true, width: 'w-24' },
   {
+    key: 'amplitude',
+    label: 'Амплитуда, нАм',
+    hint: 'Момент диполя, нА·м: порог «КД ≥» из раздела «Диполи» на таблицу не влияет',
+    numeric: true,
+    width: 'w-28',
+  },
+  { key: 'gof', label: 'GOF, %', hint: 'Goodness of fit: доля объяснённой дисперсии поля', numeric: true, width: 'w-24' },
+  {
     key: 'hemisphere',
     label: 'Полушарие',
     hint: 'Выведено из знака MNI x (x > 0 — правое): отдельного поля в результате нет',
@@ -97,14 +105,6 @@ export const TABLE_COLUMNS: TableColumn[] = [
     numeric: false,
     width: 'w-48',
   },
-  {
-    key: 'amplitude',
-    label: 'Амплитуда, нАм',
-    hint: 'Момент диполя, нА·м: порог «КД ≥» из раздела «Диполи» на таблицу не влияет',
-    numeric: true,
-    width: 'w-28',
-  },
-  { key: 'gof', label: 'GOF, %', hint: 'Goodness of fit: доля объяснённой дисперсии поля', numeric: true, width: 'w-24' },
   {
     key: 'area',
     label: 'Поле Бродмана',

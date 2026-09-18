@@ -7,6 +7,8 @@
  *
  * * `EdgeLabel` — буква направления края (L/R, A/P, S/I) с пояснением в
  *   `<title>`; сами подписи считает `planeEdgeLabels` из знаков осей;
+ * * `ReferenceCross` — перекрестие точки клика: XY-линии плоскостей MNI-срезов
+ *   в этой точке плюс короткий штрих на самой точке (поправка ручной проверки);
  * * `FrameMarker` — кадр воспроизведения траектории (срез 3.7): его обновляет
  *   контекст (`usePlaybackFrame`), поэтому статичные слои проекции при движении
  *   кадра не перерисовываются.
@@ -22,7 +24,14 @@ import {
   dipolePointTitle,
   dipoleRayVisual,
 } from '@/shared/lib/dipolePoints'
-import { projectPoint, type PlaneEdgeLabel, type ProjectionPlane } from '@/shared/lib/mriProjections'
+import {
+  PROJECTION_PADDING,
+  projectPoint,
+  type PixelPoint,
+  type PlaneEdgeLabel,
+  type ProjectionBox,
+  type ProjectionPlane,
+} from '@/shared/lib/mriProjections'
 import { layerVisible, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { usePlaybackFrame } from './playbackClock'
 
@@ -53,6 +62,87 @@ export function EdgeLabel({
       >
         {label.text}
       </text>
+    </g>
+  )
+}
+
+/** Полудлина штриха перекрестия в точке клика (px фигуры) и его толщина. */
+export const REFERENCE_TICK_PX = 6
+export const REFERENCE_TICK_STROKE_PX = 1.4
+
+/**
+ * Толщина и плотность XY-линий плоскостей срезов: линии длинные, поэтому они
+ * приглушены относительно штриха точки — иначе перекрестие спорило бы с сеткой
+ * MNI и анатомией за внимание. Пунктира нет: пунктир — признак сетки/следа среза.
+ */
+export const REFERENCE_PLANE_STROKE_PX = 1.2
+export const REFERENCE_PLANE_OPACITY = 0.55
+
+/**
+ * Перекрестие точки клика: **XY-линии плоскостей MNI-срезов** в этой точке
+ * (поправка ручной проверки) плюс короткий штрих на самой точке.
+ *
+ * Клик по проекции задаёт точку MNI (две координаты — из позиции клика, третья —
+ * из среза плоскости), и `applyPointToSlices` наводит её на **все три** среза.
+ * Линии показывают, где проходят плоскости этих срезов: на каждой проекции —
+ * вертикаль (одна ось плоскости) и горизонталь (другая), от края до края
+ * прямоугольника плоскости. Без них видно только «точку», а связь «клик →
+ * плоскости срезов» приходилось читать по подписям в панели. Штрих в центре
+ * остаётся: он отмечает саму точку клика, которой соответствуют координаты в
+ * строке под фигурой.
+ *
+ * Рисуется это **во всех трёх** проекциях (проп `reference` раздела) и не
+ * подчиняется слоям: перекрестие — состояние просмотра, а не слой данных.
+ * Цвет — токен перекрестия (`--color-accent`, как и след среза): третий синий
+ * оттенок здесь завёл бы вторую «легенду» одного и того же смысла.
+ */
+export function ReferenceCross({
+  plane,
+  at,
+  box,
+  padding = PROJECTION_PADDING,
+}: {
+  plane: ProjectionPlane
+  /** Точка клика в пикселях фигуры (`projectPoint`) */
+  at: PixelPoint
+  /** Габариты фигуры: линии тянутся по её прямоугольнику плоскости */
+  box: ProjectionBox
+  padding?: number
+}) {
+  const left = padding
+  const right = box.width - padding
+  const top = padding
+  const bottom = box.height - padding
+
+  return (
+    <g
+      data-testid={`reference-${plane}`}
+      aria-hidden
+      stroke="var(--color-accent)"
+      strokeWidth={REFERENCE_TICK_STROKE_PX}
+    >
+      {/* XY-линии плоскостей срезов: вертикаль — ось одной, горизонталь — другой */}
+      <line
+        data-testid={`reference-plane-${plane}-vertical`}
+        x1={at.x}
+        y1={top}
+        x2={at.x}
+        y2={bottom}
+        strokeWidth={REFERENCE_PLANE_STROKE_PX}
+        strokeOpacity={REFERENCE_PLANE_OPACITY}
+      />
+      <line
+        data-testid={`reference-plane-${plane}-horizontal`}
+        x1={left}
+        y1={at.y}
+        x2={right}
+        y2={at.y}
+        strokeWidth={REFERENCE_PLANE_STROKE_PX}
+        strokeOpacity={REFERENCE_PLANE_OPACITY}
+      />
+      {/* Точка клика: короткий штрих поверх линий — плотнее и заметнее самих линий */}
+      <line x1={at.x - REFERENCE_TICK_PX} y1={at.y} x2={at.x + REFERENCE_TICK_PX} y2={at.y} />
+      <line x1={at.x} y1={at.y - REFERENCE_TICK_PX} x2={at.x} y2={at.y + REFERENCE_TICK_PX} />
     </g>
   )
 }

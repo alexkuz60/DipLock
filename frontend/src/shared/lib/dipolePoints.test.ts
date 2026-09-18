@@ -7,7 +7,7 @@
  * **отображение**, не меняя результат.
  */
 import { describe, expect, it } from 'vitest'
-import { projectPoint } from './mriProjections'
+import { PROJECTION_SCALE, projectPoint } from './mriProjections'
 import { dipoleScanResultFixture } from '@/test/fixtures'
 import {
   ARROW_LENGTH_MAX_PX,
@@ -21,10 +21,13 @@ import {
   FRAME_DIM_OPACITY,
   TRAIL_STROKE_PX,
   MARKER_OPACITY_MIN,
+  DIPOLE_DOT_GROWTH_PX,
+  OVERLAP_FILL_MIN_OPACITY,
   VECTOR_MAX_PX,
   VECTOR_MIN_PX,
   demoDipoleLayer,
   dipoleArrowHead,
+  dipoleDotVisual,
   dipoleForceFraction,
   dipoleLayerFromScan,
   dipoleLayerStatus,
@@ -36,6 +39,8 @@ import {
   emptyDipoleLayer,
   hiddenByThreshold,
   thresholdDipoleLayer,
+  withOverlapCounts,
+  type DipoleLayer,
   type DipoleMarker,
   type DipolePoint,
 } from './dipolePoints'
@@ -246,5 +251,107 @@ describe('результат расчёта в слой проекций (сре
     // Нулевой порог ничего не скрывает и возвращает тот же объект слоя
     expect(thresholdDipoleLayer(layer, 0)).toBe(layer)
     expect(hiddenByThreshold(layer, 0)).toBe(0)
+  })
+})
+
+/**
+ * Кратность узла в отрисовке (поправка ручной проверки, 18.09.2026).
+ *
+ * Быстрый расчёт ищет позицию перебором узлов сетки, поэтому несколько эпох часто
+ * выбирают один узел — раньше их кольца ложились друг на друга, и «в узле три диполя»
+ * выглядело как один. Теперь размер кольца читает кратность узла (Ø 6 + 2·(n − 1) px)
+ * до предела `2 · grid_mm` (центр соседнего узла), а дальше кратность показывает
+ * заливка. Координаты, векторы и анимация не меняются — это проверяется отдельно.
+ */
+describe('кратность узла в отрисовке (поправка 18.09.2026)', () => {
+  const GRID_MM = 5
+  /** Предел диаметра для этого шага: 2 · gridMm · PROJECTION_SCALE, единиц фигуры. */
+  const LIMIT_UNITS = 2 * GRID_MM * PROJECTION_SCALE
+
+  /** Слой из трёх точек: две выбрали один узел сетки, третья — свой. */
+  function overlappedLayer(): DipoleLayer {
+    return {
+      source: 'result',
+      points: [
+        { ...POINT, id: '0-40' },
+        { ...POINT, id: '1-140' },
+        { ...POINT, id: '2-60', position: { x: 60, y: 10, z: -20 } },
+      ],
+    }
+  }
+
+  it('проставляет число диполей в узле и не меняет сами точки', () => {
+    const layer = withOverlapCounts(overlappedLayer())
+
+    expect(layer.points.map((point) => point.overlapCount)).toEqual([2, 2, 1])
+    // Порядок и координаты — из результата: кратность только добавлена
+    expect(layer.points.map((point) => point.id)).toEqual(['0-40', '1-140', '2-60'])
+    expect(layer.points[0].position).toEqual(POINT.position)
+  })
+
+  it('одну точку не трогает: считать нечего', () => {
+    const single: DipoleLayer = { source: 'result', points: [{ ...POINT, id: 'a' }] }
+    expect(withOverlapCounts(single)).toBe(single)
+  })
+
+  it('растит диаметр кольца на 2 px за каждый диполь в узле', () => {
+    // Масштаб 1:1 (в jsdom нет раскладки): единицы фигуры совпадают с пикселями экрана
+    expect(dipoleDotVisual(1, GRID_MM, 1)).toMatchObject({
+      radiusUnits: DIPOLE_DOT_RADIUS_PX,
+      fillOpacity: 0,
+      capped: false,
+    })
+    const pair = dipoleDotVisual(2, GRID_MM, 1)
+    const triple = dipoleDotVisual(3, GRID_MM, 1)
+    expect(pair.radiusUnits).toBe(DIPOLE_DOT_RADIUS_PX + DIPOLE_DOT_GROWTH_PX / 2)
+    expect(triple.radiusUnits).toBe(DIPOLE_DOT_RADIUS_PX + DIPOLE_DOT_GROWTH_PX)
+    expect(triple.capped).toBe(false)
+    expect(triple.fillOpacity).toBe(0)
+  })
+
+  it('держит экранный размер при другом масштабе фигуры', () => {
+    // Фигура растянута вдвое: те же пиксели экрана — это вдвое меньше единиц фигуры
+    const pair = dipoleDotVisual(2, 0, 2)
+    expect(pair.radiusUnits).toBe(2)
+    // В экранных пикселях радиус тот же: 2 единицы × 2 = 4 px (Ø 8 px = 6 + 2)
+    expect(pair.radiusUnits * 2).toBe(DIPOLE_DOT_RADIUS_PX + DIPOLE_DOT_GROWTH_PX / 2)
+    expect(dipoleDotVisual(3, 0, 2).radiusUnits).toBe(2.5)
+  })
+
+  it('не растёт шире 2 · grid_mm: дальше кратность читается заливкой', () => {
+    const capped = dipoleDotVisual(6, GRID_MM, 1)
+
+    expect(capped.capped).toBe(true)
+    expect(capped.radiusUnits).toBe(LIMIT_UNITS / 2)
+    expect(capped.fillOpacity).toBeGreaterThanOrEqual(OVERLAP_FILL_MIN_OPACITY)
+
+    const more = dipoleDotVisual(11, GRID_MM, 1)
+    expect(more.radiusUnits).toBe(LIMIT_UNITS / 2)
+    expect(more.fillOpacity).toBeGreaterThan(capped.fillOpacity)
+    expect(more.fillOpacity).toBeLessThanOrEqual(1)
+  })
+
+  it('без шага сетки предела нет: кольцо растёт по кратности', () => {
+    const wide = dipoleDotVisual(12, 0, 1)
+
+    expect(wide.capped).toBe(false)
+    expect(wide.fillOpacity).toBe(0)
+    expect(wide.radiusUnits).toBe(DIPOLE_DOT_RADIUS_PX + (11 * DIPOLE_DOT_GROWTH_PX) / 2)
+  })
+
+  it('не подменяет координаты: маркер не зависит от кратности', () => {
+    const [first, second] = withOverlapCounts(overlappedLayer()).points
+
+    expect(dipoleMarker('axial', first).at).toEqual(projectPoint('axial', first.position))
+    // Точки одного узла стоят в одной точке: кратность видна кольцом, а не сдвигом
+    expect(dipoleMarker('axial', second).at).toEqual(dipoleMarker('axial', first).at)
+  })
+
+  it('называет число диполей в тултипе, когда кратность посчитана', () => {
+    const [first] = withOverlapCounts(overlappedLayer()).points
+
+    expect(dipolePointTitle(first)).toContain('диполей в узле: 2')
+    // Без кратности подпись не выдумывает число
+    expect(dipolePointTitle(POINT)).not.toContain('диполей в узле')
   })
 })

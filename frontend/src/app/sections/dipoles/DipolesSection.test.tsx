@@ -10,6 +10,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PROJECTION_PLANES,
+  PROJECTION_SCALE,
   applyPointToSlices,
   defaultSlices,
   mniToNormalized,
@@ -19,7 +20,12 @@ import {
 } from '@/shared/lib/mriProjections'
 import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
-import { FRAME_DIM_OPACITY } from '@/shared/lib/dipolePoints'
+import {
+  DIPOLE_DOT_GROWTH_PX,
+  DIPOLE_DOT_RADIUS_PX,
+  FRAME_DIM_OPACITY,
+  OVERLAP_FILL_MIN_OPACITY,
+} from '@/shared/lib/dipolePoints'
 import {
   DIPOLE_PARAM_DEFAULTS,
   EMPTY_SELECTION,
@@ -115,9 +121,12 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(state.params.slices.sagittal).toBe(0)
     expect(state.selection.orientations.sagittal).toBe('midline')
 
-    // Все три проекции показывают перекрестие в выбранной точке
+    // Все три проекции показывают перекрестие в выбранной точке с XY-линиями
+    // плоскостей срезов: видно и точку клика, и где проходят плоскости
     for (const plane of ['axial', 'sagittal', 'coronal']) {
       expect(screen.getByTestId(`reference-${plane}`)).toBeInTheDocument()
+      expect(screen.getByTestId(`reference-plane-${plane}-vertical`)).toBeInTheDocument()
+      expect(screen.getByTestId(`reference-plane-${plane}-horizontal`)).toBeInTheDocument()
     }
   })
 
@@ -204,6 +213,70 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(screen.queryAllByTestId(/^dipole-dot-axial-/)).toHaveLength(0)
     expect(screen.getByText('Скрыто порогом «КД ≥ 200 нАм»: 3')).toBeInTheDocument()
     expect(screen.getByText(/Быстрый режим, сетка 7 мм/)).toBeInTheDocument()
+  })
+
+  /**
+   * Кратность узла (поправка ручной проверки, 18.09.2026).
+   *
+   * Быстрый расчёт берёт позицию перебором узлов, поэтому несколько эпох могут выбрать
+   * один узел: кольцо рисуется крупнее (+2 px к диаметру за диполь), а когда оно
+   * упирается в предел `2 · grid_mm` — кратность показывает заливка. Координаты,
+   * векторы и результат задачи при этом не меняются.
+   */
+  it('растит кольцо по числу диполей в узле и не подменяет координаты', () => {
+    const result = dipoleScanResultFixture()
+    const shared = result.points[0]
+    useDipoleCalc.setState({
+      result: {
+        ...result,
+        grid_mm: 5,
+        n_epochs_used: 3,
+        points: [
+          { ...shared, epoch_index: 0 },
+          { ...shared, epoch_index: 1 },
+          { ...result.points[1], epoch_index: 2 },
+        ],
+      },
+    })
+    renderWithProviders(<DipolesSection />)
+
+    const dots = screen.getAllByTestId(/^dipole-dot-axial-/)
+    expect(dots).toHaveLength(3)
+    const radii = dots.map((dot) => Number(dot.getAttribute('r')))
+    // Масштаб 1:1 (в jsdom нет раскладки): два диполя в одном узле — Ø 8 px, одиночный — Ø 6 px
+    expect(radii.filter((radius) => radius === DIPOLE_DOT_RADIUS_PX + DIPOLE_DOT_GROWTH_PX / 2)).toHaveLength(2)
+    expect(radii.filter((radius) => radius === DIPOLE_DOT_RADIUS_PX)).toHaveLength(1)
+    // Предел 2 · grid_mm не достигнут: заливки нет, кратность читается размером
+    for (const dot of dots) {
+      expect(dot.getAttribute('fill-opacity')).toBe('0')
+    }
+    // Тултип называет число диполей в узле
+    const paired = dots.find((dot) => dot.getAttribute('r') === String(DIPOLE_DOT_RADIUS_PX + DIPOLE_DOT_GROWTH_PX / 2))
+    expect(paired?.parentElement?.textContent).toContain('диполей в узле: 2')
+    // Координаты диполя и результат задачи не подменяются отрисовкой
+    expect(useDipoleCalc.getState().result?.points[0].mni_coords).toEqual(shared.mni_coords)
+  })
+
+  it('показывает кратность заливкой, когда кольцо упёрлось в предел сетки', () => {
+    const result = dipoleScanResultFixture()
+    const shared = result.points[0]
+    useDipoleCalc.setState({
+      result: {
+        ...result,
+        grid_mm: 5,
+        n_epochs_used: 6,
+        points: Array.from({ length: 6 }, (_, index) => ({ ...shared, epoch_index: index })),
+      },
+    })
+    renderWithProviders(<DipolesSection />)
+
+    const dots = screen.getAllByTestId(/^dipole-dot-axial-/)
+    expect(dots).toHaveLength(6)
+    // Предел диаметра — 2 · grid_mm в единицах фигуры: дальше растёт только заливка
+    expect(Number(dots[0].getAttribute('r'))).toBe((2 * 5 * PROJECTION_SCALE) / 2)
+    expect(Number(dots[0].getAttribute('fill-opacity'))).toBeGreaterThanOrEqual(
+      OVERLAP_FILL_MIN_OPACITY,
+    )
   })
 
   /**

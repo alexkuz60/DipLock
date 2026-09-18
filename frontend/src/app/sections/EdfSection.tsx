@@ -11,7 +11,9 @@
  * загруженных — переключение зума не мигает пустотой.
  *
  * Диалог выбора EDF один на раздел: его открывают и кнопка в зоне загрузки,
- * и иконка «Загрузить EDF» в тулс-хедере (через `fileDialogRequest`).
+ * и иконка «Загрузить EDF» в тулс-хедере (через `fileDialogRequest` — счётчик
+ * запросов: диалог открывается на его **изменение**, поэтому возврат в раздел
+ * с уже накопленным запросом файл не переспрашивает).
  */
 import { useQuery } from '@tanstack/react-query'
 import { FileUp, FlaskConical, X } from 'lucide-react'
@@ -36,8 +38,20 @@ function FileDialogInput({
   inputRef: RefObject<HTMLInputElement | null>
   request: number
 }) {
+  /**
+   * Последний обработанный запрос. Инициализируется текущим: счётчик
+   * `fileDialogRequest` живёт в сторе записи и не сбрасывается, поэтому при
+   * возврате в раздел («ЭЭГ» → «EDF») компонент монтируется заново при
+   * `request > 0`, и проверка «есть запрос — открыть диалог» показывала выбор
+   * файла поверх уже открытой записи (ручная проверка, 18.09.2026). Запрос
+   * должен срабатывать только на **изменение** счётчика — тот же приём, что у
+   * `handledNavSeqRef` в `TrackStack`/`EegSection`.
+   */
+  const handledRequestRef = useRef(request)
   useEffect(() => {
-    if (request > 0) inputRef.current?.click()
+    if (request === handledRequestRef.current) return
+    handledRequestRef.current = request
+    inputRef.current?.click()
   }, [inputRef, request])
 
   return (

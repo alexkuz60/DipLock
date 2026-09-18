@@ -137,10 +137,10 @@ describe('строки таблицы локализации', () => {
       'x',
       'y',
       'z',
-      'hemisphere',
-      'structure',
       'amplitude',
       'gof',
+      'hemisphere',
+      'structure',
       'area',
     ])
     expect(hiddenColumnCount(visibility)).toBe(0)

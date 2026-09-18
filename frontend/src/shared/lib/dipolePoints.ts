@@ -16,6 +16,7 @@ import {
   PLANE_HORIZONTAL_SIGN,
   PLANE_VERTICAL_SIGN,
   PROJECTION_PADDING,
+  PROJECTION_SCALE,
   projectPoint,
   type MniPoint2,
   type MniVector,
@@ -49,6 +50,16 @@ export type DipolePoint = {
    * контуры срезов). `null` — координаты/метки нет: подпись не выдумывается.
    */
   structure: string | null
+  /**
+   * Сколько диполей стоит в этом узле сетки (поправка ручной проверки, 18.09.2026).
+   *
+   * Быстрый расчёт ищет позицию перебором узлов, поэтому несколько эпох часто
+   * выбирают один и тот же узел, и их кольца рисуются ровно друг на друге. Число
+   * заполняет `withOverlapCounts` по **видимому** слою (после порога «КД»), и по нему
+   * считается размер кольца и заливка (`dipoleDotVisual`); `1`/`undefined` — узел
+   * занят одним диполем.
+   */
+  overlapCount?: number
 }
 
 /** Слой диполей: точки + флаг источника («результат задачи» или фикстура). */
@@ -124,6 +135,105 @@ export function thresholdDipoleLayer(layer: DipoleLayer, minAmplitudeNaM: number
 export function hiddenByThreshold(layer: DipoleLayer, minAmplitudeNaM: number): number {
   if (!(minAmplitudeNaM > 0)) return 0
   return layer.points.filter((point) => point.amplitudeNaM < minAmplitudeNaM).length
+}
+
+/**
+ * Прирост **диаметра** кольца позиции на каждый диполь в одном узле сетки, px
+ * (поправка ручной проверки, 18.09.2026).
+ *
+ * Быстрый расчёт ищет позицию перебором узлов, поэтому несколько эпох могут выбрать
+ * один узел — раньше их кольца рисовались ровно друг на друге, и «в узле три
+ * диполя» выглядело как один. Теперь размер кольца читает кратность узла: Ø 6 px для
+ * одиночного, +2 px на каждый следующий. Силу диполя по-прежнему кодирует луч
+ * (`dipoleRayVisual`), а не кольцо — иначе две разные величины спорили бы за один
+ * визуальный канал.
+ */
+export const DIPOLE_DOT_GROWTH_PX = 2
+
+/**
+ * Заливка включается, когда диаметр упёрся в предел (`2 · grid_mm`): дальше кратность
+ * читается плотностью заливки. 0.25 — «в узле больше диполей, чем влезает в размер»;
+ * выше предел не поднимается, чтобы заливка не превратилась в сплошное пятно.
+ */
+export const OVERLAP_FILL_MIN_OPACITY = 0.25
+
+/** Прирост заливки на «лишний» диполь: от `OVERLAP_FILL_MIN_OPACITY` до 1. */
+export const OVERLAP_FILL_GROWTH = 0.75
+
+/** Ключ позиции для поиска совпадений: миллиметры с точностью 0.001. */
+function positionKey(position: MniVector): string {
+  return `${position.x.toFixed(3)}|${position.y.toFixed(3)}|${position.z.toFixed(3)}`
+}
+
+/**
+ * Проставить точкам число диполей в их узле (`overlapCount`).
+ *
+ * Считается по **видимому** слою (после порога «КД ≥»): кольцо не должно обещать
+ * диполи, скрытые порогом. Функция чистая: координаты, порядок и сами точки не
+ * меняются, добавляется только производное число; узел с одним диполем остаётся с
+ * `1`. Если совпадений нет, возвращается тот же объект слоя.
+ */
+export function withOverlapCounts(layer: DipoleLayer): DipoleLayer {
+  if (layer.points.length < 2) return layer
+  const counts = new Map<string, number>()
+  for (const point of layer.points) {
+    const key = positionKey(point.position)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return {
+    ...layer,
+    points: layer.points.map((point) => ({
+      ...point,
+      overlapCount: counts.get(positionKey(point.position)) ?? 1,
+    })),
+  }
+}
+
+/** Геометрия кольца позиции: радиус и заливка по кратности узла. */
+export type DipoleDotVisual = {
+  /** Радиус кольца в единицах viewBox (экранный размер делится на масштаб фигуры) */
+  radiusUnits: number
+  /** Заливка внутренней области, 0…1: `0` — заливки нет */
+  fillOpacity: number
+  /** Кольцо упёрлось в предел `2 · grid_mm`: кратность показывает заливка */
+  capped: boolean
+}
+
+/**
+ * Кольцо позиции по кратности узла: Ø `6 + 2·(n − 1)` px, но не больше `2 · grid_mm`.
+ *
+ * Предел — центр соседнего узла сетки: кольцо не должно вылезать в соседнюю ячейку и
+ * выглядеть как диполь «между узлами». Когда кратность не влезает в предел, диаметр
+ * замирает, а число диполей показывает заливка — от `OVERLAP_FILL_MIN_OPACITY` (25 %)
+ * и выше. Ниже базового экранного размера предел кольцо не опускает: при мелком шаге
+ * сетки одиночный диполь не должен рисоваться мельче остальных.
+ *
+ * `gridMm <= 0` (результата нет) — предела нет, кольцо растёт как задано, заливки нет.
+ */
+export function dipoleDotVisual(
+  overlapCount: number,
+  gridMm: number,
+  pxPerUnit: number,
+): DipoleDotVisual {
+  const scale = pxPerUnit > 0 ? pxPerUnit : 1
+  const count = Number.isFinite(overlapCount) ? Math.max(1, Math.floor(overlapCount)) : 1
+  // Экранные пиксели → единицы фигуры: Ø 6 px плюс 2 px на каждый диполь в узле
+  const baseDiameter = (2 * DIPOLE_DOT_RADIUS_PX) / scale
+  const growth = DIPOLE_DOT_GROWTH_PX / scale
+  const rawDiameter = baseDiameter + growth * (count - 1)
+  const maxDiameter = gridMm > 0 ? 2 * gridMm * PROJECTION_SCALE : Number.POSITIVE_INFINITY
+
+  if (rawDiameter <= maxDiameter) {
+    return { radiusUnits: rawDiameter / 2, fillOpacity: 0, capped: false }
+  }
+  // Сколько диполей влезает в предел: дальше растёт только заливка
+  const maxCount = 1 + Math.max(0, Math.floor((maxDiameter - baseDiameter) / growth))
+  const overflow = Math.max(1, count - maxCount)
+  return {
+    radiusUnits: Math.max(baseDiameter, maxDiameter) / 2,
+    fillOpacity: Math.min(1, OVERLAP_FILL_MIN_OPACITY + (OVERLAP_FILL_GROWTH * overflow) / maxCount),
+    capped: true,
+  }
 }
 
 /** Масштаб вектора на проекции: пикселей на 1 нА·м момента. */
@@ -263,13 +373,25 @@ export type DipoleMarker = {
   vectorPx: number
 }
 
-/** Доля длины луча, уходящая под наконечник, и границы его длины, px. */
+/**
+ * Доля длины луча, уходящая под наконечник, и границы его длины, px.
+ *
+ * Наконечник **вдвое меньше** прежнего (поправка ручной проверки, 18.09.2026: 4…9 px → 2…4.5 px):
+ * при плотном облаке точек крупные залитые треугольники сливались в сплошной комок, и направление
+ * момента читалось хуже, чем по самому лучу. Ширина крыльев считается от длины (`half`), поэтому
+ * вдвое меньшая длина даёт вдвое меньший габарит по обеим осям.
+ */
 export const ARROW_LENGTH_RATIO = 0.38
-export const ARROW_LENGTH_MIN_PX = 4
-export const ARROW_LENGTH_MAX_PX = 9
+export const ARROW_LENGTH_MIN_PX = 2
+export const ARROW_LENGTH_MAX_PX = 4.5
 
 /**
- * Наконечник вектора: треугольник на конце луча плюс укороченный штрих.
+ * Наконечник вектора: залитый треугольник на конце луча плюс укороченный штрих.
+ *
+ * Размер наконечника **вдвое меньше** прежнего (поправка ручной проверки, 18.09.2026: 4…9 px →
+ * 2…4.5 px): при плотном облаке точек крупные треугольники сливались в сплошной комок, и уменьшение
+ * габарита решило это без отказа от заливки (заливка возвращена — ручная проверка). Вершина остаётся
+ * концом луча, крылья — по сторонам (порядок точек: `[вершина, левое крыло, правое крыло]`).
  *
  * `vectorPx <= 0` — направления нет (момент вдоль нормали среза): наконечника и
  * штриха тоже нет, компонент рисует точку кольцом.
@@ -333,7 +455,12 @@ export function dipoleMarker(
   }
 }
 
-/** Подпись точки для тултипа: эпоха, время, координаты, структура, амплитуда и GOF. */
+/**
+ * Подпись точки для тултипа: эпоха, время, координаты, структура, амплитуда, GOF
+ * и — когда кратность узла посчитана (`withOverlapCounts`) — число диполей в узле:
+ * в быстром режиме несколько эпох часто выбирают один узел, и по этой подписи видно,
+ * почему кольцо крупнее или залито.
+ */
 export function dipolePointTitle(point: DipolePoint): string {
   const [x, y, z] = [point.position.x, point.position.y, point.position.z]
   // Структура атласа и поле Бродмана — разные величины: первая читается из
@@ -341,7 +468,9 @@ export function dipolePointTitle(point: DipolePoint): string {
   // Обе подписываются, иначе «где диполь» выглядело бы одним и тем же вопросом.
   const anatomy = [point.structure, point.brodmannArea].filter(Boolean).join(', ')
   const suffix = anatomy ? `, ${anatomy}` : ''
-  return `Эпоха ${point.epochIndex + 1}, ${(point.timeMs / 1000).toFixed(3)} с: MNI ${x.toFixed(1)} / ${y.toFixed(1)} / ${z.toFixed(1)}${suffix}, ${point.amplitudeNaM.toFixed(1)} нАм, GOF ${(point.gof * 100).toFixed(1)} %`
+  const overlap =
+    point.overlapCount === undefined ? '' : `, диполей в узле: ${point.overlapCount}`
+  return `Эпоха ${point.epochIndex + 1}, ${(point.timeMs / 1000).toFixed(3)} с: MNI ${x.toFixed(1)} / ${y.toFixed(1)} / ${z.toFixed(1)}${suffix}, ${point.amplitudeNaM.toFixed(1)} нАм, GOF ${(point.gof * 100).toFixed(1)} %${overlap}`
 }
 
 /**

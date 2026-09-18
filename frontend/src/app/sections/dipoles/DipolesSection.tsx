@@ -60,6 +60,7 @@ import {
   dipolePointTitle,
   emptyDipoleLayer,
   hiddenByThreshold,
+  withOverlapCounts,
   thresholdDipoleLayer,
 } from '@/shared/lib/dipolePoints'
 import { api } from '@/shared/api/client'
@@ -155,6 +156,14 @@ export function DipolesSection() {
    */
   const layer = useMemo(() => (result ? dipoleLayerFromScan(result) : EMPTY_DIPOLE_LAYER), [result])
   const visibleLayer = useMemo(() => thresholdDipoleLayer(layer, threshold), [layer, threshold])
+  /**
+   * Слой для проекций: каждой точке проставляется кратность узла сетки
+   * (`overlapCount`) — по ней рисуется размер кольца и заливка (поправка ручной
+   * проверки, 18.09.2026). Считается по **видимому** слою, то есть после порога
+   * «КД ≥»: кольцо не должно обещать диполи, которые скрыты порогом. Координаты,
+   * векторы и анимация от этого не меняются — это производное число для отрисовки.
+   */
+  const displayLayer = useMemo(() => withOverlapCounts(visibleLayer), [visibleLayer])
   const hidden = hiddenByThreshold(layer, threshold)
   const mniMissing = result !== null && layer.points.length < result.points.length
   /**
@@ -165,6 +174,19 @@ export function DipolesSection() {
   const selected = selectedPointId
     ? (layer.points.find((point) => point.id === selectedPointId) ?? null)
     : null
+  /**
+   * Кратность узла для подписи выделенного диполя берётся из слоя отрисовки (с
+   * учётом порога): если диполь скрыт порогом, числа диполей в узле не показываем —
+   * «1» было бы выдумкой, а «3» не совпало бы с картинкой.
+   */
+  const selectedOverlap = selected
+    ? displayLayer.points.find((point) => point.id === selected.id)?.overlapCount
+    : undefined
+  const selectedTitle = selected
+    ? dipolePointTitle(
+        selectedOverlap === undefined ? selected : { ...selected, overlapCount: selectedOverlap },
+      )
+    : ''
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
@@ -230,8 +252,8 @@ export function DipolesSection() {
       */}
       {selected ? (
         <div className="flex flex-wrap items-center gap-2">
-          <StatusPill tone="accent" title={dipolePointTitle(selected)}>
-            {`Выделен диполь: ${dipolePointTitle(selected)}`}
+          <StatusPill tone="accent" title={selectedTitle}>
+            {`Выделен диполь: ${selectedTitle}`}
           </StatusPill>
           <Button onClick={clearSelectedPoint} title="Снять выделение со всех проекций">
             Снять выделение
@@ -253,7 +275,8 @@ export function DipolesSection() {
               plane={plane}
               slices={slices}
               visibility={visibility}
-              points={visibleLayer}
+              points={displayLayer}
+              gridMm={result?.grid_mm ?? 0}
               dimmed={playbackActive}
               selectedArea={selection.area}
               selectedStructure={selection.structure}

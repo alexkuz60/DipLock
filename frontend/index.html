@@ -4,6 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
+    <!-- Иконка приложения (мозг): файл статики из public/ — Vite сам подставит base
+         и скопирует его в корень сборки, поэтому путь пишется от корня приложения
+         (`/favicon.svg`), а не через `%BASE_URL%`: в dev тот давал двойной префикс -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>DipLock</title>
   </head>
   <body>

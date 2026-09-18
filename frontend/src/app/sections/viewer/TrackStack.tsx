@@ -9,12 +9,13 @@
  * (срез 2.5, `GET /recordings/{id}/signals?level=`) или демо-фикстура. Вьюеру
  * не важно, откуда кадр: он не хранит сырые отсчёты и не декодирует EDF.
  *
- * Интеракции: колесо — дискретный зум ×1…×16 (якорь в точке курсора),
- * drag — панорамирование, клик — поставить курсор (время под точкой клика,
- * курсор живёт до следующего клика), клик по названию канала — открыть этот
- * канал в разделе «ЭЭГ» (срез 5), стрелка под названием — развернуть трек на
- * всю высоту области (повторный клик — свернуть). Каналы включаются и
- * выключаются только чекбоксами панели «Каналы».
+ * Интеракции: колесо — **вертикальная прокрутка** стека треков (нативный скролл
+ * контейнера; зум переключают контролы — комбо-бокс `EdfZoomSelect` в шапке и
+ * селект зума в панели опций), drag — панорамирование, клик — поставить курсор
+ * (время под точкой клика, курсор живёт до следующего клика), клик по названию
+ * канала — открыть этот канал в разделе «ЭЭГ» (срез 5), стрелка под названием —
+ * развернуть трек на всю высоту области (повторный клик — свернуть). Каналы
+ * включаются и выключаются только чекбоксами панели «Каналы».
  *
  * Поверх треков — **слои результата** (срез 2.6, `viewerLayers.ts` + `TrackLayers.tsx`):
  * зоны артефактов (клик → детали: тип, интервал, каналы), границы эпох с номерами и
@@ -26,13 +27,13 @@
  * склеивается из canvas'ов треков вместе с подписями, зонами и сеткой эпох, CSV — из
  * того же кадра, что виден в окне. Экспорт клиентский: сервер не пересчитывает экран.
  *
- * Чартам отключены собственные жесты (pointer-events: none): окном управляет
- * обёртка, чтобы drag/колесо работали одинаково на всех треках.
+ * Чартам отключены собственные жесты (pointer-events: none): жесты разбирает
+ * обёртка — drag панорамирует окно одинаково на всех треках, а колесо
+ * прокручивает стек (вьюер его не перехватывает, см. ниже).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  anchoredCenter,
   clampCenter,
   panByPixels,
   xToTime,
@@ -234,37 +235,15 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navRequest?.seq])
 
-  // Колесо = дискретный зум (нативный слушатель: React вешает wheel как passive,
-  // а нам нужен preventDefault, чтобы колесо не скроллило область)
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el) return
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault()
-      const state = useEdfParams.getState()
-      const level = state.params.timeLevel
-      const next = Math.min(
-        Math.max(level + (event.deltaY < 0 ? 1 : -1), 0),
-        TIME_LEVELS.length - 1,
-      )
-      if (next === level) return
-
-      const rect = el.getBoundingClientRect()
-      const trackWidth = Math.max(1, rect.width - LABEL_WIDTH - 8)
-      const xPx = Math.min(Math.max(event.clientX - rect.left - LABEL_WIDTH - 4, 0), trackWidth)
-      const oldWin = zoomWindow(signal.durationSec, TIME_LEVELS[level], centerSec)
-      const fraction = xPx / trackWidth
-      // Якорь зума — время под курсором (та же функция, что у слоёв и курсора)
-      const cursorSec = xToTime(xPx, oldWin, trackWidth)
-
-      const newWidth = signal.durationSec / TIME_LEVELS[next]
-      setCenterSec(anchoredCenter(cursorSec, fraction, newWidth, signal.durationSec))
-      state.setParams({ timeLevel: next })
-    }
-    el.addEventListener('wheel', onWheel, { passive: false })
-    return () => el.removeEventListener('wheel', onWheel)
-  }, [signal, centerSec])
-
+  /*
+   * Колесо мыши **не перехватывается** — оно прокручивает стек треков (ручная
+   * проверка, 18.09.2026). Раньше здесь висел нативный `wheel`-слушатель с
+   * `preventDefault` и дискретным зумом ×1…×16 с якорем в точке курсора: при
+   * 18+ каналах он отнимал главный способ добраться до нижних треков, а зум и
+   * так есть в контролах (`EdfZoomSelect` и кнопки листания в шапке, селект зума
+   * в панели опций). Горизонтальный скролл при этом не нужен: окно времени
+   * двигается drag-панорамированием (`overflow-x-hidden` у контейнера).
+   */
   // Drag = панорамирование
   useEffect(() => {
     const el = wrapRef.current
@@ -450,9 +429,9 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
           amplitudeScaleUv={params.amplitudeScaleUv}
         />
         <span className="ml-auto truncate">
-          Колесо — зум · drag — панорама · клик — курсор · клик по названию — канал в
-          разделе «ЭЭГ» · стрелка у названия — развернуть трек · Ctrl+двойной клик — блокировка
-          эпохи
+          Колесо — прокрутка треков · зум — селект «Зум отрисовки ЭЭГ» · drag — панорама · клик —
+          курсор · клик по названию — канал в разделе «ЭЭГ» · стрелка у названия — развернуть
+          трек · Ctrl+двойной клик — блокировка эпохи
         </span>
       </div>
 

@@ -5,7 +5,7 @@
  * расширению/размеру, загрузку с прогрессом и результат в сторе. Рендер треков
  * отдельно покрыт в `viewer/TrackStack.test.tsx`.
  */
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EdfSection } from './EdfSection'
@@ -197,5 +197,38 @@ describe('рабочая область раздела EDF', () => {
       ),
     )
     expect(useEdfParams.getState().params.visibleChannels.length).toBeGreaterThan(0)
+  })
+
+  /**
+   * Диалог выбора файла не открывается при возврате в раздел (ручная проверка, 18.09.2026).
+   *
+   * `fileDialogRequest` — накопительный счётчик в сторе записи, и `FileDialogInput` раньше
+   * открывал диалог при любом `request > 0`: после первого клика по иконке «Загрузить EDF»
+   * каждый переход «ЭЭГ» → «EDF» показывал выбор файла поверх уже открытой записи. Запрос
+   * обязан срабатывать только на **изменение** счётчика (приём `handledNavSeqRef`).
+   */
+  it('не открывает диалог выбора файла при возврате в раздел с накопленным запросом', () => {
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture, fileDialogRequest: 0 })
+    const clickSpy = vi.spyOn(HTMLElement.prototype, 'click')
+
+    const first = renderWithProviders(<EdfSection />)
+    // Первое монтирование: запросов ещё не было — диалог не открывается
+    expect(clickSpy).not.toHaveBeenCalled()
+
+    // Иконка «Загрузить EDF» в шапке растит счётчик — диалог открывается
+    act(() => useEdfRecording.getState().requestFileDialog())
+    expect(clickSpy).toHaveBeenCalledTimes(1)
+
+    // Уход в «ЭЭГ» и возврат: старый запрос не должен открывать диалог заново
+    first.unmount()
+    clickSpy.mockClear()
+    renderWithProviders(<EdfSection />)
+    expect(clickSpy).not.toHaveBeenCalled()
+
+    // Новый клик в шапке после возврата работает как раньше
+    act(() => useEdfRecording.getState().requestFileDialog())
+    expect(clickSpy).toHaveBeenCalledTimes(1)
+    clickSpy.mockRestore()
   })
 })

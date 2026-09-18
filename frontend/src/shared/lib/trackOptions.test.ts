@@ -57,7 +57,7 @@ describe('опции трека uPlot', () => {
     const upper = makeTrackOptions(600, TRACK_HEIGHT, WINDOW, [-50, 50], false)
     expect(upper.axes?.[0]).toMatchObject({ show: false })
 
-    // Собственные жесты чарта и легенда выключены: drag/колесо разбирает обёртка
+    // Собственные жесты чарта и легенда выключены: жесты разбирает обёртка (`TrackStack`)
     expect(bottom.legend?.show).toBe(false)
     expect(bottom.cursor?.show).toBe(false)
 

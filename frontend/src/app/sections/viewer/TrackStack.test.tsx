@@ -137,6 +137,28 @@ describe('вьюер треков', () => {
     expect(screen.getByText('×4')).toBeInTheDocument()
   })
 
+  /**
+   * Колесо мыши (ручная проверка, 18.09.2026): **вертикальная прокрутка** стека,
+   * а не зум. Раньше вьюер вешал нативный `wheel`-слушатель с `preventDefault` и
+   * менял уровень зума с якорем в точке курсора — при 18+ каналах до нижних
+   * треков было не добраться колесом. Теперь событие не отменяется (браузер
+   * прокручивает контейнер), а зум меняют контролы шапки/панели.
+   */
+  it('не перехватывает колесо мыши: прокрутка треков, зум — только у контролов', () => {
+    paramsState({ visibleChannels: ['F3', 'F4', 'C3'], timeLevel: 2 })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    const region = screen.getByRole('region', { name: 'Треки ЭЭГ' })
+    const before = useEdfParams.getState().params.timeLevel
+
+    // `fireEvent` возвращает результат `dispatchEvent`: `true` — событие не отменено,
+    // значит браузер прокрутит контейнер своим механизмом
+    expect(fireEvent.wheel(region, { deltaY: -120 })).toBe(true)
+    expect(fireEvent.wheel(region, { deltaY: 120 })).toBe(true)
+    // Уровень зума колесом не меняется — зум переключают селект шапки и панели
+    expect(useEdfParams.getState().params.timeLevel).toBe(before)
+  })
+
   it('стрелка у названия канала разворачивает трек, повторный клик — сворачивает (срез 2.9)', async () => {
     const user = userEvent.setup()
     paramsState({ visibleChannels: ['F3', 'F4', 'C3'] })

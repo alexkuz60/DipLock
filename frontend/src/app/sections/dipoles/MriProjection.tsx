@@ -15,15 +15,19 @@
  * **разные слои** (срез 3.5): «где» и «куда» отвечают на разные вопросы, и при
  * плотном облаке точек лучи мешают читать позиции (и наоборот).
  *
- * Позиция диполя — белое кольцо **фиксированного экранного размера** (Ø 6 px,
- * штрих 2 px при любом размере окна: фигура растягивается по ширине колонки,
- * поэтому геометрия кольца делится на масштаб `renderedWidth / viewBox.width`,
- * который отслеживает ResizeObserver). Выделенный диполь залит оранжево-жёлтым.
- * Сила момента видна по лучу (`dipoleRayVisual` в `shared/lib/dipolePoints.ts`),
- * а не по размеру кольца; толщина луча тоже фиксирована (2 px по экрану), как и
- * штрих кольца. Наконечник вектора рисуется полигоном с длиной от длины луча:
- * размер `<marker>` SVG один на всю проекцию, поэтому на коротком луче стрелка
- * накрывала бы весь луч, а на длинном выглядела бы точкой.
+ * Позиция диполя — кольцо **фиксированного экранного штриха** (2 px при любом
+ * размере окна: фигура растягивается по ширине колонки, поэтому геометрия кольца
+ * делится на масштаб `renderedWidth / viewBox.width`, который отслеживает
+ * ResizeObserver). **Диаметр кольца читает кратность узла сетки** (поправка ручной
+ * проверки, 18.09.2026): в быстром режиме несколько эпох часто выбирают один узел, и
+ * Ø растёт на 2 px за каждый диполь в узле, пока не упрётся в предел `2 · grid_mm`
+ * (центр соседнего узла) — дальше число диполей показывает заливка от 25 %
+ * (`dipoleDotVisual`). Силу момента кодирует **луч** (`dipoleRayVisual`), а не
+ * кольцо: две величины в одном канале спорили бы. Выделенный диполь залит акцентным
+ * цветом целиком. Толщина луча тоже фиксирована (2 px по экрану), как и штрих
+ * кольца. Наконечник вектора рисуется полигоном с длиной от длины луча: размер
+ * `<marker>` SVG один на всю проекцию, поэтому на коротком луче стрелка накрывала бы
+ * весь луч, а на длинном выглядела бы точкой.
  *
  * Клик по точке **выделяет диполь** (`onSelectPoint`) **и наводит срезы** на его
  * позицию (`onPick`): поправка ручной проверки — срезы обязаны меняться при
@@ -32,6 +36,12 @@
  *
  * Координаты под курсором — только текстом в строке под фигурой: маркера,
  * бегающего за мышью, нет, чтобы его не путали с кольцами диполей.
+ *
+ * Перекрестие точки клика (`reference`, часть `ReferenceCross`) — **XY-линии
+ * плоскостей MNI-срезов** в этой точке (поправка ручной проверки): клик наводит
+ * все три среза, и линии показывают, где эти плоскости проходят на каждой фигуре.
+ * Короткий штрих в центре отмечает саму точку клика, а слой это не гасит:
+ * перекрестие — состояние просмотра, а не данные.
  *
  * Кадр воспроизведения (срез 3.7) рисуется отдельным компонентом `FrameMarker`:
  * он берёт кадр из контекста (`PlaybackFrame.tsx`) и потому обновляется сам, а
@@ -89,11 +99,11 @@ import {
 } from '@/shared/lib/atlasContours'
 import type { ContourSlice, MriSliceRef } from '@/shared/api/types'
 import {
-  DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
   DIPOLE_RAY_STROKE_PX,
   DOT_HIT_RADIUS_PX,
   FRAME_DIM_OPACITY,
+  dipoleDotVisual,
   dipoleMarker,
   dipolePointTitle,
   dipoleRayVisual,
@@ -102,7 +112,7 @@ import {
 } from '@/shared/lib/dipolePoints'
 import { layerVisible, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { cx } from '@/shared/ui/cx'
-import { EdgeLabel, FrameMarker } from './MriProjectionParts'
+import { EdgeLabel, FrameMarker, ReferenceCross } from './MriProjectionParts'
 
 export type MriProjectionProps = {
   plane: ProjectionPlane
@@ -115,6 +125,12 @@ export type MriProjectionProps = {
    * точки придут из результата задачи (следующий срез фазы 3).
    */
   points?: DipoleLayer
+  /**
+   * Шаг сетки расчёта, мм (`result.grid_mm`): задаёт предел роста кольца —
+   * `2 · gridMm`. Без него (или `<= 0`) кольцо растёт по кратности узла без предела,
+   * и заливка не включается.
+   */
+  gridMm?: number
   /** Выделенное поле Бродмана: подсвечивается, остальные приглушаются */
   selectedArea?: string | null
   /** Выделенная структура атласа (имя метки) — подсвечивается, как и поле */
@@ -135,7 +151,7 @@ export type MriProjectionProps = {
   selectedPointId?: string | null
   /** Клик по точке диполя: выделить (или снять — `null` при повторном клике) и навести срезы (`onPick`) */
   onSelectPoint?: (id: string | null) => void
-  /** Референс-точка сессии (перекрестие на всех проекциях) */
+  /** Референс-точка сессии: XY-линии плоскостей MNI-срезов в точке клика на всех проекциях */
   reference?: MniVector | null
   /**
    * Ссылка на срезы МРТ из `/meta` (срез 3.2). Без неё слой `mri` просто не
@@ -154,6 +170,7 @@ export function MriProjection({
   slices,
   visibility,
   points = emptyDipoleLayer(),
+  gridMm = 0,
   selectedArea = null,
   selectedStructure = null,
   contours = null,
@@ -203,7 +220,6 @@ export function MriProjection({
     observer.observe(element)
     return () => observer.disconnect()
   }, [box.width])
-  const dotRadiusPx = DIPOLE_DOT_RADIUS_PX / pxPerUnit
   const dotStrokePx = DIPOLE_DOT_STROKE_PX / pxPerUnit
   const rayStrokePx = DIPOLE_RAY_STROKE_PX / pxPerUnit
   /**
@@ -249,8 +265,10 @@ export function MriProjection({
         point,
         marker: dipoleMarker(plane, point),
         visual: dipoleRayVisual(point.amplitudeNaM),
+        // Кольцо: Ø растёт с кратностью узла, предел — 2 · gridMm (см. dipoleDotVisual)
+        dot: dipoleDotVisual(point.overlapCount ?? 1, gridMm, pxPerUnit),
       })),
-    [plane, points],
+    [plane, points, gridMm, pxPerUnit],
   )
 
   const referencePx = reference ? projectPoint(plane, reference) : null
@@ -568,6 +586,14 @@ export function MriProjection({
             {markers.map(({ point, marker, visual }) => {
               if (!marker.end || !marker.shaftEnd || !marker.head) return null
               const selected = selectedPointId === point.id
+              /**
+               * Цвет луча — **приглушённый** токен (`--color-mri-dipole-vector`),
+               * а не оранжевый диполя: векторы («куда») не должны спорить с
+               * кольцами позиций («где»). Выделение остаётся акцентным, а вектор
+               * кадра анимации (`MriProjectionParts.FrameMarker`) не затрагивается:
+               * приглушение — признак облака, а не кадра.
+               */
+              const rayColor = selected ? 'var(--color-accent)' : 'var(--color-mri-dipole-vector)'
               return (
                 <g key={point.id} data-testid={`dipole-ray-${plane}-${point.id}`}>
                   <title>{dipolePointTitle(point)}</title>
@@ -577,15 +603,19 @@ export function MriProjection({
                     y1={marker.at.y}
                     x2={marker.shaftEnd.x}
                     y2={marker.shaftEnd.y}
-                    stroke={selected ? 'var(--color-accent)' : 'var(--color-mri-dipole)'}
+                    stroke={rayColor}
                     strokeWidth={rayStrokePx}
                     strokeOpacity={selected ? 1 : visual.opacity * dim}
                   />
-                  {/* Наконечник: полигон от длины луча, а не `<marker>` на всю проекцию */}
+                  {/*
+                    Наконечник: залитый треугольник от длины луча (вдвое меньший, чем раньше),
+                    а не `<marker>` на всю проекцию. Вершина — конец луча, крылья — по сторонам
+                    от неё; размер уменьшен, поэтому заливка больше не сливается в комок.
+                  */}
                   <polygon
                     data-testid={`dipole-arrow-${plane}-${point.id}`}
                     points={marker.head.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')}
-                    fill={selected ? 'var(--color-accent)' : 'var(--color-mri-dipole)'}
+                    fill={rayColor}
                     fillOpacity={selected ? 1 : visual.opacity * dim}
                   />
                 </g>
@@ -596,8 +626,10 @@ export function MriProjection({
 
         {layerVisible(visibility, 'dipoles') ? (
           <g data-testid={`layer-dipoles-${plane}`}>
-            {markers.map(({ point, marker }) => {
+            {markers.map(({ point, marker, dot }) => {
               const selected = selectedPointId === point.id
+              /** Заливка: выделение — акцент, кратность узла — цветом кольца */
+              const filled = selected || dot.fillOpacity > 0
               return (
                 <g
                   key={point.id}
@@ -606,35 +638,43 @@ export function MriProjection({
                 >
                   <title>{dipolePointTitle(point)}</title>
                   {/*
-                    Кольцо позиции: белое, фиксированного экранного размера
-                    (Ø 6 px, штрих 2 px) — пиксели поделены на масштаб фигуры.
-                    Выделенный диполь залит оранжево-жёлтым; сила момента
-                    читается по лучу, а не по размеру кольца.
+                    Кольцо позиции: Ø 6 px плюс 2 px на каждый диполь в узле (кратность
+                    узла сетки), штрих 2 px — пиксели поделены на масштаб фигуры.
+                    Кольцо не растёт шире `2 · grid_mm` (центр соседнего узла): когда
+                    диполей больше, число читается заливкой от 25 % (`dipoleDotVisual`).
+                    Сила момента по-прежнему читается по лучу, а не по размеру кольца.
                   */}
                   <circle
                     data-testid={`dipole-dot-${plane}-${point.id}`}
                     cx={marker.at.x}
                     cy={marker.at.y}
-                    r={dotRadiusPx}
-                    fill={selected ? 'var(--color-mri-dipole)' : 'none'}
+                    r={dot.radiusUnits}
+                    fill={
+                      selected
+                        ? 'var(--color-mri-dipole)'
+                        : filled
+                          ? 'var(--color-mri-dipole-point)'
+                          : 'none'
+                    }
+                    fillOpacity={selected ? 1 : dot.fillOpacity}
                     stroke="var(--color-mri-dipole-point)"
                     strokeWidth={dotStrokePx}
                     strokeOpacity={selected ? 1 : dim}
                   />
                   {/*
-                    Хит-зона выделения: попасть в кольцо диаметром 6 px мышью
-                    трудно, поэтому клик принимает невидимый круг большего радиуса.
-                    Он гасит всплытие, чтобы клик не обработался дважды (фигура
-                    навела бы срезы на «сырую» точку клика у края хит-зоны), и сам
-                    наводит срезы на точную позицию диполя: срезы меняются при
-                    любом клике.
+                    Хит-зона выделения: попасть в тонкое кольцо мышью трудно, поэтому
+                    клик принимает невидимый круг большего радиуса — и он растёт вместе
+                    с кольцом, иначе по краю крупного «мульти-дипольного» кольца нельзя
+                    было бы щёлкнуть. Хит-зона гасит всплытие, чтобы клик не обработался
+                    дважды (фигура навела бы срезы на «сырую» точку клика у края зоны),
+                    и сама наводит срезы на точную позицию диполя.
                   */}
                   {onSelectPoint ? (
                     <circle
                       data-testid={`dipole-hit-${plane}-${point.id}`}
                       cx={marker.at.x}
                       cy={marker.at.y}
-                      r={DOT_HIT_RADIUS_PX}
+                      r={Math.max(DOT_HIT_RADIUS_PX, dot.radiusUnits + 2)}
                       fill="transparent"
                       className="cursor-pointer"
                       onClick={(event) => {
@@ -659,27 +699,10 @@ export function MriProjection({
             кадр рисуется поверх остальных слоёв и не зависит от слоёв облака */}
         <FrameMarker plane={plane} visibility={visibility} pxPerUnit={pxPerUnit} />
 
-        {referencePx ? (
-          <g
-            data-testid={`reference-${plane}`}
-            aria-hidden
-            stroke="var(--color-accent)"
-            strokeWidth={1.4}
-          >
-            <line
-              x1={referencePx.x - 6}
-              y1={referencePx.y}
-              x2={referencePx.x + 6}
-              y2={referencePx.y}
-            />
-            <line
-              x1={referencePx.x}
-              y1={referencePx.y - 6}
-              x2={referencePx.x}
-              y2={referencePx.y + 6}
-            />
-          </g>
-        ) : null}
+        {/* Перекрестие точки клика: XY-линии плоскостей MNI-срезов в этой точке —
+            видно, какие срезы выбраны, а не только «где щёлкнули» (часть
+            `ReferenceCross`). Слоям оно не подчиняется: это состояние просмотра. */}
+        {referencePx ? <ReferenceCross plane={plane} at={referencePx} box={box} /> : null}
 
         {/* Края фигуры подписаны по знакам осей: L/R, A/P, S/I */}
         <EdgeLabel

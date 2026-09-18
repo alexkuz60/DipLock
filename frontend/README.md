@@ -23,6 +23,7 @@ cd ../backend && venv/bin/uvicorn app.main:app --reload --port 8000
 ## Структура
 
 ```
+public/              # статика сборки «как есть»: favicon.svg (иконка-«мозг») → /ui/favicon.svg
 src/
 ├── app/
 │   ├── layout/      # каркас: рейл разделов, тулс-хедер, правый сайдбар, статусбар
