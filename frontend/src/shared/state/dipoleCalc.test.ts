@@ -442,6 +442,9 @@ describe('кадр воспроизведения в состоянии расч
 
     useDipoleCalc.getState().setPlaybackSpeed(4)
     expect(useDipoleCalc.getState().playback.speed).toBe(4)
+    // Замедление — тоже допустимая скорость (поправка ручной проверки)
+    useDipoleCalc.getState().setPlaybackSpeed(0.25)
+    expect(useDipoleCalc.getState().playback.speed).toBe(0.25)
     // Скорости ×3 в UI нет: чужое значение не должно дойти до часов
     useDipoleCalc.getState().setPlaybackSpeed(3)
     expect(useDipoleCalc.getState().playback.speed).toBe(1)

@@ -81,6 +81,28 @@ describe('строка анатомии кадра воспроизведени�
     expect(anatomyLine()).toHaveTextContent('Кадр: эпоха 1 — таламус (слева), BA17-lh')
   })
 
+  it('держит локацию и переход одной строкой: текст читается как одна фраза', () => {
+    renderLine({
+      epochIndex: 0,
+      points: [
+        scanPoint(0),
+        scanPoint(1),
+        scanPoint(2, {
+          anatomical_structure: 'прецентральная извилина (слева)',
+          brodmann_area: 'BA4-lh',
+        }),
+      ],
+    })
+
+    const text = anatomyLine().textContent ?? ''
+    expect(text).toBe(
+      'Кадр: эпоха 1 — таламус (слева), BA17-lh · дальше: эпоха 3 (2.100 с) → ' +
+        'прецентральная извилина (слева), BA4-lh',
+    )
+    // Одной строкой: перевода строки в разметке нет — подпись читается одной фразой
+    expect(text).not.toContain('\n')
+  })
+
   it('следует за кадром: перевод на другую эпоху меняет подпись', () => {
     renderLine({
       epochIndex: 0,

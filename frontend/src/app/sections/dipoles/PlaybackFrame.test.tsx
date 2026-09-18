@@ -10,6 +10,7 @@
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import type { PlaybackSpeed } from '@/shared/lib/playback'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { dipoleScanResultFixture } from '@/test/fixtures'
 import { PlaybackFrameProvider } from './PlaybackFrame'
@@ -48,7 +49,9 @@ function trailCount(): number {
 }
 
 /** Результат фикстуры: нарезка 1000 мс, 4 эпохи, точки у эпох 0…2 (у 3-й нет MNI) */
-function setResult(options: { playing?: boolean; speed?: 1 | 2 | 4; epochIndex?: number } = {}) {
+function setResult(
+  options: { playing?: boolean; speed?: PlaybackSpeed; epochIndex?: number } = {},
+) {
   useDipoleCalc.setState({
     result: dipoleScanResultFixture(),
     playback: {
@@ -130,6 +133,21 @@ describe('часы воспроизведения траектории', () => {
 
     // 1500 мс реального времени ×2 = 3000 мс записи → третья эпоха
     expect(useDipoleCalc.getState().playback.epochIndex).toBe(2)
+  })
+
+  it('замедляется: ×0.5 проходит вдвое меньше записи за то же время', () => {
+    setResult({ playing: true, speed: 0.5 })
+    renderClock()
+
+    advance(1000)
+
+    // 1000 мс реального времени ×0.5 ≈ 500 мс записи: первая эпоха ещё идёт
+    expect(useDipoleCalc.getState().playback.epochIndex).toBe(0)
+    const [timeMs, fraction] = frameText().split('|')
+    expect(Number(timeMs)).toBeGreaterThan(400)
+    expect(Number(timeMs)).toBeLessThan(600)
+    expect(Number(fraction)).toBeGreaterThan(0.4)
+    expect(Number(fraction)).toBeLessThan(0.6)
   })
 
   it('останавливается в конце записи, вставая на последнюю эпоху', () => {

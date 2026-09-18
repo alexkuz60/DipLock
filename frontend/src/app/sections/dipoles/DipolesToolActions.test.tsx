@@ -177,12 +177,26 @@ describe('тулс-хедер раздела «Диполи»', () => {
       epochIndex: 1,
     })
 
-    await user.click(screen.getByRole('button', { name: 'Скорость ×4' }))
+    // Скорость — выпадающим списком (поправка ручной проверки: экономия места в хедере)
+    const speed = screen.getByLabelText('Скорость воспроизведения')
+    expect(within(speed).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      '×0.25',
+      '×0.5',
+      '×1',
+      '×2',
+      '×4',
+    ])
+    expect(speed).toHaveValue('1')
+
+    await user.selectOptions(speed, '4')
     expect(useDipoleCalc.getState().playback.speed).toBe(4)
-    expect(screen.getByRole('button', { name: 'Скорость ×4' })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    )
+    expect(speed).toHaveValue('4')
+
+    // Замедление (поправка ручной проверки): ×0.25 и ×0.5 — чтобы успеть прочитать подписи
+    await user.selectOptions(speed, '0.25')
+    expect(useDipoleCalc.getState().playback.speed).toBe(0.25)
+    await user.selectOptions(speed, '0.5')
+    expect(useDipoleCalc.getState().playback.speed).toBe(0.5)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 

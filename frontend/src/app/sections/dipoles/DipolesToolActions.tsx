@@ -15,8 +15,9 @@
  * * без загруженной записи кнопка выключена с объяснением: расчёт идёт по файлу
  *   записи на сервере, а не по демо-сигналу;
  * * воспроизведение траектории (`PlaybackControls`) — тоже **команды**: play/pause,
- *   покадрово и скорость меняют состояние раздела, а сам кадр ведут часы в рабочей
- *   области (`PlaybackFrame.tsx`). Здесь же видно, какой кадр показан, и что
+ *   покадрово и скорость (выпадающим списком — экономия места в хедере) меняют
+ *   состояние раздела, а сам кадр ведут часы в рабочей области
+ *   (`PlaybackFrame.tsx`). Здесь же видно, какой кадр показан, и что
  *   интерполяция между эпохами — отображение, а не измерение.
  *
  * Справа, у края полосы, живёт кнопка «Справка»: пояснения к проекциям, слоям,
@@ -29,6 +30,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
+  Gauge,
   Grid2x2,
   Loader2,
   Pause,
@@ -94,7 +96,12 @@ export function CalcProgress({ className }: { className?: string }) {
 
 /**
  * Кластер воспроизведения траектории (срез 3.7): play/pause, покадрово, скорость
- * ×1/×2/×4, снятие кадра и подпись текущей эпохи.
+ * ×0.25/×0.5/×1/×2/×4 **выпадающим списком**, снятие кадра и подпись текущей эпохи.
+ *
+ * Скорость — список, а не ряд кнопок (поправка ручной проверки, 18.09.2026): пять
+ * кнопок занимали в хедере больше места, чем весь остальной кластер, а выбирают
+ * скорость редко и одним значением. Список — нативный `<select>` того же вида, что
+ * «Канал» в ЭЭГ и «Масштаб» во вьюере, поэтому клавиатура и прокрутка системные.
  *
  * Здесь только **команды**: всё уходит в состояние раздела, а кадр ведут часы
  * рабочей области (`PlaybackFrame.tsx`) — прямых «ручек» у проекций нет.
@@ -143,34 +150,28 @@ export function PlaybackControls() {
         onClick={() => stepPlaybackEpoch(1)}
       />
 
-      {/* Скорость: 1 — реальное время записи, 2 и 4 — ускорение (требование среза) */}
-      <div
-        role="group"
-        aria-label="Скорость воспроизведения"
-        title="Скорость кадра: ×1 — реальное время записи, ×2 и ×4 — ускорение"
-        className="flex items-center gap-1"
-      >
-        {PLAYBACK_SPEEDS.map((speed) => {
-          const active = speed === playback.speed
-          return (
-            <button
-              key={speed}
-              type="button"
-              aria-pressed={active}
-              aria-label={`Скорость ×${speed}`}
-              onClick={() => setPlaybackSpeed(speed)}
-              className={cx(
-                'tnum rounded-lg border px-2 py-1 text-sm transition-colors',
-                active
-                  ? 'border-accent/60 bg-accent-soft text-fg-0'
-                  : 'border-border bg-bg-2 text-fg-1 hover:bg-bg-3 hover:text-fg-0',
-              )}
-            >
+      {/*
+        Скорость — выпадающий список: 0.25 и 0.5 — замедление (успеть прочитать
+        подписи кадра), 1 — реальное время записи, 2 и 4 — ускорение (требование
+        среза + ручная проверка). Вид — как у «Канала» в ЭЭГ: иконка + нативный
+        `<select>`, чтобы хедер не разрастался рядом одинаковых кнопок.
+      */}
+      <label className="flex items-center gap-2 text-sm text-fg-2">
+        <Gauge className="size-4 shrink-0" aria-hidden />
+        <select
+          aria-label="Скорость воспроизведения"
+          title="Скорость кадра: ×0.25 и ×0.5 — замедление, ×1 — реальное время записи, ×2 и ×4 — ускорение"
+          value={String(playback.speed)}
+          onChange={(event) => setPlaybackSpeed(Number(event.target.value))}
+          className="tnum rounded-lg border border-border bg-bg-2 px-2 py-1.5 text-sm text-fg-0"
+        >
+          {PLAYBACK_SPEEDS.map((speed) => (
+            <option key={speed} value={speed}>
               {`×${speed}`}
-            </button>
-          )
-        })}
-      </div>
+            </option>
+          ))}
+        </select>
+      </label>
 
       {playback.active ? (
         <>

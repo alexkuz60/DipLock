@@ -25,8 +25,12 @@ import { atlasLabels, type DipolePoint } from './dipolePoints'
 import type { MniVector } from './mriProjections'
 import type { DipoleScanResult } from '@/shared/api/types'
 
-/** Скорости воспроизведения: 1 — реальное время записи, 2 и 4 — ускорение */
-export const PLAYBACK_SPEEDS = [1, 2, 4] as const
+/**
+ * Скорости воспроизведения: **0.25 и 0.5 — замедление** (поправка ручной проверки,
+ * 18.09.2026: на ×1 подписи кадра не успеть прочитать), 1 — реальное время записи,
+ * 2 и 4 — ускорение.
+ */
+export const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4] as const
 
 export type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number]
 

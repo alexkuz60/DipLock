@@ -32,6 +32,16 @@ import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
 import { StatusPill } from '@/shared/ui/StatusPill'
 
+/**
+ * Крупный текст подписи (поправка ручной проверки): строка стоит над рядом
+ * проекций отдельной полосой, и её читают «на бегу» кадра — поэтому размер больше
+ * стандартного `text-sm` у `StatusPill` (класс задаётся на своём элементе, без
+ * переопределения базовых классов контрола вразрез порядку утилит). Текст —
+ * **одной строкой** (`text-lg`): локация и переход читаются как одна фраза и
+ * влезают в ширину рабочей области.
+ */
+const ANATOMY_TEXT_CLASS = 'text-lg leading-snug'
+
 export function PlaybackAnatomyLine() {
   const result = useDipoleCalc((state) => state.result)
   const epochIndex = useDipoleCalc((state) => state.playback.epochIndex)
@@ -59,9 +69,10 @@ export function PlaybackAnatomyLine() {
     return (
       <StatusPill
         tone="warn"
+        className="w-full"
         title="Эпоха отброшена нарезкой (reject) или у её точки нет MNI (fsaverage недоступен): анатомии в результате нет, и подставлять чужую нельзя."
       >
-        {`Кадр: эпоха ${epoch} — диполя с MNI нет`}
+        <span className={ANATOMY_TEXT_CLASS}>{`Кадр: эпоха ${epoch} — диполя с MNI нет`}</span>
       </StatusPill>
     )
   }
@@ -70,9 +81,10 @@ export function PlaybackAnatomyLine() {
     return (
       <StatusPill
         tone="warn"
+        className="w-full"
         title={`Кадр слабее порога «КД ≥ ${threshold} нАм»: он не рисуется на проекциях, поэтому и анатомия не подписывается — иначе подпись расходилась бы с картинкой.`}
       >
-        {`Кадр: эпоха ${epoch} — скрыт порогом «КД ≥ ${threshold} нАм»`}
+        <span className={ANATOMY_TEXT_CLASS}>{`Кадр: эпоха ${epoch} — скрыт порогом «КД ≥ ${threshold} нАм»`}</span>
       </StatusPill>
     )
   }
@@ -86,9 +98,13 @@ export function PlaybackAnatomyLine() {
   ].join('\n')
 
   return (
-    <StatusPill tone={playing ? 'accent' : 'neutral'} title={hint}>
-      {`Кадр: эпоха ${epoch} — ${anatomyText(atlasLabels(point))}`}
-      {change ? ` · ${anatomyChangeText(change)}` : ''}
+    <StatusPill tone={playing ? 'accent' : 'neutral'} className="w-full" title={hint}>
+      {/* Одной строкой крупным текстом (поправка ручной проверки): подпись читают
+          «на бегу» кадра, а локация и переход складываются в одну фразу */}
+      <span className={ANATOMY_TEXT_CLASS}>
+        {`Кадр: эпоха ${epoch} — ${anatomyText(atlasLabels(point))}`}
+        {change ? ` · ${anatomyChangeText(change)}` : ''}
+      </span>
     </StatusPill>
   )
 }

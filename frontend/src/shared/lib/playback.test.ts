@@ -50,9 +50,12 @@ function point(epochIndex: number, overrides: Partial<DipolePoint> = {}): Dipole
 }
 
 describe('кадр воспроизведения траектории', () => {
-  it('держит скорости ×1/×2/×4 и приводит чужое значение к ×1', () => {
-    expect(PLAYBACK_SPEEDS).toEqual([1, 2, 4])
+  it('держит скорости ×0.25…×4 и приводит чужое значение к ×1', () => {
+    expect(PLAYBACK_SPEEDS).toEqual([0.25, 0.5, 1, 2, 4])
     expect(DEFAULT_PLAYBACK_SPEED).toBe(1)
+    // Замедление — чтобы успеть прочитать подписи кадра (поправка ручной проверки)
+    expect(normalizePlaybackSpeed(0.25)).toBe(0.25)
+    expect(normalizePlaybackSpeed(0.5)).toBe(0.5)
     expect(normalizePlaybackSpeed(2)).toBe(2)
     // «Скорости ×3» в UI нет: значение из старого состояния не должно дойти до часов
     expect(normalizePlaybackSpeed(3)).toBe(1)
