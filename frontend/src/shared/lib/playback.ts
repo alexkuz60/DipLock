@@ -21,7 +21,7 @@
  * Модуль чистый (без DOM и zustand): состояние — `shared/state/dipoleCalc.ts`,
  * часы и отрисовка — `app/sections/dipoles/PlaybackFrame.tsx`.
  */
-import type { DipolePoint } from './dipolePoints'
+import { atlasLabels, type DipolePoint } from './dipolePoints'
 import type { MniVector } from './mriProjections'
 import type { DipoleScanResult } from '@/shared/api/types'
 
@@ -174,6 +174,71 @@ export function playbackSummary(
   speed: PlaybackSpeed,
 ): string {
   return `Кадр: эпоха ${epochIndex + 1} из ${totalEpochs} · ${timeSec.toFixed(2)} с · ×${speed}`
+}
+
+/** Анатомия диполя: структура `aparc+aseg` и поле Бродмана (уже нормализованные). */
+export type AnatomyLabels = { structure: string | null; area: string | null }
+
+/** Переход анатомии впереди: эпоха, на которой диполь оказывается в других метках. */
+export type AnatomyChange = {
+  /** Номер эпохи, на которой метки стали другими */
+  epochIndex: number
+  /** Время пика этой эпохи, мс — та же величина, что в подписях точек */
+  timeMs: number
+  /** Анатомия, в которую диполь «приходит» на этой эпохе */
+  labels: AnatomyLabels
+}
+
+/** Отсутствие анатомии подписывается словами, а не прочерком: в тексте строки «—» не читается. */
+export const ANATOMY_UNKNOWN_TEXT = 'анатомия не определена'
+
+/**
+ * Подпись анатомии: «структура, поле» — или честное «анатомия не определена».
+ * Структура и поле остаются разными величинами (см. `atlasLabels`), поэтому
+ * склеиваются только для чтения, а не в одно поле данных.
+ */
+export function anatomyText(labels: AnatomyLabels): string {
+  const parts = [labels.structure, labels.area].filter(Boolean)
+  return parts.length > 0 ? parts.join(', ') : ANATOMY_UNKNOWN_TEXT
+}
+
+/**
+ * Ближайшая **смена** анатомии впереди: на какой эпохе диполь оказывается в
+ * другой структуре или поле.
+ *
+ * Идём только по непрерывной цепочке эпох с точками: эпоха без диполя — это
+ * разрыв в данных, и «протягивать» через неё переход нельзя (`null`) — то же
+ * правило, что у интерполяции кадра и шлейфа. Отсутствие метки (`null`) —
+ * такая же величина, как и название: переход «таламус → не определено»
+ * показывается, а не прячется.
+ *
+ * Функция читает **измеренные** точки эпох: кадр между эпохами интерполирован,
+ * анатомия — нет (правило модуля), поэтому «дальше» — это не предсказание
+ * положения, а следующая измеренная метка.
+ */
+export function nextAnatomyChange(
+  points: Map<number, DipolePoint>,
+  epochIndex: number,
+): AnatomyChange | null {
+  const current = points.get(epochIndex)
+  if (!current) return null
+  const currentLabels = atlasLabels(current)
+  // Не больше эпох, чем есть в карте: цикл конечен даже на «дырявой» нарезке
+  for (let step = 0, index = epochIndex + 1; step < points.size; step++, index++) {
+    const candidate = points.get(index)
+    // Разрыв (эпоха отброшена нарезкой или у точки нет MNI): «перехода» нет
+    if (!candidate) return null
+    const labels = atlasLabels(candidate)
+    if (labels.structure !== currentLabels.structure || labels.area !== currentLabels.area) {
+      return { epochIndex: index, timeMs: candidate.timeMs, labels }
+    }
+  }
+  return null
+}
+
+/** Подпись перехода для строки кадра: «дальше: эпоха 52 (26.000 с) → …». */
+export function anatomyChangeText(change: AnatomyChange): string {
+  return `дальше: эпоха ${change.epochIndex + 1} (${(change.timeMs / 1000).toFixed(3)} с) → ${anatomyText(change.labels)}`
 }
 
 /**

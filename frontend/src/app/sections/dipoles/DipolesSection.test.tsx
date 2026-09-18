@@ -372,6 +372,9 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(screen.getByTestId('layer-playback-axial').querySelector('title')?.textContent).toContain(
       'Кадр воспроизведения: Эпоха 2',
     )
+    // Анатомия кадра (срез 3.7): структура и поле **своей** эпохи — из результата,
+    // без запроса (в фикстуре метки у всех точек одинаковы, поэтому «дальше» нет)
+    expect(screen.getByText('Кадр: эпоха 2 — таламус (слева), BA17-lh')).toBeInTheDocument()
     // Кадр — чистая перерисовка: раздел по-прежнему просит только статику
     const paths = fetchSpy.mock.calls.map(([path]) => String(path))
     expect(paths.every((path) => staticAsset(path))).toBe(true)
@@ -384,6 +387,8 @@ describe('рабочая область раздела «Диполи»', () => 
 
     expect(screen.queryByTestId('layer-playback-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('dipole-dot-axial-0-120')).toHaveAttribute('stroke-opacity', '1')
+    // Кадра нет — и строки анатомии кадра тоже нет: подписывать нечего
+    expect(screen.queryByText(/^Кадр: эпоха/)).not.toBeInTheDocument()
   })
 
   it('убирает анимацию выключенным слоем «Кадр воспроизведения», не трогая облако', () => {

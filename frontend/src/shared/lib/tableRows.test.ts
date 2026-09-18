@@ -119,6 +119,20 @@ describe('строки таблицы локализации', () => {
     expect(rows[0].mni).toBeNull()
   })
 
+  it('показывает «—» вместо служебного «unknown» сервера', () => {
+    // Поле и структура приходят строками, и «unknown» — это «не определено»:
+    // в ячейке прочерк, а в подсказке строки слова «unknown» нет
+    const rows = localizationRows(
+      dipoleScanResultFixture({
+        points: [point({ brodmann_area: 'unknown', anatomical_structure: ' unknown ' })],
+      }),
+    )
+
+    expect(cellText(rows[0], 'area')).toBe(EM_DASH)
+    expect(cellText(rows[0], 'structure')).toBe(EM_DASH)
+    expect(rowTooltip(rows[0])).not.toContain('unknown')
+  })
+
   it('выводит полушарие из знака MNI x (RAS: x > 0 — правое)', () => {
     expect(hemisphereOf(12)).toBe('right')
     expect(hemisphereOf(-12)).toBe('left')

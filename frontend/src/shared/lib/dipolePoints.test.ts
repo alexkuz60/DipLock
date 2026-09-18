@@ -38,8 +38,11 @@ import {
   dipoleVectorLength,
   emptyDipoleLayer,
   hiddenByThreshold,
+  atlasLabel,
+  atlasLabels,
   thresholdDipoleLayer,
   withOverlapCounts,
+  UNKNOWN_ATLAS_LABEL,
   type DipoleLayer,
   type DipoleMarker,
   type DipolePoint,
@@ -106,6 +109,28 @@ describe('слой диполей', () => {
     // Без анатомии подпись не «дорисовывает» структуру: нет данных — нет слов
     const anonymous = dipolePointTitle({ ...POINT, structure: null, brodmannArea: null })
     expect(anonymous).toContain('MNI 20.0 / -10.0 / 30.0, 40.0 нАм')
+  })
+
+  it('снимает служебное «unknown» и пустые метки: «не определено» — это отсутствие данных', () => {
+    // Сервер отдаёт поле строкой «unknown», когда поиск по ближайшему центру метки
+    // не удался (`dipole_fitter._find_ba`): это не название поля, а «не посчитано»
+    expect(atlasLabel(UNKNOWN_ATLAS_LABEL)).toBeNull()
+    expect(atlasLabel(' unknown ')).toBeNull()
+    expect(atlasLabel('')).toBeNull()
+    expect(atlasLabel('   ')).toBeNull()
+    expect(atlasLabel(null)).toBeNull()
+    expect(atlasLabel(undefined)).toBeNull()
+    expect(atlasLabel(' BA17-lh ')).toBe('BA17-lh')
+
+    expect(atlasLabels({ structure: 'таламус (слева)', brodmannArea: 'unknown' })).toEqual({
+      structure: 'таламус (слева)',
+      area: null,
+    })
+
+    // В подписи точки «unknown» не появляется: остаются координаты, амплитуда и GOF
+    const title = dipolePointTitle({ ...POINT, structure: 'unknown', brodmannArea: 'unknown' })
+    expect(title).not.toContain('unknown')
+    expect(title).toContain('MNI 20.0 / -10.0 / 30.0, 40.0 нАм')
   })
 
   it('даёт детерминированную фикстуру для отрисовки', () => {

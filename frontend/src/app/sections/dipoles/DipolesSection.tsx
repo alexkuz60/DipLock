@@ -69,6 +69,7 @@ import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { Button } from '@/shared/ui/Button'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { MriProjection } from './MriProjection'
+import { PlaybackAnatomyLine } from './PlaybackAnatomyLine'
 import { PlaybackFrameProvider } from './PlaybackFrame'
 
 /**
@@ -260,6 +261,11 @@ export function DipolesSection() {
           </Button>
         </div>
       ) : null}
+
+      {/* Анатомия кадра воспроизведения (срез 3.7): структура и поле кадра плюс
+          ближайшая смена. Строка подписана на номер эпохи из состояния, а не на
+          контекст кадра, поэтому облако при движении кадра не перерисовывается. */}
+      <PlaybackAnatomyLine />
 
       {/*
         Колонки пропорциональны ширине фигур (`projectionBox`), а не равны: фигуры

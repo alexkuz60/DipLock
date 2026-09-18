@@ -191,7 +191,9 @@ export function FrameMarker({
 
   return (
     <g data-testid={`layer-playback-${plane}`}>
-      <title>{`Кадр воспроизведения: ${dipolePointTitle(point)}`}</title>
+      <title>
+        {`Кадр воспроизведения: ${dipolePointTitle(point)} — между эпохами кадр интерполирован, анатомия — по измеренной точке его эпохи`}
+      </title>
       {trail.length > 0 ? (
         <g data-testid={`frame-trail-${plane}`}>
           {trail.map((segment) => {

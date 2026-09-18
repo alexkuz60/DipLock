@@ -17,6 +17,9 @@
  *   сервером из объёма `aparc+aseg` по координате точки (та же метка, что и
  *   контуры срезов), а поле — производная разметка коры (`PALS_B12_Brodmann`).
  *   Одинаковые подписи у них читались бы как одна величина, измеренная дважды;
+ *   служебное `unknown` сервера и пустые строки снимаются той же нормализацией,
+ *   что и в тултипах проекций (`atlasLabel` в `dipolePoints.ts`): «не определено»
+ *   показывается «—» и не выглядит измеренной величиной;
  * * ROI в результате пока нет (точка помечена полем Бродмана и структурой),
  *   поэтому колонки ROI в таблице не будет, пока нет данных: пустая колонка «ROI»
  *   читалась бы как «ROI не определён», хотя его просто не считали.
@@ -26,6 +29,7 @@
  * просто переворачивало таблицу, а строки одной эпохи не «смешивались».
  */
 import type { DipoleScanResult } from '@/shared/api/types'
+import { atlasLabel } from './dipolePoints'
 
 /** Прочерк вместо отсутствующего значения: «не измерено» ≠ «ноль». */
 export const EM_DASH = '—'
@@ -167,8 +171,10 @@ export function localizationRows(result: DipoleScanResult): LocalizationRow[] {
     mni: mniOf(point.mni_coords),
     amplitudeNaM: point.amplitude_nam,
     gof: point.gof,
-    area: point.brodmann_area,
-    structure: point.anatomical_structure,
+    // Метки нормализуются здесь (одно место): `unknown` сервера и пустые строки
+    // становятся `null` — в ячейке «—», в подсказке строки их просто нет.
+    area: atlasLabel(point.brodmann_area),
+    structure: atlasLabel(point.anatomical_structure),
   }))
 }
 

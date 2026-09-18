@@ -456,6 +456,40 @@ export function dipoleMarker(
 }
 
 /**
+ * Служебная метка сервера «не определено»: `dipole_fitter._find_ba` возвращает её
+ * строкой, когда поле не нашлось. Подписывать ею UI нельзя — «unknown» читалось бы
+ * как название поля Бродмана.
+ */
+export const UNKNOWN_ATLAS_LABEL = 'unknown'
+
+/**
+ * Метка анатомии из результата: пустая строка и служебное `unknown` — это
+ * **отсутствие** метки (`null`), а не измеренная величина.
+ *
+ * Нормализация одна на все подписи (тултипы проекций, строка анатомии кадра,
+ * таблица локализации): иначе «не посчитано» выглядело бы по-разному в разных
+ * местах — в одном «unknown», в другом «—».
+ */
+export function atlasLabel(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  if (!trimmed || trimmed.toLowerCase() === UNKNOWN_ATLAS_LABEL) return null
+  return trimmed
+}
+
+/**
+ * Анатомия точки — структура `aparc+aseg` и поле Бродмана — в нормализованном
+ * виде. Величины остаются **разными** (`structure` и `area`): первая читается из
+ * объёма по координате, второе — производная разметка коры, и сливать их в одну
+ * строку внутри этой функции нельзя.
+ */
+export function atlasLabels(point: {
+  structure: string | null
+  brodmannArea: string | null
+}): { structure: string | null; area: string | null } {
+  return { structure: atlasLabel(point.structure), area: atlasLabel(point.brodmannArea) }
+}
+
+/**
  * Подпись точки для тултипа: эпоха, время, координаты, структура, амплитуда, GOF
  * и — когда кратность узла посчитана (`withOverlapCounts`) — число диполей в узле:
  * в быстром режиме несколько эпох часто выбирают один узел, и по этой подписи видно,
@@ -466,7 +500,9 @@ export function dipolePointTitle(point: DipolePoint): string {
   // Структура атласа и поле Бродмана — разные величины: первая читается из
   // объёма `aparc+aseg` по координате, второе — производная разметка коры.
   // Обе подписываются, иначе «где диполь» выглядело бы одним и тем же вопросом.
-  const anatomy = [point.structure, point.brodmannArea].filter(Boolean).join(', ')
+  // «unknown» и пустые строки — не метки, их снимает `atlasLabels`.
+  const { structure, area } = atlasLabels(point)
+  const anatomy = [structure, area].filter(Boolean).join(', ')
   const suffix = anatomy ? `, ${anatomy}` : ''
   const overlap =
     point.overlapCount === undefined ? '' : `, диполей в узле: ${point.overlapCount}`

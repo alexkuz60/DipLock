@@ -8,17 +8,21 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  ANATOMY_UNKNOWN_TEXT,
   DEFAULT_PLAYBACK_SPEED,
   PLAYBACK_SPEEDS,
   TRAIL_ALPHA_HEAD,
   TRAIL_ALPHA_MIN,
   TRAIL_MAX_SEGMENTS,
+  anatomyChangeText,
+  anatomyText,
   canPlayback,
   clampEpochIndex,
   epochAtTime,
   epochFraction,
   interpolatedPoint,
   lerp,
+  nextAnatomyChange,
   normalizePlaybackSpeed,
   playbackDurationMs,
   playbackSummary,
@@ -238,5 +242,82 @@ describe('кадр воспроизведения траектории', () => {
     // Без длины эпохи и по одной точке шлейфа нет вовсе
     expect(trailSegments(many, 150, 0)).toEqual([])
     expect(trailSegments(pointByEpoch([point(0)]), 0, 1000)).toEqual([])
+  })
+
+  /**
+   * Анатомия кадра (срез 3.7): структура и поле — метки **измеренной** точки
+   * эпохи, поэтому «дальше» ищется по эпохам результата, а не по интерполяции.
+   */
+  it('находит ближайшую смену анатомии впереди: структура и поле — разные величины', () => {
+    const points = new Map([
+      [0, point(0)],
+      [1, point(1)],
+      [2, point(2, { structure: 'прецентральная извилина (слева)' })],
+    ])
+
+    // Поле у эпохи 2 то же (`BA17-lh` из хелпера), но структура изменилась — это смена
+    expect(nextAnatomyChange(points, 0)).toEqual({
+      epochIndex: 2,
+      timeMs: 100,
+      labels: { structure: 'прецентральная извилина (слева)', area: 'BA17-lh' },
+    })
+    expect(nextAnatomyChange(points, 1)).toMatchObject({ epochIndex: 2 })
+
+    // Меняется только поле — тоже смена
+    const areaOnly = new Map([
+      [0, point(0)],
+      [1, point(1, { brodmannArea: 'BA4-lh' })],
+    ])
+    expect(nextAnatomyChange(areaOnly, 0)).toMatchObject({
+      epochIndex: 1,
+      labels: { structure: 'таламус (слева)', area: 'BA4-lh' },
+    })
+
+    // «Не определено» — такая же величина, как название: переход в неё показывается
+    const toUnknown = new Map([
+      [0, point(0, { brodmannArea: 'unknown' })],
+      [1, point(1)],
+    ])
+    expect(nextAnatomyChange(toUnknown, 0)).toMatchObject({
+      epochIndex: 1,
+      labels: { structure: 'таламус (слева)', area: 'BA17-lh' },
+    })
+  })
+
+  it('не показывает смену через разрыв и в конце записи', () => {
+    // Эпоха 1 отсутствует (отброшена нарезкой или у точки нет MNI): это разрыв в
+    // данных, а не «переход» — протягивать через него нельзя, как и кадр
+    const broken = new Map([
+      [0, point(0)],
+      [2, point(2, { structure: 'прецентральная извилина (слева)' })],
+    ])
+    expect(nextAnatomyChange(broken, 0)).toBeNull()
+    // Метки не меняются до последней эпохи — смены нет
+    expect(
+      nextAnatomyChange(
+        new Map([
+          [0, point(0)],
+          [1, point(1)],
+        ]),
+        0,
+      ),
+    ).toBeNull()
+    // Эпохи, которой нет в карте точек, нет и у перехода
+    expect(nextAnatomyChange(new Map([[0, point(0)]]), 3)).toBeNull()
+  })
+
+  it('подписывает анатомию словами: «не определена» вместо пустоты и прочерка', () => {
+    expect(anatomyText({ structure: 'таламус (слева)', area: 'BA17-lh' })).toBe(
+      'таламус (слева), BA17-lh',
+    )
+    expect(anatomyText({ structure: null, area: 'BA17-lh' })).toBe('BA17-lh')
+    expect(anatomyText({ structure: null, area: null })).toBe(ANATOMY_UNKNOWN_TEXT)
+    expect(
+      anatomyChangeText({
+        epochIndex: 51,
+        timeMs: 26_000,
+        labels: { structure: null, area: null },
+      }),
+    ).toBe(`дальше: эпоха 52 (26.000 с) → ${ANATOMY_UNKNOWN_TEXT}`)
   })
 })
