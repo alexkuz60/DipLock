@@ -248,4 +248,25 @@ describe('раздел «Таблица локализации»', () => {
     // И кнопки на месте: уточнение можно повторить
     expect(screen.getAllByRole('button', { name: 'Уточнить…' })).toHaveLength(4)
   })
+
+  it('синхронизирует выбор: строка ↔ точка на проекциях (одна точка везде)', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    renderWithProviders(<LocalizationTableSection />)
+
+    // Клик по строке выбирает диполь в разделе «Диполи» (id строки = id точки слоя)
+    await user.click(screen.getByTestId('loc-row-1-140'))
+    expect(useDipoleCalc.getState().selectedPointId).toBe('1-140')
+    expect(screen.getByTestId('loc-row-1-140')).toHaveAttribute('aria-selected', 'true')
+
+    // Обратно: выбор точки на проекции (id в сторе) подсвечивает строку
+    act(() => useDipoleCalc.setState({ selectedPointId: '2-60' }))
+    expect(screen.getByTestId('loc-row-2-60')).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByTestId('loc-row-1-140')).toHaveAttribute('aria-selected', 'false')
+
+    // Повторный клик по выбранной строке снимает выделение (toggle)
+    await user.click(screen.getByTestId('loc-row-2-60'))
+    expect(useDipoleCalc.getState().selectedPointId).toBeNull()
+  })
 })

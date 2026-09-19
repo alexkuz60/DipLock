@@ -21,11 +21,14 @@
  * Окно частот FFT-графика (срез 3.5) — параметр просмотра: панель передаёт его в
  * `FftHistogram` из состояния расчёта, и правка окна **ничего не запрашивает**.
  */
-import { X } from 'lucide-react'
+import {
+  AudioWaveform,
+  Loader2,
+  X,
+} from 'lucide-react'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { spectrumMetrics, spectrumQueryOf, spectrumSummary } from '@/shared/lib/spectrum'
-import { Button } from '@/shared/ui/Button'
 import { IconButton } from '@/shared/ui/IconButton'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -73,18 +76,28 @@ export function DipolesDrawer() {
           <StatusPill tone="neutral">Спектр не рассчитан</StatusPill>
         )}
         <div className="ml-auto flex items-center gap-2">
-          <Button
-            variant="primary"
-            disabled={recording === null || running}
+          <IconButton
+            icon={
+              running ? (
+                <Loader2 className="size-5 animate-spin" />
+              ) : (
+                <AudioWaveform className="size-5" />
+              )
+            }
+            label={spectrum ? 'Пересчитать спектр' : 'Рассчитать спектр'}
+            tooltip={
+              recording === null
+                ? 'Сначала загрузите EDF в разделе EDF — спектр считается по файлу записи'
+                : 'Запустить расчёт спектра по диапазонам (Welch PSD + топокарты)'
+            }
             title={
               recording === null
                 ? 'Сначала загрузите EDF в разделе EDF — спектр считается по файлу записи'
                 : 'Запустить расчёт спектра по диапазонам (Welch PSD + топокарты)'
             }
+            disabled={recording === null || running}
             onClick={() => void runSpectrum(recording?.recording_id ?? null)}
-          >
-            {spectrum ? 'Пересчитать спектр' : 'Рассчитать спектр'}
-          </Button>
+          />
           <IconButton
             icon={<X className="size-5" />}
             tooltip="Закрыть панель"

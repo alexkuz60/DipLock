@@ -211,6 +211,18 @@ export function refineTooltip(refined: DipoleRefineResult): string {
   )
 }
 
+/**
+ * Номер эпохи из id точки слоя/строки таблицы (`"{epoch_index}-{time_ms}"`,
+ * один формат в `dipolePoints.ts` и `tableRows.ts`). Нужен кнопке «Уточнить»
+ * тулс-хедера: выбранная на проекции точка → эпоха для `dipole_refine`.
+ */
+export function epochIndexOfPointId(pointId: string | null): number | null {
+  if (!pointId) return null
+  const sep = pointId.indexOf('-')
+  const value = Number(sep === -1 ? pointId : pointId.slice(0, sep))
+  return Number.isInteger(value) && value >= 0 ? value : null
+}
+
 /** Форма запроса спектра: полоса та же, что у расчёта диполей (один источник). */
 export function buildSpectrumForm(params: CalcParams): FormData {
   const form = new FormData()

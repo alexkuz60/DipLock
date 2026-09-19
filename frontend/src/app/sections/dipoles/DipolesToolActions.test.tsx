@@ -6,7 +6,7 @@
  * отображение (без единого запроса), а кнопки панелей лишь открывают одну
  * выдвижную панель за раз.
  */
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
@@ -31,6 +31,11 @@ describe('тулс-хедер раздела «Диполи»', () => {
       spectrum: null,
       error: null,
       spectrumError: null,
+      refineJob: null,
+      refiningEpoch: null,
+      refinedPoints: {},
+      refineError: null,
+      selectedPointId: null,
     })
     useEdfRecording.setState({ recording: null })
   })
@@ -247,5 +252,39 @@ describe('тулс-хедер раздела «Диполи»', () => {
     await user.click(screen.getByRole('button', { name: 'Закрыть справку' }))
     expect(screen.queryByTestId('dipoles-help-dialog')).not.toBeInTheDocument()
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('кнопка-очки неактивна без выбранной точки и уточняет выбранную (F19)', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    // Без выбора на проекциях кнопка выключена, запросов нет
+    const glasses = screen.getByTestId('refine-selected-button')
+    expect(glasses).toBeDisabled()
+    await user.click(glasses)
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    // Выбор точки на проекции (кладёт id в стор) активирует кнопку.
+    // Узел перезапрашиваем: у IconButton смена disabled меняет обёртку
+    // (tooltip-контейнер), и React пересоздаёт кнопку — старая ссылка протухла.
+    act(() => useDipoleCalc.setState({ selectedPointId: '2-60' }))
+    const enabled = screen.getByTestId('refine-selected-button')
+    expect(enabled).toBeEnabled()
+    await user.click(enabled)
+
+    // Ушёл POST на dipole_refine с эпохой выбранной точки и нарезкой результата
+    const post = fetchSpy.mock.calls.find(
+      ([url, init]) => String(url).includes('/dipole_refine') && init?.method === 'POST',
+    )
+    expect(post).toBeTruthy()
+    const form = post?.[1]?.body as FormData
+    expect(form.get('epoch_index')).toBe('2')
+    expect(form.get('grid_mm')).toBe('7')
+
+    // После уточнения кнопка помечает эпоху как уточнённую
+    await screen.findByRole('button', { name: 'Эпоха 3 уточнена точным профилем' })
   })
 })

@@ -10,7 +10,7 @@
  * `shared/lib/tableRows.ts`), цвета — токенами темы, числа — классом `tnum`,
  * чтобы колонки не «плясали» при пересчёте.
  */
-import type { ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import type { LocalizationRow, TableColumn } from '@/shared/lib/tableRows'
 import { cellText, rowTooltip } from '@/shared/lib/tableRows'
 import { cx } from '@/shared/ui/cx'
@@ -24,9 +24,33 @@ export type LocalizationTableProps = {
    * состояние задачи живут в разделе.
    */
   renderRowAction?: (row: LocalizationRow) => ReactNode
+  /**
+   * Выделенная строка (id = id точки слоя проекций): выбор диполя на любой
+   * проекции подсвечивает строку, клик по строке — наоборот (одна точка
+   * синхронна везде, `selectedPointId` в `dipoleCalc`).
+   */
+  selectedRowId?: string | null
+  /** Клик по строке (выбор/снятие выбора решает вызывающий — toggle) */
+  onRowClick?: (row: LocalizationRow) => void
 }
 
-export function LocalizationTable({ rows, columns, renderRowAction }: LocalizationTableProps) {
+export function LocalizationTable({
+  rows,
+  columns,
+  renderRowAction,
+  selectedRowId = null,
+  onRowClick,
+}: LocalizationTableProps) {
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({})
+
+  // Выбранная на проекции точка может быть за пределами экрана — подвозим строку
+  useEffect(() => {
+    if (!selectedRowId) return
+    const row = rowRefs.current[selectedRowId]
+    if (row && typeof row.scrollIntoView === 'function') {
+      row.scrollIntoView({ block: 'nearest' })
+    }
+  }, [selectedRowId])
   return (
     <div
       data-testid="localization-table-scroll"
@@ -69,9 +93,18 @@ export function LocalizationTable({ rows, columns, renderRowAction }: Localizati
           {rows.map((row) => (
             <tr
               key={row.id}
+              ref={(element) => {
+                rowRefs.current[row.id] = element
+              }}
               data-testid={`loc-row-${row.id}`}
               title={rowTooltip(row)}
-              className="border-b border-border/60 last:border-0 hover:bg-bg-2"
+              aria-selected={selectedRowId === row.id}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              className={cx(
+                'border-b border-border/60 last:border-0 hover:bg-bg-2',
+                onRowClick && 'cursor-pointer',
+                selectedRowId === row.id && 'bg-accent/15 hover:bg-accent/15',
+              )}
             >
               {columns.map((column) => (
                 <td

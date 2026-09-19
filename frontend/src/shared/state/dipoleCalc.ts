@@ -416,9 +416,14 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           )
           if (!isCurrent()) return
           const refined = await api.dipoleRefine.result(recordingId, created.job_id)
+          // Ключ — ЗАПРОШЕННАЯ эпоха (она привязана к выбранной точке); номер из
+          // ответа — эхо сервера, и расхождение не должно прятать результат
+          if (refined.epoch_index !== epochIndex) {
+            console.warn('dipole_refine: эпоха ответа не совпала с запрошенной', refined.epoch_index, epochIndex)
+          }
           if (!isCurrent()) return
           set({
-            refinedPoints: { ...get().refinedPoints, [refined.epoch_index]: refined },
+            refinedPoints: { ...get().refinedPoints, [epochIndex]: refined },
             refineJob: succeededJob(get().refineJob),
             refiningEpoch: null,
           })

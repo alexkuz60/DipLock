@@ -54,6 +54,8 @@ export function LocalizationTableSection() {
   const refinedPoints = useDipoleCalc((state) => state.refinedPoints)
   const refineError = useDipoleCalc((state) => state.refineError)
   const refineEpoch = useDipoleCalc((state) => state.refineEpoch)
+  const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
+  const toggleSelectedPoint = useDipoleCalc((state) => state.toggleSelectedPoint)
 
   const sortDirection = useTableParams((state) => state.params.sortDirection)
   const columnVisibility = useTableParams((state) => state.params.columnVisibility)
@@ -193,7 +195,13 @@ export function LocalizationTableSection() {
       {refineError ? (
         <StatusPill tone="danger">{`Ошибка уточнения: ${refineError}`}</StatusPill>
       ) : null}
-      <LocalizationTable rows={rows} columns={columns} renderRowAction={renderRowAction} />
+      <LocalizationTable
+        rows={rows}
+        columns={columns}
+        renderRowAction={renderRowAction}
+        selectedRowId={selectedPointId}
+        onRowClick={(row) => toggleSelectedPoint(row.id)}
+      />
 
       <p className="text-sm text-fg-2">
         Таблица читает результат задачи раздела «Диполи» и ничего не запрашивает: расчёт запускается

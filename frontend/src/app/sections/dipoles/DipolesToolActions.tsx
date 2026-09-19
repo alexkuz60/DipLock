@@ -31,17 +31,17 @@ import {
   ChevronRight,
   CircleHelp,
   Gauge,
+  Glasses,
   Grid2x2,
   Loader2,
   Pause,
   Play,
   Square,
 } from 'lucide-react'
-import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
+import { calcJobSummary, epochIndexOfPointId, refinedSummary } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { canPlayback, playbackSummary, PLAYBACK_SPEEDS } from '@/shared/lib/playback'
 import { useEdfRecording } from '@/shared/state/edfRecording'
-import { Button } from '@/shared/ui/Button'
 import { IconButton } from '@/shared/ui/IconButton'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { Tooltip } from '@/shared/ui/Tooltip'
@@ -199,10 +199,27 @@ export function DipolesToolHeaderActions() {
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const toggleView = useDipoleCalc((state) => state.toggleView)
   const runCalculation = useDipoleCalc((state) => state.runCalculation)
+  const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
+  const refineJob = useDipoleCalc((state) => state.refineJob)
+  const refiningEpoch = useDipoleCalc((state) => state.refiningEpoch)
+  const refinedPoints = useDipoleCalc((state) => state.refinedPoints)
+  const refineEpoch = useDipoleCalc((state) => state.refineEpoch)
   const [helpOpen, setHelpOpen] = useState(false)
 
   const running = job?.status === 'running'
   const canRun = recording !== null && !running
+
+  const selectedEpoch = epochIndexOfPointId(selectedPointId)
+  const refinedSelected = selectedEpoch !== null ? refinedPoints[selectedEpoch] : undefined
+  const refineRunning = refineJob?.status === 'running' && refiningEpoch !== null
+  const refineTooltipText =
+    result === null
+      ? 'Точное уточнение (BEM) доступно после расчёта диполей'
+      : selectedEpoch === null
+        ? 'Выберите точку диполя на любой из трёх проекций (или строку в таблице локализации) — тогда кнопка уточнит её эпоху точным фитингом на BEM'
+        : refinedSelected
+          ? `${refinedSummary(refinedSelected)} — нажмите, чтобы повторить уточнение эпохи ${selectedEpoch + 1}`
+          : `Уточнить эпоху ${selectedEpoch + 1}: точный фитинг на BEM fsaverage в окне пика GFP (десятки секунд)`
 
   const runTooltip = running
     ? `Расчёт идёт: ${calcJobSummary(job)}`
@@ -216,17 +233,42 @@ export function DipolesToolHeaderActions() {
 
   return (
     <>
-      <Button
-        variant={canRun ? 'primary' : 'secondary'}
-        disabled={!canRun}
+      <IconButton
+        icon={running ? <Loader2 className="size-5 animate-spin" /> : <Play className="size-5" />}
+        label={running ? 'Расчёт…' : result ? 'Пересчитать диполи' : 'Рассчитать диполи'}
+        tooltip={runTooltip}
         title={runTooltip}
+        disabled={!canRun}
         onClick={() => void runCalculation(recording?.recording_id ?? null)}
-        icon={running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-      >
-        {running ? 'Расчёт…' : result ? 'Пересчитать диполи' : 'Рассчитать диполи'}
-      </Button>
+      />
 
       <CalcProgress />
+
+      {/* «Уточнить» (F19): активна при выбранной на проекциях точке; на время
+          BEM-фитинга внутри кнопки крутится спиннер */}
+      <IconButton
+        data-testid="refine-selected-button"
+        icon={
+          refineRunning && refiningEpoch === selectedEpoch ? (
+            <Loader2 className="size-5 animate-spin" />
+          ) : (
+            <Glasses className="size-5" />
+          )
+        }
+        label={
+          refinedSelected
+            ? `Эпоха ${(selectedEpoch ?? 0) + 1} уточнена точным профилем`
+            : 'Уточнить выбранный диполь'
+        }
+        tooltip={refineTooltipText}
+        active={refinedSelected !== undefined}
+        disabled={result === null || selectedEpoch === null || refineRunning}
+        onClick={() => {
+          if (selectedEpoch !== null) {
+            void refineEpoch(recording?.recording_id ?? null, selectedEpoch)
+          }
+        }}
+      />
 
       <PlaybackControls />
 

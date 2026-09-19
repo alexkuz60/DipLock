@@ -12,6 +12,7 @@ import {
   CALC_PARAM_DEFAULTS,
   buildDipoleForm,
   buildRefineForm,
+  epochIndexOfPointId,
   buildSpectrumForm,
   calcJobFromStatus,
   calcJobSummary,
@@ -185,5 +186,15 @@ describe('точное уточнение эпохи (F19, «Уточнить…
       'BEM GOF 94.0 % · Δ 6.3 мм',
     )
     expect(refineTooltip(dipoleRefineResultFixture({ grid_gof_bem: null }))).not.toContain('null')
+  })
+})
+
+describe('epochIndexOfPointId: номер эпохи из id точки (кнопка «Уточнить» хедера)', () => {
+  it('парсит префикс id и отсекает мусор', () => {
+    expect(epochIndexOfPointId('2-60')).toBe(2)
+    expect(epochIndexOfPointId('0-120')).toBe(0)
+    expect(epochIndexOfPointId(null)).toBeNull()
+    expect(epochIndexOfPointId('')).toBeNull()
+    expect(epochIndexOfPointId('abc')).toBeNull()
   })
 })
