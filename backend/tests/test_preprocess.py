@@ -174,6 +174,59 @@ def test_artifacts_stage_uses_flat_line_params(tmp_path, edf_file):
     assert {name for zone in flat for name in zone["channels"]} == set(result["channels"])
 
 
+def test_artifacts_stage_returns_channel_qc(tmp_path, edf_file):
+    """Стадия artifacts отдаёт QC-сводку по всем каналам + пороги из конфига."""
+    recording = _register(tmp_path, edf_file)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="artifacts", run_ica=False),
+        progress=lambda *_, **__: None,
+    )
+
+    qc = result["channel_qc"]
+    assert [row["channel"] for row in qc] == result["channels"]
+    assert result["qc_warn_share"] == settings.qc_channel_warn_share
+    assert result["qc_bad_share"] == settings.qc_channel_bad_share
+    for row in qc:
+        assert 0.0 <= row["artifact_share"] <= 1.0
+
+
+def test_artifacts_stage_qc_marks_flat_recording(tmp_path):
+    """Запись «замирает» на секунду (нули 1 с из 4): у всех каналов доля ≥ 0.2.
+
+    Проверяется связка «детектор → зоны → по-канальная сводка». По-канальная
+    избирательность покрыта юнит-тестом ``channel_qc_summary``; на уровне стадии
+    её не проверяем, потому что средний референс (всегда применяется в
+    предподготовке) превращает один «мёртвый» канал в минус-среднее живых —
+    flat-line после референса его уже не увидит (известное ограничение: искать
+    отвалившийся электрод надо до референса).
+    """
+    path = tmp_path / "dead.edf"
+    sfreq = 250.0
+    t = np.arange(int(4 * sfreq)) / sfreq
+    data = np.vstack(
+        [np.sin(2 * np.pi * (6 + i) * t) * 20 for i in range(5)]
+    )
+    data[:, int(sfreq) : 2 * int(sfreq)] = 0.0  # вся запись «замерла» на секунду
+    from tests.conftest import write_minimal_edf
+
+    write_minimal_edf(path, list(settings.standard_channels[:5]), data, sfreq)
+    recording = _register(tmp_path, path)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="artifacts", run_ica=False),
+        progress=lambda *_, **__: None,
+    )
+
+    qc = {row["channel"]: row for row in result["channel_qc"]}
+    assert len(qc) == len(result["channels"])
+    for row in qc.values():
+        assert row["artifact_share"] >= 0.2
+        assert row["by_kind"].get("flat_line", 0.0) > 0
+
+
 def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
     """Инвариант N6: отброшены эпохи с всплеском И пересекающие зоны детектора.
 

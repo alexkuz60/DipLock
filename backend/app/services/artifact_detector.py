@@ -136,3 +136,51 @@ def detect_artifacts(
     total = sum(stats.values())
     return annotations, {"total": total, "by_type": stats, "ica_applied": ica_applied, "zones": zones}
 
+
+def channel_qc_summary(
+    zones: list, channels: list[str], duration_sec: float,
+) -> list[dict]:
+    """QC-сводка по каналам из зон артефактов (шаг 0.4).
+
+    Для иконок состояния слева от имён каналов вьюера нужна не география зон,
+    а «сколько времени канал был плохим»: суммарные секунды в зонах (интервалы
+    сливаются, чтобы пересекающиеся детекторы не задваивались), доля от записи
+    и разбивка по типам для тултипа. Зоны ``ica_eog`` не считаются: они
+    помечают весь монтаж на всю запись (компоненты не привязаны к каналу) и
+    обнулили бы смысл метрики.
+    """
+    duration = max(float(duration_sec), 1e-9)
+    kinds = ("zscore_outlier", "peak_to_peak", "flat_line")
+    summary: list[dict] = []
+    for name in channels:
+        own = [
+            (float(zone["onset_sec"]), float(zone["onset_sec"]) + float(zone["duration_sec"]),
+             str(zone["kind"]))
+            for zone in zones
+            if name in zone.get("channels", []) and zone.get("kind") in kinds
+        ]
+        by_kind: dict[str, float] = {}
+        for onset, end, kind in own:
+            by_kind[kind] = round(by_kind.get(kind, 0.0) + (end - onset), 3)
+        # Слияние интервалов: пересекающиеся зоны разных детекторов — одно время
+        merged_sec = 0.0
+        cur_start: float | None = None
+        cur_end = 0.0
+        for onset, end, _ in sorted(own):
+            if cur_start is None or onset > cur_end:
+                if cur_start is not None:
+                    merged_sec += cur_end - cur_start
+                cur_start, cur_end = onset, end
+            else:
+                cur_end = max(cur_end, end)
+        if cur_start is not None:
+            merged_sec += cur_end - cur_start
+        merged_sec = round(merged_sec, 3)
+        summary.append({
+            "channel": name,
+            "artifact_sec": merged_sec,
+            "artifact_share": round(min(merged_sec / duration, 1.0), 4),
+            "by_kind": by_kind,
+        })
+    return summary
+

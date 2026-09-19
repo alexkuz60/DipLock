@@ -149,6 +149,11 @@ class Settings(BaseSettings):
     # полосового сигнала ближе к нулю, чем 5 мкВ.
     flat_line_window_ms: float = Field(default=100.0)
 
+    # QC-индикаторы каналов вьюера (шаг 0.4): доля времени канала в зонах
+    # артефактов. < warn — «ок», warn..bad — «внимание», >= bad — «плохо».
+    qc_channel_warn_share: float = Field(default=0.05)
+    qc_channel_bad_share: float = Field(default=0.20)
+
     # Порог reject при нарезке эпох (мкВ): эпохи выше порога отбрасываются MNE.
     # Отдельно от peak_to_peak_threshold_uv: детекция артефактов и reject-фильтр
     # решают разные задачи (первая — аннотации, второй — отбраковка эпох).

@@ -54,6 +54,7 @@ import {
   type EdfViewerLayers,
 } from '@/shared/lib/viewerLayers'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue } from '@/shared/state/edfParams'
+import { channelQcStatus, channelQcTooltip } from '@/shared/lib/channelQc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useEegParams } from '@/shared/state/eegParams'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -85,6 +86,9 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   /** Ручные пометки эпох живут при записи: они относятся к конкретной сессии */
   const epochMarks = useEdfRecording((state) => state.epochMarks)
   const toggleEpochBlock = useEdfRecording((state) => state.toggleEpochBlock)
+  // QC-иконки каналов (шаг 0.4): сводка стадии «Поиск артефактов»; null — её не было
+  const channelQc = useEdfRecording((state) => state.channelQc)
+  const qcThresholds = useEdfRecording((state) => state.channelQcThresholds)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -543,6 +547,18 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 amplitudeMode={params.amplitudeMode}
                 amplitudeScaleUv={params.amplitudeScaleUv}
                 showXAxis={index === visible.length - 1}
+                qc={
+                  channelQc?.[name]
+                    ? {
+                        status: channelQcStatus(
+                          channelQc[name].artifact_share,
+                          qcThresholds.warn,
+                          qcThresholds.bad,
+                        ),
+                        tooltip: channelQcTooltip(name, channelQc[name]),
+                      }
+                    : null
+                }
                 onLabelClick={handleLabelClick}
                 onToggleExpand={handleToggleExpand}
                 onCanvas={registerCanvas}

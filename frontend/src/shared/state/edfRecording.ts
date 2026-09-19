@@ -11,7 +11,7 @@
  */
 import { create } from 'zustand'
 import { api, apiErrorText } from '@/shared/api/client'
-import type { PreprocessResult, RecordingMeta } from '@/shared/api/types'
+import type { ChannelQc, PreprocessResult, RecordingMeta } from '@/shared/api/types'
 import { uploadRecording } from '@/shared/api/upload'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
 import { makeDemoSignal } from '@/shared/lib/demoSignal'
@@ -207,6 +207,14 @@ export type EdfRecordingState = {
    */
   epochMarks: EpochMark[]
   /**
+   * QC-сводка каналов из стадии `artifacts` (шаг 0.4): иконки состояния слева
+   * от имён каналов вьюера. `null` — стадия ещё не запускалась (иконок нет);
+   * живёт при записи, сбрасывается вместе с ней.
+   */
+  channelQc: Record<string, ChannelQc> | null
+  /** Пороги статуса иконок из результата стадии (конфиг сервера) */
+  channelQcThresholds: { warn: number; bad: number }
+  /**
    * Задачи предподготовки по стадиям (срез 2.7): прогресс и ошибка каждой.
    * Хранится отдельно от снимков параметров (`stageApplied`): снимок говорит
    * «результат соответствует параметрам», а это — «задача сейчас идёт».
@@ -272,6 +280,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   layers: null,
   epochMarks: [],
   stageJobs: {},
+  channelQc: null,
+  channelQcThresholds: { warn: 0.05, bad: 0.2 },
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
   navRequest: null,
@@ -421,8 +431,20 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       const result = await api.preprocess.result(recording.recording_id, created.job_id)
       if (!isCurrent()) return
 
+      // QC-иконки каналов: сводка приходит только у стадии artifacts
+      const channelQc =
+        result.stage === 'artifacts' && result.channel_qc.length
+          ? Object.fromEntries(result.channel_qc.map((row) => [row.channel, row]))
+          : get().channelQc
+      const channelQcThresholds =
+        result.stage === 'artifacts'
+          ? { warn: result.qc_warn_share, bad: result.qc_bad_share }
+          : get().channelQcThresholds
+
       set((state) => ({
         layers: layersFromResult(result, state.layers),
+        channelQc,
+        channelQcThresholds,
         stageJobs: {
           ...state.stageJobs,
           [stage]: {
@@ -476,6 +498,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       layers: null,
       epochMarks: [],
       stageJobs: {},
+      channelQc: null,
       passport: { ...EMPTY_PASSPORT },
     })
     // Выбор каналов и результат предподготовки привязаны к записи

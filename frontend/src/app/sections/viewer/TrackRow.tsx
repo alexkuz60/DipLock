@@ -21,6 +21,7 @@ import { frameEnvelope, pointsBudget, type TimeWindow } from '@/shared/lib/viewe
 import type { SignalFrame } from '@/shared/lib/signalFrame'
 import { perfCount } from '@/shared/lib/perf'
 import { LABEL_WIDTH, makeTrackOptions, yRangeFor } from '@/shared/lib/trackOptions'
+import type { ChannelQcStatus } from '@/shared/lib/channelQc'
 import { cx } from '@/shared/ui/cx'
 
 export type TrackRowProps = {
@@ -35,6 +36,8 @@ export type TrackRowProps = {
   amplitudeMode: 'shared' | 'per_channel'
   amplitudeScaleUv: number
   showXAxis: boolean
+  /** QC-статус канала (шаг 0.4): точка слева от имени; null — стадии артефактов не было */
+  qc: { status: ChannelQcStatus; tooltip: string } | null
   /** Клик по названию канала — открыть его в разделе «ЭЭГ» (срез 5) */
   onLabelClick: (name: string) => void
   /** Клик по стрелке у названия — развернуть/свернуть трек (срез 2.9) */
@@ -53,6 +56,7 @@ export function TrackRow({
   amplitudeMode,
   amplitudeScaleUv,
   showXAxis,
+  qc,
   onLabelClick,
   onToggleExpand,
   onCanvas,
@@ -143,9 +147,23 @@ export function TrackRow({
       style={{ height }}
     >
       <div
-        className="flex shrink-0 flex-col items-end justify-center"
+        className="relative flex shrink-0 flex-col items-end justify-center"
         style={{ width: LABEL_WIDTH }}
       >
+        {qc ? (
+          <span
+            data-testid={`track-qc-${name}`}
+            data-status={qc.status}
+            title={qc.tooltip}
+            aria-label={`Качество канала ${name}: ${qc.tooltip}`}
+            className={cx(
+              'absolute top-1/2 left-0.5 size-2 -translate-y-1/2 rounded-full',
+              qc.status === 'ok' && 'bg-ok',
+              qc.status === 'warn' && 'bg-warn',
+              qc.status === 'bad' && 'bg-danger',
+            )}
+          />
+        ) : null}
         <button
           type="button"
           data-testid={`track-label-${name}`}

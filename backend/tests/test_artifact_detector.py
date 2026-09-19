@@ -53,6 +53,41 @@ def test_flat_line_threshold_still_comes_from_settings():
     assert stats["by_type"]["flat_line"] > 0
 
 
+# ---------- Шаг 0.4: QC-сводка по каналам из зон ----------
+
+
+def test_channel_qc_summary_merges_intervals_and_skips_ica():
+    """Пересекающиеся зоны — одно время; ica_eog (весь монтаж) не считается."""
+    from app.services.artifact_detector import channel_qc_summary
+
+    zones = [
+        {"kind": "peak_to_peak", "onset_sec": 1.0, "duration_sec": 2.0, "channels": ["C3"]},
+        {"kind": "zscore_outlier", "onset_sec": 2.0, "duration_sec": 2.0, "channels": ["C3"]},
+        {"kind": "flat_line", "onset_sec": 6.0, "duration_sec": 1.0, "channels": ["C3"]},
+        {"kind": "ica_eog", "onset_sec": 0.0, "duration_sec": 10.0, "channels": ["C3", "C4"]},
+    ]
+    summary = channel_qc_summary(zones, ["C3", "C4"], 10.0)
+
+    c3 = next(row for row in summary if row["channel"] == "C3")
+    # [1,4] слиты (2 с p2p + 2 с z-score пересекаются) + [6,7] = 4 с из 10 с
+    assert c3["artifact_sec"] == 4.0
+    assert c3["artifact_share"] == 0.4
+    assert c3["by_kind"] == {"peak_to_peak": 2.0, "zscore_outlier": 2.0, "flat_line": 1.0}
+
+    c4 = next(row for row in summary if row["channel"] == "C4")
+    assert c4["artifact_sec"] == 0.0, "зона ica_eog не должна засчитываться каналу"
+    assert c4["by_kind"] == {}
+
+
+def test_channel_qc_covers_all_channels_of_recording():
+    """Сводка содержит каждый канал записи — иконка нужна и у чистого канала."""
+    from app.services.artifact_detector import channel_qc_summary
+
+    summary = channel_qc_summary([], ["Fz", "Pz"], 4.0)
+    assert [row["channel"] for row in summary] == ["Fz", "Pz"]
+    assert all(row["artifact_share"] == 0.0 for row in summary)
+
+
 # ---------- N6: аннотации с BAD_ реально отбраковывают эпохи ----------
 
 

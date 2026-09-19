@@ -68,6 +68,17 @@ export type ArtifactZoneOut = {
   channels: string[]
 }
 
+/** QC-строка канала (шаг 0.4): доля времени в зонах артефактов (иконки вьюера) */
+export type ChannelQc = {
+  channel: string
+  /** Секунд в зонах артефактов (интервалы слиты, без ica_eog) */
+  artifact_sec: number
+  /** Доля времени записи в зонах (0..1) */
+  artifact_share: number
+  /** Секунды по типам артефактов (для тултипа иконки) */
+  by_kind: Partial<Record<import('@/shared/lib/artifacts').ArtifactKind, number>>
+}
+
 /**
  * Результат одной стадии предподготовки (`GET /recordings/{id}/preprocess/{job}`).
  * Заполнены только поля запрошенной стадии, остальные — пустые значения.
@@ -84,6 +95,11 @@ export type PreprocessResult = {
   artifacts: ArtifactZoneOut[]
   artifact_types: ArtifactTypes
   ica_applied: boolean
+  /** QC-сводка по каналам (стадия artifacts, шаг 0.4); у других стадий пусто */
+  channel_qc: ChannelQc[]
+  /** Пороги статуса иконок (из конфига сервера, приезжают с результатом) */
+  qc_warn_share: number
+  qc_bad_share: number
   epoch_length_ms: number
   n_epochs_total: number
   n_epochs_used: number

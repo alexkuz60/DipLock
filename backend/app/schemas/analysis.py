@@ -108,6 +108,21 @@ class ArtifactZoneOut(BaseModel):
     channels: list[str] = Field(default_factory=list)
 
 
+class ChannelQcOut(BaseModel):
+    """QC-строка канала (шаг 0.4): сколько времени канал был в зонах артефактов.
+
+    Считается из зон стадии ``artifacts`` (слияние интервалов, без ``ica_eog``);
+    статус «ок/внимание/плохо» выводит UI по порогам ``qc_*_share`` из конфига.
+    """
+
+    channel: str
+    artifact_sec: float = Field(description="Секунд в зонах артефактов (интервалы слиты)")
+    artifact_share: float = Field(description="Доля времени записи в зонах (0..1)")
+    by_kind: dict[str, float] = Field(
+        default_factory=dict, description="Секунды по типам артефактов (для тултипа)"
+    )
+
+
 class PreprocessResult(BaseModel):
     """Результат задачи предподготовки записи (стадия ``preprocess``).
 
@@ -136,6 +151,16 @@ class PreprocessResult(BaseModel):
     artifacts: list[ArtifactZoneOut] = Field(default_factory=list)
     artifact_types: ArtifactTypes = Field(default_factory=ArtifactTypes)
     ica_applied: bool = False
+    channel_qc: list[ChannelQcOut] = Field(
+        default_factory=list,
+        description="QC-сводка по каналам: доля времени в зонах (иконки состояния вьюера)",
+    )
+    qc_warn_share: float = Field(
+        default=0.05, description="Порог «внимание» для доли времени в артефактах"
+    )
+    qc_bad_share: float = Field(
+        default=0.20, description="Порог «плохо» для доли времени в артефактах"
+    )
 
     # Стадия `epochs`: сетка эпох и отброшенные reject-фильтром
     epoch_length_ms: float = 0.0

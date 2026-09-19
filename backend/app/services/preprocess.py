@@ -29,7 +29,7 @@ from typing import Any
 from app.core.config import Settings
 from app.schemas.analysis import ArtifactZoneOut, PreprocessStage
 from app.services import journal
-from app.services.artifact_detector import detect_artifacts
+from app.services.artifact_detector import channel_qc_summary, detect_artifacts
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
@@ -211,6 +211,12 @@ def run_preprocess(
             "artifacts": [zone.model_dump() for zone in _zones(stats)],
             "artifact_types": stats["by_type"],
             "ica_applied": bool(stats.get("ica_applied")),
+            # QC-иконки каналов (шаг 0.4): сводка из тех же зон + пороги из конфига
+            "channel_qc": channel_qc_summary(
+                stats.get("zones", []), list(raw.ch_names), base["duration_sec"],
+            ),
+            "qc_warn_share": float(cfg.qc_channel_warn_share),
+            "qc_bad_share": float(cfg.qc_channel_bad_share),
         })
         if not stats.get("ica_applied") and params.run_ica:
             warnings.append(
