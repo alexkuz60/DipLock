@@ -115,7 +115,9 @@ export function EdfPanel() {
   // а не только красной точкой на кнопке.
   const stageErrors = RECALC_STAGES.flatMap((stage) => {
     const job = stageJobs[stage]
-    return job?.status === 'failed' && job.error ? [{ stage, message: job.error }] : []
+    return job?.status === 'failed' && job.error
+      ? [{ stage, message: job.error, traceback: job.errorTraceback }]
+      : []
   })
 
   return (
@@ -339,10 +341,20 @@ export function EdfPanel() {
             </p>
             {stageErrors.length ? (
               <div className="mt-2 space-y-1">
-                {stageErrors.map(({ stage, message }) => (
-                  <StatusPill key={stage} tone="danger">
-                    {RECALC_STAGE_LABELS[stage]}: {message}
-                  </StatusPill>
+                {stageErrors.map(({ stage, message, traceback }) => (
+                  <div key={stage}>
+                    <StatusPill tone="danger">
+                      {RECALC_STAGE_LABELS[stage]}: {message}
+                    </StatusPill>
+                    {traceback ? (
+                      <details className="mt-1 text-xs text-fg-2" data-testid={`stage-traceback-${stage}`}>
+                        <summary className="cursor-pointer">Технические детали ошибки</summary>
+                        <pre className="mt-1 max-h-48 overflow-auto rounded-sm bg-bg-2 p-2 whitespace-pre-wrap">
+                          {traceback}
+                        </pre>
+                      </details>
+                    ) : null}
+                  </div>
                 ))}
               </div>
             ) : null}

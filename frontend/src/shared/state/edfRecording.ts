@@ -15,7 +15,12 @@ import type { PreprocessResult, RecordingMeta } from '@/shared/api/types'
 import { uploadRecording } from '@/shared/api/upload'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
 import { makeDemoSignal } from '@/shared/lib/demoSignal'
-import { createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
+import {
+  createRunToken,
+  isCancelled,
+  JobFailedError,
+  waitForJob,
+} from '@/shared/lib/jobPolling'
 import { decodeSignalFrame, frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
 import {
   DEMO_LAYERS_SEED,
@@ -164,6 +169,8 @@ export type StageJob = {
   /** Этап пайплайна от сервера (load_edf / artifacts / epochs / done) */
   stage: string
   error: string | null
+  /** Хвост traceback при провале задачи (N31): показывается разворотом в панели */
+  errorTraceback: string | null
 }
 
 /** Команды навигации по окну вьюера из тулс-хедера (срез 2.9) */
@@ -361,11 +368,18 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     set((state) => ({
       stageJobs: {
         ...state.stageJobs,
-        [stage]: { status: 'running', progress: 0, message: '', stage: 'queued', error: null },
+        [stage]: {
+          status: 'running',
+          progress: 0,
+          message: '',
+          stage: 'queued',
+          error: null,
+          errorTraceback: null,
+        },
       },
     }))
 
-    const fail = (message: string) => {
+    const fail = (message: string, traceback: string | null = null) => {
       if (!isCurrent()) return
       set((state) => ({
         stageJobs: {
@@ -376,6 +390,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
             message: '',
             stage: 'queued',
             error: message,
+            errorTraceback: traceback,
           },
         },
       }))
@@ -396,6 +411,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
               message: status.message,
               stage: status.stage,
               error: null,
+              errorTraceback: null,
             },
           },
         }))
@@ -409,7 +425,14 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         layers: layersFromResult(result, state.layers),
         stageJobs: {
           ...state.stageJobs,
-          [stage]: { status: 'succeeded', progress: 1, message: '', stage: 'done', error: null },
+          [stage]: {
+            status: 'succeeded',
+            progress: 1,
+            message: '',
+            stage: 'done',
+            error: null,
+            errorTraceback: null,
+          },
         },
       }))
       // Результат получен — фиксируем снимок параметров стадии. Если параметры
@@ -418,7 +441,10 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     } catch (error) {
       // Отмена (закрытие записи/новый запуск) — не ошибка пользователя
       if (isCancelled(error) || !isCurrent()) return
-      fail(apiErrorText(error))
+      fail(
+        apiErrorText(error),
+        error instanceof JobFailedError ? error.traceback : null,
+      )
     }
   },
 

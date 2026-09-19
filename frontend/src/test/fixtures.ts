@@ -228,6 +228,7 @@ export const jobFixture: JobStatus = {
   finished_at: null,
   elapsed_sec: 12.5,
   error: null,
+  error_traceback: null,
   result_url: null,
 }
 
@@ -248,6 +249,7 @@ export const preprocessJobFixture: JobStatus = {
   finished_at: '2026-09-13T09:00:02',
   elapsed_sec: 1.2,
   error: null,
+  error_traceback: null,
   result_url: '/api/v1/recordings/rec-1/preprocess/job-pre-1',
 }
 
@@ -322,6 +324,7 @@ export const calcJobFixture: JobStatus = {
   finished_at: '2026-09-15T09:00:04',
   elapsed_sec: 3.1,
   error: null,
+  error_traceback: null,
   result_url: '/api/v1/recordings/rec-1/dipoles/job-calc-1',
 }
 
@@ -470,5 +473,6 @@ export const spectrogramJobFixture: JobStatus = {
   finished_at: '2026-09-15T09:00:02',
   elapsed_sec: 0.4,
   error: null,
+  error_traceback: null,
   result_url: `/api/v1/recordings/${recordingFixture.recording_id}/spectrogram/job-spec-1`,
 }

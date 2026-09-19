@@ -87,7 +87,11 @@ describe('поллинг задачи', () => {
 
   it('ошибка задачи приходит текстом сервера и не выглядит отменой', async () => {
     vi.spyOn(api, 'job').mockResolvedValue(
-      jobStatus({ status: 'failed', error: 'Ни одной эпохи не удалось локализовать' }),
+      jobStatus({
+        status: 'failed',
+        error: 'Ни одной эпохи не удалось локализовать',
+        error_traceback: 'Traceback (most recent call last): ... ValueError',
+      }),
     )
 
     const failure = await waitForJob(
@@ -99,6 +103,8 @@ describe('поллинг задачи', () => {
 
     expect(failure).toBeInstanceOf(JobFailedError)
     expect((failure as Error).message).toBe('Ни одной эпохи не удалось локализовать')
+    // N31: traceback с сервера доезжает до ошибки — UI показывает его разворотом
+    expect((failure as JobFailedError).traceback).toContain('ValueError')
     expect(isCancelled(failure)).toBe(false)
   })
 
@@ -113,6 +119,7 @@ describe('поллинг задачи', () => {
     ).catch((error: unknown) => error as Error)
 
     expect(failure.message).toBe('Задача завершилась ошибкой')
+    expect((failure as JobFailedError).traceback).toBeNull()
   })
 
   it('устаревший запуск бросает отмену и не делает лишних запросов', async () => {

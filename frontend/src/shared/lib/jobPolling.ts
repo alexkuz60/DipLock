@@ -38,9 +38,13 @@ export class JobCancelledError extends Error {
 
 /** Задача завершилась ошибкой: текст от сервера показывается пользователю. */
 export class JobFailedError extends Error {
-  constructor(message: string) {
+  /** Хвост traceback с сервера (N31): текст говорит «что», traceback — «где». */
+  readonly traceback: string | null
+
+  constructor(message: string, traceback: string | null = null) {
     super(message)
     this.name = 'JobFailedError'
+    this.traceback = traceback
   }
 }
 
@@ -107,7 +111,7 @@ export async function waitForJob(
     onTick(status)
     if (status.status === 'succeeded') return status
     if (status.status === 'failed') {
-      throw new JobFailedError(status.error ?? 'Задача завершилась ошибкой')
+      throw new JobFailedError(status.error ?? 'Задача завершилась ошибкой', status.error_traceback)
     }
     await delay(pollMs)
   }

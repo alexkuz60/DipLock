@@ -41,7 +41,7 @@ describe('панель раздела EDF', () => {
     expect(screen.getByLabelText('Длина эпохи')).toHaveValue('2000')
     expect(screen.getByLabelText('z-score')).toHaveValue(5)
     expect(screen.getByLabelText('peak-to-peak')).toHaveValue(100)
-    expect(screen.getByLabelText('flat-line')).toHaveValue(5)
+    expect(screen.getByLabelText('flat-line')).toHaveValue(1)
     expect(screen.getByRole('option', { name: '2000 мс' })).toBeInTheDocument()
     expect(screen.getByText(/Показан монтаж 10-20 по умолчанию/)).toBeInTheDocument()
   })
@@ -108,6 +108,30 @@ describe('панель раздела EDF', () => {
     ).toBeInTheDocument()
     expect(screen.getByText(/Фильтр и референс — не рассчитано/)).toBeInTheDocument()
     expect(screen.getByText(/Поиск артефактов — не рассчитано/)).toBeInTheDocument()
+  })
+
+  it('ошибка стадии показывает текст и разворот traceback (N31)', () => {
+    mockApiFetch()
+    useEdfRecording.setState({
+      recording: recordingFixture,
+      passport: { ...EMPTY_PASSPORT },
+      stageJobs: {
+        artifacts: {
+          status: 'failed',
+          progress: 0,
+          message: '',
+          stage: 'queued',
+          error: 'Все эпохи отброшены reject-фильтром',
+          errorTraceback: 'Traceback (most recent call last): ... ValueError: эпохи',
+        },
+      },
+    })
+    renderWithProviders(<EdfPanel />)
+
+    expect(screen.getByText(/Поиск артефактов: Все эпохи отброшены/)).toBeInTheDocument()
+    const details = screen.getByTestId('stage-traceback-artifacts')
+    expect(details).toHaveTextContent('Технические детали ошибки')
+    expect(details).toHaveTextContent('ValueError: эпохи')
   })
 
   it('в панели нет данных записи — они перенесены в диалог «Паспорт»', () => {

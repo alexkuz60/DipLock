@@ -302,6 +302,8 @@ export type JobStatus = {
   finished_at: string | null
   elapsed_sec: number | null
   error: string | null
+  /** Хвост traceback при провале задачи (разворот в UI, N31) */
+  error_traceback: string | null
   result_url: string | null
 }
 
