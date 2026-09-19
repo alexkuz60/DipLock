@@ -39,7 +39,7 @@ describe('слой параметров EDF', () => {
 
     expect(params.zScoreThreshold).toBe(5)
     expect(params.peakToPeakUv).toBe(100)
-    expect(params.flatLineUv).toBe(5)
+    expect(params.flatLineUv).toBe(1)
     expect(params.flatLineMs).toBe(200)
     expect(params.epochLengthMs).toBe(2000)
     expect(params.visibleChannels).toEqual(metaFixture.standard_channels)

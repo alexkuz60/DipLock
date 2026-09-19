@@ -105,7 +105,9 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   reference: 'average',
   zScoreThreshold: 5,
   peakToPeakUv: 100,
-  flatLineUv: 5,
+  // Дефолт совпадает с backend (config.flat_line_threshold_uv): размах
+  // в окне 100 мс, а не абсолютная амплитуда (N7/F20). /meta уточняет.
+  flatLineUv: 1,
   flatLineMs: 200,
   epochLengthMs: 2000,
   edfUnits: 'auto',

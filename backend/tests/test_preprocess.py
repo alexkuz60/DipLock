@@ -73,21 +73,23 @@ def _register(tmp_path, edf_file, recording_id="rec-test"):
 
 @pytest.fixture
 def spike_edf(tmp_path):
-    """EDF 4.5 с, где всплеск 250 мкВ лежит целиком внутри второй эпохи.
+    """EDF 10.5 с, где всплеск 250 мкВ лежит целиком внутри эпохи 5.
 
-    Длина выбрана так, чтобы запись делилась на 4 полные эпохи по 1 с без
-    «TOO_SHORT» на хвосте: reject-фильтр обязан отбросить ровно эпоху 1.
+    Длина выбрана так, чтобы запись делилась на 10 полных эпох по 1 с без
+    «TOO_SHORT» на хвосте, а всплеск был далеко от краёв: детектор
+    peak-to-peak работает окном 2 с, и его зоны законно отбраковывают
+    соседние эпохи (N6) — тест обязан учитывать и их, и amplitude-reject.
     """
     path = tmp_path / "spike.edf"
     sfreq = 250.0
-    n_times = int(4.5 * sfreq)
+    n_times = int(10.5 * sfreq)
     t = np.arange(n_times) / sfreq
     data = np.vstack([
         np.sin(2 * np.pi * (6 + channel) * t) * 20
         for channel in range(5)
     ])
-    # Кадр 260–490 (вторая эпоха: 250–500) — границы эпох остаются чистыми
-    data[0, 260:490] = 250.0
+    # Кадры 1260–1490 (эпоха 5: кадры 1250–1500) — границы эпох чистые
+    data[0, 1260:1490] = 250.0
     write_minimal_edf(
         path, list(settings.standard_channels[:5]), data, sfreq, record_sec=0.5
     )
@@ -173,8 +175,24 @@ def test_artifacts_stage_uses_flat_line_params(tmp_path, edf_file):
 
 
 def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
-    """Всплеск во второй секунде → отброшена ровно одна эпоха (индекс 1)."""
+    """Инвариант N6: отброшены эпохи с всплеском И пересекающие зоны детектора.
+
+    Ожидание не хардкодится: сначала стадия artifacts возвращает зоны, затем
+    стадия epochs обязана отбросить ровно эпохи, пересекающие эти зоны, плюс
+    эпоху амплитудного reject (всплеск 250 мкВ > порога 150 мкВ — это эпоха 5).
+    """
     recording = _register(tmp_path, spike_edf)
+
+    artifacts = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="artifacts", pp_threshold_uv=100.0, run_ica=False),
+        progress=lambda *_, **__: None,
+    )
+    zones = [
+        (zone["onset_sec"], zone["onset_sec"] + zone["duration_sec"])
+        for zone in artifacts["artifacts"]
+    ]
+    assert zones, "всплеск 250 мкВ обязан дать зоны peak_to_peak"
 
     result = run_preprocess(
         recording, settings,
@@ -185,10 +203,21 @@ def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
         progress=lambda *_, **__: None,
     )
 
+    # Касание края зоны зависит от округления onset до мс и частоты, поэтому
+    # точное множество граничных эпох не хардкодим: инвариант — «ядро зон и
+    # эпоха всплеска отброшены, далёкие эпохи сохранены, счётчики согласованы».
+    zone_core = {
+        start for start in range(10)
+        if any(onset < start + 1.0 and start < end for onset, end in zones)
+    }
+    rejected = set(result["rejected_epochs"])
+
     assert result["epoch_length_ms"] == 1000.0
-    assert result["n_epochs_total"] == 4
-    assert result["n_epochs_used"] == 3
-    assert result["rejected_epochs"] == [1]
+    assert result["n_epochs_total"] == 10
+    assert 5 in rejected, "эпоха со всплеском обязана быть отброшена"
+    assert zone_core <= rejected, "эпохи, пересекающие зоны, обязаны отбраковываться (N6)"
+    assert {0, 1, 2, 9}.isdisjoint(rejected), "далёкие от всплеска эпохи сохраняются"
+    assert result["n_epochs_used"] == 10 - len(rejected)
     assert any("Отброшено эпох" in warning for warning in result["warnings"])
 
 

@@ -18,6 +18,28 @@ from app.utils.versions import library_versions
 
 logger = logging.getLogger(__name__)
 
+
+def _configure_logging() -> None:
+    """Конфигурация stdlib-логирования (N29).
+
+    Без неё root-logger не имеет handlers, а эффективный уровень ``app.*`` —
+    WARNING: все ``logger.info`` сервисов молчали (замер 19.09.2026). Уровень —
+    из ``settings.log_level``; если handlers уже настроены (например, uvicorn
+    ``--log-config`` или тесты), не переопределяем их, а лишь опускаем уровень
+    логгеров ``app.*``, чтобы сообщения доходили до существующих handlers.
+    """
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        )
+    logging.getLogger("app").setLevel(level)
+
+
+_configure_logging()
+
 # Статика: legacy-страница (index.html) и собранный frontend (ui/)
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 UI_DIR = os.path.join(STATIC_DIR, "ui")

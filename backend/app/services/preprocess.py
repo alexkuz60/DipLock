@@ -59,7 +59,7 @@ class PreprocessParams:
     # Стадия `artifacts`
     z_threshold: float = 5.0
     pp_threshold_uv: float = 100.0
-    flat_line_uv: float = 5.0
+    flat_line_uv: float = 1.0  # размах в окне flat_line_window_ms (N7/F20)
     flat_line_ms: float = 200.0
     run_ica: bool = False
     # Стадия `epochs`

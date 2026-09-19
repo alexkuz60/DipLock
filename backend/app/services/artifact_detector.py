@@ -1,4 +1,11 @@
-"""Авто-детекция артефактов: z-score, порог, ICA, flat-line."""
+"""Авто-детекция артефактов: z-score, порог, ICA, flat-line.
+
+Описания аннотаций несут префикс ``BAD_`` (N6): ``mne.Epochs`` отбраковывает
+эпохи, пересекающиеся с аннотациями, только если описание начинается с ``BAD``
+(``reject_by_annotation=True`` по умолчанию). Без префикса показанные в UI зоны
+не влияли на состав эпох — замер 19.09.2026: 19/20 эпох оставалось против 15/20.
+Имена зон (``kind``) для слоёв вьюера префикса не имеют — это отдельный контракт.
+"""
 
 import logging
 
@@ -58,7 +65,7 @@ def detect_artifacts(
                     annotations += mne.Annotations(
                         onset=[onset],
                         duration=[duration],
-                        description=["zscore_outlier"],
+                        description=["BAD_zscore_outlier"],
                     )
                     stats["zscore_outlier"] += 1
                     add_zone("zscore_outlier", onset, duration, [ch])
@@ -72,7 +79,7 @@ def detect_artifacts(
             center = (w_start + win // 2) / sfreq
             annotations += mne.Annotations(
                 onset=[center], duration=[win / sfreq],
-                description=["peak_to_peak"],
+                description=["BAD_peak_to_peak"],
             )
             stats["peak_to_peak"] += 1
             add_zone(
@@ -80,10 +87,20 @@ def detect_artifacts(
                 [raw.ch_names[int(i)] for i in exceeded],
             )
 
-    # 3. Flat-line
-    flat_min = int(settings.flat_line_min_duration_ms / 1000.0 * sfreq)
+    # 3. Flat-line: «почти константа» — размах (peak-to-peak) в скользящем окне
+    # ниже порога (N7/F20). Критерий по абсолютной амплитуде (|x| < порог)
+    # ловил обычный шум: треть отсчётов полосового сигнала ближе к нулю, чем
+    # 5 мкВ — замер 19.09.2026: 4 ложные зоны на 30 с чистого белого шума.
+    flat_win = max(1, int(settings.flat_line_window_ms / 1000.0 * sfreq))
+    flat_min = max(1, int(settings.flat_line_min_duration_ms / 1000.0 * sfreq))
+    flat_thr = settings.flat_line_threshold_uv * 1e-6
     for i, ch in enumerate(raw.ch_names):
-        flat = np.abs(data[i]) < (settings.flat_line_threshold_uv * 1e-6)
+        ch_data = data[i]
+        n_win = ch_data.shape[0] // flat_win
+        if n_win == 0:
+            continue
+        windows = ch_data[: n_win * flat_win].reshape(n_win, flat_win)
+        flat = np.repeat(np.ptp(windows, axis=1) < flat_thr, flat_win)
         lab, nf = ndimage.label(flat)
         for r in range(1, nf + 1):
             idx = np.where(lab == r)[0]
@@ -93,7 +110,7 @@ def detect_artifacts(
                 annotations += mne.Annotations(
                     onset=[onset],
                     duration=[duration],
-                    description=["flat_line"],
+                    description=["BAD_flat_line"],
                 )
                 stats["flat_line"] += 1
                 add_zone("flat_line", onset, duration, [ch])

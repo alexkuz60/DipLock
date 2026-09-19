@@ -44,7 +44,7 @@ export const metaFixture: MetaResponse = {
   artifact_thresholds: {
     z_score_threshold: 5,
     peak_to_peak_threshold_uv: 100,
-    flat_line_threshold_uv: 5,
+    flat_line_threshold_uv: 1,
     flat_line_min_duration_ms: 200,
     reject_threshold_uv: 150,
   },

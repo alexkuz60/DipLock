@@ -104,6 +104,11 @@ def test_failed_job_is_restored_with_error():
     assert restored.status == "failed"
     assert "reject-фильтром" in (restored.error or "")
     assert restored.result is None
+    # N31: traceback переживает рестарт — текст ошибки говорит «что», он — «где».
+    assert restored.error_traceback is not None
+    assert "ValueError" in restored.error_traceback
+    assert "reject-фильтром" in restored.error_traceback
+    assert "error_traceback" in restored.as_dict()
     with pytest.raises(Exception) as exc:
         _require_finished(restored)
     assert "завершилась ошибкой" in str(exc.value)

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     api_prefix: str = "/api/v1"
     debug: bool = True
 
+    # Логирование (N29): без конфигурации root-logger не имеет handlers, а
+    # эффективный уровень `app.*` — WARNING, поэтому все logger.info сервисов
+    # молчали. Уровень настраивается (LOG_LEVEL=DEBUG и т.п.), применяется
+    # в app/main.py при старте.
+    log_level: str = Field(default="INFO")
+
+
     # CORS: origins, которым разрешён доступ к API (без "*" + credentials).
     # 5173 — Vite dev-server, 3000 — CRA, 8000 — сам backend.
     cors_origins: str = Field(
@@ -130,8 +137,18 @@ class Settings(BaseSettings):
     # Артефакты
     z_score_threshold: float = 5.0
     peak_to_peak_threshold_uv: float = 100.0
-    flat_line_threshold_uv: float = 5.0
+    # Порог «почти константы» (мкВ): размах (peak-to-peak) сигнала в окне
+    # ``flat_line_window_ms`` ниже порога. 1 мкВ — «мёртвый» канал; обычный
+    # шум (~1 мкВ std) даёт размах ~4–5 мкВ в окне 100 мс и не ловится (N7/F20).
+    flat_line_threshold_uv: float = 1.0
     flat_line_min_duration_ms: float = 200.0
+
+    # Окно «почти константы» для flat-line (N7/F20): критерий — peak-to-peak
+    # в скользящем окне этой длины ниже flat_line_threshold_uv. Критерий по
+    # абсолютной амплитуде (|x| < порога) ловил обычный шум: треть отсчётов
+    # полосового сигнала ближе к нулю, чем 5 мкВ.
+    flat_line_window_ms: float = Field(default=100.0)
+
     # Порог reject при нарезке эпох (мкВ): эпохи выше порога отбрасываются MNE.
     # Отдельно от peak_to_peak_threshold_uv: детекция артефактов и reject-фильтр
     # решают разные задачи (первая — аннотации, второй — отбраковка эпох).

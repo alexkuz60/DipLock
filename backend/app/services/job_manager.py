@@ -20,6 +20,7 @@
 """
 import asyncio
 import logging
+import traceback
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -98,6 +99,10 @@ class Job:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: str | None = None
+    # Хвост traceback (последние кадры) для разворота в UI (N31): текст
+    # ошибки говорит «что», traceback — «где». Храним укороченным: полный
+    # traceback пайплайна MNE — килобайты, в файл задачи идёт хвост.
+    error_traceback: str | None = None
     session_id: str | None = None
     result: dict[str, Any] | None = None
     meta: dict[str, Any] = field(default_factory=dict)
@@ -166,9 +171,10 @@ class Job:
         self.set_progress("done", 1.0, message="Готово")
 
     def fail(self, error: BaseException) -> None:
-        """Провал задачи: сохраняем текст ошибки для UI."""
+        """Провал задачи: сохраняем текст ошибки и хвост traceback для UI (N31)."""
         self.status = "failed"
         self.error = str(error)
+        self.error_traceback = traceback.format_exc()[-4000:]
         self.finished_at = datetime.utcnow()
         self.message = f"Ошибка: {error}"
 
@@ -198,6 +204,7 @@ class Job:
             "finished_at": self.finished_at,
             "elapsed_sec": self.elapsed_sec,
             "error": self.error,
+            "error_traceback": self.error_traceback,
         }
 
     def to_record(self) -> dict[str, Any]:
@@ -224,6 +231,7 @@ class Job:
             "started_at": iso(self.started_at),
             "finished_at": iso(self.finished_at),
             "error": self.error,
+            "error_traceback": self.error_traceback,
             "session_id": self.session_id,
             "meta": self.meta,
             "result": self.result,
@@ -263,6 +271,7 @@ class Job:
             started_at=moment("started_at"),
             finished_at=moment("finished_at", created_at),
             error=record.get("error"),
+            error_traceback=record.get("error_traceback"),
             session_id=record.get("session_id"),
             result=record.get("result"),
             meta=dict(record.get("meta") or {}),

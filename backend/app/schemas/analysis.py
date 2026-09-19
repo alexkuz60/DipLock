@@ -641,6 +641,9 @@ class JobStatus(BaseModel):
     finished_at: datetime | None = None
     elapsed_sec: float | None = None
     error: str | None = None
+    error_traceback: str | None = Field(
+        default=None, description="Хвост traceback при провале задачи (для разворота в UI, N31)"
+    )
     result_url: str | None = None
 
 
