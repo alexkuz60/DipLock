@@ -211,10 +211,57 @@ def test_band_power_outside_frequency_axis_is_none_not_nan():
 
     powers = _band_powers(freqs, psd, settings.freq_bands)
 
-    assert powers["delta"] == 1.0
-    assert powers["alpha"] == 1.0
+    # Один бин в полосе Simpson не интегрирует: оценка значением × шаг оси (4 Гц)
+    assert powers["delta"] == 4.0
+    assert powers["alpha"] == 4.0
     assert powers["gamma"] is None
     band = SpectrumBandOut(name="gamma", fmin=30, fmax=40, power_uv2=powers["gamma"])
     dumped = band.model_dump_json()
     assert "NaN" not in dumped
     assert "null" in dumped
+
+
+def test_band_power_is_integral_not_mean():
+    """N15: мощность полосы — площадь под PSD, а не среднее по бинам.
+
+    На плоском спектре (все PSD = 1 мкВ²/Гц) среднее давало бы 1.0 для всех
+    диапазонов, а интеграл пропорционален ширине полосы: β (13–30) в 17/5 раза
+    больше α (8–13). Именно это делает мощности диапазонов сравнимыми.
+    """
+    from app.services.spectral import _band_powers
+
+    freqs = np.arange(1.0, 41.0, 1.0)
+    psd = np.ones((4, freqs.size))
+
+    powers = _band_powers(freqs, psd, settings.freq_bands)
+
+    assert powers["alpha"] == pytest.approx(5.0)
+    assert powers["beta"] == pytest.approx(17.0)
+    assert powers["beta"] / powers["alpha"] == pytest.approx(17.0 / 5.0)
+
+
+def test_spectrum_reports_iaf_ratios_and_epoch_spread(tmp_path):
+    """N16: IAF ≈ частоте ведущего ритма, индексы и разброс по эпохам заполнены."""
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+
+    result = compute_spectrum(
+        recording, settings,
+        SpectrumParams(filter_band=(1, 40), epoch_length_ms=1000.0),
+    )
+
+    # IAF: синтетический ритм ровно 10 Гц → пик в α с параболическим уточнением
+    assert result["iaf_hz"] is not None
+    assert abs(result["iaf_hz"] - 10.0) <= 1.0
+    # Индексы посчитаны и положительны
+    assert result["theta_beta_ratio"] is not None and result["theta_beta_ratio"] > 0
+    assert result["theta_alpha_beta_ratio"] is not None
+    assert result["theta_alpha_beta_ratio"] > result["theta_beta_ratio"]
+    # Relative power: доли в (0, 1), α — ведущий ритм
+    bands = {band["name"]: band for band in result["bands"]}
+    measured = [b["relative_power"] for b in bands.values() if b["relative_power"] is not None]
+    assert all(0.0 < value < 1.0 for value in measured)
+    assert bands["alpha"]["relative_power"] == max(measured)
+    # Разброс по эпохам: квартили упорядочены, медиана близка к мощности
+    alpha = bands["alpha"]
+    assert alpha["q25_power_uv2"] <= alpha["median_power_uv2"] <= alpha["q75_power_uv2"]
+    assert alpha["median_power_uv2"] == pytest.approx(alpha["power_uv2"], rel=0.5)

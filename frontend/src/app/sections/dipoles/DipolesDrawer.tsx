@@ -24,7 +24,7 @@
 import { X } from 'lucide-react'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
-import { spectrumQueryOf, spectrumSummary } from '@/shared/lib/spectrum'
+import { spectrumMetrics, spectrumQueryOf, spectrumSummary } from '@/shared/lib/spectrum'
 import { Button } from '@/shared/ui/Button'
 import { IconButton } from '@/shared/ui/IconButton'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
@@ -115,6 +115,11 @@ export function DipolesDrawer() {
             </p>
           ) : null}
           <p className="mb-2 text-sm text-fg-2">{HINTS[view]}</p>
+          {spectrumMetrics(spectrum).length > 0 ? (
+            <p className="mb-2 text-sm text-fg-1" data-testid="spectrum-metrics">
+              {spectrumMetrics(spectrum).join(' · ')}
+            </p>
+          ) : null}
           {spectrum.missed_channels.length > 0 ? (
             <p className="mb-2 text-sm text-warn">
               {`Без позиции в монтаже (в топокарты не попали): ${spectrum.missed_channels.join(', ')}`}

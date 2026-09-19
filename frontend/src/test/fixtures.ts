@@ -336,12 +336,22 @@ export function spectrumResultFixture(
   overrides: Partial<SpectrumResult> = {},
 ): SpectrumResult {
   const bands: SpectrumBandOut[] = [
-    { name: 'delta', fmin: 1, fmax: 4, power_uv2: 2.5, topomap_url: topomapUrl('delta') },
-    { name: 'theta', fmin: 4, fmax: 8, power_uv2: 3.5, topomap_url: topomapUrl('theta') },
-    { name: 'alpha', fmin: 8, fmax: 13, power_uv2: 12.5, topomap_url: topomapUrl('alpha') },
-    { name: 'beta', fmin: 13, fmax: 30, power_uv2: 4.5, topomap_url: topomapUrl('beta') },
+    { name: 'delta', fmin: 1, fmax: 4, power_uv2: 2.5, relative_power: 0.11,
+      median_power_uv2: 2.4, q25_power_uv2: 2.1, q75_power_uv2: 2.8,
+      topomap_url: topomapUrl('delta') },
+    { name: 'theta', fmin: 4, fmax: 8, power_uv2: 3.5, relative_power: 0.15,
+      median_power_uv2: 3.4, q25_power_uv2: 3.0, q75_power_uv2: 3.9,
+      topomap_url: topomapUrl('theta') },
+    { name: 'alpha', fmin: 8, fmax: 13, power_uv2: 12.5, relative_power: 0.55,
+      median_power_uv2: 12.2, q25_power_uv2: 11.0, q75_power_uv2: 13.4,
+      topomap_url: topomapUrl('alpha') },
+    { name: 'beta', fmin: 13, fmax: 30, power_uv2: 4.5, relative_power: 0.19,
+      median_power_uv2: 4.4, q25_power_uv2: 4.0, q75_power_uv2: 4.9,
+      topomap_url: topomapUrl('beta') },
     // γ вне узкой полосы фильтра: мощность «не измерена» — именно null, а не 0
-    { name: 'gamma', fmin: 30, fmax: 40, power_uv2: null, topomap_url: topomapUrl('gamma') },
+    { name: 'gamma', fmin: 30, fmax: 40, power_uv2: null, relative_power: null,
+      median_power_uv2: null, q25_power_uv2: null, q75_power_uv2: null,
+      topomap_url: topomapUrl('gamma') },
   ]
   return {
     recording_id: recordingFixture.recording_id,
@@ -357,6 +367,9 @@ export function spectrumResultFixture(
     freqs: [1, 4, 8, 10, 13, 30, 40],
     psd_mean_uv2: [1, 2, 6, 12, 4, 2, 1],
     bands,
+    iaf_hz: 10.2,
+    theta_beta_ratio: 0.78,
+    theta_alpha_beta_ratio: 3.56,
     topomap_version: 'spec1234abcd',
     warnings: [],
     duration_sec_calc: 0.6,

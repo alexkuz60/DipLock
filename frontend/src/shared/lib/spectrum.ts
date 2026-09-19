@@ -106,7 +106,7 @@ export type BandBar = {
   /** Границы диапазона из конфига сервера, Гц */
   fmin: number
   fmax: number
-  /** Мощность диапазона, мкВ²/Гц (0 для «не измерено» — полоса рисуется пустой) */
+  /** Мощность диапазона — интеграл PSD, мкВ² (0 для «не измерено») */
   power: number
   /** Доля от максимальной мощности диапазона, 0..1 (высота полосы) */
   ratio: number
@@ -283,4 +283,22 @@ export function bandInFreqWindow(
 export function spectrumSummary(result: SpectrumResult): string {
   const { filterBandHz, epochLengthMs } = spectrumQueryOf(result)
   return `Спектр: ${rangeSummary({ filterBandHz, epochLengthMs })} · окно ${result.n_fft} · эпох ${result.n_epochs}`
+}
+
+/**
+ * Интерпретируемые метрики спектра (N16): IAF и θ/β-индексы одной строкой.
+ * Неизмеренные значения (`null`) пропускаются — строка никогда не покажет «null».
+ */
+export function spectrumMetrics(result: SpectrumResult): string[] {
+  const metrics: string[] = []
+  if (result.iaf_hz !== null && Number.isFinite(result.iaf_hz)) {
+    metrics.push(`IAF ${result.iaf_hz.toFixed(1)} Гц`)
+  }
+  if (result.theta_beta_ratio !== null && Number.isFinite(result.theta_beta_ratio)) {
+    metrics.push(`θ/β ${result.theta_beta_ratio.toFixed(2)}`)
+  }
+  if (result.theta_alpha_beta_ratio !== null && Number.isFinite(result.theta_alpha_beta_ratio)) {
+    metrics.push(`(θ+α)/β ${result.theta_alpha_beta_ratio.toFixed(2)}`)
+  }
+  return metrics
 }

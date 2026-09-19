@@ -108,14 +108,20 @@ export type PreprocessResult = {
   duration_sec_calc: number
 }
 
-/** Средняя мощность одного ритма (срез 3.4): число + ссылка на топокарту */
+/** Мощность одного ритма (срез 3.4): интеграл PSD + ссылка на топокарту */
 export type SpectrumBandOut = {
   /** Ключ диапазона из `/meta` (`delta`…`gamma`) */
   name: string
   fmin: number
   fmax: number
-  /** мкВ²/Гц; `null` — частоты диапазона не попали в полосу фильтра («не измерено») */
+  /** Интеграл PSD по диапазону, мкВ² (N15); `null` — диапазон вне полосы фильтра («не измерено») */
   power_uv2: number | null
+  /** Доля диапазона в интеграле всего спектра, 0..1 (N16); `null` — не измерено */
+  relative_power: number | null
+  /** Медиана и квартили мощности по эпохам, мкВ² (N16); `null` — не измерено */
+  median_power_uv2: number | null
+  q25_power_uv2: number | null
+  q75_power_uv2: number | null
   /** URL топокарты (PNG, ETag) или `null`, если картинка не построена */
   topomap_url: string | null
 }
@@ -140,6 +146,12 @@ export type SpectrumResult = {
   freqs: number[]
   psd_mean_uv2: number[]
   bands: SpectrumBandOut[]
+  /** Индивидуальная пиковая α-частота (IAF), Гц (N16); `null` — мало бинов в полосе α */
+  iaf_hz: number | null
+  /** Индекс θ/β по интегральным мощностям (N16); `null` — диапазоны не измерены */
+  theta_beta_ratio: number | null
+  /** Индекс (θ+α)/β (N16); `null` — диапазоны не измерены */
+  theta_alpha_beta_ratio: number | null
   /** Версия топокарт: уходит в URL (`?v=`) против «залипания» кэша браузера */
   topomap_version: string
   warnings: string[]

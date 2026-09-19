@@ -21,8 +21,15 @@
 * эпохи нарезаются без наложения и проходят reject-порог: эпохи с амплитудой
   выше порога в PSD не попадают, иначе спектр «съедали» бы артефакты;
 * PSD — Welch по эпохам, окно ``n_fft`` (не длиннее эпохи);
-* мощность диапазона — среднее PSD по каналам и частотам внутри ``freq_bands``
-  (`core/config.py` — единственный источник диапазонов, DRY).
+* мощность диапазона — **интеграл PSD по полосе** (trapezoid, мкВ²), усреднённый по
+  каналам, в мкВ² (N15): физически сравнимая величина между диапазонами разной
+  ширины, в отличие от среднего по бинам; диапазоны — из ``freq_bands``
+  (`core/config.py` — единственный источник, DRY). Топокарта рисуется тем же
+  интегралом по каналам — шкала картинки и число в таблице совпадают;
+* дополнительно (N16): ``relative_power`` (доля диапазона в интеграле всего
+  спектра), медиана и квартили мощности по эпохам (разброс = стационарность
+  ритма), IAF (индивидуальная пиковая α-частота, параболическое уточнение) и
+  индексы θ/β и (θ+α)/β по интегральным мощностям.
 
 Топокарта (честно о компромиссе)
 --------------------------------
@@ -117,6 +124,9 @@ def spectrum_signature(params: SpectrumParams, cfg: Settings, channels: Sequence
         f"ref={params.reference}",
         ",".join(channels),
         ",".join(f"{name}:{cfg.freq_bands[name]}" for name in sorted(cfg.freq_bands)),
+        # v2: мощность полосы — интеграл PSD (N15), а не среднее — топокарты
+        # старой метрики недействительны даже при тех же параметрах.
+        "v2-integral",
     )).encode("utf-8"))
     return digest.hexdigest()[:16]
 
@@ -240,20 +250,68 @@ def topomap_png(
     return encode_png_gray8(gray, alpha)
 
 
+def _integrate_band(freqs: np.ndarray, values: np.ndarray, df: float) -> np.ndarray:
+    """Интеграл PSD по маске диапазона вдоль последней оси (trapezoid), мкВ².
+
+    Именно трапециевидное правило, а не Simpson: оно **аддитивно** — интегралы
+    соседних полос в сумме дают интеграл охвата, поэтому `relative_power`
+    гарантированно в 0..1. Simpson на узких пиках ритма (1–2 бина над 1/f)
+    недосчитывает в зависимости от чётности точек и эту гарантию ломал.
+    Одиночный бин трапециями не интегрируется — оценка значением × шаг сетки.
+    """
+    if freqs.size >= 2:
+        return np.asarray(np.trapezoid(values, x=freqs, axis=-1), dtype=float)
+    return np.asarray(np.sum(values, axis=-1), dtype=float) * df
+
+
 def _band_powers(
     freqs: np.ndarray, psd_mean: np.ndarray, bands: dict[str, tuple],
 ) -> dict[str, float | None]:
-    """Средняя мощность каждого диапазона: PSD уже усреднён по эпохам.
+    """Мощность каждого диапазона — **интеграл PSD по полосе, мкВ²** (N15).
 
+    Интеграл, а не среднее по бинам: среднее сравнивало «плотности» и делало
+    ответ зависимым от ширины диапазона (узкая α против широкого β), а
+    физически сравнимая величина — площадь под PSD. PSD уже усреднён по эпохам.
     Диапазон без попавших частот (например γ при узкой полосе фильтра) даёт
     ``None``, а не NaN: «NaN» — невалидный JSON, и ответ ломался бы на клиенте,
     тогда как ``None`` читается как «не измерено» (UI покажет «—»).
     """
+    df = float(freqs[1] - freqs[0]) if freqs.size > 1 else 1.0
     powers: dict[str, float | None] = {}
     for name, (fmin, fmax) in bands.items():
         mask = (freqs >= fmin) & (freqs <= fmax)
-        powers[name] = float(np.mean(psd_mean[:, mask])) if np.any(mask) else None
+        if not np.any(mask):
+            powers[name] = None
+            continue
+        per_channel = _integrate_band(freqs[mask], psd_mean[:, mask], df)
+        powers[name] = float(np.mean(per_channel))
     return powers
+
+
+def _individual_alpha_hz(
+    freqs: np.ndarray, psd_mean: np.ndarray, alpha: tuple[float, float],
+) -> float | None:
+    """Индивидуальная пиковая α-частота (IAF): максимум среднего PSD в полосе α.
+
+    Пик уточняется параболической интерполяцией по трём точкам: разрешение
+    Welch (1–4 Гц) грубее ширины α-пика, голый argmax давал бы шаг сетки.
+    ``None`` — в полосе меньше трёх бинов (ни пика, ни интерполяции).
+    """
+    mask = (freqs >= alpha[0]) & (freqs <= alpha[1])
+    if int(mask.sum()) < 3:
+        return None
+    band_freqs = freqs[mask]
+    band_psd = psd_mean[mask]
+    peak = int(np.argmax(band_psd))
+    if peak == 0 or peak == band_psd.size - 1:
+        return float(band_freqs[peak])
+    y0, y1, y2 = band_psd[peak - 1], band_psd[peak], band_psd[peak + 1]
+    denom = float(y0 - 2.0 * y1 + y2)
+    if denom >= 0:  # вершина не выпуклая — интерполяция бессмысленна
+        return float(band_freqs[peak])
+    shift = 0.5 * float(y0 - y2) / denom
+    df = float(band_freqs[1] - band_freqs[0])
+    return float(band_freqs[peak] + shift * df)
 
 
 def _channel_band_power(
@@ -263,7 +321,10 @@ def _channel_band_power(
     mask = (freqs >= fmin) & (freqs <= fmax)
     if not np.any(mask):
         return {}
-    per_channel = np.mean(psd_mean[:, mask], axis=1)
+    # Интеграл PSD (как `_band_powers`, N15): иначе шкала картинки и число
+    # в таблице диапазонов читались бы в разных единицах.
+    df = float(freqs[1] - freqs[0]) if freqs.size > 1 else 1.0
+    per_channel = _integrate_band(freqs[mask], psd_mean[:, mask], df)
     # ``strict=False`` — явная фиксация контракта: набор каналов и мощность берутся
     # из одного расчёта, а если они разойдутся, обрезка повторит прежнее поведение.
     return {name: float(value) for name, value in zip(channels, per_channel, strict=False)}
@@ -367,9 +428,40 @@ def compute_spectrum(
     with journal.step(
         "spectrum", "psd", params_key=signature, epochs=len(epochs),
     ) as entry:
-        freqs, _psd, psd_mean, n_fft = _compute_psd(epochs, cfg, params)
+        freqs, psd, psd_mean, n_fft = _compute_psd(epochs, cfg, params)
         entry.note = f"n_fft={n_fft}, epoch={params.epoch_length_ms:g}ms"
+    psd_ch_mean = np.mean(psd_mean, axis=0)
     band_powers = _band_powers(freqs, psd_mean, cfg.freq_bands)
+    # N16: медиана/квартили мощности диапазона по эпохам (куб PSD уже посчитан
+    # в `_compute_psd`, поэтому разброс — почти бесплатный).
+    df = float(freqs[1] - freqs[0]) if freqs.size > 1 else 1.0
+    epoch_stats: dict[str, tuple[float, float, float] | None] = {}
+    for band_name, (fmin, fmax) in cfg.freq_bands.items():
+        mask = (freqs >= fmin) & (freqs <= fmax)
+        if not mask.any():
+            epoch_stats[band_name] = None
+            continue
+        series = np.mean(_integrate_band(freqs[mask], psd[:, :, mask], df), axis=-1)
+        epoch_stats[band_name] = (
+            float(np.median(series)),
+            float(np.percentile(series, 25)),
+            float(np.percentile(series, 75)),
+        )
+    # Полная мощность спектра — интеграл среднего PSD: знаменатель relative power.
+    total_power = float(np.trapezoid(psd_ch_mean, x=freqs)) if freqs.size >= 2 else 0.0
+    alpha_range = cfg.freq_bands.get("alpha")
+    iaf_hz = (
+        _individual_alpha_hz(freqs, psd_ch_mean, alpha_range)
+        if alpha_range is not None else None
+    )
+    theta_p = band_powers.get("theta")
+    alpha_p = band_powers.get("alpha")
+    beta_p = band_powers.get("beta")
+    theta_beta_ratio = theta_p / beta_p if theta_p is not None and beta_p else None
+    theta_alpha_beta_ratio = (
+        (theta_p + alpha_p) / beta_p
+        if theta_p is not None and alpha_p is not None and beta_p else None
+    )
 
     warnings: list[str] = []
     positions = channel_positions(channels)
@@ -381,7 +473,6 @@ def compute_spectrum(
     if len(positions) < 3:
         warnings.append("Слишком мало каналов с позициями — топокарты не построены")
 
-    signature = spectrum_signature(params, cfg, channels)
     report(
         "topomaps",
         message=f"Топокарты диапазонов: {len(cfg.freq_bands)}",
@@ -402,11 +493,19 @@ def compute_spectrum(
                 )
                 written += size or 0
                 url = topomap_url(cfg, recording.recording_id, name)
+            power = band_powers[name]
+            stats = epoch_stats[name]
             bands_out.append({
                 "name": name,
                 "fmin": float(fmin),
                 "fmax": float(fmax),
-                "power_uv2": band_powers[name],
+                "power_uv2": power,
+                "relative_power": (
+                    power / total_power if power is not None and total_power > 0 else None
+                ),
+                "median_power_uv2": stats[0] if stats else None,
+                "q25_power_uv2": stats[1] if stats else None,
+                "q75_power_uv2": stats[2] if stats else None,
                 "topomap_url": url,
             })
         entry.bytes_out = written or None
@@ -433,8 +532,11 @@ def compute_spectrum(
         "notch_hz": params.notch_hz,
         "reject_threshold_uv": params.reject_threshold_uv,
         "freqs": [float(value) for value in freqs],
-        "psd_mean_uv2": [float(value) for value in np.mean(psd_mean, axis=0)],
+        "psd_mean_uv2": [float(value) for value in psd_ch_mean],
         "bands": bands_out,
+        "iaf_hz": iaf_hz,
+        "theta_beta_ratio": theta_beta_ratio,
+        "theta_alpha_beta_ratio": theta_alpha_beta_ratio,
         "topomap_version": signature,
         "warnings": warnings,
         "duration_sec_calc": round(time.perf_counter() - started, 3),

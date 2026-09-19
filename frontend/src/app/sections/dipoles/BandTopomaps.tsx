@@ -59,7 +59,10 @@ export function BandTopomaps({ spectrum, query, className }: BandTopomapsProps) 
               <span className="font-medium">{bandLabel(band.name)}</span>
               <br />
               <span className="tnum text-fg-2">
-                {bandRangeLabel(band)} · {formatPower(band.power_uv2)} мкВ²/Гц
+                {bandRangeLabel(band)} · {formatPower(band.power_uv2)} мкВ²
+                {band.relative_power !== null
+                  ? ` · ${Math.round(band.relative_power * 100)} %`
+                  : ''}
               </span>
             </figcaption>
           </figure>

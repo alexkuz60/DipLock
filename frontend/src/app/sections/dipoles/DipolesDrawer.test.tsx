@@ -50,8 +50,8 @@ describe('выдвижная панель раздела «Диполи»', () =
       '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&epoch_length_ms=1000&reject_threshold_uv=150&v=spec1234abcd',
     )
     // Мощность подписана рядом с картинкой; неизмеренная — «—», а не «0.00»
-    expect(screen.getByText(/8–13 Гц · 12.50 мкВ²\/Гц/)).toBeInTheDocument()
-    expect(screen.getByText(/30–40 Гц · — мкВ²\/Гц/)).toBeInTheDocument()
+    expect(screen.getByText(/8–13 Гц · 12.50 мкВ² · 55 %/)).toBeInTheDocument()
+    expect(screen.getByText(/30–40 Гц · — мкВ²/)).toBeInTheDocument()
     expect(screen.getAllByTestId(/^topomap-/)).toHaveLength(5)
   })
 

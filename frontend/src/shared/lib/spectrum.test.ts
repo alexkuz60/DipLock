@@ -21,6 +21,7 @@ import {
   psdPolyline,
   psdScale,
   rangeSummary,
+  spectrumMetrics,
   spectrumQueryOf,
   spectrumQueryString,
   spectrumSummary,
@@ -41,6 +42,10 @@ function band(overrides: Partial<SpectrumBandOut> = {}): SpectrumBandOut {
     fmin: 8,
     fmax: 13,
     power_uv2: 12.5,
+    relative_power: 0.55,
+    median_power_uv2: 12.2,
+    q25_power_uv2: 11.0,
+    q75_power_uv2: 13.4,
     topomap_url: '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png',
     ...overrides,
   }
@@ -61,6 +66,9 @@ function spectrum(overrides: Partial<SpectrumResult> = {}): SpectrumResult {
     freqs: [1, 10, 40],
     psd_mean_uv2: [1, 100, 2],
     bands: [band()],
+    iaf_hz: 10.2,
+    theta_beta_ratio: 0.78,
+    theta_alpha_beta_ratio: 3.56,
     topomap_version: 'abc123',
     warnings: [],
     duration_sec_calc: 0.4,
@@ -264,4 +272,13 @@ describe('окно частот FFT-графика (срез 3.5)', () => {
     expect(bars[1].ratio).toBe(0.5)
     expect(histogramBars(bands).every((bar) => bar.inRange)).toBe(true)
   })
+})
+
+test('spectrumMetrics форматирует IAF и θ/β-индексы, пропуская null (N16)', () => {
+  expect(spectrumMetrics(spectrum())).toEqual(['IAF 10.2 Гц', 'θ/β 0.78', '(θ+α)/β 3.56'])
+  expect(
+    spectrumMetrics(
+      spectrum({ iaf_hz: null, theta_beta_ratio: null, theta_alpha_beta_ratio: null }),
+    ),
+  ).toEqual([])
 })

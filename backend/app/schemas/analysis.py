@@ -456,10 +456,11 @@ class ContoursOut(BaseModel):
 # --- Спектр по диапазонам (срез 3.4) ---
 
 class SpectrumBandOut(BaseModel):
-    """Средняя мощность одного ритма (δ…γ) с ссылкой на топокарту.
+    """Мощность одного ритма (δ…γ) с ссылкой на топокарту.
 
-    Мощность — мкВ²/Гц (единицы `compute_psd`: при `units='uV'` MNE отдаёт
-    мкВ²/Гц), то есть величину можно читать как «плотность мощности».
+    Мощность — **интеграл PSD по диапазону, мкВ²** (N15): физически сравнимая
+    величина между диапазонами разной ширины (среднее PSD, мкВ²/Гц, таким не
+    является). Топокарта диапазона строится тем же интегралом по каналам.
     """
 
     name: str = Field(description="Ключ диапазона из `freq_bands` (delta…gamma)")
@@ -467,7 +468,20 @@ class SpectrumBandOut(BaseModel):
     fmax: float
     power_uv2: float | None = Field(
         default=None,
-        description="Средняя мощность в диапазоне, мкВ²/Гц; None — частоты не попали в полосу фильтра",
+        description="Интеграл PSD по диапазону, мкВ²; None — частоты не попали в полосу фильтра",
+    )
+    relative_power: float | None = Field(
+        default=None,
+        description="Доля диапазона в интеграле всего спектра, 0..1 (N16); None — не измерено",
+    )
+    median_power_uv2: float | None = Field(
+        default=None, description="Медиана мощности диапазона по эпохам, мкВ² (N16)"
+    )
+    q25_power_uv2: float | None = Field(
+        default=None, description="25-й перцентиль мощности по эпохам, мкВ²"
+    )
+    q75_power_uv2: float | None = Field(
+        default=None, description="75-й перцентиль мощности по эпохам, мкВ²"
     )
     topomap_url: str | None = Field(
         default=None, description="URL топокарты диапазона (PNG, ETag); None — не построена"
@@ -501,6 +515,18 @@ class SpectrumResult(BaseModel):
     freqs: list[float] = Field(description="Частоты PSD, Гц")
     psd_mean_uv2: list[float] = Field(description="PSD, усреднённый по каналам, мкВ²/Гц")
     bands: list[SpectrumBandOut] = Field(default_factory=list)
+    iaf_hz: float | None = Field(
+        default=None,
+        description="Индивидуальная пиковая α-частота (IAF), Гц (N16); None — мало бинов в полосе α",
+    )
+    theta_beta_ratio: float | None = Field(
+        default=None,
+        description="Индекс θ/β по интегральным мощностям (N16); None — θ или β не измерены",
+    )
+    theta_alpha_beta_ratio: float | None = Field(
+        default=None,
+        description="Индекс (θ+α)/β по интегральным мощностям (N16); None — диапазоны не измерены",
+    )
     topomap_version: str = Field(description="Версия топокарт (в URL — против «залипания» кэша)")
     warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = 0.0
