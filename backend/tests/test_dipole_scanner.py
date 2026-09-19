@@ -20,12 +20,15 @@ from app.services.dipole_scanner import (
     GRID_CENTER_MM,
     GRID_RADIUS_MM,
     GRID_STEP_MM,
+    MIN_SENSOR_DISTANCE_MM,
     DipoleScanError,
     DipoleScanParams,
     _leadfield,
+    _scan_kernel,
     candidate_grid,
     compute_dipole_scan,
     scan_point,
+    scan_point_fast,
 )
 from app.services.recordings import recording_registry
 from app.services.spectral import channel_positions
@@ -91,6 +94,73 @@ def _wait_finished(client, job_id: str, timeout: float = 30.0) -> dict:
             return body
         time.sleep(0.05)
     raise AssertionError(f"Задача не завершилась за {timeout} с: {body}")
+
+
+def test_scan_point_fast_matches_scan_point():
+    """N20: быстрый путь с предрасчитанным ядром даёт те же числа, что и
+    одноразовый `scan_point` (тот же узел, GOF, амплитуда и направление)."""
+    electrodes = _electrodes()
+    grid = candidate_grid(GRID_STEP_MM)
+    kernel = _scan_kernel(
+        np.ascontiguousarray(electrodes, dtype=float).tobytes(),
+        electrodes.shape,
+        GRID_STEP_MM,
+        MIN_SENSOR_DISTANCE_MM / 1000.0,
+    )
+    rng = np.random.default_rng(7)
+    for _ in range(10):
+        signal = rng.normal(size=electrodes.shape[0]) * 20e-6
+        pos_ref, dir_ref, amp_ref, gof_ref = scan_point(electrodes, signal, grid)
+        pos_new, dir_new, amp_new, gof_new = scan_point_fast(kernel, signal)
+        # Лучший узел обязан совпасть в точности — это и есть ответ перебора
+        assert np.array_equal(pos_new, pos_ref)
+        assert np.isclose(gof_new, gof_ref, atol=1e-9)
+        assert np.isclose(amp_new, amp_ref, rtol=1e-9)
+        assert np.allclose(dir_new, dir_ref, atol=1e-9)
+
+
+def test_scan_kernel_is_cached():
+    """Ядро сетки кэшируется по позициям и шагу: повторный вызов — тот же объект."""
+    electrodes = _electrodes()
+    key = np.ascontiguousarray(electrodes, dtype=float).tobytes()
+    first = _scan_kernel(key, electrodes.shape, GRID_STEP_MM, MIN_SENSOR_DISTANCE_MM / 1000.0)
+    second = _scan_kernel(key, electrodes.shape, GRID_STEP_MM, MIN_SENSOR_DISTANCE_MM / 1000.0)
+    assert first is second
+    # Другой шаг сетки — другое ядро
+    third = _scan_kernel(key, electrodes.shape, 8.0, MIN_SENSOR_DISTANCE_MM / 1000.0)
+    assert third is not first
+
+
+def test_scan_point_fast_is_much_faster():
+    """N20: циклический путь минимум втрое быстрее одноразового (замер ~11-13x).
+
+    Порог взят с большим запасом, чтобы тест не зависел от машины: выигрыш
+    структурный (без свинцового поля и обращения GᵀG на эпоху), а не пограничный.
+    """
+    electrodes = _electrodes()
+    grid = candidate_grid(GRID_STEP_MM)
+    kernel = _scan_kernel(
+        np.ascontiguousarray(electrodes, dtype=float).tobytes(),
+        electrodes.shape,
+        GRID_STEP_MM,
+        MIN_SENSOR_DISTANCE_MM / 1000.0,
+    )
+    rng = np.random.default_rng(11)
+    signals = rng.normal(size=(15, electrodes.shape[0])) * 20e-6
+    scan_point(electrodes, signals[0], grid)  # прогрев кэшей вне замера
+    scan_point_fast(kernel, signals[0])
+
+    started = time.perf_counter()
+    for signal in signals:
+        scan_point(electrodes, signal, grid)
+    slow_s = time.perf_counter() - started
+
+    started = time.perf_counter()
+    for signal in signals:
+        scan_point_fast(kernel, signal)
+    fast_s = time.perf_counter() - started
+
+    assert fast_s * 3.0 < slow_s
 
 
 def test_candidate_grid_is_sphere_with_requested_step():

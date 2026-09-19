@@ -20,12 +20,17 @@
 
 Почему перебор векторизован
 ---------------------------
-Свинцовое поле `G` (канал × узел × 3) считается один раз на сетку и каналы и
-кэшируется (`lru_cache`), а по узлам всё считается массивами: `GᵀG`, `Gᵀd`,
-`m = (GᵀG)⁻¹Gᵀd`, невязка. При 18 каналах и ~4200 узлах (шаг 7 мм) это ~8 мс на
-эпоху — цикл по узлам был бы в сотни раз дольше. Замер на живой записи
-(`data/edf/test.edf`: 130.7 с, 500 Гц, 18 каналов, нарезка 500 мс → 261 эпоха):
-шаг 7 мм — 2.2 с, 4 мм — 11.8 с, 2 мм (~180 тыс. узлов) — 99.8 с.
+Свинцовое поле `G` (канал × узел × 3), его центрирование по каналам и
+обращённая (с ridge) `GᵀG` не зависят от сигнала эпохи, поэтому считаются
+**один раз на монтаж и шаг сетки** и кэшируются как «ядро» (`_scan_kernel`,
+N20). По узлам всё считается массивами: `Gᵀd`, `m = (GᵀG)⁻¹Gᵀd`, невязка —
+цикл по узлам был бы в сотни раз дольше. Замер на 261 эпохе, 18 каналов
+(синтетика, `scripts`-бенчмарк от 19.09.2026): шаг 7 мм (~4200 узлов) —
+10.6 → 0.8 мс на эпоху (13×), шаг 4 мм (~22 тыс. узлов) — 51 → 4.6 мс (11×).
+До N20 (поле и `GᵀG` считались на каждую эпоху) живой прогон `test.edf`
+(130.7 с, 500 Гц, нарезка 500 мс) давал: 7 мм — 2.2 с, 4 мм — 11.8 с,
+2 мм (~180 тыс. узлов) — 99.8 с; после N20 цикл перебора — доли секунды,
+а доминируют загрузка сигнала и локализация (атлас, transform).
 
 Что остаётся общим с точным режимом
 -----------------------------------
@@ -133,54 +138,132 @@ def _leadfield(
     return diff * gain[:, :, None], distance
 
 
+@dataclass(frozen=True)
+class _ScanKernel:
+    """Предрасчёт перебора сетки, не зависящий от сигнала эпохи (N20).
+
+    Свинцовое поле, его центрирование по каналам, обращённая (с ridge) GᵀG
+    и маска «узел слишком близко к электроду» одинаковы для всех эпох записи,
+    поэтому считаются один раз. В цикле по эпохам остаются только Gᵀd,
+    одно умножение на обращённую граммиану и невязка — это и даёт основной
+    выигрыш быстрого режима (замер — в докстринге модуля).
+    """
+
+    grid_m: np.ndarray  # (q, 3), метры
+    gain_centered: np.ndarray  # (i, q, 3) — поле, центрированное по каналам
+    gram_inv: np.ndarray  # (q, 3, 3) — (GᵀG + ridge)⁻¹ по узлам
+    too_close: np.ndarray  # (q,) bool — узлы ближе min_distance к электроду
+
+
+def _build_kernel(
+    positions_m: np.ndarray, grid_m: np.ndarray, min_distance_m: float,
+) -> _ScanKernel:
+    """Собирает предрасчёт сетки для фиксированных позиций электродов."""
+    gain, distance = _leadfield(positions_m, grid_m)
+    gain_centered = gain - np.mean(gain, axis=0, keepdims=True)
+    # Регуляризация: без неё узлы с почти линейно зависимыми столбцами дают
+    # вырожденную GᵀG и обращение падает на вырожденной матрице.
+    gram = np.einsum("iqj,iqk->qjk", gain_centered, gain_centered)
+    ridge = 1e-9 * np.maximum(np.trace(gram, axis1=1, axis2=2) / 3.0, 1e-30)
+    gram = gram + ridge[:, None, None] * np.eye(3)
+    gram_inv = np.linalg.inv(gram)
+    # Диполь вплотную к электроду физически бессмыслен — исключаем узлы
+    too_close = np.any(distance <= min_distance_m, axis=0)
+    return _ScanKernel(
+        grid_m=grid_m,
+        gain_centered=gain_centered,
+        gram_inv=gram_inv,
+        too_close=too_close,
+    )
+
+
+@lru_cache(maxsize=4)
+def _scan_kernel(
+    positions_key: bytes,
+    positions_shape: tuple[int, ...],
+    grid_step_mm: float,
+    min_distance_m: float,
+) -> _ScanKernel:
+    """Кэш ядра перебора: ключ — байты позиций электродов и шаг сетки.
+
+    maxsize=4: при шаге 2 мм (~180 тыс. узлов) ядро занимает ~90 МБ, большее
+    число записей в кэше неоправданно раздувает память процесса.
+    """
+    positions_m = np.frombuffer(positions_key, dtype=float).reshape(positions_shape)
+    return _build_kernel(positions_m, candidate_grid(grid_step_mm), min_distance_m)
+
+
+def _fit_best_node(
+    kernel: _ScanKernel, signal: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """Линейный МНК по всем узлам для одного (уже центрированного) отсчёта.
+
+    Общее ядро `scan_point` и `scan_point_fast`: Gᵀd, момент через
+    предрасчитанную обращённую граммиану, невязка, выбор лучшего узла.
+    """
+    total = float(np.sum(signal ** 2))
+    moment = np.einsum(
+        "qjk,qk->qj", kernel.gram_inv,
+        np.einsum("iqj,i->qj", kernel.gain_centered, signal),
+    )
+    predicted = np.einsum("iqj,qj->qi", kernel.gain_centered, moment)
+    residual = np.sum((predicted - signal[None, :]) ** 2, axis=1)
+
+    gof = 1.0 - residual / total if total > 0 else np.zeros_like(residual)
+    amplitude = np.linalg.norm(moment, axis=1)
+    valid = ~kernel.too_close & np.isfinite(gof) & (amplitude > 0)
+    if not np.any(valid):
+        raise DipoleScanError(
+            "Все узлы сетки отсеяны ограничениями (близость к электродам)"
+        )
+    gof = np.where(valid, gof, -np.inf)
+    best = int(np.argmax(gof))
+    direction = moment[best]
+    norm = float(np.linalg.norm(direction))
+    if norm == 0:
+        raise DipoleScanError("Сигнал в пике GFP вырожден: момент нулевой")
+    return kernel.grid_m[best], direction / norm, norm, float(gof[best])
+
+
+def scan_point_fast(
+    kernel: _ScanKernel, data_v: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """То же, что `scan_point`, но с предрасчитанным ядром сетки (N20).
+
+    Используется в цикле по эпохам: ядро строится один раз на запись через
+    `_scan_kernel`, а здесь остаётся только центрирование вектора сигнала
+    (average reference) и сам МНК.
+    """
+    signal = np.asarray(data_v, dtype=float)
+    if signal.size != kernel.gain_centered.shape[0]:
+        raise DipoleScanError(
+            f"Каналов в данных {signal.size}, а в ядре {kernel.gain_centered.shape[0]}"
+        )
+    return _fit_best_node(kernel, signal - float(np.mean(signal)))
+
+
 def scan_point(
     positions_m: np.ndarray,
     data_v: np.ndarray,
     grid_m: np.ndarray,
     min_distance_m: float = MIN_SENSOR_DISTANCE_MM / 1000.0,
 ) -> tuple[np.ndarray, np.ndarray, float, float]:
-    """Лучший диполь одного отсчёта: ``(позиция, единичный момент, |m|, GOF)``.
+    """Локализует один отсчёт: перебор узлов сетки + линейный МНК по моменту.
 
-    Считает свинцовое поле, центрирует его по каналам (average reference),
-    решает МНК по моменту в каждом узле и возвращает узел с максимальным GOF.
-    Точки рядом с электродами (< ``min_distance_m``) исключаются.
+    Одноразовый вход (ядро строится на каждый вызов) — для тестов и
+    одиночных точек; цикл по эпохам должен идти через `scan_point_fast`.
+    Возвращает позицию лучшего узла (м), единичное направление момента,
+    амплитуду (А·м) и GOF лучшего узла.
     """
-    if grid_m.size == 0:
-        raise DipoleScanError("Пустая сетка поиска")
     signal = np.asarray(data_v, dtype=float)
     if signal.size != positions_m.shape[0]:
         raise DipoleScanError(
             f"Каналов в данных {signal.size}, а позиций {positions_m.shape[0]}"
         )
     signal = signal - float(np.mean(signal))
-    total = float(np.sum(signal ** 2))
-
-    gain, distance = _leadfield(positions_m, grid_m)
-    gain = gain - np.mean(gain, axis=0, keepdims=True)
-    # Регуляризация: без неё узлы с почти линейно зависимыми столбцами дают
-    # вырожденную GᵀG и `solve` падает на вырожденной матрице.
-    gram = np.einsum("iqj,iqk->qjk", gain, gain)
-    ridge = 1e-9 * np.maximum(np.trace(gram, axis1=1, axis2=2) / 3.0, 1e-30)
-    gram = gram + ridge[:, None, None] * np.eye(3)
-    moment = np.linalg.solve(
-        gram, np.einsum("iqj,i->qj", gain, signal)[..., None],
-    )[..., 0]
-    predicted = np.einsum("iqj,qj->qi", gain, moment)
-    residual = np.sum((predicted - signal[None, :]) ** 2, axis=1)
-
-    gof = 1.0 - residual / total if total > 0 else np.zeros_like(residual)
-    amplitude = np.linalg.norm(moment, axis=1)
-    # Диполь вплотную к электроду физически бессмыслен — исключаем узлы
-    valid = np.all(distance > min_distance_m, axis=0) & np.isfinite(gof) & (amplitude > 0)
-    if not np.any(valid):
-        raise DipoleScanError("Ни один узел сетки не подошёл под ограничения")
-    gof = np.where(valid, gof, -np.inf)
-    best = int(np.argmax(gof))
-
-    direction = moment[best]
-    norm = float(np.linalg.norm(direction))
-    unit = direction / norm if norm > 0 else np.zeros(3)
-    return grid_m[best], unit, norm, float(gof[best])
+    return _fit_best_node(
+        _build_kernel(positions_m, grid_m, min_distance_m), signal,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -367,12 +450,21 @@ def compute_dipole_scan(
     # + структура атласа) — самая дорогая часть по замерам аудита (0.25–0.36 с на
     # точку). Строку на эпоху журнал не получает: это сотни строк на запись.
     scan_started = time.perf_counter()
+    # N20: свинцовое поле и (GᵀG)⁻¹ не зависят от эпохи — ядро сетки
+    # строится один раз на запись (и кэшируется между задачами с тем же
+    # монтажом и шагом), в цикле остаётся только МНК по готовым матрицам.
+    kernel = _scan_kernel(
+        np.ascontiguousarray(positions_m, dtype=float).tobytes(),
+        positions_m.shape,
+        params.grid_mm,
+        MIN_SENSOR_DISTANCE_MM / 1000.0,
+    )
     localize_ms = 0.0
     for epoch_index in range(n_epochs):
         sample = peak_index[epoch_index]
         try:
-            position_m, moment, amplitude_am, gof = scan_point(
-                positions_m, data[epoch_index, :, sample], grid_m,
+            position_m, moment, amplitude_am, gof = scan_point_fast(
+                kernel, data[epoch_index, :, sample],
             )
         except DipoleScanError as exc:
             warnings.append(f"Эпоха {epoch_index + 1}: {exc}")
