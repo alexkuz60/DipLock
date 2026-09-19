@@ -4,6 +4,7 @@
 import { vi } from 'vitest'
 import {
   calcJobFixture,
+  dipoleRefineResultFixture,
   dipoleScanResultFixture,
   initStatusFixture,
   metaFixture,
@@ -17,6 +18,7 @@ import { encodeSignalBlob } from './signalBlob'
 import { spectrogramBlobFixture } from './spectrogramBlob'
 import type {
   ContourSlice,
+  DipoleRefineResult,
   DipoleScanResult,
   InitStatus,
   JobStatus,
@@ -38,7 +40,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 /** 202-ответ запуска задачи расчёта (срез 3.4): id задачи и адреса поллинга. */
 function calcJobCreated(
   jobId: string,
-  kind: 'spectrum' | 'dipoles' | 'spectrogram',
+  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine',
 ): Record<string, string> {
   return {
     job_id: jobId,
@@ -110,6 +112,8 @@ export type MockApiOptions = {
   spectrumResult?: SpectrumResult
   /** Явный результат быстрого расчёта диполей */
   dipoleScanResult?: DipoleScanResult
+  /** Явный результат точного уточнения эпохи (кнопка «Уточнить…») */
+  dipoleRefineResult?: DipoleRefineResult
   /** Явный результат спектрограммы («ЭЭГ») */
   spectrogramResult?: SpectrogramResult
   /** Статус задачи спектрограммы (поллинг) */
@@ -192,6 +196,15 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'spectrum'), 202)
       }
       return jsonResponse(options.spectrumResult ?? spectrumResultFixture())
+    }
+    if (url.includes('/dipole_refine')) {
+      if (method === 'POST') {
+        if (options.calcStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'dipole_refine'), 202)
+      }
+      return jsonResponse(options.dipoleRefineResult ?? dipoleRefineResultFixture())
     }
     if (url.includes('/dipoles')) {
       if (method === 'POST') {

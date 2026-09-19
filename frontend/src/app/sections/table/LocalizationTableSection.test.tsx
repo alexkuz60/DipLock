@@ -1,13 +1,16 @@
 /**
  * Тесты раздела «Таблица локализации» (срез 4).
  *
- * Главное правило раздела: он **показывает результат и ничего не запрашивает** —
- * в тестах это проверяется напрямую (`fetch` не вызывался ни разу). Плюс
+ * Главное правило раздела: он показывает результат и сам расчёт не запускает —
+ * в тестах это проверяется напрямую (`fetch` не вызывался ни разу). Единственное
+ * исключение — явная кнопка строки «Уточнить…» (F19): точный BEM-фитинг эпохи.
+ * Плюс
  * проверяется обещание «все результаты»: строки есть у всех точек результата,
  * включая точки без MNI (там прочерк), а порог «КД» из раздела «Диполи» таблицу
  * не фильтрует.
  */
 import { act, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defaultColumnVisibility } from '@/shared/lib/tableRows'
 import { CALC_PARAM_DEFAULTS, type CalcJob } from '@/shared/lib/dipoleCalcModel'
@@ -53,6 +56,10 @@ describe('раздел «Таблица локализации»', () => {
       spectrum: null,
       error: null,
       spectrumError: null,
+      refineJob: null,
+      refiningEpoch: null,
+      refinedPoints: {},
+      refineError: null,
       view: 'none',
     })
     useEdfRecording.setState({ recording: null })
@@ -196,5 +203,49 @@ describe('раздел «Таблица локализации»', () => {
 
     expect(screen.getByText('В результате расчёта нет точек')).toBeInTheDocument()
     expect(screen.getByText(/Эпох прошло reject-фильтр: 0 из 4/)).toBeInTheDocument()
+  })
+
+  it('кнопка «Уточнить…» запускает BEM-фитинг эпохи и показывает «стало» в строке', async () => {
+    const user = userEvent.setup()
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    renderWithProviders(<LocalizationTableSection />)
+
+    // До клика — ни одного запроса: раздел результат не пересчитывает
+    expect(fetchMock).not.toHaveBeenCalled()
+    const buttons = screen.getAllByRole('button', { name: 'Уточнить…' })
+    expect(buttons).toHaveLength(4)
+    await user.click(buttons[0])
+
+    // «Стало» в строке первой эпохи: BEM GOF + GOF узла на BEM + сдвиг
+    const refinedCell = await screen.findByTestId('refined-0')
+    expect(refinedCell).toHaveTextContent('BEM GOF 94.0 % · сетка на BEM 81.0 % · Δ 6.3 мм')
+
+    // Ушёл POST на dipole_refine с нарезкой РЕЗУЛЬТАТА, а не формы панели
+    const post = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).includes('/dipole_refine') && init?.method === 'POST',
+    )
+    expect(post).toBeTruthy()
+    const form = post?.[1]?.body as FormData
+    expect(form.get('epoch_index')).toBe('0')
+    expect(form.get('epoch_length_ms')).toBe('1000')
+    expect(form.get('grid_mm')).toBe('7')
+
+    // Строка быстрого результата не переписана: её GOF остался прежним
+    expect(screen.getByTestId('loc-cell-gof-0-120')).toHaveTextContent('91.0')
+  })
+
+  it('ошибка уточнения показывается отдельно от ошибки расчёта', () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      refineError: 'Точное уточнение недоступно: не найдено BEM-решение fsaverage',
+    })
+    renderWithProviders(<LocalizationTableSection />)
+
+    expect(screen.getByText(/Ошибка уточнения: .*BEM/)).toBeInTheDocument()
+    // И кнопки на месте: уточнение можно повторить
+    expect(screen.getAllByRole('button', { name: 'Уточнить…' })).toHaveLength(4)
   })
 })

@@ -134,6 +134,14 @@ class Settings(BaseSettings):
     # запуска, а не параметр расчёта. Замер — `audit.md` §7.7 (F19).
     dipole_fit_sec_per_point: float = Field(default=5.4)
 
+    # Точное уточнение одной эпохи (F19, кнопка «Уточнить…»): половина окна
+    # вокруг пика GFP (мс), в котором идёт последовательный fit_dipole — полная
+    # эпоха при ~5 с на точку считалась бы часами.
+    dipole_refine_halfwin_ms: float = Field(default=10.0)
+    # Потоки fit_dipole при уточнении: -1 = все ядра (окно маленькое, параллелим
+    # точки внутри него — N22).
+    dipole_refine_n_jobs: int = Field(default=-1)
+
     # Артефакты
     z_score_threshold: float = 5.0
     peak_to_peak_threshold_uv: float = 100.0

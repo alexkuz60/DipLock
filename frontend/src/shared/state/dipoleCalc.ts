@@ -58,6 +58,7 @@ import {
   THRESHOLD_NAM_RANGE,
   buildDipoleForm,
   buildSpectrumForm,
+  buildRefineForm,
   calcJobFromStatus,
   normalizeCalcParams,
   type CalcJob,
@@ -68,7 +69,7 @@ import {
 import { createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import { canPlayback, clampEpochIndex, normalizePlaybackSpeed } from '@/shared/lib/playback'
-import type { DipoleScanResult, SpectrumResult } from '@/shared/api/types'
+import type { DipoleRefineResult, DipoleScanResult, SpectrumResult } from '@/shared/api/types'
 
 /**
  * Токен запуска расчёта: новый расчёт, новый спектр или сброс делают ответы
@@ -111,6 +112,17 @@ export type DipoleCalcState = {
    * панель объясняла бы сбой диполей словами «спектр не рассчитан».
    */
   spectrumError: string | null
+  /** Задача точного уточнения эпохи (F19, «Уточнить…» в таблице локализации) */
+  refineJob: CalcJob | null
+  /** Эпоха, которая уточняется прямо сейчас (с 0); `null` — уточнения нет */
+  refiningEpoch: number | null
+  /**
+   * Уточнённые точки по номеру эпохи: «было/стало» живёт здесь, а результат
+   * быстрого расчёта не переписывается — он остаётся тем, что посчитала задача.
+   */
+  refinedPoints: Record<number, DipoleRefineResult>
+  /** Текст последней ошибки уточнения — отдельно от ошибки расчёта */
+  refineError: string | null
   setView: (view: CalcView) => void
   /** Открыть панель, а повторное нажатие — закрыть (кнопки тулс-хедера) */
   toggleView: (view: Exclude<CalcView, 'none'>) => void
@@ -151,6 +163,11 @@ export type DipoleCalcState = {
   runCalculation: (recordingId: string | null) => Promise<void>
   /** Расчёт спектра по кнопке: числа PSD + топокарты диапазонов */
   runSpectrum: (recordingId: string | null) => Promise<void>
+  /**
+   * Точное уточнение эпохи (BEM fit_dipole): параметры нарезки берутся из
+   * **результата** быстрого расчёта (`buildRefineForm`), а не из формы панели.
+   */
+  refineEpoch: (recordingId: string | null, epochIndex: number) => Promise<void>
   /** Сброс результатов (закрытие записи) — параметры остаются */
   reset: () => void
 }
@@ -170,6 +187,10 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       spectrum: null,
       error: null,
       spectrumError: null,
+      refineJob: null,
+      refiningEpoch: null,
+      refinedPoints: {},
+      refineError: null,
 
       setView: (view) => set({ view }),
       toggleView: (view) => set((state) => ({ view: state.view === view ? 'none' : view })),
@@ -332,6 +353,12 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           set({
             result,
             job: succeededJob(get().job),
+            // Уточнения привязаны к нарезке прежнего результата — новая нарезка
+            // делает их чужими (как и кадр воспроизведения ниже)
+            refinedPoints: {},
+            refineJob: null,
+            refiningEpoch: null,
+            refineError: null,
             playback: {
               ...get().playback,
               playing: false,
@@ -370,6 +397,41 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         }
       },
 
+      refineEpoch: async (recordingId, epochIndex) => {
+        const result = get().result
+        if (!recordingId || !result) return
+        const token = calcRunToken.next()
+        const isCurrent = () => calcRunToken.isCurrent(token)
+        set({
+          refineJob: runningJob(),
+          refiningEpoch: epochIndex,
+          refineError: null,
+        })
+        try {
+          const created = await api.dipoleRefine.start(
+            recordingId, buildRefineForm(result, epochIndex),
+          )
+          await waitForJob(created.job_id, isCurrent, (status) =>
+            set({ refineJob: calcJobFromStatus(status) }),
+          )
+          if (!isCurrent()) return
+          const refined = await api.dipoleRefine.result(recordingId, created.job_id)
+          if (!isCurrent()) return
+          set({
+            refinedPoints: { ...get().refinedPoints, [refined.epoch_index]: refined },
+            refineJob: succeededJob(get().refineJob),
+            refiningEpoch: null,
+          })
+        } catch (error) {
+          if (isCancelled(error) || !isCurrent()) return
+          set({
+            refineJob: failedJob(get().refineJob, apiErrorText(error)),
+            refineError: apiErrorText(error),
+            refiningEpoch: null,
+          })
+        }
+      },
+
       reset: () => {
         // Отменяем поллинг: ответы прежних задач не должны трогать новое состояние
         calcRunToken.cancel()
@@ -380,6 +442,10 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           spectrum: null,
           error: null,
           spectrumError: null,
+          refineJob: null,
+          refiningEpoch: null,
+          refinedPoints: {},
+          refineError: null,
           // Выделенный диполь жил в результате задачи — вместе с ним он исчезает
           selectedPointId: null,
           // Кадр воспроизведения привязан к нарезке эпох результата: вместе с ним

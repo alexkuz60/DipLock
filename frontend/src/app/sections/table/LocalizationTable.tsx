@@ -10,6 +10,7 @@
  * `shared/lib/tableRows.ts`), цвета — токенами темы, числа — классом `tnum`,
  * чтобы колонки не «плясали» при пересчёте.
  */
+import type { ReactNode } from 'react'
 import type { LocalizationRow, TableColumn } from '@/shared/lib/tableRows'
 import { cellText, rowTooltip } from '@/shared/lib/tableRows'
 import { cx } from '@/shared/ui/cx'
@@ -17,9 +18,15 @@ import { cx } from '@/shared/ui/cx'
 export type LocalizationTableProps = {
   rows: LocalizationRow[]
   columns: TableColumn[]
+  /**
+   * Действие строки (кнопка «Уточнить…», F19): рисуется последней колонкой.
+   * Рендер приходит снаружи — таблица остаётся «только рисующей», запросы и
+   * состояние задачи живут в разделе.
+   */
+  renderRowAction?: (row: LocalizationRow) => ReactNode
 }
 
-export function LocalizationTable({ rows, columns }: LocalizationTableProps) {
+export function LocalizationTable({ rows, columns, renderRowAction }: LocalizationTableProps) {
   return (
     <div
       data-testid="localization-table-scroll"
@@ -48,6 +55,14 @@ export function LocalizationTable({ rows, columns }: LocalizationTableProps) {
                 {column.label}
               </th>
             ))}
+            {renderRowAction ? (
+              <th
+                scope="col"
+                className="border-b border-border px-3 py-2 text-left font-semibold whitespace-nowrap text-fg-2"
+              >
+                Уточнение
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -71,6 +86,14 @@ export function LocalizationTable({ rows, columns }: LocalizationTableProps) {
                   {cellText(row, column.key)}
                 </td>
               ))}
+              {renderRowAction ? (
+                <td
+                  data-testid={`loc-action-${row.id}`}
+                  className="px-3 py-1.5 whitespace-nowrap text-fg-1"
+                >
+                  {renderRowAction(row)}
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>

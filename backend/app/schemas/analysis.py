@@ -566,6 +566,13 @@ class DipoleScanResult(BaseModel):
 
     recording_id: str
     method: str = Field(description="Метод расчёта: `fast_grid` — перебор сетки, сферическая модель")
+    reference: str = Field(
+        default="average",
+        description="Референс расчёта: уточнение эпохи (dipole_refine) обязано повторить нарезку",
+    )
+    reference_channels: list[str] | None = Field(
+        default=None, description="Каналы custom-референса; None — average"
+    )
     channels: list[str]
     sfreq: float
     epoch_length_ms: float
@@ -576,6 +583,32 @@ class DipoleScanResult(BaseModel):
     n_epochs_used: int = Field(description="Сколько эпох прошло reject-фильтр")
     grid_mm: float = Field(description="Шаг объёмной сетки поиска, мм")
     points: list[DipoleScanPointOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
+
+
+class DipoleRefineResult(BaseModel):
+    """Результат точного уточнения одной эпохи (``kind=dipole_refine``, F19).
+
+    «Было/стало» в одном контракте: узел сетки (быстрый режим) и точка
+    `mne.fit_dipole` на BEM в окне вокруг того же пика GFP. `grid_gof_bem` —
+    GOF узла сетки, посчитанный на BEM-модели (позиция фиксирована): честная
+    оценка ошибки сетки без подмены метода.
+    """
+
+    recording_id: str
+    method: str = Field(description="Метод уточнения: `bem_fit`")
+    epoch_index: int = Field(description="Номер эпохи нарезки быстрого расчёта (с 0)")
+    time_ms: float = Field(description="Время пика GFP эпохи, мс")
+    window_ms: list[float] = Field(description="Окно фитинга вокруг пика [от, до], мс")
+    fast_head_coords: list[float] = Field(description="Узел сетки (быстрый режим), head, мм")
+    fast_gof: float = Field(description="GOF узла сетки на сферической модели, 0..1")
+    grid_gof_bem: float | None = Field(
+        default=None,
+        description="GOF того же узла на BEM (позиция фиксирована); None — не посчитан",
+    )
+    shift_mm: float = Field(description="Сдвиг позиции после уточнения относительно узла сетки, мм")
+    point: DipoleScanPointOut = Field(description="Уточнённая точка (BEM, max GOF в окне)")
     warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = 0.0
 

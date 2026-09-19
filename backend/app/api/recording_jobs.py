@@ -1,7 +1,7 @@
 """Задачи записи: запуск, статус, результат (A1, этап 3).
 
-Пять «задач записи» (``preprocess`` / ``spectrum`` / ``dipoles`` /
-``spectrogram``) отличаются только формой запроса и воркером. Всё остальное у
+Шесть «задач записи» (``preprocess`` / ``spectrum`` / ``dipoles`` /
+``spectrogram`` / ``dipole_refine``) отличаются только формой запроса и воркером. Всё остальное у
 них общее, и это общее живёт здесь:
 
 * ``require_recording`` — 404 с текстом для UI, если запись неизвестна/устарела;
@@ -9,7 +9,7 @@
 * ``submit_recording_job`` — 202 + ``job_id`` и ``result_url`` рядом с записью
   (``/recordings/{id}/{kind}/{job_id}``): контракт результата у каждого вида
   задачи свой (``PreprocessResult``, ``SpectrumResult``, ``DipoleScanResult``,
-  ``SpectrogramResult``), поэтому и адрес не общий;
+  ``SpectrogramResult``, ``DipoleRefineResult``), поэтому и адрес не общий;
 * ``job_status`` — статус задачи для поллинга; новый ``kind`` обязан появиться и
   здесь, и в `_drop_signal_cache` (правило 2 в ``docs/rules/api-jobs.md``);
 * ``recording_job_result`` — разбор результата: чужой/неизвестный job — 404,
@@ -23,7 +23,12 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.schemas.analysis import JobCreated, JobStatus
-from app.services.dipole_scanner import DipoleScanParams, compute_dipole_scan
+from app.services.dipole_scanner import (
+    DipoleRefineParams,
+    DipoleScanParams,
+    compute_dipole_scan,
+    refine_dipole_point,
+)
 from app.services.job_manager import ProgressCallback, job_manager
 from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recordings import Recording, recording_registry
@@ -33,7 +38,9 @@ from app.services.spectrogram import SpectrogramParams, compute_spectrogram
 logger = logging.getLogger(__name__)
 
 # Виды задач, чей результат лежит рядом с записью, а не в `/jobs/{id}/result`
-RECORDING_JOB_KINDS: tuple[str, ...] = ("preprocess", "spectrum", "dipoles", "spectrogram")
+RECORDING_JOB_KINDS: tuple[str, ...] = (
+    "preprocess", "spectrum", "dipoles", "spectrogram", "dipole_refine",
+)
 
 
 def require_recording(recording_id: str) -> Recording:
@@ -78,7 +85,15 @@ def worker_dipole_scan(
     return compute_dipole_scan(recording, settings, params, progress)
 
 
+def worker_dipole_refine(
+    progress: ProgressCallback, recording: Recording, params: DipoleRefineParams,
+) -> dict[str, Any]:
+    """Воркер точного уточнения эпохи (поток): BEM fit_dipole в окне пика GFP."""
+    return refine_dipole_point(recording, settings, params, progress)
+
+
 WORKERS: dict[str, Callable[..., dict[str, Any]]] = {
+    "dipole_refine": worker_dipole_refine,
     "preprocess": worker_preprocess,
     "spectrum": worker_spectrum,
     "spectrogram": worker_spectrogram,

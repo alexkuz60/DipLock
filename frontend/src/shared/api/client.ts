@@ -7,6 +7,7 @@
 import type {
   AnalyzeResponse,
   ContourSlice,
+  DipoleRefineResult,
   DipoleScanResult,
   InitStatus,
   JobCreated,
@@ -92,7 +93,7 @@ export function apiErrorText(error: unknown): string {
 }
 
 /** Вид задачи расчёта по записи: адреса её двух запросов отличает последний сегмент. */
-export type RecordingJobKind = 'preprocess' | 'spectrum' | 'dipoles' | 'spectrogram'
+export type RecordingJobKind = 'preprocess' | 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine'
 
 /**
  * Пара запросов «запустить задачу / прочитать результат» (A10).
@@ -188,6 +189,9 @@ export const api = {
    * Точный профиль (`mne.fit_dipole`) — отдельный срез, здесь `method: 'fast_grid'`.
    */
   dipoles: recordingJob<DipoleScanResult>('dipoles'),
+
+  /** Точное уточнение одной эпохи (F19): BEM fit_dipole в окне пика GFP. */
+  dipoleRefine: recordingJob<DipoleRefineResult>('dipole_refine'),
 
   /**
    * Спектрограмма канала («ЭЭГ»): в форме — канал, полоса фильтра и окно STFT.

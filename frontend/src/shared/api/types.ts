@@ -186,6 +186,10 @@ export type DipoleScanPoint = {
 export type DipoleScanResult = {
   recording_id: string
   method: string
+  /** Референс расчёта: уточнение эпохи (`dipole_refine`) повторяет нарезку результата */
+  reference: string
+  /** Каналы custom-референса; `null` — average */
+  reference_channels: string[] | null
   channels: string[]
   sfreq: number
   epoch_length_ms: number
@@ -197,6 +201,31 @@ export type DipoleScanResult = {
   /** Шаг объёмной сетки поиска, мм */
   grid_mm: number
   points: DipoleScanPoint[]
+  warnings: string[]
+  duration_sec_calc: number
+}
+
+/** Результат точного уточнения эпохи (`kind=dipole_refine`, кнопка «Уточнить…», F19) */
+export type DipoleRefineResult = {
+  recording_id: string
+  /** Метод уточнения: `bem_fit` */
+  method: string
+  /** Номер эпохи нарезки быстрого расчёта (с 0) */
+  epoch_index: number
+  /** Время пика GFP эпохи, мс */
+  time_ms: number
+  /** Окно фитинга вокруг пика [от, до], мс */
+  window_ms: number[]
+  /** Узел сетки (быстрый режим), head, мм */
+  fast_head_coords: number[]
+  /** GOF узла сетки на сферической модели, 0..1 */
+  fast_gof: number
+  /** GOF того же узла на BEM (позиция фиксирована); `null` — не посчитан */
+  grid_gof_bem: number | null
+  /** Сдвиг позиции после уточнения относительно узла сетки, мм */
+  shift_mm: number
+  /** Уточнённая точка (BEM, max GOF в окне) */
+  point: DipoleScanPoint
   warnings: string[]
   duration_sec_calc: number
 }

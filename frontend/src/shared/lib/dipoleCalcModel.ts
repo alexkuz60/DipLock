@@ -25,7 +25,7 @@ import {
   type CalcFilterPresetId,
 } from '@/shared/lib/calcFilter'
 import { DEFAULT_PLAYBACK_SPEED, type PlaybackSpeed } from '@/shared/lib/playback'
-import type { DipoleScanResult, JobStatus } from '@/shared/api/types'
+import type { DipoleRefineResult, DipoleScanResult, JobStatus } from '@/shared/api/types'
 
 /** Что открыто в выдвижной панели раздела: одна панель за раз. */
 export type CalcView = 'none' | 'topomap' | 'fft'
@@ -153,6 +153,62 @@ export function buildDipoleForm(params: CalcParams): FormData {
   form.set('reject_threshold_uv', String(params.rejectThresholdUv))
   form.set('grid_mm', String(params.gridMm))
   return form
+}
+
+/**
+ * Форма точного уточнения эпохи (F19): поля берутся из **результата** быстрого
+ * расчёта, а не из текущей формы панели — номер эпохи привязан к нарезке
+ * результата, и правка параметров после расчёта не должна её подменять.
+ */
+export function buildRefineForm(result: DipoleScanResult, epochIndex: number): FormData {
+  const form = new FormData()
+  form.set('epoch_index', String(epochIndex))
+  if (result.filter_band_hz) {
+    form.set('band_min', String(result.filter_band_hz[0]))
+    form.set('band_max', String(result.filter_band_hz[1]))
+  }
+  if (result.notch_hz) form.set('notch_hz', String(result.notch_hz))
+  form.set('reference', result.reference)
+  if (result.reference_channels?.length) {
+    form.set('reference_channels', result.reference_channels.join(','))
+  }
+  form.set('epoch_length_ms', String(result.epoch_length_ms))
+  form.set('reject_threshold_uv', String(result.reject_threshold_uv))
+  form.set('grid_mm', String(result.grid_mm))
+  return form
+}
+
+/**
+ * Однострочное «стало» уточнения (F19): BEM GOF, GOF узла сетки на той же
+ * модели и сдвиг позиции — видно, что дал точный профиль, без подмены метода.
+ */
+export function refinedSummary(refined: DipoleRefineResult): string {
+  const parts = [`BEM GOF ${(refined.point.gof * 100).toFixed(1)} %`]
+  if (refined.grid_gof_bem !== null) {
+    parts.push(`сетка на BEM ${(refined.grid_gof_bem * 100).toFixed(1)} %`)
+  }
+  parts.push(`Δ ${refined.shift_mm.toFixed(1)} мм`)
+  return parts.join(' · ')
+}
+
+/**
+ * Тултип уточнённой точки: полное «было/стало» — окно фитинга, MNI, сдвиг
+ * от узла сетки и GOF обеих моделей. Одна строка — в title ячейки таблицы.
+ */
+export function refineTooltip(refined: DipoleRefineResult): string {
+  const coords = refined.point.mni_coords
+    ? `MNI ${refined.point.mni_coords.map((value) => value.toFixed(1)).join(' / ')}`
+    : 'MNI нет'
+  const gridBem =
+    refined.grid_gof_bem !== null
+      ? `, тот же узел на BEM: ${(refined.grid_gof_bem * 100).toFixed(1)} %`
+      : ''
+  return (
+    `Уточнено точным профилем (окно ${refined.window_ms.map((v) => v.toFixed(0)).join('…')} мс): ` +
+    `GOF ${(refined.point.gof * 100).toFixed(1)} %, ${coords}, ` +
+    `сдвиг от узла сетки ${refined.shift_mm.toFixed(1)} мм. ` +
+    `Было — сетка: GOF ${(refined.fast_gof * 100).toFixed(1)} %${gridBem}.`
+  )
 }
 
 /** Форма запроса спектра: полоса та же, что у расчёта диполей (один источник). */

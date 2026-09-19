@@ -39,6 +39,7 @@ from app.api.assets import (
     asset_response,
 )
 from app.api.params import (
+    dipole_refine_params,
     dipole_scan_params,
     preprocess_params,
     spectrogram_params,
@@ -65,6 +66,7 @@ from app.schemas.analysis import (
     ContourSliceOut,
     ContoursOut,
     ContoursRef,
+    DipoleRefineResult,
     DipoleScanResult,
     JobCreated,
     JobStatus,
@@ -483,6 +485,52 @@ async def get_dipole_scan_result(recording_id: str, job_id: str) -> DipoleScanRe
     """Точки диполей (MNI, момент, амплитуда, GOF). 409 — задача идёт или упала."""
     job = recording_job_result(recording_id, job_id, "dipoles")
     return DipoleScanResult(**job.result)
+
+
+@router.post(
+    "/recordings/{recording_id}/dipole_refine", status_code=202, response_model=JobCreated,
+    summary="Точное уточнение одной эпохи (BEM fit_dipole в окне пика GFP)",
+)
+async def create_dipole_refine_job(
+    recording_id: str,
+    epoch_index: int = Form(..., ge=0, description="Номер эпохи нарезки быстрого расчёта (с 0)"),
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
+    epoch_length_ms: float = Form(1000.0, description="Длина эпохи — как в быстром расчёте"),
+    reject_threshold_uv: float = Form(150.0, description="Порог reject эпох"),
+    grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг сетки быстрого расчёта, мм"),
+) -> JobCreated:
+    """Кнопка «Уточнить для эпохи…» (F19): `mne.fit_dipole` на BEM fsaverage.
+
+    Параметры нарезки обязаны повторять быстрый расчёт (UI шлёт поля результата,
+    а не текущую форму): ``epoch_index`` привязан к той нарезке. В ответе —
+    «было/стало»: узел сетки (и его GOF на BEM) и уточнённая точка.
+    """
+    recording = require_recording(recording_id)
+    params = dipole_refine_params(
+        epoch_index=epoch_index,
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz,
+        reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
+        grid_mm=grid_mm,
+    )
+    return submit_recording_job(
+        "dipole_refine", recording, params, meta={"epoch_index": epoch_index},
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/dipole_refine/{job_id}", response_model=DipoleRefineResult,
+    summary="Результат точного уточнения эпохи",
+)
+async def get_dipole_refine_result(recording_id: str, job_id: str) -> DipoleRefineResult:
+    """«Было/стало»: узел сетки и уточнённая BEM-точка. 409 — задача идёт/упала."""
+    job = recording_job_result(recording_id, job_id, "dipole_refine")
+    return DipoleRefineResult(**job.result)
 
 
 @router.post(

@@ -45,6 +45,8 @@
 | 12 | `POST /recordings/{id}/spectrogram` | спектрограмма канала (STFT) |
 | 13 | `GET /recordings/{id}/spectrogram/{job_id}` | метаданные сетки |
 | 14 | `GET /recordings/{id}/spectrogram/{job_id}/grid.bin` | сетка дБ (float32, контейнер `DPS2`, ETag) |
+| 15 | `POST /recordings/{id}/dipole_refine` | точное уточнение одной эпохи (BEM fit_dipole, F19) |
+| 16 | `GET /recordings/{id}/dipole_refine/{job_id}` | результат уточнения («было/стало») |
 | 15 | `POST /jobs` | анализ фоновой задачей (legacy, с прогрессом) |
 | 16 | `GET /jobs` | история задач |
 | 17 | `GET /jobs/{job_id}` | состояние задачи |
@@ -74,7 +76,7 @@
    Новый вид задачи (`kind`) обязан быть добавлен и в `RECORDING_JOB_KINDS` + `WORKERS`
    (сборка `result_url` и запуск), и в `_drop_signal_cache` (чистка кэшей записи — дисковых и
    RAM-кэша подготовленного сигнала) — иначе результат «потеряется» после вытеснения.
-   Сейчас kind: `analyze`, `preprocess`, `spectrum`, `dipoles`, `spectrogram`.
+   Сейчас kind: `analyze`, `preprocess`, `spectrum`, `dipoles`, `spectrogram`, `dipole_refine`.
    На стороне UI задача описана **одной парой** методов клиента (`recordingJob(kind)` в
    `shared/api/client.ts`: `start` + `result`), а ожидание завершения — единым `waitForJob`
    (`shared/lib/jobPolling.ts`); своих копий поллинга в сторах нет (правило 7 —

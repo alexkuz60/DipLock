@@ -1,9 +1,10 @@
 /**
  * Раздел «Таблица локализации» (срез 4): все точки расчёта диполей текущей записи.
  *
- * Раздел — **только представление результата**: он не запускает расчёт и не
- * делает ни одного запроса (в этом легко убедиться тестом: `fetch` не вызывается
- * вовсе). Что показать, решает состояние двух срезов:
+ * Раздел — представление результата: сам он ничего не считает, а единственный
+ * запрос идёт по **явной кнопке** строки — «Уточнить…» (F19: точный BEM-фитинг
+ * одной эпохи, параметры нарезки берутся из результата, а не из формы панели).
+ * Что показать, решает состояние двух срезов:
  *
  * * `edfRecording` — загружена ли запись (без неё результата быть не может);
  * * `dipoleCalc` — результат задачи расчёта, её прогресс/ошибка и **правки
@@ -21,7 +22,7 @@
  * * результат принадлежит записи: при загрузке новой или закрытии записи он
  *   сбрасывается вместе с расчётом (`edfRecording` → `dipoleCalc.reset()`).
  */
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { Table2 } from 'lucide-react'
 import {
   hiddenColumnCount,
@@ -30,13 +31,14 @@ import {
   tableRows,
   visibleColumns,
 } from '@/shared/lib/tableRows'
-import { calcJobSummary, resultMatchesParams } from '@/shared/lib/dipoleCalcModel'
+import { calcJobSummary, refinedSummary, refineTooltip, resultMatchesParams } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useTableParams } from '@/shared/state/tableParams'
 import { filterBandText } from '@/shared/lib/calcFilter'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { Button } from '@/shared/ui/Button'
 import { LocalizationTable } from './LocalizationTable'
 
 export function LocalizationTableSection() {
@@ -47,6 +49,11 @@ export function LocalizationTableSection() {
   const error = useDipoleCalc((state) => state.error)
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
   const calcParams = useDipoleCalc((state) => state.params)
+  const refineJob = useDipoleCalc((state) => state.refineJob)
+  const refiningEpoch = useDipoleCalc((state) => state.refiningEpoch)
+  const refinedPoints = useDipoleCalc((state) => state.refinedPoints)
+  const refineError = useDipoleCalc((state) => state.refineError)
+  const refineEpoch = useDipoleCalc((state) => state.refineEpoch)
 
   const sortDirection = useTableParams((state) => state.params.sortDirection)
   const columnVisibility = useTableParams((state) => state.params.columnVisibility)
@@ -61,6 +68,42 @@ export function LocalizationTableSection() {
   const missingMni = missingMniCount(rows)
   const hiddenColumns = hiddenColumnCount(columnVisibility)
   const stale = result !== null && !resultMatchesParams(result, calcParams)
+
+  // Ячейка «Уточнение»: «Уточнить…» → «Уточняю…» → «стало» (BEM GOF + сдвиг).
+  // Строка результата не переписывается: уточнение — добавка, а не подмена чисел.
+  const renderRowAction = useCallback(
+    (row: (typeof rows)[number]) => {
+      const refined = refinedPoints[row.epochIndex]
+      if (refined) {
+        return (
+          <span
+            className="tnum text-accent"
+            title={refineTooltip(refined)}
+            data-testid={`refined-${row.epochIndex}`}
+          >
+            {refinedSummary(refined)}
+          </span>
+        )
+      }
+      if (refiningEpoch === row.epochIndex && refineJob?.status === 'running') {
+        return <span className="text-fg-2">Уточняю…</span>
+      }
+      return (
+        <Button
+          variant="ghost"
+          disabled={refineJob?.status === 'running'}
+          title={
+            'Точный фитинг этой эпохи на BEM fsaverage (окно пика GFP, ~десятки секунд). ' +
+            'Нарезка повторяет быстрый расчёт; строка результата не переписывается'
+          }
+          onClick={() => void refineEpoch(recording?.recording_id ?? null, row.epochIndex)}
+        >
+          Уточнить…
+        </Button>
+      )
+    },
+    [refinedPoints, refiningEpoch, refineJob, refineEpoch, recording],
+  )
 
   if (recording === null) {
     return (
@@ -147,7 +190,10 @@ export function LocalizationTableSection() {
         ) : null}
       </div>
 
-      <LocalizationTable rows={rows} columns={columns} />
+      {refineError ? (
+        <StatusPill tone="danger">{`Ошибка уточнения: ${refineError}`}</StatusPill>
+      ) : null}
+      <LocalizationTable rows={rows} columns={columns} renderRowAction={renderRowAction} />
 
       <p className="text-sm text-fg-2">
         Таблица читает результат задачи раздела «Диполи» и ничего не запрашивает: расчёт запускается

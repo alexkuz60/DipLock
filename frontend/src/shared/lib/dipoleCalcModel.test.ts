@@ -11,16 +11,19 @@ import { BANDWIDTH_RANGE, SINGLE_FREQ_RANGE } from '@/shared/lib/calcFilter'
 import {
   CALC_PARAM_DEFAULTS,
   buildDipoleForm,
+  buildRefineForm,
   buildSpectrumForm,
   calcJobFromStatus,
   calcJobSummary,
   calcSignature,
   normalizeCalcParams,
   resultMatchesParams,
+  refineTooltip,
+  refinedSummary,
   resultSignature,
   type CalcParams,
 } from '@/shared/lib/dipoleCalcModel'
-import { calcJobFixture, dipoleScanResultFixture } from '@/test/fixtures'
+import { calcJobFixture, dipoleRefineResultFixture, dipoleScanResultFixture } from '@/test/fixtures'
 
 /** Параметры формы в виде объекта: FormData удобнее читать словарём. */
 function formEntries(form: FormData): Record<string, string> {
@@ -138,5 +141,49 @@ describe('домен расчёта диполей: формы, отпечатк
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, filterBandHz: null })).toBe(false)
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, notchHz: 50 })).toBe(false)
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, epochLengthMs: 500 })).toBe(false)
+  })
+})
+
+describe('точное уточнение эпохи (F19, «Уточнить…»)', () => {
+  it('buildRefineForm берёт нарезку из результата, а не из формы панели', () => {
+    const result = dipoleScanResultFixture({
+      filter_band_hz: [8, 13],
+      epoch_length_ms: 500,
+      grid_mm: 5,
+      notch_hz: 50,
+    })
+    expect(formEntries(buildRefineForm(result, 2))).toEqual({
+      epoch_index: '2',
+      band_min: '8',
+      band_max: '13',
+      notch_hz: '50',
+      reference: 'average',
+      epoch_length_ms: '500',
+      reject_threshold_uv: '150',
+      grid_mm: '5',
+    })
+    // custom-референс доезжает списком каналов; без фильтра пары границ нет
+    const custom = formEntries(
+      buildRefineForm(
+        dipoleScanResultFixture({ reference: 'custom', reference_channels: ['Cz', 'Pz'] }),
+        0,
+      ),
+    )
+    expect(custom.reference_channels).toBe('Cz,Pz')
+    expect(formEntries(buildRefineForm(dipoleScanResultFixture({ filter_band_hz: null }), 0)))
+      .not.toHaveProperty('band_min')
+  })
+
+  it('refinedSummary и refineTooltip показывают «было/стало» без «null» в тексте', () => {
+    const refined = dipoleRefineResultFixture()
+    expect(refinedSummary(refined)).toBe('BEM GOF 94.0 % · сетка на BEM 81.0 % · Δ 6.3 мм')
+    const tooltip = refineTooltip(refined)
+    expect(tooltip).toContain('Уточнено точным профилем')
+    expect(tooltip).toContain('Было — сетка')
+    // grid_gof_bem = null — метрика просто отсутствует, а не печатается как «null»
+    expect(refinedSummary(dipoleRefineResultFixture({ grid_gof_bem: null }))).toBe(
+      'BEM GOF 94.0 % · Δ 6.3 мм',
+    )
+    expect(refineTooltip(dipoleRefineResultFixture({ grid_gof_bem: null }))).not.toContain('null')
   })
 })

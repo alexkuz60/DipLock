@@ -4,6 +4,7 @@
 import type {
   ContourSlice,
   DipoleScanPoint,
+  DipoleRefineResult,
   DipoleScanResult,
   InitStatus,
   JobStatus,
@@ -377,6 +378,36 @@ export function spectrumResultFixture(
   }
 }
 
+/** Результат точного уточнения эпохи (kind=dipole_refine, кнопка «Уточнить…»). */
+export function dipoleRefineResultFixture(
+  overrides: Partial<DipoleRefineResult> = {},
+): DipoleRefineResult {
+  const scan = dipoleScanResultFixture()
+  const fast = scan.points[0]
+  return {
+    recording_id: recordingFixture.recording_id,
+    method: 'bem_fit',
+    epoch_index: fast.epoch_index,
+    time_ms: fast.time_ms,
+    window_ms: [fast.time_ms - 10, fast.time_ms + 10],
+    fast_head_coords: [...fast.head_coords],
+    fast_gof: fast.gof,
+    grid_gof_bem: 0.81,
+    shift_mm: 6.3,
+    point: {
+      ...fast,
+      head_coords: [fast.head_coords[0] + 4.1, fast.head_coords[1] + 2.2, fast.head_coords[2] + 3.5],
+      mni_coords: fast.mni_coords
+        ? [fast.mni_coords[0] + 4.3, fast.mni_coords[1] + 2.4, fast.mni_coords[2] + 3.3]
+        : null,
+      gof: 0.94,
+    },
+    warnings: [],
+    duration_sec_calc: 3.2,
+    ...overrides,
+  }
+}
+
 /** URL топокарты диапазона — как его отдаёт бэкенд (версия добавляется клиентом). */
 export function topomapUrl(band: string): string {
   return `/api/v1/recordings/${recordingFixture.recording_id}/spectrum/topomap/${band}.png`
@@ -389,6 +420,8 @@ export function dipoleScanResultFixture(
   return {
     recording_id: recordingFixture.recording_id,
     method: 'fast_grid',
+    reference: 'average',
+    reference_channels: null,
     channels: [...recordingFixture.channels],
     sfreq: recordingFixture.sfreq,
     epoch_length_ms: 1000,

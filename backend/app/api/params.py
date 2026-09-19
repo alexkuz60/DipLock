@@ -16,7 +16,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.schemas.analysis import PreprocessStage
-from app.services.dipole_scanner import DipoleScanParams
+from app.services.dipole_scanner import DipoleRefineParams, DipoleScanParams
 from app.services.preprocess import PreprocessParams
 from app.services.spectral import SpectrumParams
 from app.services.spectrogram import SpectrogramParams
@@ -210,3 +210,28 @@ def dipole_scan_params(
         reference_channels=parse_reference_channels(reference_channels),
         grid_mm=grid_mm,
     )
+
+
+def dipole_refine_params(
+    *,
+    epoch_index: int,
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
+    reference: str,
+    reference_channels: str | None,
+    epoch_length_ms: float,
+    reject_threshold_uv: float,
+    grid_mm: float,
+) -> DipoleRefineParams:
+    """Параметры точного уточнения: сканирование (нарезка результата) + эпоха."""
+    scan = dipole_scan_params(
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz,
+        reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
+        grid_mm=grid_mm,
+    )
+    if epoch_index < 0:
+        raise HTTPException(status_code=400, detail="Номер эпохи неотрицателен (с 0)")
+    return DipoleRefineParams(scan=scan, epoch_index=epoch_index)

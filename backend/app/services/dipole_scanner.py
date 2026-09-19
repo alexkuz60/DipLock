@@ -55,6 +55,7 @@ import numpy as np
 
 from app.core.config import Settings
 from app.services import journal
+from app.services.dipole_fitter import _get_bem, _get_covariance
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
@@ -533,6 +534,10 @@ def compute_dipole_scan(
     return {
         "recording_id": recording.recording_id,
         "method": "fast_grid",
+        "reference": params.reference,
+        "reference_channels": (
+            list(params.reference_channels) if params.reference_channels else None
+        ),
         "channels": used_channels,
         "sfreq": float(raw.info["sfreq"]),
         "epoch_length_ms": params.epoch_length_ms,
@@ -546,3 +551,149 @@ def compute_dipole_scan(
         "warnings": warnings,
         "duration_sec_calc": round(time.perf_counter() - started, 3),
     }
+
+@dataclass
+class DipoleRefineParams:
+    """Параметры точного уточнения: параметры быстрого расчёта + номер эпохи.
+
+    Сканирование передаётся целиком, а не «текущими настройками формы»: номер
+    эпохи привязан к нарезке результата, и уточнение обязано повторить её
+    точь-в-точь (та же полоса, длина эпохи, reject), иначе «эпоха 12» оказалась
+    бы другим куском записи.
+    """
+
+    scan: DipoleScanParams
+    epoch_index: int
+
+
+def refine_dipole_point(
+    recording: Recording,
+    cfg: Settings,
+    params: DipoleRefineParams,
+    progress: Any = None,
+) -> dict[str, Any]:
+    """Точное уточнение одной точки быстрого расчёта (F19/N22): BEM-фитинг эпохи.
+
+    MNE 1.13 не принимает стартовую точку оптимизации (`pos` у `fit_dipole` —
+    это **фиксированная** позиция), поэтому «сетка как старт» устроена иначе:
+    узел сетки оценивается на BEM-модели с фиксированной позицией (линейный
+    фитинг момента — быстро; это честный GOF сетки на честной модели головы),
+    а свободный последовательный фитинг идёт по маленькому окну вокруг пика
+    GFP (`dipole_refine_halfwin_ms`). В ответе обе точки — «было/стало».
+    """
+    scan = params.scan
+    report = progress or (lambda *args, **kwargs: None)
+    started = time.perf_counter()
+    report("load_edf", message="Чтение EDF, монтаж 10-20")
+
+    # Та же подготовка, что и в быстром расчёте (общий `_prepare_epochs`):
+    # кэш подготовленного сигнала и нарезка совпадают по построению.
+    raw, epochs = _prepare_epochs(recording, cfg, scan)
+    n_epochs = len(epochs)
+    if n_epochs == 0:
+        raise DipoleScanError("После reject-фильтра не осталось эпох — нечего уточнять")
+    if not 0 <= params.epoch_index < n_epochs:
+        raise DipoleScanError(
+            f"Эпохи №{params.epoch_index + 1} нет: в нарезке быстрого расчёта их {n_epochs}. "
+            "Уточнение привязано к той нарезке — если параметры менялись, пересчитайте диполи"
+        )
+    # Тот же порядок выборки, что в compute_dipole_scan: сначала матрица
+    # электродов (каналы с позициями), потом данные по ним — иначе индекс
+    # эпохи/канала разъедется с быстрым расчётом.
+    positions = channel_positions(raw.ch_names)
+    used_channels, positions_m, used_index = _electrode_matrix(raw.ch_names, positions)
+    data = epochs.get_data()[:, used_index, :]  # (n_epochs, n_ch, n_times), В
+    times = epochs.times
+    gfp = np.sqrt(np.mean(data ** 2, axis=1))  # (n_epochs, n_times)
+    sample = int(np.argmax(gfp[params.epoch_index]))
+    kernel = _scan_kernel(
+        np.ascontiguousarray(positions_m, dtype=float).tobytes(),
+        positions_m.shape, scan.grid_mm, MIN_SENSOR_DISTANCE_MM / 1000.0,
+    )
+    fast_pos_m, _fast_dir, _fast_amp, fast_gof = scan_point_fast(
+        kernel, data[params.epoch_index, :, sample],
+    )
+
+    report("refine", 0.3, message=f"Точный фитинг эпохи {params.epoch_index + 1} (BEM)")
+    try:
+        bem = _get_bem(cfg)
+    except (FileNotFoundError, OSError) as exc:
+        raise DipoleScanError(
+            "Точное уточнение недоступно: не найдено BEM-решение fsaverage "
+            f"({exc}). Быстрый результат остаётся в таблице"
+        ) from exc
+    cov = _get_covariance(cfg)
+    if cov is None:
+        cov = mne.compute_covariance(epochs, method="empirical", verbose=False)
+
+    # Окно вокруг пика GFP: полная эпоха при ~5 с на точку считалась бы часами.
+    sfreq = float(raw.info["sfreq"])
+    half = max(1, round(cfg.dipole_refine_halfwin_ms / 1000.0 * sfreq))
+    lo = max(0, sample - half)
+    hi = min(data.shape[2], sample + half + 1)
+    sel = [raw.ch_names.index(name) for name in used_channels]
+    info = mne.pick_info(raw.info, sel)
+    evoked = mne.EvokedArray(
+        data[params.epoch_index][:, lo:hi], info,
+        tmin=float(times[lo]), nave=1, verbose=False,
+    )
+    n_jobs = int(cfg.dipole_refine_n_jobs or -1)
+
+    warnings: list[str] = []
+    with journal.step(
+        "dipoles", "refine_fit", epochs=1,
+        note=f"epoch={params.epoch_index + 1}, окно ±{cfg.dipole_refine_halfwin_ms:g} мс",
+    ):
+        out = mne.fit_dipole(
+            evoked, cov, bem, trans=cfg.fsaverage_trans,
+            min_dist=MIN_SENSOR_DISTANCE_MM, n_jobs=n_jobs, verbose=False,
+        )
+    dip = out[0] if isinstance(out, tuple) else out
+    if len(dip.pos) == 0:
+        raise DipoleScanError("fit_dipole не дал ни одной точки в окне пика GFP")
+    best = int(np.argmax(dip.gof))
+    refined_pos_m = np.asarray(dip.pos[best], dtype=float)
+
+    # GOF узла сетки на BEM-модели: фиксированная позиция, линейный момент.
+    # Сбой (узел ближе min_dist к черепу и т.п.) не роняет уточнение — метрика
+    # сравнения просто не отдаётся.
+    grid_gof_bem: float | None = None
+    try:
+        out_fixed = mne.fit_dipole(
+            evoked, cov, bem, trans=cfg.fsaverage_trans, pos=fast_pos_m,
+            min_dist=MIN_SENSOR_DISTANCE_MM, n_jobs=n_jobs, verbose=False,
+        )
+        dip_fixed = out_fixed[0] if isinstance(out_fixed, tuple) else out_fixed
+        grid_gof_bem = float(dip_fixed.gof[min(sample - lo, len(dip_fixed.gof) - 1)])
+    except Exception as exc:  # метрика сравнения опциональна
+        warnings.append(f"GOF узла сетки на BEM не посчитан: {exc}")
+
+    mni_coords, area = _localize_point(refined_pos_m, cfg)
+    structure = _structure_of(cfg, mni_coords)
+    point = {
+        "epoch_index": params.epoch_index,
+        "time_ms": float(dip.times[best] * 1000.0),
+        "head_coords": [float(value * 1000.0) for value in refined_pos_m],
+        "mni_coords": mni_coords,
+        "moment": [float(value) for value in dip.ori[best]],
+        "amplitude_nam": float(dip.amplitude[best] * 1e9),
+        "gof": float(dip.gof[best]),
+        "brodmann_area": area,
+        "anatomical_structure": structure,
+    }
+    report("done", 1.0, message=f"Эпоха {params.epoch_index + 1} уточнена (BEM)")
+    return {
+        "recording_id": recording.recording_id,
+        "method": "bem_fit",
+        "epoch_index": params.epoch_index,
+        "time_ms": float(times[sample] * 1000.0),
+        "window_ms": [float(times[lo] * 1000.0), float(times[hi - 1] * 1000.0)],
+        "fast_head_coords": [float(value * 1000.0) for value in fast_pos_m],
+        "fast_gof": float(fast_gof),
+        "grid_gof_bem": grid_gof_bem,
+        "shift_mm": float(np.linalg.norm(refined_pos_m - fast_pos_m) * 1000.0),
+        "point": point,
+        "warnings": warnings,
+        "duration_sec_calc": round(time.perf_counter() - started, 3),
+    }
+
