@@ -42,6 +42,8 @@ import {
   atlasLabels,
   thresholdDipoleLayer,
   withOverlapCounts,
+  dipoleNodeSiblings,
+  dipoleNodeTitle,
   UNKNOWN_ATLAS_LABEL,
   type DipoleLayer,
   type DipoleMarker,
@@ -378,5 +380,40 @@ describe('кратность узла в отрисовке (поправка 18
     expect(dipolePointTitle(first)).toContain('диполей в узле: 2')
     // Без кратности подпись не выдумывает число
     expect(dipolePointTitle(POINT)).not.toContain('диполей в узле')
+  })
+})
+
+describe('курсорный тултип узла (находка ручной проверки, 19.09.2026)', () => {
+  const at = (id: string, epochIndex: number): DipolePoint => ({
+    ...POINT,
+    id,
+    epochIndex,
+    overlapCount: 2,
+  })
+
+  it('dipoleNodeSiblings группирует точки одного узла, включая саму точку', () => {
+    const a1 = at('a1', 2)
+    const a2 = at('a2', 4)
+    const other: DipolePoint = { ...at('b', 6), position: { x: 2, y: 0, z: 0 }, overlapCount: 1 }
+
+    expect(dipoleNodeSiblings([a1, a2, other], a2).map((point) => point.id)).toEqual([
+      'a1',
+      'a2',
+    ])
+    expect(dipoleNodeSiblings([a1, a2, other], other).map((point) => point.id)).toEqual(['b'])
+    expect(dipoleNodeSiblings([], a1)).toEqual([])
+  })
+
+  it('dipoleNodeTitle перечисляет все эпохи узла по возрастанию', () => {
+    // Список сортируется: порядок точек в слое (порядок расчёта) — не порядок эпох
+    const a1 = at('a1', 4)
+    const a2 = at('a2', 2)
+
+    const title = dipoleNodeTitle(a1, [a1, a2])
+    expect(title).toContain('диполей в узле: 2')
+    expect(title).toContain('эпохи узла: 3, 5')
+
+    // Одиночный узел — обычная подпись точки без списка
+    expect(dipoleNodeTitle(a1, [a1])).toBe(dipolePointTitle(a1))
   })
 })

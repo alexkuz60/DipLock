@@ -189,6 +189,19 @@ export function withOverlapCounts(layer: DipoleLayer): DipoleLayer {
   }
 }
 
+/**
+ * Точки того же узла сетки (одна позиция MNI с точностью ключа), включая саму
+ * точку (находка ручной проверки, 19.09.2026).
+ *
+ * Курсорный тултип проекции перечисляет эпохи узла: число «диполей в узле: N»
+ * без их списка не отвечало на вопрос «какие именно эпохи» и оставляло
+ * невнятным, для какой эпохи сработает «Уточнить».
+ */
+export function dipoleNodeSiblings(points: DipolePoint[], point: DipolePoint): DipolePoint[] {
+  const key = positionKey(point.position)
+  return points.filter((other) => positionKey(other.position) === key)
+}
+
 /** Геометрия кольца позиции: радиус и заливка по кратности узла. */
 export type DipoleDotVisual = {
   /** Радиус кольца в единицах viewBox (экранный размер делится на масштаб фигуры) */
@@ -507,6 +520,22 @@ export function dipolePointTitle(point: DipolePoint): string {
   const overlap =
     point.overlapCount === undefined ? '' : `, диполей в узле: ${point.overlapCount}`
   return `Эпоха ${point.epochIndex + 1}, ${(point.timeMs / 1000).toFixed(3)} с: MNI ${x.toFixed(1)} / ${y.toFixed(1)} / ${z.toFixed(1)}${suffix}, ${point.amplitudeNaM.toFixed(1)} нАм, GOF ${(point.gof * 100).toFixed(1)} %${overlap}`
+}
+
+/**
+ * Подпись узла для курсорного тултипа проекции: точка под курсором плюс список
+ * **всех** эпох узла (находка ручной проверки, 19.09.2026: «диполей в узле: 3»
+ * с одной эпохой в подписи читалось как противоречие). Список отсортирован по
+ * номеру эпохи; одиночный узел — обычная подпись точки.
+ */
+export function dipoleNodeTitle(point: DipolePoint, siblings: DipolePoint[]): string {
+  const base = dipolePointTitle(point)
+  if (siblings.length < 2) return base
+  const epochs = siblings
+    .map((sibling) => sibling.epochIndex + 1)
+    .sort((a, b) => a - b)
+    .join(', ')
+  return `${base} (эпохи узла: ${epochs})`
 }
 
 /**

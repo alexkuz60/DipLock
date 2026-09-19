@@ -510,6 +510,53 @@ def structure_id_at(volumes: ContourVolumes, mni_mm: Sequence[float]) -> int:
     return int(volumes.structures[x, y, z])
 
 
+# KD-деревья размеченных узлов по версии объёмов: строятся лениво (только когда
+# точка попала в неразмеченную ячейку), живут не дольше самих объёмов
+# (`load_volumes` — lru_cache(maxsize=2)).
+_structure_trees: dict[str, tuple[cKDTree, np.ndarray]] = {}
+
+
+def _structure_tree(volumes: ContourVolumes) -> tuple[cKDTree, np.ndarray]:
+    """KD-дерево размеченных узлов объёма и их метки (в порядке точек дерева).
+
+    Координаты узлов считаются из модульных ``MRI_BOUNDS``/``spacing_mm`` — тех же
+    источников, что использует ``structure_id_at`` (в тестах подменяются вместе).
+    """
+    cached = _structure_trees.get(volumes.version)
+    if cached is not None:
+        return cached
+    nz = np.nonzero(volumes.structures)
+    coords = np.column_stack(
+        [
+            MRI_BOUNDS[axis][0] + nz[position].astype(np.float64) * volumes.spacing_mm
+            for position, axis in enumerate(("x", "y", "z"))
+        ]
+    )
+    tree = cKDTree(coords)
+    labels = volumes.structures[nz].astype(np.int32)
+    if len(_structure_trees) >= 2:
+        _structure_trees.clear()
+    _structure_trees[volumes.version] = (tree, labels)
+    return tree, labels
+
+
+def nearest_structure_id(volumes: ContourVolumes, mni_mm: Sequence[float], max_mm: float) -> int:
+    """Ближайшая размеченная метка в радиусе ``max_mm`` (``0`` — в радиусе пусто).
+
+    Fallback для ``structure_at``: сферическая сетка быстрого расчёта ставит узлы
+    и между размеченными вокселями атласа, и за край мозга. «Ближайшая метка в
+    паре миллиметров» честнее прочерка для точки у границы структуры, но
+    недопустима для точки вне мозга — отсюда жёсткий радиус.
+    """
+    if len(mni_mm) != 3 or not all(np.isfinite(value) for value in mni_mm):
+        return 0
+    tree, labels = _structure_tree(volumes)
+    distance, index = tree.query(np.asarray(mni_mm, dtype=np.float64))
+    if not np.isfinite(distance) or distance > max_mm or index >= len(labels):
+        return 0
+    return int(labels[index])
+
+
 def structure_at(settings: Settings, mni_mm: Sequence[float]) -> str | None:
     """Анатомическая структура по MNI-координате точки — подпись для результата.
 
@@ -517,9 +564,14 @@ def structure_at(settings: Settings, mni_mm: Sequence[float]) -> str | None:
     таблице локализации и подпись под курсором на проекциях не должны
     расходиться — это одна и та же метка объёма, прочитанная в двух местах.
 
-    ``None`` — координат нет, метки в узле нет или атлас недоступен: отсутствие
-    анатомии не должно отменять сам расчёт (в таблице будет «—»). Первое
-    обращение собирает объёмы (как и первый запрос контуров), дальше они
+    Точная ячейка не размечена (узел сетки между вокселями атласа) — берётся
+    ближайшая размеченная метка в радиусе ``settings.atlas_structure_snap_mm``
+    (находка ручной проверки 19.09.2026: без подтягивания ~треть точек быстрого
+    расчёта оставалась без структуры; медиана расстояния до метки 3.6 мм).
+
+    ``None`` — координат нет, метки в радиусе нет (точка вне мозга) или атлас
+    недоступен: отсутствие анатомии **не отменяет** расчёт (в таблице «—»).
+    Первое обращение собирает объёмы (как и первый запрос контуров), дальше они
     берутся из кэша процесса/диска.
     """
     try:
@@ -529,6 +581,10 @@ def structure_at(settings: Settings, mni_mm: Sequence[float]) -> str | None:
         return None
 
     label_id = structure_id_at(volumes, mni_mm)
+    if label_id == 0:
+        label_id = nearest_structure_id(
+            volumes, mni_mm, settings.atlas_structure_snap_mm
+        )
     if label_id == 0:
         return None
     return volumes.structure_labels.get(label_id) or volumes.structure_names.get(label_id)

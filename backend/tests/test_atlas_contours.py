@@ -515,6 +515,48 @@ def test_structure_at_returns_label_and_none_without_atlas(monkeypatch):
     assert ac.structure_at(settings, [0.0, 0.0, 0.0]) is None
 
 
+def test_nearest_structure_id_within_and_beyond_snap_radius(monkeypatch):
+    """Ближайшая метка в радиусе snap — есть; дальше радиуса — честный 0.
+
+    Fallback для узлов сферической сетки между вокселями атласа (находка ручной
+    проверки 19.09.2026: без подтягивания ~треть точек быстрого расчёта
+    оставалась без структуры).
+    """
+    monkeypatch.setattr(ac, "MRI_BOUNDS", _STRUCTURE_BOUNDS)
+    monkeypatch.setattr(ac, "axis_count", lambda axis, spacing=1.0: 21)
+    # Кэш деревьев ключован версией объёмов (у синтетики она одна) — чистим
+    ac._structure_trees.clear()
+    volumes = _synthetic_volumes({(10, 10, 10): 7})
+
+    # 3 мм от метки — в радиусе; ровно на границе — тоже внутри
+    assert ac.nearest_structure_id(volumes, [3.0, 0.0, 0.0], 5.0) == 7
+    assert ac.nearest_structure_id(volumes, [5.0, 0.0, 0.0], 5.0) == 7
+    # Дальше радиуса — метки нет
+    assert ac.nearest_structure_id(volumes, [9.0, 0.0, 0.0], 5.0) == 0
+    # Мусор на входе
+    assert ac.nearest_structure_id(volumes, [0.0, float("nan"), 0.0], 5.0) == 0
+    assert ac.nearest_structure_id(volumes, [0.0, 0.0], 5.0) == 0
+    # Совсем пустой объём — 0, а не падение KD-дерева
+    ac._structure_trees.clear()
+    assert ac.nearest_structure_id(_synthetic_volumes({}), [0.0, 0.0, 0.0], 5.0) == 0
+
+
+def test_structure_at_snaps_to_nearest_label(monkeypatch):
+    """Неразмеченный узел → ближайшая метка в радиусе; вне радиуса — None."""
+    monkeypatch.setattr(ac, "MRI_BOUNDS", _STRUCTURE_BOUNDS)
+    monkeypatch.setattr(ac, "axis_count", lambda axis, spacing=1.0: 21)
+    ac._structure_trees.clear()
+    volumes = _synthetic_volumes({(10, 10, 10): 7})
+    monkeypatch.setattr(ac, "load_volumes", lambda ctx: volumes)
+
+    # Точный узел размечен — fallback не нужен
+    assert ac.structure_at(settings, [0.0, 0.0, 0.0]) == "таламус (слева)"
+    # Узел пуст, но в 3 мм есть метка — подпись подтянулась
+    assert ac.structure_at(settings, [3.0, 0.0, 0.0]) == "таламус (слева)"
+    # Дальше snap-радиуса (5 мм в настройках) — честное «нет»
+    assert ac.structure_at(settings, [9.0, 0.0, 0.0]) is None
+
+
 @pytest.mark.integration
 @_skip_no_atlas
 def test_real_structure_at_reads_same_label_as_volume():

@@ -192,8 +192,14 @@ describe('проекция мозга', () => {
     renderProjection('coronal', { points: demoDipoleLayer(7, 3) })
 
     expect(screen.getAllByTestId(/^dipole-dot-coronal-/)).toHaveLength(3)
-    const marker = screen.getByTestId('dipole-coronal-0-0')
-    expect(marker.querySelector('title')?.textContent).toContain('Эпоха 1')
+    // Тултип — курсорная строка под фигурой (поправка 19.09.2026): наведение
+    // на центр кольца называет его эпоху, `<title>` у точек больше нет
+    const dot = screen.getByTestId('dipole-dot-coronal-0-0')
+    fireEvent.mouseMove(screen.getByTestId('projection-svg-coronal'), {
+      clientX: Number(dot.getAttribute('cx')),
+      clientY: Number(dot.getAttribute('cy')),
+    })
+    expect(screen.getByTestId('projection-readout-coronal').textContent).toContain('Эпоха 1')
   })
 
   /**
@@ -295,10 +301,11 @@ describe('проекция мозга', () => {
     const pair = { ...layer.points[1], id: 'pair', overlapCount: 2 }
     const crowded = { ...layer.points[2], id: 'crowded', overlapCount: 6 }
 
+    const onSelectPoint = vi.fn()
     renderProjection('axial', {
       gridMm: 5,
       points: { points: [single, pair, crowded], source: 'demo' },
-      onSelectPoint: () => {},
+      onSelectPoint,
     })
 
     // В jsdom раскладки нет: масштаб 1, атрибуты — экранные пиксели
@@ -318,10 +325,15 @@ describe('проекция мозга', () => {
     expect(Number(capped.getAttribute('fill-opacity'))).toBeGreaterThanOrEqual(
       OVERLAP_FILL_MIN_OPACITY,
     )
-    // Хит-зона растёт вместе с кольцом: по краю крупного кольца можно щёлкнуть
-    expect(
-      Number(screen.getByTestId('dipole-hit-axial-crowded').getAttribute('r')),
-    ).toBeGreaterThan(Number(capped.getAttribute('r')))
+    // Хит-радиус растёт вместе с кольцом (курсорная модель, 19.09.2026): клик
+    // у самого края крупного кольца — дальше базовых 9 px от центра — выбирает
+    // именно его, а не молчит и не попадает в соседа
+    const crowdedDot = screen.getByTestId('dipole-dot-axial-crowded')
+    fireEvent.click(screen.getByTestId('projection-svg-axial'), {
+      clientX: Number(crowdedDot.getAttribute('cx')) + 9.2,
+      clientY: Number(crowdedDot.getAttribute('cy')),
+    })
+    expect(onSelectPoint).toHaveBeenCalledWith('crowded')
   })
 
   /**
@@ -371,7 +383,11 @@ describe('проекция мозга', () => {
     })
     const point = demoDipoleLayer(7, 2).points[1]
 
-    fireEvent.click(screen.getByTestId('dipole-hit-coronal-0-1'))
+    const dot = screen.getByTestId('dipole-dot-coronal-0-1')
+    fireEvent.click(screen.getByTestId('projection-svg-coronal'), {
+      clientX: Number(dot.getAttribute('cx')),
+      clientY: Number(dot.getAttribute('cy')),
+    })
 
     expect(onSelectPoint).toHaveBeenCalledWith('0-1')
     // Срезы меняются при любом клике (поправка ручной проверки): по диполю —
@@ -410,8 +426,60 @@ describe('проекция мозга', () => {
       selectedPointId: point.id,
       onSelectPoint,
     })
-    fireEvent.click(screen.getByTestId(`dipole-hit-coronal-${point.id}`))
+    const dot = screen.getByTestId(`dipole-dot-coronal-${point.id}`)
+    fireEvent.click(screen.getByTestId('projection-svg-coronal'), {
+      clientX: Number(dot.getAttribute('cx')),
+      clientY: Number(dot.getAttribute('cy')),
+    })
     expect(onSelectPoint).toHaveBeenCalledWith(null)
+  })
+
+  /**
+   * Курсорная модель попадания (находка ручной проверки, 19.09.2026): при мелкой
+   * сетке хит-зоны соседних узлов перекрываются (2 мм — это 3 px проекции, зона —
+   * 9 px), и «верхний» элемент DOM мог принадлежать соседнему узлу: у крупного
+   * кольца с N=2 всплывал тултип «диполей в узле: 1». Теперь тултип и клик берут
+   * **ближайший к курсору центр**, а подпись перечисляет все эпохи узла.
+   */
+  it('тултип узла перечисляет эпохи, клик выбирает ближайший центр', () => {
+    const base = demoDipoleLayer(5, 1).points[0]
+    const first = {
+      ...base,
+      id: 'a1',
+      epochIndex: 2,
+      position: { x: 0, y: 0, z: 0 },
+      overlapCount: 2,
+    }
+    const second = { ...first, id: 'a2', epochIndex: 4 }
+    // Сосед в 2 мм (3 px) от узла, нарисован позже — в DOM-стэке он «верхний»
+    const neighbor = {
+      ...first,
+      id: 'b',
+      epochIndex: 6,
+      position: { x: 2, y: 0, z: 0 },
+      overlapCount: 1,
+    }
+    const onSelectPoint = vi.fn()
+    renderProjection('coronal', {
+      points: { points: [first, second, neighbor], source: 'demo' },
+      onSelectPoint,
+    })
+
+    const dot = screen.getByTestId('dipole-dot-coronal-a1')
+    const cx = Number(dot.getAttribute('cx'))
+    const cy = Number(dot.getAttribute('cy'))
+    const svg = screen.getByTestId('projection-svg-coronal')
+
+    fireEvent.mouseMove(svg, { clientX: cx, clientY: cy })
+    const readout = screen.getByTestId('projection-readout-coronal').textContent
+    expect(readout).toContain('Эпоха 3')
+    expect(readout).toContain('диполей в узле: 2')
+    expect(readout).toContain('эпохи узла: 3, 5')
+    expect(readout).not.toContain('Эпоха 7')
+
+    // Клик по центру узла выбирает его точку, хотя сосед нарисован позже
+    fireEvent.click(svg, { clientX: cx, clientY: cy })
+    expect(onSelectPoint).toHaveBeenCalledWith('a1')
   })
 
   it('клик отдаёт точку MNI в плоскости текущего среза', () => {

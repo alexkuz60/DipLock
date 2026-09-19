@@ -250,9 +250,16 @@ describe('рабочая область раздела «Диполи»', () => 
     for (const dot of dots) {
       expect(dot.getAttribute('fill-opacity')).toBe('0')
     }
-    // Тултип называет число диполей в узле
+    // Тултип (курсорная строка под фигурой, 19.09.2026) называет число диполей
+    // в узле и перечисляет их эпохи
     const paired = dots.find((dot) => dot.getAttribute('r') === String(DIPOLE_DOT_RADIUS_PX + DIPOLE_DOT_GROWTH_PX / 2))
-    expect(paired?.parentElement?.textContent).toContain('диполей в узле: 2')
+    fireEvent.mouseMove(screen.getByTestId('projection-svg-axial'), {
+      clientX: Number(paired?.getAttribute('cx')),
+      clientY: Number(paired?.getAttribute('cy')),
+    })
+    const readout = screen.getByTestId('projection-readout-axial').textContent
+    expect(readout).toContain('диполей в узле: 2')
+    expect(readout).toContain('эпохи узла: 1, 2')
     // Координаты диполя и результат задачи не подменяются отрисовкой
     expect(useDipoleCalc.getState().result?.points[0].mni_coords).toEqual(shared.mni_coords)
   })
@@ -290,7 +297,11 @@ describe('рабочая область раздела «Диполи»', () => 
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
     renderWithProviders(<DipolesSection />)
 
-    fireEvent.click(screen.getByTestId('dipole-hit-sagittal-0-120'))
+    const dot0120 = screen.getByTestId('dipole-dot-sagittal-0-120')
+    fireEvent.click(screen.getByTestId('projection-svg-sagittal'), {
+      clientX: Number(dot0120.getAttribute('cx')),
+      clientY: Number(dot0120.getAttribute('cy')),
+    })
 
     for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
       expect(screen.getByTestId(`dipole-${plane}-0-120`)).toHaveAttribute('data-selected', 'true')
@@ -320,7 +331,11 @@ describe('рабочая область раздела «Диполи»', () => 
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
     renderWithProviders(<DipolesSection />)
 
-    fireEvent.click(screen.getByTestId('dipole-hit-axial-1-140'))
+    const dot1140 = screen.getByTestId('dipole-dot-axial-1-140')
+    fireEvent.click(screen.getByTestId('projection-svg-axial'), {
+      clientX: Number(dot1140.getAttribute('cx')),
+      clientY: Number(dot1140.getAttribute('cy')),
+    })
     expect(screen.getByTestId('dipole-coronal-1-140')).toHaveAttribute('data-selected', 'true')
 
     await user.click(screen.getByRole('button', { name: 'Снять выделение' }))

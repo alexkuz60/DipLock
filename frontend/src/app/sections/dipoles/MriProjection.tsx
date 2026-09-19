@@ -105,10 +105,13 @@ import {
   FRAME_DIM_OPACITY,
   dipoleDotVisual,
   dipoleMarker,
+  dipoleNodeSiblings,
+  dipoleNodeTitle,
   dipolePointTitle,
   dipoleRayVisual,
   emptyDipoleLayer,
   type DipoleLayer,
+  type DipolePoint,
 } from '@/shared/lib/dipolePoints'
 import { layerVisible, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { cx } from '@/shared/ui/cx'
@@ -186,6 +189,8 @@ export function MriProjection({
   const sliceMm = slices[plane]
   /** «Точка под курсором» — только для текущей отрисовки (в стор не уходит) */
   const [hover, setHover] = useState<MniVector | null>(null)
+  /** Диполь под курсором (ближайший центр): тултип-строка вместо `<title>`. */
+  const [hoverDipole, setHoverDipole] = useState<DipolePoint | null>(null)
   /**
    * URL картинки, которая не загрузилась. Держим именно URL, а не флаг: смена
    * среза — новый URL, и попытка повторяется (сервер мог вернуться).
@@ -295,9 +300,43 @@ export function MriProjection({
     }
   }
 
+  /**
+   * Диполь под курсором: **ближайший центр**, а не верхний элемент DOM
+   * (находка ручной проверки, 19.09.2026). При мелкой сетке (2 мм — это 3 px
+   * проекции) хит-зоны соседних узлов перекрываются, и «верхний» элемент мог
+   * принадлежать соседнему узлу: курсор стоял на крупном кольце узла с N=4, а
+   * тултип и клик рассказывали про одиночного соседа. Хит-радиус растёт вместе
+   * с кольцом — по краю крупного «мульти-дипольного» кольца клик работает.
+   */
+  const dipoleAt = (px: PixelPoint): (typeof markers)[number] | null => {
+    if (!layerVisible(visibility, 'dipoles')) return null
+    let best: (typeof markers)[number] | null = null
+    let bestDistance = Number.POSITIVE_INFINITY
+    for (const entry of markers) {
+      const hitUnits =
+        Math.max(DOT_HIT_RADIUS_PX, entry.dot.radiusUnits * pxPerUnit + 2) / pxPerUnit
+      const distance = Math.hypot(entry.marker.at.x - px.x, entry.marker.at.y - px.y)
+      if (distance <= hitUnits && distance < bestDistance) {
+        best = entry
+        bestDistance = distance
+      }
+    }
+    return best
+  }
+
   const handleClick = (event: MouseEvent<SVGSVGElement>) => {
-    if (!onPick) return
     const px = pxOf(event)
+    const dipole = dipoleAt(px)
+    if (dipole && onSelectPoint) {
+      // Клик по точке диполя — это выбор **диполя**: структуру под ним не
+      // угадываем (контур нового среза ещё не пришёл), а прежняя подпись
+      // структуры не должна «залипать». Срезы наводятся на точную позицию
+      // диполя, а не на «сырую» точку клика у края хит-зоны.
+      onSelectPoint(selectedPointId === dipole.point.id ? null : dipole.point.id)
+      onPick?.(dipole.point.position, dipole.point.brodmannArea, null)
+      return
+    }
+    if (!onPick) return
     const normalized = pxToNormalized(px, plane)
     // Поле и структуру ищем по **той же** геометрии, что нарисована: реальные
     // контуры атласа, когда они есть, иначе — условные эллипсы фикстуры.
@@ -311,7 +350,9 @@ export function MriProjection({
   }
 
   const handleHover = (event: MouseEvent<SVGSVGElement>) => {
-    setHover(pointFromProjectionClick(plane, sliceMm, pxOf(event)))
+    const px = pxOf(event)
+    setHover(pointFromProjectionClick(plane, sliceMm, px))
+    setHoverDipole(dipoleAt(px)?.point ?? null)
   }
 
   /** Метка под курсором: структура атласа, иначе поле (та же геометрия, что нарисована). */
@@ -325,12 +366,15 @@ export function MriProjection({
 
   // Текст подписи над фигурой: под курсором — координаты и метка атласа, иначе
   // пояснение плоскости; недоступная картинка среза важнее пояснения — о ней надо
-  // сказать.
-  const footnote = hover
-    ? [coordsLabel(hover), hoverLabel].filter(Boolean).join(' · ')
-    : mriFailed
-      ? MRI_SLICE_UNAVAILABLE
-      : PROJECTION_HINTS[plane]
+  // сказать. Курсор на диполе — тултип узла с эпохами вместо подписи атласа.
+  const hoverDipoleSiblings = hoverDipole ? dipoleNodeSiblings(points.points, hoverDipole) : null
+  const footnote = hoverDipole
+    ? dipoleNodeTitle(hoverDipole, hoverDipoleSiblings ?? [hoverDipole])
+    : hover
+      ? [coordsLabel(hover), hoverLabel].filter(Boolean).join(' · ')
+      : mriFailed
+        ? MRI_SLICE_UNAVAILABLE
+        : PROJECTION_HINTS[plane]
 
   return (
     <figure
@@ -356,7 +400,10 @@ export function MriProjection({
         )}
         onClick={handleClick}
         onMouseMove={handleHover}
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={() => {
+          setHover(null)
+          setHoverDipole(null)
+        }}
       >
         {/* Наконечники векторов рисуются полигонами (см. `dipoleArrowHead`): тег
             `<marker>` один на проекцию и не подстраивается под длину луча. */}
@@ -636,7 +683,6 @@ export function MriProjection({
                   data-testid={`dipole-${plane}-${point.id}`}
                   data-selected={selected ? 'true' : 'false'}
                 >
-                  <title>{dipolePointTitle(point)}</title>
                   {/*
                     Кольцо позиции: Ø 6 px плюс 2 px на каждый диполь в узле (кратность
                     узла сетки), штрих 2 px — пиксели поделены на масштаб фигуры.
@@ -662,33 +708,11 @@ export function MriProjection({
                     strokeOpacity={selected ? 1 : dim}
                   />
                   {/*
-                    Хит-зона выделения: попасть в тонкое кольцо мышью трудно, поэтому
-                    клик принимает невидимый круг большего радиуса — и он растёт вместе
-                    с кольцом, иначе по краю крупного «мульти-дипольного» кольца нельзя
-                    было бы щёлкнуть. Хит-зона гасит всплытие, чтобы клик не обработался
-                    дважды (фигура навела бы срезы на «сырую» точку клика у края зоны),
-                    и сама наводит срезы на точную позицию диполя.
+                    Хит-зоны и `<title>` у точки больше нет: попадание и тултип
+                    считает курсорная модель фигуры (`dipoleAt` — ближайший центр,
+                    подпись узла с эпохами — в строке под фигурой). DOM-стэкинг
+                    ошибался, когда хит-зоны соседних узлов перекрывались.
                   */}
-                  {onSelectPoint ? (
-                    <circle
-                      data-testid={`dipole-hit-${plane}-${point.id}`}
-                      cx={marker.at.x}
-                      cy={marker.at.y}
-                      r={Math.max(DOT_HIT_RADIUS_PX, dot.radiusUnits + 2)}
-                      fill="transparent"
-                      className="cursor-pointer"
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onSelectPoint(selected ? null : point.id)
-                        // Клик по точке диполя — это выбор **диполя**: структуру под
-                        // ним не угадываем (контур нового среза ещё не пришёл), и
-                        // прежняя подпись структуры не должна «залипать».
-                        onPick?.(point.position, point.brodmannArea, null)
-                      }}
-                    >
-                      <title>{`Выделить диполь: ${dipolePointTitle(point)}`}</title>
-                    </circle>
-                  ) : null}
                 </g>
               )
             })}
