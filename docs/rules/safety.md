@@ -15,6 +15,10 @@
 - BEM fsaverage: `fsaverage/bem/fsaverage-5120-5120-5120-bem-sol.fif`; average reference должна быть
   применена (`projection=False`), иначе `mne.fit_dipole` падает.
 - `mne.fit_dipole` требует `Evoked` (не массив) и дорог — используйте `dipole_fit_decim`.
+- `mne.fit_dipole` возвращает `Dipole.gof` **в процентах** (`dipole.py`: `gof * 100`),
+  а `pos` — это **фиксированная** позиция, а не стартовая точка оптимизации. Контракт проекта
+  — доля 0..1: нормализация `/ 100.0` на границе сервиса (`dipole_fitter`, `dipole_scanner`),
+  инвариант — фейки в тестах отдают проценты, как настоящий MNE.
 - Сигналы вьюера (2.5) отдаются **бинарным контейнером** `DPS1` (magic + uint32 LE + JSON-заголовок +
   float32 LE, канало-мажорно), а не JSON: 64k точек × 18 каналов в JSON не влезают. Чтение EDF —
   `preload=False` блоками; единицы контейнера всегда мкВ (опора на `units_autoscaled`, не на повторный

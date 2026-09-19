@@ -70,7 +70,9 @@ def fit_dipoles_for_epochs(
                     "pos_head": dip.pos[idx].tolist(),
                     "ori_head": dip.ori[idx].tolist(),
                     "amplitude_nam": float(dip.amplitude[idx] * 1e9),
-                    "gof": float(dip.gof[idx]),
+                    # MNE отдаёт Dipole.gof в процентах (dipole.py: * 100);
+                    # контракт проекта — доля 0..1
+                    "gof": float(dip.gof[idx]) / 100.0,
                 })
             best = max(traj, key=lambda x: x["gof"]) if traj else {}
             all_dips.append({

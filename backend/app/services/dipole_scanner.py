@@ -664,7 +664,9 @@ def refine_dipole_point(
             min_dist=MIN_SENSOR_DISTANCE_MM, n_jobs=n_jobs, verbose=False,
         )
         dip_fixed = out_fixed[0] if isinstance(out_fixed, tuple) else out_fixed
-        grid_gof_bem = float(dip_fixed.gof[min(sample - lo, len(dip_fixed.gof) - 1)])
+        # MNE отдаёт Dipole.gof в процентах (dipole.py: * 100) — нормализуем
+        # на границе сервиса: контракт проекта везде — доля 0..1.
+        grid_gof_bem = float(dip_fixed.gof[min(sample - lo, len(dip_fixed.gof) - 1)]) / 100.0
     except Exception as exc:  # метрика сравнения опциональна
         warnings.append(f"GOF узла сетки на BEM не посчитан: {exc}")
 
@@ -677,7 +679,7 @@ def refine_dipole_point(
         "mni_coords": mni_coords,
         "moment": [float(value) for value in dip.ori[best]],
         "amplitude_nam": float(dip.amplitude[best] * 1e9),
-        "gof": float(dip.gof[best]),
+        "gof": float(dip.gof[best]) / 100.0,  # MNE отдаёт проценты — см. выше
         "brodmann_area": area,
         "anatomical_structure": structure,
     }

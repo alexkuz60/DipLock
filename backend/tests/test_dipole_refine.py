@@ -43,14 +43,19 @@ def clean_state():
 
 
 class _FakeDipole:
-    """Минимальный контракт `mne.Dipole`, который читает refine."""
+    """Минимальный контракт `mne.Dipole`, который читает refine.
+
+    `gof` — в ПРОЦЕНТАХ, как у настоящего MNE (`dipole.py`: `* 100`): фейк,
+    повторявший наш контракт 0..1, пропустил бы баг нормализации (и пропустил:
+    GOF 7566.7% в UI). Поэтому здесь — поведение MNE, а не схемы проекта.
+    """
 
     def __init__(self, n_times: int, pos_m: np.ndarray | None = None):
         base = np.array([0.012, 0.024, 0.056]) if pos_m is None else np.asarray(pos_m, dtype=float)
         self.pos = np.tile(base, (n_times, 1))
         self.ori = np.tile(np.array([0.0, 0.0, 1.0]), (n_times, 1))
         self.amplitude = np.full(n_times, 12e-9)
-        self.gof = np.linspace(0.5, 0.93, n_times)
+        self.gof = np.linspace(50.0, 93.0, n_times)  # проценты, как у MNE
         self.times = np.linspace(0.0, 0.02, n_times)
 
 
@@ -102,7 +107,11 @@ def test_refine_repeats_scan_epoch_and_grid_start(tmp_path, fake_fit):
     assert n_times <= 2 * round(settings.dipole_refine_halfwin_ms / 1000.0 * 250.0) + 1
     # «Стало»: точка из фейка, метод помечен, сдвиг посчитан
     assert result["method"] == "bem_fit"
+    # GOF нормализован в долю 0..1 (MNE прислал проценты: 93.0 → 0.93)
     assert result["grid_gof_bem"] is not None
+    assert 0.0 <= result["grid_gof_bem"] <= 1.0
+    # Окно симметрично: пик — средний отсчёт, linspace(50, 93) → 71.5 % → 0.715
+    assert result["grid_gof_bem"] == pytest.approx(0.715)
     assert result["point"]["gof"] == pytest.approx(0.93)
     assert result["point"]["head_coords"] == pytest.approx([12.0, 24.0, 56.0])
     assert result["shift_mm"] >= 0.0

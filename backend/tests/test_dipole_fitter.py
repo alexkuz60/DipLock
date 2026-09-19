@@ -9,7 +9,11 @@ from app.services.job_manager import noop_progress
 
 
 class FakeDipole:
-    """Двойник ``mne.Dipole``: две временные точки, разный gof."""
+    """Двойник ``mne.Dipole``: две временные точки, разный gof.
+
+    `gof` — в процентах, как у настоящего MNE (`dipole.py`: `* 100`): сервис
+    обязан нормализовать в долю 0..1 на границе (контракт `DipoleOut`).
+    """
 
     def __init__(self) -> None:
         self.times = np.array([0.0, 0.1])
@@ -50,7 +54,9 @@ def test_fit_dipoles_unpacks_tuple_from_mne(epochs_alpha, monkeypatch):
     for r in result:
         assert "error" not in r
         assert r["n_time_points"] == 2, "кортеж распакован: точки траектории на месте"
-        assert r["best_fit"]["gof"] == pytest.approx(95.0)
+        # MNE прислал 95.0 (проценты) → в контракте доля 0.95
+        assert r["best_fit"]["gof"] == pytest.approx(0.95)
+        assert all(0.0 <= p["gof"] <= 1.0 for p in r["trajectory"])
         assert r["best_fit"]["amplitude_nam"] == pytest.approx(2.0)
     # n_jobs берётся из настроек, а не зашит единицей
     assert all(kw.get("n_jobs") == settings.dipole_fit_n_jobs for kw in kwargs_seen)
