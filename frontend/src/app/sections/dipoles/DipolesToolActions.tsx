@@ -36,6 +36,7 @@ import {
   Loader2,
   Pause,
   Play,
+  Share2,
   Square,
 } from 'lucide-react'
 import { calcJobSummary, epochIndexOfPointId, refinedSummary } from '@/shared/lib/dipoleCalcModel'
@@ -233,8 +234,11 @@ export function DipolesToolHeaderActions() {
 
   return (
     <>
+      {/* Иконка — связанные узлы сетки (Share2): быстрый расчёт — это перебор
+          узлов; треугольник play уже занят кнопкой воспроизведения анимации
+          (поправка ручной проверки, 19.09.2026) */}
       <IconButton
-        icon={running ? <Loader2 className="size-5 animate-spin" /> : <Play className="size-5" />}
+        icon={running ? <Loader2 className="size-5 animate-spin" /> : <Share2 className="size-5" />}
         label={running ? 'Расчёт…' : result ? 'Пересчитать диполи' : 'Рассчитать диполи'}
         tooltip={runTooltip}
         title={runTooltip}
