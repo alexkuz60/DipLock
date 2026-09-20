@@ -341,4 +341,24 @@ describe('панель раздела «Диполи»', () => {
       screen.queryByText('Параметры расчёта изменены — результат не пересчитан'),
     ).not.toBeInTheDocument()
   })
+
+  it('окно уточнения выбирается списком, время оценивается по числам /meta (шаг 1.5)', async () => {
+    mockApiFetch()
+    const user = userEvent.setup()
+    renderWithProviders(<DipolesPanel />)
+
+    const select = screen.getByLabelText('Окно уточнения')
+    // Дефолт — только пик GFP: окно ±10 мс стоило ≈80 с счёта, а не «точнее»
+    expect(select).toHaveValue('0')
+    // До расчёта частота записи неизвестна: число отсчётов окна не выдумывается
+    await screen.findByText(/частота записи станет известна/)
+
+    await user.selectOptions(select, '5')
+    expect(useDipoleCalc.getState().refineHalfwinMs).toBe(5)
+
+    // С результатом расчёта появляется ожидаемое время — по числам сервера
+    useDipoleCalc.setState({ result: dipoleScanResultFixture({ sfreq: 500 }) })
+    await screen.findByText(/Ожидаемое время ≈/)
+    expect(screen.getByText(/свободный фит 5 отсч\./)).toBeInTheDocument()
+  })
 })

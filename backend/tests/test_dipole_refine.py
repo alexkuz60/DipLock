@@ -74,15 +74,40 @@ def fake_fit(monkeypatch):
     return calls
 
 
-def _params(epoch_index: int = 0) -> DipoleRefineParams:
+@pytest.fixture
+def failing_free_fit(monkeypatch):
+    """Свободный фит падает, оценка узла на BEM работает (шаг 1.5).
+
+    Так выглядит реальный случай из файла задачи: узел сферической сетки оказался
+    на 0.3 мм вне внутренней границы черепа, фиксированный вызов отказал. Проверяем
+    и обратный порядок: падает именно **второй** (свободный) вызов, а первый
+    (дешёвый) отдаёт «стало».
+    """
+    calls: list[dict] = []
+
+    def fake(evoked, cov, bem, trans=None, min_dist=5.0, n_jobs=None, pos=None, verbose=None):
+        calls.append({"pos": pos, "n_times": int(evoked.data.shape[1])})
+        if pos is None:
+            raise RuntimeError("не сошёлся свободный фит (фейк)")
+        return _FakeDipole(evoked.data.shape[1], pos_m=pos), None
+
+    monkeypatch.setattr(dipole_scanner.mne, "fit_dipole", fake)
+    monkeypatch.setattr(dipole_scanner, "_get_bem", lambda cfg: object())
+    monkeypatch.setattr(dipole_scanner, "_get_covariance", lambda cfg: object())
+    return calls
+
+
+def _params(epoch_index: int = 0, halfwin_ms: float = 0.0) -> DipoleRefineParams:
+    """Параметры уточнения: окно по умолчанию 0 — фитится только пик GFP."""
     return DipoleRefineParams(
         scan=DipoleScanParams(filter_band=(1, 40), epoch_length_ms=1000.0),
         epoch_index=epoch_index,
+        halfwin_ms=halfwin_ms,
     )
 
 
 def test_refine_repeats_scan_epoch_and_grid_start(tmp_path, fake_fit):
-    """Уточнение попадает в ту же эпоху/пик GFP и стартует с того же узла сетки."""
+    """Уточнение попадает в ту же эпоху/пик, а первым идёт дешёвый фит узла (1.5)."""
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine")
     scan = compute_dipole_scan(recording, settings, _params().scan)
     epoch_index = int(scan["points"][1]["epoch_index"])
@@ -95,26 +120,78 @@ def test_refine_repeats_scan_epoch_and_grid_start(tmp_path, fake_fit):
     assert result["time_ms"] == pytest.approx(fast_point["time_ms"])
     assert result["fast_head_coords"] == pytest.approx(fast_point["head_coords"])
     assert result["fast_gof"] == pytest.approx(fast_point["gof"])
-    # fit_dipole вызван дважды: свободный + фиксированная позиция узла сетки
+    # fit_dipole вызван дважды, и ПЕРВЫМ — фит узла с фиксированной позицией:
+    # он стоит ≈0.5 с против ≈8 с + ≈7 с на отсчёт у свободного (замер 20.09.2026)
     assert len(fake_fit) == 2
-    fixed = fake_fit[1]
+    fixed, free = fake_fit
     assert fixed["pos"] is not None
     assert np.allclose(
         np.asarray(fixed["pos"]) * 1000.0, result["fast_head_coords"], atol=1e-6,
     )
-    # Окно фитинга — маленькое (±dipole_refine_halfwin_ms), не вся эпоха
-    n_times = fake_fit[0]["n_times"]
-    assert n_times <= 2 * round(settings.dipole_refine_halfwin_ms / 1000.0 * 250.0) + 1
+    assert free["pos"] is None
+    # Окно по умолчанию — только пик GFP (один отсчёт), а не вся эпоха и не ±10 мс
+    assert result["halfwin_ms"] == 0.0
+    assert fixed["n_times"] == 1
+    assert free["n_times"] == 1
+    assert result["free_fit"] is True
     # «Стало»: точка из фейка, метод помечен, сдвиг посчитан
     assert result["method"] == "bem_fit"
-    # GOF нормализован в долю 0..1 (MNE прислал проценты: 93.0 → 0.93)
-    assert result["grid_gof_bem"] is not None
-    assert 0.0 <= result["grid_gof_bem"] <= 1.0
-    # Окно симметрично: пик — средний отсчёт, linspace(50, 93) → 71.5 % → 0.715
-    assert result["grid_gof_bem"] == pytest.approx(0.715)
-    assert result["point"]["gof"] == pytest.approx(0.93)
+    # GOF нормализован в долю 0..1 (MNE прислал проценты: 50.0 → 0.5)
+    assert result["grid_gof_bem"] == pytest.approx(0.5)
+    assert result["point"]["gof"] == pytest.approx(0.5)
     assert result["point"]["head_coords"] == pytest.approx([12.0, 24.0, 56.0])
     assert result["shift_mm"] >= 0.0
+
+
+def test_refine_window_comes_from_params(tmp_path, fake_fit):
+    """Окно свободного фита берётся из параметров, а не из конфига (шаг 1.5)."""
+    recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-window")
+    scan = compute_dipole_scan(recording, settings, _params().scan)
+    epoch_index = int(scan["points"][0]["epoch_index"])
+
+    result = refine_dipole_point(
+        recording, settings, _params(epoch_index, halfwin_ms=10.0),
+    )
+
+    # Синтетика идёт на 250 Гц: ±10 мс — это 5 отсчётов; у края эпохи окно
+    # зажимается границей, поэтому проверяем «не шире» и согласованность
+    expected = 2 * round(10.0 / 1000.0 * 250.0) + 1
+    n_times = fake_fit[0]["n_times"]
+    assert 1 <= n_times <= expected
+    assert fake_fit[1]["n_times"] == n_times
+    assert result["halfwin_ms"] == 10.0
+    # window_ms описывает ровно то окно, по которому шёл фит
+    span_ms = result["window_ms"][1] - result["window_ms"][0]
+    assert span_ms == pytest.approx((n_times - 1) * 1000.0 / 250.0, abs=1e-6)
+
+
+def test_refine_keeps_grid_estimate_when_free_fit_fails(tmp_path, failing_free_fit):
+    """Сбой свободного фита не уносит задачу: остаётся оценка узла на BEM (1.5)."""
+    recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-fallback")
+
+    result = refine_dipole_point(recording, settings, _params(0))
+
+    assert result["free_fit"] is False
+    assert result["grid_gof_bem"] == pytest.approx(0.5)
+    assert result["point"]["gof"] == pytest.approx(0.5)
+    # «Стало» — тот же узел сетки: сдвиг нулевой, а не выдуманный
+    assert result["shift_mm"] == 0.0
+    assert result["point"]["head_coords"] == pytest.approx(result["fast_head_coords"])
+    assert any("Свободный фит окна не выполнен" in warning for warning in result["warnings"])
+
+
+def test_refine_reports_error_when_both_fits_fail(tmp_path, monkeypatch):
+    """Ни свободного фита, ни оценки узла — честная ошибка, а не пустое «стало»."""
+    def boom(*args, **kwargs):
+        raise RuntimeError("fixed position is 0.3mm outside the inner skull boundary")
+
+    monkeypatch.setattr(dipole_scanner.mne, "fit_dipole", boom)
+    monkeypatch.setattr(dipole_scanner, "_get_bem", lambda cfg: object())
+    monkeypatch.setattr(dipole_scanner, "_get_covariance", lambda cfg: object())
+    recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-both-fail")
+
+    with pytest.raises(DipoleScanError, match="Точный фитинг не выполнен"):
+        refine_dipole_point(recording, settings, _params(0))
 
 
 def test_refine_epoch_out_of_range_is_clear_error(tmp_path, fake_fit):
@@ -176,3 +253,51 @@ def test_refine_job_flow(client, tmp_path, fake_fit):
     failed = _wait_finished(client, created.json()["job_id"])
     assert failed["status"] == "failed"
     assert "Эпохи №1000 нет" in (failed["error"] or "")
+
+
+def test_refine_form_window_is_validated(client, tmp_path, fake_fit):
+    """Окно уточнения из формы: 0…предел конфига, дальше — 400 с текстом (1.5).
+
+    Каждый лишний отсчёт окна стоит ≈7 с, поэтому «широкое окно» — это значение
+    из формы, а не молчаливый дефолт; выход за предел обязан объясниться.
+    """
+    from tests.test_dipole_scanner import _wait_finished
+
+    recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-window-form")
+    url = f"{_PREFIX}/recordings/{recording.recording_id}/dipole_refine"
+
+    too_wide = client.post(url, data={"epoch_index": 0, "halfwin_ms": 999})
+    assert too_wide.status_code == 400, too_wide.text
+    assert "halfwin_ms" in too_wide.json()["detail"]
+    negative = client.post(url, data={"epoch_index": 0, "halfwin_ms": -1})
+    assert negative.status_code == 400, negative.text
+
+    # Предел конфига принимается, и окно доезжает до результата
+    limit = settings.dipole_refine_halfwin_max_ms
+    created = client.post(url, data={"epoch_index": 0, "halfwin_ms": limit})
+    assert created.status_code == 202, created.text
+    status = _wait_finished(client, created.json()["job_id"])
+    assert status["status"] == "succeeded", status
+    body = client.get(status["result_url"]).json()
+    assert body["halfwin_ms"] == limit
+    assert body["free_fit"] is True
+
+
+def test_refine_default_window_is_peak_and_meta_declares_cost(client, tmp_path, fake_fit):
+    """Дефолт окна — только пик GFP (0), а /meta объявляет цену уточнения (1.5)."""
+    from tests.test_dipole_scanner import _wait_finished
+
+    meta = client.get(f"{_PREFIX}/meta").json()
+    assert meta["dipole_refine_halfwin_ms"] == 0.0
+    assert meta["dipole_refine_halfwin_max_ms"] > 0.0
+    assert meta["dipole_refine_sec_fixed"] > 0.0
+    assert meta["dipole_refine_sec_per_sample"] > 0.0
+
+    recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-default-window")
+    created = client.post(
+        f"{_PREFIX}/recordings/{recording.recording_id}/dipole_refine",
+        data={"epoch_index": 0},
+    )
+    status = _wait_finished(client, created.json()["job_id"])
+    body = client.get(status["result_url"]).json()
+    assert body["halfwin_ms"] == meta["dipole_refine_halfwin_ms"]

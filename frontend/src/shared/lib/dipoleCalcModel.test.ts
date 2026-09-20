@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { BANDWIDTH_RANGE, SINGLE_FREQ_RANGE } from '@/shared/lib/calcFilter'
 import {
   CALC_PARAM_DEFAULTS,
+  REFINE_HALFWIN_OPTIONS,
   buildDipoleForm,
   buildRefineForm,
   epochIndexOfPointId,
@@ -18,13 +19,17 @@ import {
   calcJobSummary,
   calcSignature,
   normalizeCalcParams,
+  normalizeRefineHalfwin,
+  refineCostHint,
+  refineHalfwinLabel,
+  refineWindowSamples,
   resultMatchesParams,
   refineTooltip,
   refinedSummary,
   resultSignature,
   type CalcParams,
 } from '@/shared/lib/dipoleCalcModel'
-import { calcJobFixture, dipoleRefineResultFixture, dipoleScanResultFixture } from '@/test/fixtures'
+import { calcJobFixture, dipoleRefineResultFixture, dipoleScanResultFixture, metaFixture } from '@/test/fixtures'
 
 /** Параметры формы в виде объекта: FormData удобнее читать словарём. */
 function formEntries(form: FormData): Record<string, string> {
@@ -162,7 +167,11 @@ describe('точное уточнение эпохи (F19, «Уточнить…
       epoch_length_ms: '500',
       reject_threshold_uv: '150',
       grid_mm: '5',
+      // Окно свободного фитинга (шаг 1.5): по умолчанию только пик GFP
+      halfwin_ms: '0',
     })
+    // Окно — из параметра: «пошире» уходит в задачу явно, а не по умолчанию
+    expect(formEntries(buildRefineForm(result, 2, 10)).halfwin_ms).toBe('10')
     // custom-референс доезжает списком каналов; без фильтра пары границ нет
     const custom = formEntries(
       buildRefineForm(
@@ -186,6 +195,44 @@ describe('точное уточнение эпохи (F19, «Уточнить…
       'BEM GOF 94.0 % · Δ 6.3 мм',
     )
     expect(refineTooltip(dipoleRefineResultFixture({ grid_gof_bem: null }))).not.toContain('null')
+  })
+})
+
+describe('окно уточнения (шаг 1.5): варианты, оценка времени и честное «стало»', () => {
+  it('число отсчётов окна считается от частоты записи, мусор хранилища — к пику', () => {
+    expect(refineWindowSamples(0, 500)).toBe(1)
+    expect(refineWindowSamples(10, 500)).toBe(11)
+    expect(refineWindowSamples(10, 250)).toBe(5)
+    expect(normalizeRefineHalfwin(10)).toBe(10)
+    // Произвольное число из localStorage не превращается в «окно на минуты»
+    expect(normalizeRefineHalfwin(20)).toBe(0)
+    expect(normalizeRefineHalfwin(undefined)).toBe(0)
+  })
+
+  it('подписи вариантов окна читаемы без чисел конфига в UI', () => {
+    expect(REFINE_HALFWIN_OPTIONS).toEqual([0, 2, 5, 10])
+    expect(refineHalfwinLabel(0)).toContain('только пик')
+    expect(refineHalfwinLabel(5)).toBe('±5 мс')
+  })
+
+  it('оценка времени берётся из чисел /meta, а не из головы клиента', () => {
+    // 0.5 с (узел на BEM) + 1·7 с (свободный фит пика) → ≈8 с — тот же порядок,
+    // что дал живой замер 20.09.2026
+    expect(refineCostHint(metaFixture, 500, 0)).toBe(
+      'Ожидаемое время ≈8 с: оценка узла на BEM ≈0.5 с + свободный фит 1 отсч. ≈7 с',
+    )
+    // Без результата расчёта частота записи неизвестна: число отсчётов не выдумываем
+    expect(refineCostHint(metaFixture, null, 10)).toContain('частота записи станет известна')
+    expect(refineCostHint(null, 500, 0)).toContain('Оценка времени появится')
+  })
+
+  it('сбой свободного фита называет «стало» оценкой узла, а не уточнением', () => {
+    const fallback = dipoleRefineResultFixture({ free_fit: false, shift_mm: 0 })
+    expect(refinedSummary(fallback)).toBe(
+      'Оценка узла сетки на BEM: GOF 94.0 % · свободный фит не выполнен',
+    )
+    expect(refineTooltip(fallback)).toContain('Свободный фит не выполнен')
+    expect(refineTooltip(dipoleRefineResultFixture({ halfwin_ms: 5 }))).toContain('±5 мс')
   })
 })
 

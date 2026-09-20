@@ -26,7 +26,7 @@
 | `edfRecording.ts` | `useEdfRecording` | **нет** | сессия записи: паспорт, окно, `navRequest`, `epochMarks` — живёт только в текущей сессии браузера |
 | `eegParams.ts` | `useEegParams` | `diplock.eeg` | канал, окно, зум, палитра/дБ, `eegNav`, отпечаток расчёта |
 | `dipoleParams.ts` | `useDipoleParams` | `diplock.dipoles` | слои проекций, срезы, референс-точка, выделенное поле |
-| `dipoleCalc.ts` | `useDipoleCalc` | `diplock.dipoleCalc` | задача расчёта, результат, порог «КД», окно FFT, playback, `seekSeq` |
+| `dipoleCalc.ts` | `useDipoleCalc` | `diplock.dipoleCalc` | задача расчёта, результат, порог «КД», окно FFT, окно уточнения (`refineHalfwinMs`), playback, `seekSeq` |
 | `tableParams.ts` | `useTableParams` | `diplock.table` | сортировка и состав колонок таблицы (только отображение) |
 
 Правила:

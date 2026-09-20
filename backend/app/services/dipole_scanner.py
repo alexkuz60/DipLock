@@ -554,16 +554,52 @@ def compute_dipole_scan(
 
 @dataclass
 class DipoleRefineParams:
-    """Параметры точного уточнения: параметры быстрого расчёта + номер эпохи.
+    """Параметры точного уточнения: параметры быстрого расчёта, эпоха и окно.
 
     Сканирование передаётся целиком, а не «текущими настройками формы»: номер
     эпохи привязан к нарезке результата, и уточнение обязано повторить её
     точь-в-точь (та же полоса, длина эпохи, reject), иначе «эпоха 12» оказалась
     бы другим куском записи.
+
+    ``halfwin_ms`` — половина окна **свободного** фитинга вокруг пика GFP;
+    ``0`` (дефолт конфига) — фитится только пик, то есть тот отсчёт, который уже
+    выбрал быстрый расчёт. Каждый следующий отсчёт окна стоит ≈7 с (замер
+    20.09.2026, `docs/rules/dipoles.md`), поэтому окно приходит из формы и
+    расширяется пользователем осознанно.
     """
 
     scan: DipoleScanParams
     epoch_index: int
+    halfwin_ms: float = 0.0
+
+
+def _refine_point_payload(
+    cfg: Settings,
+    epoch_index: int,
+    position_m: np.ndarray,
+    moment: np.ndarray,
+    amplitude_am: float,
+    gof: float,
+    time_ms: float,
+) -> dict[str, Any]:
+    """Точка уточнения в схеме быстрого расчёта (``DipoleScanPointOut``).
+
+    Локализация — те же функции, что у быстрого расчёта (`_localize_point`,
+    `_structure_of`), поэтому структура и поле Бродмана в «было/стало» читаются
+    одним атласом, а не вторым, «своим».
+    """
+    mni_coords, area = _localize_point(position_m, cfg)
+    return {
+        "epoch_index": epoch_index,
+        "time_ms": time_ms,
+        "head_coords": [float(value * 1000.0) for value in position_m],
+        "mni_coords": mni_coords,
+        "moment": [float(value) for value in moment],
+        "amplitude_nam": float(amplitude_am * 1e9),
+        "gof": gof,
+        "brodmann_area": area,
+        "anatomical_structure": _structure_of(cfg, mni_coords),
+    }
 
 
 def refine_dipole_point(
@@ -576,10 +612,16 @@ def refine_dipole_point(
 
     MNE 1.13 не принимает стартовую точку оптимизации (`pos` у `fit_dipole` —
     это **фиксированная** позиция), поэтому «сетка как старт» устроена иначе:
-    узел сетки оценивается на BEM-модели с фиксированной позицией (линейный
-    фитинг момента — быстро; это честный GOF сетки на честной модели головы),
-    а свободный последовательный фитинг идёт по маленькому окну вокруг пика
-    GFP (`dipole_refine_halfwin_ms`). В ответе обе точки — «было/стало».
+
+    1. узел сетки оценивается на BEM-модели с фиксированной позицией (линейный
+       момент) — по замеру 20.09.2026 ≈0.5 с. Это **первый** шаг: пользователь
+       видит «было/стало» по честной модели сразу, и сбой этого вызова больше не
+       уносит всю задачу;
+    2. свободный последовательный фитинг идёт по окну вокруг пика GFP
+       (``params.halfwin_ms``; ≈8 с постоянной цены + ≈7 с на отсчёт окна).
+
+    Сбой свободного фита не отменяет уточнение: в ответе остаётся оценка узла на
+    BEM, а причина уходит в ``warnings`` («стало» не выдумывается).
     """
     scan = params.scan
     report = progress or (lambda *args, **kwargs: None)
@@ -626,9 +668,12 @@ def refine_dipole_point(
     if cov is None:
         cov = mne.compute_covariance(epochs, method="empirical", verbose=False)
 
-    # Окно вокруг пика GFP: полная эпоха при ~5 с на точку считалась бы часами.
+    # Окно вокруг пика GFP: половина берётся из формы (0 — только пик, то есть
+    # тот отсчёт, по которому уже посчитан быстрый результат). Полная эпоха при
+    # ≈7 с на отсчёт считалась бы минутами, а лишние отсчёты не добавляют
+    # точности позиции — они добавляют траекторию (замер — `docs/rules/dipoles.md`).
     sfreq = float(raw.info["sfreq"])
-    half = max(1, round(cfg.dipole_refine_halfwin_ms / 1000.0 * sfreq))
+    half = max(0, round(params.halfwin_ms / 1000.0 * sfreq))
     lo = max(0, sample - half)
     hi = min(data.shape[2], sample + half + 1)
     sel = [raw.ch_names.index(name) for name in used_channels]
@@ -640,49 +685,87 @@ def refine_dipole_point(
     n_jobs = int(cfg.dipole_refine_n_jobs or -1)
 
     warnings: list[str] = []
+
+    # 1) Дешёвый шаг: оценка узла сетки на BEM (фиксированная позиция, линейный
+    # момент) — ≈0.5 с по замеру 20.09.2026. Идёт **первым**: «было/стало» по
+    # честной модели видно сразу, а его сбой (узел сетки вне внутренней границы
+    # черепа — сетка строится без учёта BEM) больше не уносит всю задачу.
+    grid_gof_bem: float | None = None
+    grid_point: dict[str, Any] | None = None
+    with journal.step(
+        "dipoles", "refine_fixed", epochs=1,
+        note=f"epoch={params.epoch_index + 1}, узел сетки на BEM",
+    ):
+        try:
+            out_fixed = mne.fit_dipole(
+                evoked, cov, bem, trans=cfg.fsaverage_trans, pos=fast_pos_m,
+                min_dist=MIN_SENSOR_DISTANCE_MM, n_jobs=n_jobs, verbose=False,
+            )
+            dip_fixed = out_fixed[0] if isinstance(out_fixed, tuple) else out_fixed
+            if len(dip_fixed.pos) == 0:
+                raise DipoleScanError("fit_dipole с фиксированной позицией не дал точек")
+            # Пик GFP — средний отсчёт окна; индекс зажимается: у фиксированной
+            # позиции MNE может вернуть меньше отсчётов, чем в evoked.
+            fixed_index = min(sample - lo, len(dip_fixed.gof) - 1)
+            # MNE отдаёт Dipole.gof в процентах (dipole.py: * 100) — нормализуем
+            # на границе сервиса: контракт проекта везде — доля 0..1.
+            grid_gof_bem = float(dip_fixed.gof[fixed_index]) / 100.0
+            grid_point = _refine_point_payload(
+                cfg, params.epoch_index, fast_pos_m, dip_fixed.ori[fixed_index],
+                float(dip_fixed.amplitude[fixed_index]), grid_gof_bem,
+                float(dip_fixed.times[fixed_index] * 1000.0),
+            )
+        except Exception as exc:  # метрика сравнения опциональна
+            warnings.append(f"Оценка узла сетки на BEM не посчитана: {exc}")
+
+    report("refine", 0.6, message="Свободный фитинг окна (BEM)")
+    # 2) Свободный фит окна: основная цена шага (≈8 с постоянной цены + ≈7 с на
+    # отсчёт). Второй отсчёт окна и дальше — только то, что выбрал пользователь.
+    free_point: dict[str, Any] | None = None
+    shift_mm = 0.0
+    free_error: str | None = None
     with journal.step(
         "dipoles", "refine_fit", epochs=1,
-        note=f"epoch={params.epoch_index + 1}, окно ±{cfg.dipole_refine_halfwin_ms:g} мс",
+        note=(
+            f"epoch={params.epoch_index + 1}, окно ±{params.halfwin_ms:g} мс, "
+            f"отсчётов {hi - lo}"
+        ),
     ):
-        out = mne.fit_dipole(
-            evoked, cov, bem, trans=cfg.fsaverage_trans,
-            min_dist=MIN_SENSOR_DISTANCE_MM, n_jobs=n_jobs, verbose=False,
-        )
-    dip = out[0] if isinstance(out, tuple) else out
-    if len(dip.pos) == 0:
-        raise DipoleScanError("fit_dipole не дал ни одной точки в окне пика GFP")
-    best = int(np.argmax(dip.gof))
-    refined_pos_m = np.asarray(dip.pos[best], dtype=float)
+        try:
+            out = mne.fit_dipole(
+                evoked, cov, bem, trans=cfg.fsaverage_trans,
+                min_dist=MIN_SENSOR_DISTANCE_MM, n_jobs=n_jobs, verbose=False,
+            )
+            dip = out[0] if isinstance(out, tuple) else out
+            if len(dip.pos) == 0:
+                raise DipoleScanError("fit_dipole не дал ни одной точки в окне пика GFP")
+            best = int(np.argmax(dip.gof))
+            refined_pos_m = np.asarray(dip.pos[best], dtype=float)
+            free_point = _refine_point_payload(
+                cfg, params.epoch_index, refined_pos_m, dip.ori[best],
+                float(dip.amplitude[best]),
+                float(dip.gof[best]) / 100.0,  # MNE отдаёт проценты — см. выше
+                float(dip.times[best] * 1000.0),
+            )
+            shift_mm = float(np.linalg.norm(refined_pos_m - fast_pos_m) * 1000.0)
+        except Exception as exc:
+            free_error = str(exc)
 
-    # GOF узла сетки на BEM-модели: фиксированная позиция, линейный момент.
-    # Сбой (узел ближе min_dist к черепу и т.п.) не роняет уточнение — метрика
-    # сравнения просто не отдаётся.
-    grid_gof_bem: float | None = None
-    try:
-        out_fixed = mne.fit_dipole(
-            evoked, cov, bem, trans=cfg.fsaverage_trans, pos=fast_pos_m,
-            min_dist=MIN_SENSOR_DISTANCE_MM, n_jobs=n_jobs, verbose=False,
+    if free_point is None:
+        if grid_point is None:
+            # Ни свободного фита, ни оценки узла: «стало» нет вовсе — это ошибка,
+            # а не «пустой результат»
+            raise DipoleScanError(
+                f"Точный фитинг не выполнен: {free_error or 'fit_dipole не дал точек'}"
+            )
+        warnings.append(
+            "Свободный фит окна не выполнен "
+            f"({free_error or 'fit_dipole не дал точек'}); показана оценка узла сетки на BEM"
         )
-        dip_fixed = out_fixed[0] if isinstance(out_fixed, tuple) else out_fixed
-        # MNE отдаёт Dipole.gof в процентах (dipole.py: * 100) — нормализуем
-        # на границе сервиса: контракт проекта везде — доля 0..1.
-        grid_gof_bem = float(dip_fixed.gof[min(sample - lo, len(dip_fixed.gof) - 1)]) / 100.0
-    except Exception as exc:  # метрика сравнения опциональна
-        warnings.append(f"GOF узла сетки на BEM не посчитан: {exc}")
+        point = grid_point
+    else:
+        point = free_point
 
-    mni_coords, area = _localize_point(refined_pos_m, cfg)
-    structure = _structure_of(cfg, mni_coords)
-    point = {
-        "epoch_index": params.epoch_index,
-        "time_ms": float(dip.times[best] * 1000.0),
-        "head_coords": [float(value * 1000.0) for value in refined_pos_m],
-        "mni_coords": mni_coords,
-        "moment": [float(value) for value in dip.ori[best]],
-        "amplitude_nam": float(dip.amplitude[best] * 1e9),
-        "gof": float(dip.gof[best]) / 100.0,  # MNE отдаёт проценты — см. выше
-        "brodmann_area": area,
-        "anatomical_structure": structure,
-    }
     report("done", 1.0, message=f"Эпоха {params.epoch_index + 1} уточнена (BEM)")
     return {
         "recording_id": recording.recording_id,
@@ -690,12 +773,13 @@ def refine_dipole_point(
         "epoch_index": params.epoch_index,
         "time_ms": float(times[sample] * 1000.0),
         "window_ms": [float(times[lo] * 1000.0), float(times[hi - 1] * 1000.0)],
+        "halfwin_ms": float(params.halfwin_ms),
         "fast_head_coords": [float(value * 1000.0) for value in fast_pos_m],
         "fast_gof": float(fast_gof),
         "grid_gof_bem": grid_gof_bem,
-        "shift_mm": float(np.linalg.norm(refined_pos_m - fast_pos_m) * 1000.0),
+        "shift_mm": shift_mm,
+        "free_fit": free_point is not None,
         "point": point,
         "warnings": warnings,
         "duration_sec_calc": round(time.perf_counter() - started, 3),
     }
-

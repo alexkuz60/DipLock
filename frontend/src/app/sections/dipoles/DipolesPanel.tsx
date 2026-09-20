@@ -36,8 +36,11 @@ import {
 } from '@/shared/state/dipoleParams'
 import {
   GRID_MM_RANGE,
+  REFINE_HALFWIN_OPTIONS,
   THRESHOLD_NAM_RANGE,
   calcJobSummary,
+  refineCostHint,
+  refineHalfwinLabel,
   resultMatchesParams,
 } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
@@ -86,6 +89,8 @@ export function DipolesPanel() {
   const setNotchHz = useDipoleCalc((state) => state.setNotchHz)
   const setSingleFreq = useDipoleCalc((state) => state.setSingleFreq)
   const setBandwidth = useDipoleCalc((state) => state.setBandwidth)
+  const refineHalfwinMs = useDipoleCalc((state) => state.refineHalfwinMs)
+  const setRefineHalfwinMs = useDipoleCalc((state) => state.setRefineHalfwinMs)
   const resetCalc = useDipoleCalc((state) => state.reset)
 
   // Длины эпох приходят из `/meta` (единственный источник — конфиг сервера):
@@ -333,6 +338,24 @@ export function DipolesPanel() {
           unit="мкВ"
           onChange={setRejectThresholdUv}
           hint="Эпохи выше порога в расчёт не попадают (тот же смысл, что у нарезки эпох)."
+        />
+        {/*
+          Окно уточнения (шаг 1.5): свободный фитинг «Уточнить…» идёт по окну вокруг
+          пика GFP, и каждый отсчёт стоит ≈7 с. Здесь выбирается окно, а время
+          оценивается по числам `/meta` — то есть по замеру, а не по надежде.
+        */}
+        <SelectField
+          label="Окно уточнения"
+          value={String(refineHalfwinMs)}
+          options={REFINE_HALFWIN_OPTIONS.map((value) => ({
+            value: String(value),
+            label: refineHalfwinLabel(value),
+          }))}
+          onChange={(value) => setRefineHalfwinMs(Number(value))}
+          hint={
+            'Свободный фитинг кнопки «Уточнить…» вокруг пика GFP: ' +
+            refineCostHint(meta.data, calcResult?.sfreq ?? null, refineHalfwinMs)
+          }
         />
         <NumberField
           label="КД ≥"

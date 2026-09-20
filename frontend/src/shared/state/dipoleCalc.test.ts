@@ -490,4 +490,45 @@ describe('кадр воспроизведения в состоянии расч
     expect(raw).not.toContain('playback')
     expect(raw).toContain('amplitudeThresholdNam')
   })
+
+  it('окно уточнения: только варианты списка, значение уезжает в форму (шаг 1.5)', async () => {
+    const state = useDipoleCalc.getState()
+    // По умолчанию — пик GFP: окно ±10 мс стоило ≈80 с вместо ≈8 с
+    expect(state.refineHalfwinMs).toBe(0)
+    // Произвольное число не принимается: «окно на 15 мс» было бы скрытой ценой
+    state.setRefineHalfwinMs(15)
+    expect(useDipoleCalc.getState().refineHalfwinMs).toBe(0)
+    useDipoleCalc.getState().setRefineHalfwinMs(5)
+    expect(useDipoleCalc.getState().refineHalfwinMs).toBe(5)
+  })
+
+  it('уточнение уходит задачей с выбранным окном, результат — в refinedPoints', async () => {
+    const fetchSpy = mockApiFetch()
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      refineHalfwinMs: 5,
+    })
+
+    await useDipoleCalc.getState().refineEpoch('rec-1', 0)
+
+    const refineCall = fetchSpy.mock.calls.find(([input]) =>
+      String(input).includes('/dipole_refine'),
+    )
+    expect(refineCall).toBeDefined()
+    expect(refineCall?.[1]?.method).toBe('POST')
+    const form = refineCall?.[1]?.body as FormData
+    expect(form.get('halfwin_ms')).toBe('5')
+    expect(form.get('epoch_index')).toBe('0')
+
+    const refined = useDipoleCalc.getState().refinedPoints[0]
+    expect(refined?.method).toBe('bem_fit')
+    expect(useDipoleCalc.getState().refineJob?.status).toBe('succeeded')
+  })
+
+  it('персистит окно уточнения: предпочтение переживает перезагрузку', () => {
+    useDipoleCalc.getState().setRefineHalfwinMs(10)
+
+    const raw = localStorage.getItem('diplock.dipoleCalc')
+    expect(raw).toContain('"refineHalfwinMs":10')
+  })
 })

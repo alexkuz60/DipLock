@@ -13,3 +13,6 @@ pydantic-settings>=2.5.0
 trimesh>=4.5.0
 # Децимация surface-мешей (trimesh.Trimesh.simplify_quadric_decimation)
 fast-simplification>=0.1.7
+# Параллелизм mne.fit_dipole (n_jobs=-1): опциональная зависимость MNE — без неё
+# он молча считает в один поток, и `DIPOLE_REFINE_N_JOBS=-1` ничего не обещает.
+joblib>=1.4.0

@@ -212,6 +212,26 @@ def dipole_scan_params(
     )
 
 
+def require_halfwin_ms(halfwin_ms: float | None) -> float:
+    """Половина окна уточнения (мс): 0…``dipole_refine_halfwin_max_ms``.
+
+    ``None`` — дефолт конфига (0 = фитится только пик GFP). Верхняя граница —
+    не формальность: каждый лишний отсчёт окна стоит ≈7 с (замер 20.09.2026),
+    поэтому «широкое окно» пользователь выбирает явно, а не получает молча.
+    """
+    value = settings.dipole_refine_halfwin_ms if halfwin_ms is None else float(halfwin_ms)
+    limit = settings.dipole_refine_halfwin_max_ms
+    if value < 0 or value > limit:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"halfwin_ms должен быть в диапазоне 0…{limit:g} мс "
+                f"(0 — фитится только пик GFP); получено {value:g}"
+            ),
+        )
+    return value
+
+
 def dipole_refine_params(
     *,
     epoch_index: int,
@@ -223,8 +243,13 @@ def dipole_refine_params(
     epoch_length_ms: float,
     reject_threshold_uv: float,
     grid_mm: float,
+    halfwin_ms: float | None = None,
 ) -> DipoleRefineParams:
-    """Параметры точного уточнения: сканирование (нарезка результата) + эпоха."""
+    """Параметры точного уточнения: сканирование (нарезка результата) + эпоха.
+
+    ``halfwin_ms`` — половина окна свободного фитинга вокруг пика GFP; ``None``
+    означает дефолт конфига (0 — один отсчёт), а не «окно пошире».
+    """
     scan = dipole_scan_params(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
@@ -234,4 +259,8 @@ def dipole_refine_params(
     )
     if epoch_index < 0:
         raise HTTPException(status_code=400, detail="Номер эпохи неотрицателен (с 0)")
-    return DipoleRefineParams(scan=scan, epoch_index=epoch_index)
+    return DipoleRefineParams(
+        scan=scan,
+        epoch_index=epoch_index,
+        halfwin_ms=require_halfwin_ms(halfwin_ms),
+    )

@@ -17,6 +17,17 @@ import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { DipolesToolHeaderActions } from './DipolesToolActions'
 
+type FetchCall = [input: unknown, init?: RequestInit]
+
+/**
+ * Запросы, которые **что-то считают на сервере**. Статический `/meta` (оценка
+ * времени уточнения — шаг 1.5) в счёт не идёт: хедер читает его всегда, а
+ * правило «правка параметра ничего не запускает» проверяется по задачам.
+ */
+function stateCalls(fetchSpy: { mock: { calls: FetchCall[] } }): FetchCall[] {
+  return fetchSpy.mock.calls.filter(([input]) => !String(input).includes('/meta'))
+}
+
 describe('тулс-хедер раздела «Диполи»', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -50,7 +61,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     expect(button).toHaveAttribute('title', expect.stringContaining('загрузите EDF'))
 
     await user.click(button)
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(stateCalls(fetchSpy)).toEqual([])
   })
 
   it('запускает расчёт кнопкой: задача, поллинг и точки в состоянии', async () => {
@@ -61,7 +72,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     await user.click(screen.getByRole('button', { name: 'Рассчитать диполи' }))
 
-    const urls = fetchSpy.mock.calls.map(
+    const urls = stateCalls(fetchSpy).map(
       ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
     )
     expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/dipoles')
@@ -104,7 +115,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     await user.type(field, '60')
 
     expect(useDipoleCalc.getState().amplitudeThresholdNam).toBe(60)
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(stateCalls(fetchSpy)).toEqual([])
   })
 
   it('отправляет полосу и сетевой фильтр из панели в задачу (срез 3.6)', async () => {
@@ -120,7 +131,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     // Полоса формы фильтров уходит в задачу как band_min/band_max — не «где-то
     // в состоянии, но не в запросе»
-    const [, init] = fetchSpy.mock.calls[0]
+    const [, init] = stateCalls(fetchSpy)[0]
     const form = init?.body as FormData
     expect(form.get('band_min')).toBe('8')
     expect(form.get('band_max')).toBe('13')
@@ -159,7 +170,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     await user.click(screen.getByRole('button', { name: 'Следующая эпоха' }))
     expect(useDipoleCalc.getState().playback.epochIndex).toBe(0)
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(stateCalls(fetchSpy)).toEqual([])
   })
 
   it('играет, шагает покадрово и меняет скорость — без запросов к серверу', async () => {
@@ -202,7 +213,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     expect(useDipoleCalc.getState().playback.speed).toBe(0.25)
     await user.selectOptions(speed, '0.5')
     expect(useDipoleCalc.getState().playback.speed).toBe(0.5)
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(stateCalls(fetchSpy)).toEqual([])
   })
 
   it('подписывает текущий кадр и снимает его отдельной кнопкой', async () => {
@@ -242,7 +253,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     expect(within(dialog).getByText(/перебор узлов объёмной сетки/)).toBeInTheDocument()
     expect(within(dialog).getByTestId('dipoles-help-note')).toHaveTextContent('nearest_cortex_vertex')
     expect(within(dialog).getByText(/Кадр идёт по сетке эпох результата/)).toBeInTheDocument()
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(stateCalls(fetchSpy)).toEqual([])
 
     await user.keyboard('{Escape}')
     expect(screen.queryByTestId('dipoles-help-dialog')).not.toBeInTheDocument()
@@ -251,7 +262,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     await user.click(screen.getByRole('button', { name: 'Справка' }))
     await user.click(screen.getByRole('button', { name: 'Закрыть справку' }))
     expect(screen.queryByTestId('dipoles-help-dialog')).not.toBeInTheDocument()
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(stateCalls(fetchSpy)).toEqual([])
   })
 
   it('кнопка-очки неактивна без выбранной точки и уточняет выбранную (F19)', async () => {
@@ -265,7 +276,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     const glasses = screen.getByTestId('refine-selected-button')
     expect(glasses).toBeDisabled()
     await user.click(glasses)
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(stateCalls(fetchSpy)).toEqual([])
 
     // Выбор точки на проекции (кладёт id в стор) активирует кнопку.
     // Узел перезапрашиваем: у IconButton смена disabled меняет обёртку
@@ -273,6 +284,10 @@ describe('тулс-хедер раздела «Диполи»', () => {
     act(() => useDipoleCalc.setState({ selectedPointId: '2-60' }))
     const enabled = screen.getByTestId('refine-selected-button')
     expect(enabled).toBeEnabled()
+    // Текст подсказки (окно + ожидаемое время) собирается из `/meta` и проверен
+    // юнит-тестами `refineCostHint`/`refineHalfwinLabel`: Radix-тултип в jsdom
+    // не открывается по hover, и «ждать» его здесь значило бы тест на Radix.
+
     await user.click(enabled)
 
     // Ушёл POST на dipole_refine с эпохой выбранной точки и нарезкой результата
@@ -283,6 +298,8 @@ describe('тулс-хедер раздела «Диполи»', () => {
     const form = post?.[1]?.body as FormData
     expect(form.get('epoch_index')).toBe('2')
     expect(form.get('grid_mm')).toBe('7')
+    // Окно свободного фитинга уходит явно: 0 — только пик GFP (шаг 1.5)
+    expect(form.get('halfwin_ms')).toBe('0')
 
     // После уточнения кнопка помечает эпоху как уточнённую
     await screen.findByRole('button', { name: 'Эпоха 3 уточнена точным профилем' })

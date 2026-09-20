@@ -61,6 +61,7 @@ import {
   buildRefineForm,
   calcJobFromStatus,
   normalizeCalcParams,
+  normalizeRefineHalfwin,
   type CalcJob,
   type CalcParams,
   type CalcView,
@@ -168,6 +169,14 @@ export type DipoleCalcState = {
    * **результата** быстрого расчёта (`buildRefineForm`), а не из формы панели.
    */
   refineEpoch: (recordingId: string | null, epochIndex: number) => Promise<void>
+  /**
+   * Окно свободного фитинга уточнения, мс (0 — только пик GFP, шаг 1.5).
+   * Предпочтение просмотра и персистится: «сколько ждать» пользователь выбирает
+   * один раз, а не перед каждым уточнением. Значение — из списка вариантов.
+   */
+  refineHalfwinMs: number
+  /** Окно уточнения из списка вариантов (`REFINE_HALFWIN_OPTIONS`) */
+  setRefineHalfwinMs: (value: number) => void
   /** Сброс результатов (закрытие записи) — параметры остаются */
   reset: () => void
 }
@@ -191,6 +200,9 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       refiningEpoch: null,
       refinedPoints: {},
       refineError: null,
+      // Окно уточнения — предпочтение просмотра (персистится): по умолчанию
+      // только пик GFP, то есть ≈8 с вместо ≈80 с на окне ±10 мс (шаг 1.5)
+      refineHalfwinMs: 0,
 
       setView: (view) => set({ view }),
       toggleView: (view) => set((state) => ({ view: state.view === view ? 'none' : view })),
@@ -276,6 +288,9 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         set((state) => ({ params: { ...state.params, epochLengthMs: Math.round(value) } })),
       setGridMm: (value) =>
         set((state) => ({ params: { ...state.params, gridMm: clamp(value, GRID_MM_RANGE) } })),
+      // Окно уточнения — только варианты списка: произвольное число здесь значило
+      // бы «случайные 40 секунд счёта», а не выбор точности (шаг 1.5)
+      setRefineHalfwinMs: (value) => set({ refineHalfwinMs: normalizeRefineHalfwin(value) }),
       setRejectThresholdUv: (value) =>
         set((state) => ({ params: { ...state.params, rejectThresholdUv: Math.max(0, value) } })),
       setFilterPreset: (preset, freqBands) =>
@@ -409,7 +424,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         })
         try {
           const created = await api.dipoleRefine.start(
-            recordingId, buildRefineForm(result, epochIndex),
+            recordingId, buildRefineForm(result, epochIndex, get().refineHalfwinMs),
           )
           await waitForJob(created.job_id, isCurrent, (status) =>
             set({ refineJob: calcJobFromStatus(status) }),
@@ -469,6 +484,9 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         amplitudeThresholdNam: state.amplitudeThresholdNam,
         fftRangeHz: state.fftRangeHz,
         params: state.params,
+        // Окно уточнения — предпочтение просмотра: оно переживает перезагрузку
+        // (результаты задач — нет, они привязаны к записи)
+        refineHalfwinMs: state.refineHalfwinMs,
       }),
       merge: (persisted, current) => {
         const stored = (persisted ?? {}) as Partial<DipoleCalcState>
@@ -485,6 +503,9 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           view: stored.view ?? current.view,
           amplitudeThresholdNam: stored.amplitudeThresholdNam ?? current.amplitudeThresholdNam,
           fftRangeHz: normalizeFreqWindow(stored.fftRangeHz ?? current.fftRangeHz),
+          // Окно уточнения из старого хранилища может быть любым числом (или его
+          // не было): приводим к списку вариантов, а не отправляем в форму как есть
+          refineHalfwinMs: normalizeRefineHalfwin(stored.refineHalfwinMs),
           selectedPointId: null,
           // Кадр воспроизведения — сессионное состояние: он не персистится, и после
           // перезагрузки страницы его нет (как и результата задачи) — берём дефолт

@@ -502,6 +502,13 @@ async def create_dipole_refine_job(
     epoch_length_ms: float = Form(1000.0, description="Длина эпохи — как в быстром расчёте"),
     reject_threshold_uv: float = Form(150.0, description="Порог reject эпох"),
     grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг сетки быстрого расчёта, мм"),
+    halfwin_ms: float | None = Form(
+        None,
+        description=(
+            "Половина окна свободного фитинга вокруг пика GFP, мс (0 — только пик; "
+            "пусто — дефолт сервера)"
+        ),
+    ),
 ) -> JobCreated:
     """Кнопка «Уточнить для эпохи…» (F19): `mne.fit_dipole` на BEM fsaverage.
 
@@ -517,9 +524,11 @@ async def create_dipole_refine_job(
         reference=reference, reference_channels=reference_channels,
         epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
         grid_mm=grid_mm,
+        halfwin_ms=halfwin_ms,
     )
     return submit_recording_job(
-        "dipole_refine", recording, params, meta={"epoch_index": epoch_index},
+        "dipole_refine", recording, params,
+        meta={"epoch_index": epoch_index, "halfwin_ms": params.halfwin_ms},
     )
 
 
@@ -938,6 +947,13 @@ async def get_meta() -> MetaResponse:
         # Точный фитинг — «медленный профиль»: дефолты означают часы счёта,
         # поэтому UI обязан предупреждать до запуска, а не после (F19).
         dipole_fit_experimental=True,
+        # Уточнение эпохи: окно по умолчанию (0 — только пик), предел из формы и
+        # оценки времени — UI показывает «сколько ждать» до запуска (1.5).
+        dipole_refine_halfwin_ms=settings.dipole_refine_halfwin_ms,
+        dipole_refine_halfwin_max_ms=settings.dipole_refine_halfwin_max_ms,
+        dipole_refine_sec_fixed=settings.dipole_refine_sec_fixed,
+        dipole_refine_sec_per_sample=settings.dipole_refine_sec_per_sample,
+        dipole_refine_n_jobs=settings.dipole_refine_n_jobs,
         max_concurrent_jobs=job_manager.max_concurrent,
         cors_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
         mri_slices=_mri_ref(),

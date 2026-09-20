@@ -591,9 +591,11 @@ class DipoleRefineResult(BaseModel):
     """Результат точного уточнения одной эпохи (``kind=dipole_refine``, F19).
 
     «Было/стало» в одном контракте: узел сетки (быстрый режим) и точка
-    `mne.fit_dipole` на BEM в окне вокруг того же пика GFP. `grid_gof_bem` —
-    GOF узла сетки, посчитанный на BEM-модели (позиция фиксирована): честная
-    оценка ошибки сетки без подмены метода.
+    `mne.fit_dipole` на BEM в окне вокруг того же пика GFP. `grid_gof_bem` — GOF
+    узла сетки, посчитанный на BEM-модели (позиция фиксирована): честная оценка
+    ошибки сетки без подмены метода. Этот дешёвый шаг считается **первым**, и
+    если свободный фит не удался (`free_fit=false`), в `point` остаётся именно
+    оценка узла на BEM, а причина — в `warnings`.
     """
 
     recording_id: str
@@ -601,6 +603,10 @@ class DipoleRefineResult(BaseModel):
     epoch_index: int = Field(description="Номер эпохи нарезки быстрого расчёта (с 0)")
     time_ms: float = Field(description="Время пика GFP эпохи, мс")
     window_ms: list[float] = Field(description="Окно фитинга вокруг пика [от, до], мс")
+    halfwin_ms: float = Field(
+        default=0.0,
+        description="Половина окна свободного фитинга, мс (0 — фитился только пик GFP)",
+    )
     fast_head_coords: list[float] = Field(description="Узел сетки (быстрый режим), head, мм")
     fast_gof: float = Field(description="GOF узла сетки на сферической модели, 0..1")
     grid_gof_bem: float | None = Field(
@@ -608,6 +614,10 @@ class DipoleRefineResult(BaseModel):
         description="GOF того же узла на BEM (позиция фиксирована); None — не посчитан",
     )
     shift_mm: float = Field(description="Сдвиг позиции после уточнения относительно узла сетки, мм")
+    free_fit: bool = Field(
+        default=True,
+        description="Свободный фит окна выполнен; False — показана оценка узла сетки на BEM",
+    )
     point: DipoleScanPointOut = Field(description="Уточнённая точка (BEM, max GOF в окне)")
     warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = 0.0
@@ -783,6 +793,24 @@ class MetaResponse(BaseModel):
         description=(
             "Точный фитинг помечен экспериментальным: дефолты (все эпохи, decim=5) "
             "означают часы счёта, поэтому синхронный /analyze для него не рекомендуется"
+        ),
+    )
+    dipole_refine_halfwin_ms: float = Field(
+        description="Дефолтное окно уточнения, мс (0 — свободный фит только по пику GFP)",
+    )
+    dipole_refine_halfwin_max_ms: float = Field(
+        description="Предел окна уточнения из формы, мс — каждый отсчёт стоит ≈7 с",
+    )
+    dipole_refine_sec_fixed: float = Field(
+        description="Постоянная цена уточнения (оценка узла сетки на BEM), с — замер, не параметр",
+    )
+    dipole_refine_sec_per_sample: float = Field(
+        description="Оценка времени одного отсчёта свободного фита в окне, с — подсказка «сколько ждать»",
+    )
+    dipole_refine_n_jobs: int = Field(
+        description=(
+            "Потоков fit_dipole в уточнении (-1 — все ядра); параллелизм работает "
+            "только при установленном joblib (опциональная зависимость MNE)"
         ),
     )
     max_concurrent_jobs: int

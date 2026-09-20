@@ -25,6 +25,7 @@
  * диалогом (`DipolesHelpDialog`), а не занимают рабочую область абзацем.
  */
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   ChartColumn,
   ChevronLeft,
@@ -39,7 +40,14 @@ import {
   Share2,
   Square,
 } from 'lucide-react'
-import { calcJobSummary, epochIndexOfPointId, refinedSummary } from '@/shared/lib/dipoleCalcModel'
+import {
+  calcJobSummary,
+  epochIndexOfPointId,
+  refineCostHint,
+  refineHalfwinLabel,
+  refinedSummary,
+} from '@/shared/lib/dipoleCalcModel'
+import { api } from '@/shared/api/client'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { canPlayback, playbackSummary, PLAYBACK_SPEEDS } from '@/shared/lib/playback'
 import { useEdfRecording } from '@/shared/state/edfRecording'
@@ -205,6 +213,16 @@ export function DipolesToolHeaderActions() {
   const refiningEpoch = useDipoleCalc((state) => state.refiningEpoch)
   const refinedPoints = useDipoleCalc((state) => state.refinedPoints)
   const refineEpoch = useDipoleCalc((state) => state.refineEpoch)
+  const refineHalfwinMs = useDipoleCalc((state) => state.refineHalfwinMs)
+  // Оценка времени уточнения берётся из чисел `/meta` (замер сервера): кнопка
+  // обещает «≈N с», а не «десятки секунд» наугад (шаг 1.5). Тот же запрос уже
+  // делает панель раздела — кэш react-query общий.
+  const meta = useQuery({
+    queryKey: ['meta'],
+    queryFn: ({ signal }) => api.meta(signal),
+    staleTime: 60_000,
+    retry: false,
+  })
   const [helpOpen, setHelpOpen] = useState(false)
 
   const running = job?.status === 'running'
@@ -213,6 +231,7 @@ export function DipolesToolHeaderActions() {
   const selectedEpoch = epochIndexOfPointId(selectedPointId)
   const refinedSelected = selectedEpoch !== null ? refinedPoints[selectedEpoch] : undefined
   const refineRunning = refineJob?.status === 'running' && refiningEpoch !== null
+  const refineCost = refineCostHint(meta.data, result?.sfreq ?? null, refineHalfwinMs)
   const refineTooltipText =
     result === null
       ? 'Точное уточнение (BEM) доступно после расчёта диполей'
@@ -220,7 +239,7 @@ export function DipolesToolHeaderActions() {
         ? 'Выберите точку диполя на любой из трёх проекций (или строку в таблице локализации) — тогда кнопка уточнит её эпоху точным фитингом на BEM'
         : refinedSelected
           ? `${refinedSummary(refinedSelected)} — нажмите, чтобы повторить уточнение эпохи ${selectedEpoch + 1}`
-          : `Уточнить эпоху ${selectedEpoch + 1}: точный фитинг на BEM fsaverage в окне пика GFP (десятки секунд)`
+          : `Уточнить эпоху ${selectedEpoch + 1}: точный фитинг на BEM fsaverage, окно ${refineHalfwinLabel(refineHalfwinMs)}. ${refineCost}`
 
   const runTooltip = running
     ? `Расчёт идёт: ${calcJobSummary(job)}`

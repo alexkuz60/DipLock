@@ -25,7 +25,12 @@ import {
   type CalcFilterPresetId,
 } from '@/shared/lib/calcFilter'
 import { DEFAULT_PLAYBACK_SPEED, type PlaybackSpeed } from '@/shared/lib/playback'
-import type { DipoleRefineResult, DipoleScanResult, JobStatus } from '@/shared/api/types'
+import type {
+  DipoleRefineResult,
+  DipoleScanResult,
+  JobStatus,
+  MetaResponse,
+} from '@/shared/api/types'
 
 /** Что открыто в выдвижной панели раздела: одна панель за раз. */
 export type CalcView = 'none' | 'topomap' | 'fft'
@@ -160,7 +165,11 @@ export function buildDipoleForm(params: CalcParams): FormData {
  * расчёта, а не из текущей формы панели — номер эпохи привязан к нарезке
  * результата, и правка параметров после расчёта не должна её подменять.
  */
-export function buildRefineForm(result: DipoleScanResult, epochIndex: number): FormData {
+export function buildRefineForm(
+  result: DipoleScanResult,
+  epochIndex: number,
+  halfwinMs = 0,
+): FormData {
   const form = new FormData()
   form.set('epoch_index', String(epochIndex))
   if (result.filter_band_hz) {
@@ -175,14 +184,99 @@ export function buildRefineForm(result: DipoleScanResult, epochIndex: number): F
   form.set('epoch_length_ms', String(result.epoch_length_ms))
   form.set('reject_threshold_uv', String(result.reject_threshold_uv))
   form.set('grid_mm', String(result.grid_mm))
+  // Окно свободного фитинга (шаг 1.5): 0 — только пик GFP. Каждый отсчёт стоит
+  // ≈7 с на сервере, поэтому окно — явный выбор пользователя, а не «пошире».
+  form.set('halfwin_ms', String(halfwinMs))
   return form
+}
+
+/**
+ * Варианты окна свободного фитинга уточнения, мс (шаг 1.5).
+ *
+ * `0` — только пик GFP: тот самый отсчёт, по которому уже посчитан быстрый
+ * результат. Каждый следующий отсчёт окна стоит ≈7 с на BEM-модели (замер
+ * 20.09.2026, `docs/rules/dipoles.md`), поэтому «пошире» выбирается осознанно.
+ */
+export const REFINE_HALFWIN_OPTIONS = [0, 2, 5, 10] as const
+
+export type RefineHalfwinMs = (typeof REFINE_HALFWIN_OPTIONS)[number]
+
+/** Подпись варианта окна: «только пик GFP (±0 мс)» / «±5 мс». */
+export function refineHalfwinLabel(halfwinMs: number): string {
+  return halfwinMs === 0 ? 'только пик GFP (±0 мс)' : `±${halfwinMs} мс`
+}
+
+/**
+ * Округление «половина к чётному» (как Python `round`): сервер считает границы
+ * окна через `round(halfwin_ms/1000 · sfreq)`, и клиентская оценка времени обязана
+ * давать **то же** число отсчётов, иначе подсказка «≈N с» разойдётся с расчётом
+ * (JS `Math.round(2.5)` даёт 3, а Python `round(2.5)` — 2).
+ */
+function roundHalfToEven(value: number): number {
+  const floor = Math.floor(value)
+  const rest = value - floor
+  if (rest > 0.5) return floor + 1
+  if (rest < 0.5) return floor
+  return floor % 2 === 0 ? floor : floor + 1
+}
+
+/** Число отсчётов окна при данной частоте дискретизации: 2·halfwin·sfreq/1000 + 1. */
+export function refineWindowSamples(halfwinMs: number, sfreq: number): number {
+  if (!(halfwinMs > 0) || !(sfreq > 0)) return 1
+  return 2 * roundHalfToEven((halfwinMs / 1000) * sfreq) + 1
+}
+
+/** Значение окна из сохранённых параметров: только варианты списка (иначе — пик). */
+export function normalizeRefineHalfwin(halfwinMs: number | null | undefined): number {
+  const stored = Number(halfwinMs)
+  return REFINE_HALFWIN_OPTIONS.includes(stored as RefineHalfwinMs) ? stored : 0
+}
+
+/**
+ * Оценка времени уточнения до запуска («сколько ждать», шаг 1.5): постоянная цена
+ * (оценка узла на BEM) + отсчёты свободного фита. Числа берутся из `/meta` —
+ * это замер сервера, а не предположение клиента, и подсказка не обещает
+ * «мгновенно» там, где счёт идёт десятками секунд.
+ */
+export function refineCostHint(
+  meta: Pick<
+    MetaResponse,
+    'dipole_refine_sec_fixed' | 'dipole_refine_sec_per_sample'
+  > | null | undefined,
+  sfreq: number | null,
+  halfwinMs: number,
+): string {
+  if (!meta) return 'Оценка времени появится вместе с метаданными сервера (/meta)'
+  const fixed = meta.dipole_refine_sec_fixed.toFixed(1)
+  const perSample = meta.dipole_refine_sec_per_sample.toFixed(1)
+  // Частота записи приходит с результатом расчёта: до него число отсчётов окна
+  // неизвестно, и подставлять «примерно 500 Гц» было бы выдумкой клиента
+  if (sfreq === null || !(sfreq > 0)) {
+    return (
+      `Оценка времени: ≈${fixed} с на оценку узла на BEM + ≈${perSample} с за отсчёт окна ` +
+      '(частота записи станет известна после расчёта диполей)'
+    )
+  }
+  const samples = refineWindowSamples(halfwinMs, sfreq)
+  const freeSec = samples * meta.dipole_refine_sec_per_sample
+  const totalSec = meta.dipole_refine_sec_fixed + freeSec
+  return (
+    `Ожидаемое время ≈${Math.round(totalSec)} с: оценка узла на BEM ≈${fixed} с + ` +
+    `свободный фит ${samples} отсч. ≈${Math.round(freeSec)} с`
+  )
 }
 
 /**
  * Однострочное «стало» уточнения (F19): BEM GOF, GOF узла сетки на той же
  * модели и сдвиг позиции — видно, что дал точный профиль, без подмены метода.
+ *
+ * Если свободный фит не выполнился, «стало» — это оценка узла сетки на BEM, и
+ * строка **обязана** называть её узлом, а не «уточнённой точкой» (шаг 1.5).
  */
 export function refinedSummary(refined: DipoleRefineResult): string {
+  if (!refined.free_fit) {
+    return `Оценка узла сетки на BEM: GOF ${(refined.point.gof * 100).toFixed(1)} % · свободный фит не выполнен`
+  }
   const parts = [`BEM GOF ${(refined.point.gof * 100).toFixed(1)} %`]
   if (refined.grid_gof_bem !== null) {
     parts.push(`сетка на BEM ${(refined.grid_gof_bem * 100).toFixed(1)} %`)
@@ -203,9 +297,12 @@ export function refineTooltip(refined: DipoleRefineResult): string {
     refined.grid_gof_bem !== null
       ? `, тот же узел на BEM: ${(refined.grid_gof_bem * 100).toFixed(1)} %`
       : ''
+  const head = refined.free_fit
+    ? 'Уточнено точным профилем'
+    : 'Свободный фит не выполнен — показана оценка узла сетки на BEM'
   return (
-    `Уточнено точным профилем (окно ${refined.window_ms.map((v) => v.toFixed(0)).join('…')} мс): ` +
-    `GOF ${(refined.point.gof * 100).toFixed(1)} %, ${coords}, ` +
+    `${head} (окно ${refined.window_ms.map((v) => v.toFixed(0)).join('…')} мс, ` +
+    `±${refined.halfwin_ms.toFixed(0)} мс): GOF ${(refined.point.gof * 100).toFixed(1)} %, ${coords}, ` +
     `сдвиг от узла сетки ${refined.shift_mm.toFixed(1)} мм. ` +
     `Было — сетка: GOF ${(refined.fast_gof * 100).toFixed(1)} %${gridBem}.`
   )

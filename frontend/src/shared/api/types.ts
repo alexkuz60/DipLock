@@ -216,6 +216,8 @@ export type DipoleRefineResult = {
   time_ms: number
   /** Окно фитинга вокруг пика [от, до], мс */
   window_ms: number[]
+  /** Половина окна свободного фитинга, мс (0 — фитился только пик GFP) */
+  halfwin_ms: number
   /** Узел сетки (быстрый режим), head, мм */
   fast_head_coords: number[]
   /** GOF узла сетки на сферической модели, 0..1 */
@@ -224,6 +226,11 @@ export type DipoleRefineResult = {
   grid_gof_bem: number | null
   /** Сдвиг позиции после уточнения относительно узла сетки, мм */
   shift_mm: number
+  /**
+   * Свободный фит окна выполнен; `false` — показана оценка узла сетки на BEM
+   * (причина в `warnings`): «стало» не выдумывается, а честно называется узлом.
+   */
+  free_fit: boolean
   /** Уточнённая точка (BEM, max GOF в окне) */
   point: DipoleScanPoint
   warnings: string[]
@@ -406,6 +413,16 @@ export type MetaResponse = {
   dipole_fit_sec_per_point: number
   /** Точный фитинг помечен экспериментальным: дефолты означают часы счёта */
   dipole_fit_experimental: boolean
+  /** Дефолтное окно уточнения эпохи, мс (0 — свободный фит только по пику GFP) */
+  dipole_refine_halfwin_ms: number
+  /** Предел окна уточнения из формы, мс — каждый отсчёт стоит ≈7 с */
+  dipole_refine_halfwin_max_ms: number
+  /** Постоянная цена уточнения (оценка узла сетки на BEM), с — замер, не параметр */
+  dipole_refine_sec_fixed: number
+  /** Оценка времени одного отсчёта свободного фита в окне, с */
+  dipole_refine_sec_per_sample: number
+  /** Потоков fit_dipole в уточнении (-1 — все ядра; нужен установленный joblib) */
+  dipole_refine_n_jobs: number
   max_concurrent_jobs: number
   cors_origins: string[]
   /** Срезы МРТ для проекций мозга: версия ассета, базовый URL, шаг сетки */
