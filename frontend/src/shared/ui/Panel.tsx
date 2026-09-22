@@ -11,6 +11,13 @@
  * Свёрнутая секция остаётся в DOM (`hidden`), а не размонтируется: внутреннее
  * состояние контролов не теряется, а вид панели расчёт не устаревает
  * (правило в `docs/rules/frontend-state.md`).
+ *
+ * Обёртка скрытия есть **только у сворачиваемой секции**, раскрытая — прозрачна
+ * для раскладки (`display: contents`). Лишний блок между секцией и содержимым рвёт
+ * flex-цепочку «Треки записи» (`flex-1 min-h-0` перестаёт держать высоту области),
+ * замер области растёт вместе с контентом, и разворот трека вьюера входит в
+ * бесконечный рост — вкладка зависает намертво (регрессия 22.09.2026, ловушка —
+ * `docs/rules/frontend-perf.md` п. 3.7).
  */
 import { ChevronRight } from 'lucide-react'
 import { useId, type ReactNode } from 'react'
@@ -50,6 +57,12 @@ export function Panel({
   const setPanelCollapsed = useUiStore((state) => state.setPanelCollapsed)
   const hidden = isCollapsible && collapsed
   const header = <span className="block">{title}</span>
+  const content = (
+    <>
+      {children}
+      {hint ? <p className="mt-2 text-sm text-fg-2">{hint}</p> : null}
+    </>
+  )
 
   return (
     <section
@@ -82,10 +95,14 @@ export function Panel({
           header
         )}
       </h3>
-      <div id={contentId} hidden={hidden}>
-        {children}
-        {hint ? <p className="mt-2 text-sm text-fg-2">{hint}</p> : null}
-      </div>
+      {isCollapsible ? (
+        // Раскрытая обёртка прозрачна для раскладки (`contents`), свёрнутая скрыта `hidden`
+        <div id={contentId} hidden={hidden} className={hidden ? undefined : 'contents'}>
+          {content}
+        </div>
+      ) : (
+        content
+      )}
     </section>
   )
 }

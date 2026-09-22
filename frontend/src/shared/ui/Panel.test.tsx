@@ -117,4 +117,44 @@ describe('Panel (секция правой панели)', () => {
     expect(screen.queryByRole('button', { name: 'Без аккордеона' })).toBeNull()
     expect(screen.getByText('видно всегда')).toBeInTheDocument()
   })
+
+  it('не вставляет обёртку между секцией и содержимым — раскладка ломалась (фикс зависания)', () => {
+    /**
+     * Регрессия 22.09.2026: лишний div в панели «Треки записи» разрывал flex-цепочку
+     * `flex-1 min-h-0`, высота области треков текла от контента, и разворот трека в
+     * полный вид вёл вкладку в бесконечный рост (зависание). jsdom раскладку не считает
+     * (заглушка ResizeObserver отдаёт константу) — закрепляем форму DOM.
+     */
+    const { container } = renderWithProviders(
+      <Panel title="Треки записи" className="flex min-h-0 flex-1 flex-col">
+        <div data-testid="track-stack">треки</div>
+      </Panel>,
+    )
+
+    const section = container.querySelector('section')
+    expect(section?.querySelector('[data-testid="track-stack"]')?.parentElement).toBe(section)
+  })
+
+  it('у аккордеона обёртка прозрачна для раскладки, а свёрнутая скрыта без размонтирования', async () => {
+    const user = userEvent.setup()
+    const { container } = renderWithProviders(
+      scoped(
+        'edf',
+        <Panel title="Пороги артефактов">
+          <span>z-score</span>
+        </Panel>,
+      ),
+    )
+
+    const wrap = container.querySelector('section > div[id]')
+    // display: contents — обёртка не участвует в раскладке родителя секции
+    expect(wrap).toHaveClass('contents')
+    expect(wrap).not.toHaveAttribute('hidden')
+
+    await user.click(screen.getByRole('button', { name: 'Пороги артефактов' }))
+
+    expect(wrap).toHaveAttribute('hidden')
+    expect(wrap).not.toHaveClass('contents')
+    expect(wrap?.querySelector('span')?.textContent).toBe('z-score')
+  })
 })

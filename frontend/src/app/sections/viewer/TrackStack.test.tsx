@@ -197,7 +197,10 @@ describe('вьюер треков', () => {
 
     await user.click(expand)
 
-    // Высота области — 600 px (заглушка ResizeObserver), трек занимает её минус отступы
+    // Высота области — 600 px (заглушка ResizeObserver), трек занимает её минус отступы.
+    // В живой раскладке её меряет ResizeObserver (`viewportHeight`): родитель обязан держать
+    // высоту области экраном, иначе замер течёт вместе с контентом и разворот входит в
+    // бесконечный рост — вкладка зависает (регрессия 22.09.2026, `docs/rules/frontend-perf.md` п. 3.7)
     expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '592px' })
     expect(expand).toHaveAttribute('data-expanded', 'true')
     // Развёрнутый трек не скрывает соседей: видимость каналов — только у панели «Каналы»
