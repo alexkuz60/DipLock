@@ -32,8 +32,8 @@ EDF. Каждая секция `Panel` внутри панели опций ст
 «раздел:заголовок» и переживает перезаход в раздел; по умолчанию раскрыты все секции (поведение до
 правки). Область секций даёт `RightPanel` через `PanelScopeContext` (`shared/ui/panelScope.ts`), поэтому
 заголовки «EDF» и «ЭЭГ» не делят состояние, а `Panel` вне панели (рабочая область) рисуется как раньше.
-Правило — `docs/rules/frontend-state.md` п. 3 и `docs/ui/viewer.md`; тесты — `shared/ui/Panel.test.tsx`
-и `shared/state/uiStore.test.ts` (**659 Vitest**, было 654).
+Правило — `docs/rules/frontend-state.md` п. 3 и `docs/ui/viewer.md`; тесты — `shared/ui/Panel.test.tsx`,
+`shared/state/uiStore.test.ts` и каркас в `AppShell.test.tsx` (**660 Vitest**, было 654).
 
 ## 20.09.2026 — Этап 1.5: «Уточнить» вместо 100 секунд — секунды
 

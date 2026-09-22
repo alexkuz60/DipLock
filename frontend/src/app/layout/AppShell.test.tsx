@@ -125,6 +125,27 @@ describe('каркас приложения', () => {
     expect(panel()).toBeInTheDocument()
   })
 
+  it('делает секции панели опций раздела EDF аккордеонами', async () => {
+    const user = userEvent.setup()
+    renderApp()
+    // Панель наполняется после /meta — ждём канал из конфигурации сервера
+    await screen.findByLabelText('Fp1')
+
+    const panel = () => screen.getByLabelText('Панель опций раздела «EDF»')
+    const toggle = within(panel()).getByRole('button', { name: 'Пороги артефактов' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+    await user.click(toggle)
+
+    expect(within(panel()).getByRole('button', { name: 'Пороги артефактов' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    expect(useUiStore.getState().collapsedPanels).toEqual({ 'edf:Пороги артефактов': true })
+    // Секция скрыта, но не размонтирована: контрол на месте и хранит значение
+    expect(within(panel()).getByLabelText('z-score')).toBeInTheDocument()
+  })
+
   it('переходит в раздел по горячей клавише', async () => {
     const user = userEvent.setup()
     renderApp('/')
