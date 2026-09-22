@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import type { SectionConfig } from '@/app/sections/registry'
 import { useUiStore } from '@/shared/state/uiStore'
 import { IconButton } from '@/shared/ui/IconButton'
+import { PanelScopeContext } from '@/shared/ui/panelScope'
 
 export type RightPanelProps = {
   section: SectionConfig
@@ -47,7 +48,13 @@ export function RightPanel({ section, children }: RightPanelProps) {
           onClick={() => setRightPanel(section.id, false)}
         />
       </div>
-      <div className="scroll-y-always min-h-0 flex-1 space-y-3 p-3">{children}</div>
+      {/*
+        Область секций: `Panel` внутри панели опций становится аккордеоном и хранит
+        свёрнутость по разделу («edf:Пороги артефактов»), не путая её с «ЭЭГ».
+      */}
+      <div className="scroll-y-always min-h-0 flex-1 space-y-3 p-3">
+        <PanelScopeContext.Provider value={section.id}>{children}</PanelScopeContext.Provider>
+      </div>
     </aside>
   )
 }

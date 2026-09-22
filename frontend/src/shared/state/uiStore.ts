@@ -14,12 +14,20 @@ export type Density = 'compact' | 'normal'
 type UiState = {
   /** Раскрыт ли правый сайдбар для каждого раздела */
   rightPanelOpen: Record<string, boolean>
+  /**
+   * Свёрнутые секции-аккордеоны правой панели: ключ `${sectionId}:${title}` → true.
+   * Секции без записи считаются раскрытыми (`Panel`, `defaultOpen`).
+   */
+  collapsedPanels: Record<string, boolean>
   fontScale: FontScale
   density: Density
   /** Число активных (queued/running) задач — показывается бейджем в рейле */
   activeJobs: number
   toggleRightPanel: (sectionId: string) => void
   setRightPanel: (sectionId: string, open: boolean) => void
+  /** Свернуть/развернуть секцию панели опций (ключ «раздел:заголовок») */
+  togglePanelCollapsed: (panelKey: string) => void
+  setPanelCollapsed: (panelKey: string, collapsed: boolean) => void
   setFontScale: (scale: FontScale) => void
   setDensity: (density: Density) => void
   setActiveJobs: (count: number) => void
@@ -28,6 +36,7 @@ type UiState = {
 
 const DEFAULTS = {
   rightPanelOpen: { edf: true, eeg: true, dipoles: true, table: true, group: true } as Record<string, boolean>,
+  collapsedPanels: {} as Record<string, boolean>,
   fontScale: 'normal' as FontScale,
   density: 'normal' as Density,
   activeJobs: 0,
@@ -48,6 +57,17 @@ export const useUiStore = create<UiState>()(
         set((state) => ({
           rightPanelOpen: { ...state.rightPanelOpen, [sectionId]: open },
         })),
+      togglePanelCollapsed: (panelKey) =>
+        set((state) => ({
+          collapsedPanels: {
+            ...state.collapsedPanels,
+            [panelKey]: !(state.collapsedPanels[panelKey] ?? false),
+          },
+        })),
+      setPanelCollapsed: (panelKey, collapsed) =>
+        set((state) => ({
+          collapsedPanels: { ...state.collapsedPanels, [panelKey]: collapsed },
+        })),
       setFontScale: (fontScale) => set({ fontScale }),
       setDensity: (density) => set({ density }),
       setActiveJobs: (activeJobs) => set({ activeJobs }),
@@ -58,6 +78,7 @@ export const useUiStore = create<UiState>()(
       // activeJobs — состояние сессии, в localStorage не нужно
       partialize: (state) => ({
         rightPanelOpen: state.rightPanelOpen,
+        collapsedPanels: state.collapsedPanels,
         fontScale: state.fontScale,
         density: state.density,
       }),

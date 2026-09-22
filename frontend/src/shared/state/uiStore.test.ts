@@ -45,6 +45,18 @@ describe('uiStore', () => {
     expect(useUiStore.getState().rightPanelOpen.edf).toBe(true)
   })
 
+  it('сворачивает и разворачивает секции панели опций с сохранением в localStorage', () => {
+    useUiStore.getState().setPanelCollapsed('edf:Пороги артефактов', true)
+    expect(useUiStore.getState().collapsedPanels).toEqual({ 'edf:Пороги артефактов': true })
+    expect(localStorage.getItem('diplock.ui') ?? '').toContain('collapsedPanels')
+
+    useUiStore.getState().togglePanelCollapsed('edf:Пороги артефактов')
+    expect(useUiStore.getState().collapsedPanels['edf:Пороги артефактов']).toBe(false)
+
+    useUiStore.getState().resetUiState()
+    expect(useUiStore.getState().collapsedPanels).toEqual({})
+  })
+
   it('applyUiPreferences пишет data-атрибуты на <html>', () => {
     applyUiPreferences('xlarge', 'compact')
     expect(document.documentElement.dataset.fontScale).toBe('xlarge')
