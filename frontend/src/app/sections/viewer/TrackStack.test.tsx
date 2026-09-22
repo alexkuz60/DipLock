@@ -197,11 +197,10 @@ describe('вьюер треков', () => {
 
     await user.click(expand)
 
-    // Высота области — 600 px (заглушка ResizeObserver), трек занимает её минус отступы.
-    // В живой раскладке её меряет ResizeObserver (`viewportHeight`): родитель обязан держать
-    // высоту области экраном, иначе замер течёт вместе с контентом и разворот входит в
-    // бесконечный рост — вкладка зависает (регрессия 22.09.2026, `docs/rules/frontend-perf.md` п. 3.7)
-    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '592px' })
+    // Развёрнутый трек — фикс ×8 (64 → 512 px), а не «высота области» (решение 22.09.2026):
+    // константа не зависит от замера ResizeObserver и не может завести петлю роста DOM
+    // (`docs/rules/frontend-perf.md` п. 3.7)
+    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '512px' })
     expect(expand).toHaveAttribute('data-expanded', 'true')
     // Развёрнутый трек не скрывает соседей: видимость каналов — только у панели «Каналы»
     expect(useEdfParams.getState().params.visibleChannels).toEqual(['F3', 'F4', 'C3'])
@@ -210,7 +209,7 @@ describe('вьюер треков', () => {
     // Клик по другой стрелке переключает разворот, повторный по той же — сворачивает
     await user.click(screen.getByTestId('track-expand-F3'))
     expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '64px' })
-    expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '592px' })
+    expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '512px' })
 
     await user.click(screen.getByTestId('track-expand-F3'))
     expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '64px' })
@@ -279,7 +278,7 @@ describe('вьюер треков', () => {
     renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     await user.click(screen.getByTestId('track-expand-F4'))
-    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '592px' })
+    expect(screen.getByTestId('track-F4')).toHaveStyle({ height: '512px' })
 
     act(() => useEdfParams.getState().toggleChannel('F4'))
     expect(screen.queryByTestId('track-F4')).not.toBeInTheDocument()
@@ -348,8 +347,8 @@ describe('вьюер треков', () => {
     // Чарт тот же: пересоздание добавило бы в список второй, а старый уничтожило
     expect(uplotCharts()).toHaveLength(1)
     expect(chart.destroy).not.toHaveBeenCalled()
-    // Ширина области треков: 1024 − 56 (подписи) − 8 (зазор), высота — видимой области
-    expect(chart.setSize).toHaveBeenCalledWith({ width: 960, height: 592 })
+    // Ширина области треков: 1024 − 56 (подписи) − 8 (зазор), высота — фикс ×8
+    expect(chart.setSize).toHaveBeenCalledWith({ width: 960, height: 512 })
   })
 
   it('клик по треку ставит курсор, а не гонится за мышью (срез 2.9)', async () => {
@@ -430,7 +429,7 @@ describe('вьюер треков', () => {
     await user.click(screen.getByTestId('track-expand-F3'))
 
     // Разворот трека — тоже параметр отрисовки: обработку он не запускает
-    expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '592px' })
+    expect(screen.getByTestId('track-F3')).toHaveStyle({ height: '512px' })
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 

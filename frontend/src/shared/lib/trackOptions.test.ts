@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  EXPANDED_TRACK_HEIGHT,
   LABEL_WIDTH,
   TRACK_HEIGHT,
   formatTick,
@@ -72,5 +73,12 @@ describe('опции трека uPlot', () => {
     // Эти числа делят вьюер и слои (`TrackLayers`, курсор): смена ломает выравнивание
     expect(LABEL_WIDTH).toBe(56)
     expect(TRACK_HEIGHT).toBe(64)
+  })
+
+  it('высота развёрнутого трека — фикс ×8 к превью, а не «высота области» (решение 22.09.2026)', () => {
+    // Развёрнутый вид — стабильный «холст» под будущие слои (артефакты, «до/после» чистки);
+    // константа не зависит от замера ResizeObserver и не может завести петлю роста DOM
+    expect(EXPANDED_TRACK_HEIGHT).toBe(512)
+    expect(EXPANDED_TRACK_HEIGHT).toBe(TRACK_HEIGHT * 8)
   })
 })

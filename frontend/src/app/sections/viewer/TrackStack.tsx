@@ -14,7 +14,9 @@
  * селект зума в панели опций), drag — панорамирование, клик — поставить курсор
  * (время под точкой клика, курсор живёт до следующего клика), клик по названию
  * канала — открыть этот канал в разделе «ЭЭГ» (срез 5), стрелка под названием —
- * развернуть трек на всю высоту области (повторный клик — свернуть). Каналы
+ * развернуть трек на фиксированную высоту ×8 к превью (`EXPANDED_TRACK_HEIGHT`;
+ * повторный клик — свернуть). Развёрнутый вид — стабильный «холст» под будущие
+ * слои (вертикальный зум сигнала, артефакты, сравнение «до/после» чистки). Каналы
  * включаются и выключаются только чекбоксами панели «Каналы».
  *
  * Поверх треков — **слои результата** (срез 2.6, `viewerLayers.ts` + `TrackLayers.tsx`):
@@ -43,7 +45,7 @@ import {
 } from '@/shared/lib/viewerMath'
 import { DEMO_SOURCE_ID, type SignalFrame } from '@/shared/lib/signalFrame'
 import { perfCount } from '@/shared/lib/perf'
-import { LABEL_WIDTH, TRACK_HEIGHT } from '@/shared/lib/trackOptions'
+import { EXPANDED_TRACK_HEIGHT, LABEL_WIDTH, TRACK_HEIGHT } from '@/shared/lib/trackOptions'
 import {
   artifactCounts,
   buildEpochCells,
@@ -92,8 +94,6 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
-  /** Высота видимой области треков — по ней разворачивается трек (срез 2.9) */
-  const [viewportHeight, setViewportHeight] = useState(0)
   const [centerSec, setCenterSec] = useState(() => signal.durationSec / 2)
   /**
    * Центр окна для натив-обработчиков жестов: слушатели ставятся **один раз**, а
@@ -109,8 +109,9 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
   /**
    * Развёрнутый трек (срез 2.9) — локальное состояние вьюера: клик по стрелке у
-   * названия канала занимает всю высоту области, соседи остаются доступными
-   * скроллом. Изменение — только отрисовка, расчёт от него не устаревает.
+   * названия канала поднимает строку на фикс `EXPANDED_TRACK_HEIGHT` (×8 к превью),
+   * соседи остаются доступными скроллом. Изменение — только отрисовка, расчёт от
+   * него не устаревает.
    */
   const [expandedChannel, setExpandedChannel] = useState<string | null>(null)
   /**
@@ -211,15 +212,15 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     setCursor(null)
   }, [signal.sourceId, signal.durationSec])
 
-  // Размер области треков: ширина окна (без колонки подписей) и высота,
-  // по которой разворачивается трек (срез 2.9)
+  // Ширина области треков: окно без колонки подписей и зазора. Высоту **не меряем**:
+  // развёрнутый трек — фикс `EXPANDED_TRACK_HEIGHT` (×8), и замер высоты здесь же
+  // заводил бы петлю «высота → контент → замер» (docs/rules/frontend-perf.md п. 3.7)
   useEffect(() => {
     const el = wrapRef.current
     if (!el) return
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect
       setWidth(Math.max(0, (rect?.width ?? 0) - LABEL_WIDTH - 8))
-      setViewportHeight(Math.max(0, rect?.height ?? 0))
     })
     observer.observe(el)
     return () => observer.disconnect()
@@ -393,7 +394,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     navigate('/eeg')
   }
 
-  /** Клик по стрелке у названия: развернуть трек на всю высоту / свернуть */
+  /** Клик по стрелке у названия: развернуть трек на фикс ×8 / свернуть */
   function handleToggleExpand(name: string) {
     setExpandedChannel((current) => (current === name ? null : name))
   }
@@ -438,9 +439,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
 
   /** Высота трека: развёрнутый занимает видимую область, обычный — TRACK_HEIGHT. */
   function trackHeight(name: string): number {
-    if (name !== expandedChannel) return TRACK_HEIGHT
-    // viewportHeight = 0 в средах без раскладки (jsdom) — оставляем обычную высоту
-    return viewportHeight > 0 ? Math.max(TRACK_HEIGHT, viewportHeight - 8) : TRACK_HEIGHT
+    return name === expandedChannel ? EXPANDED_TRACK_HEIGHT : TRACK_HEIGHT
   }
 
   // Зоны/эпохи живут в пикселях области треков — та же геометрия, что у курсора

@@ -11,7 +11,7 @@
  * * canvas отдаётся наружу через `onCanvas` — из них собирается PNG-снапшот
  *   (срез 2.8), поэтому холст обязан быть тем же, что видит пользователь;
  * * подпись канала — кнопка перехода в раздел «ЭЭГ», стрелка под ней —
- *   разворот трека на всю высоту области (срез 2.9).
+ *   разворот трека на фиксированную высоту ×8 (срез 2.9, решение 22.09.2026).
  */
 import { useEffect, useMemo, useRef } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
@@ -29,9 +29,9 @@ export type TrackRowProps = {
   frame: SignalFrame
   window: TimeWindow
   width: number
-  /** Высота трека: обычная или высота видимой области у развёрнутого (срез 2.9) */
+  /** Высота трека: `TRACK_HEIGHT` или фикс `EXPANDED_TRACK_HEIGHT` (×8) у развёрнутого */
   height: number
-  /** Трек развёрнут на всю высоту области */
+  /** Трек развёрнут на фикс ×8 («холст» под будущие слои: артефакты, «до/после») */
   expanded: boolean
   amplitudeMode: 'shared' | 'per_channel'
   amplitudeScaleUv: number
@@ -180,7 +180,7 @@ export function TrackRow({
           data-expanded={expanded}
           aria-pressed={expanded}
           aria-label={expanded ? `Свернуть трек ${name}` : `Развернуть трек ${name}`}
-          title={expanded ? 'Свернуть трек' : 'Развернуть трек на всю высоту'}
+          title={expanded ? 'Свернуть трек' : 'Развернуть трек на высоту ×8'}
           onClick={() => onToggleExpand(name)}
           className={cx(
             'cursor-pointer rounded p-0.5',
