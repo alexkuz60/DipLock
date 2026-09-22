@@ -7,14 +7,17 @@
  * трека) и огибающую как band. Ошибка здесь не видна в тестах компонента —
  * там uPlot замокан, поэтому арифметика проверяется отдельно.
  */
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import type uPlot from 'uplot'
 import {
   EXPANDED_TRACK_HEIGHT,
   LABEL_WIDTH,
   TRACK_HEIGHT,
+  expandRangeWithZero,
   formatTick,
   makeTrackOptions,
   yRangeFor,
+  type ShowZeroFlag,
 } from './trackOptions'
 import type { TimeWindow } from './viewerMath'
 
@@ -80,5 +83,69 @@ describe('опции трека uPlot', () => {
     // константа не зависит от замера ResizeObserver и не может завести петлю роста DOM
     expect(EXPANDED_TRACK_HEIGHT).toBe(512)
     expect(EXPANDED_TRACK_HEIGHT).toBe(TRACK_HEIGHT * 8)
+  })
+})
+
+describe('ноль развёрнутого трека: диапазон Y и линия нуля (срез 5, п. 1/2)', () => {
+  it('expandRangeWithZero включает ноль в диапазон Y всегда', () => {
+    // Ноль уже в кадре — диапазон не трогаем
+    expect(expandRangeWithZero([-10, 20])).toEqual([-10, 20])
+    expect(expandRangeWithZero([-1, 1])).toEqual([-1, 1])
+    // Сигнал одной полярности — ноль включается с зазором 5% спана, а не ложится на край
+    expect(expandRangeWithZero([1, 2])).toEqual([-0.05, 2])
+    expect(expandRangeWithZero([-2, -1])).toEqual([-2, 0.05])
+    // Ноль на границе кадра тоже получает зазор
+    expect(expandRangeWithZero([0, 5])).toEqual([-0.25, 5])
+    expect(expandRangeWithZero([-5, 0])).toEqual([-5, 0.25])
+    // Вырожденный/битый диапазон — безопасный симметричный
+    expect(expandRangeWithZero([2, 2])).toEqual([-1, 1])
+    expect(expandRangeWithZero([NaN, 1])).toEqual([-1, 1])
+  })
+
+  it('хук drawClear рисует пунктир нуля стилем линии отсчёта «ЭЭГ» и гейтится живым флагом', () => {
+    const flag: ShowZeroFlag = { current: true }
+    const options = makeTrackOptions(960, 512, WINDOW, [-20, 20], false, flag)
+    const hook = (options.hooks as { drawClear?: Array<(chart: uPlot) => void> }).drawClear?.[0]
+    expect(hook).toBeTypeOf('function')
+
+    const ctx = {
+      save: vi.fn(),
+      beginPath: vi.fn(),
+      setLineDash: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      stroke: vi.fn(),
+      restore: vi.fn(),
+      strokeStyle: '',
+      globalAlpha: 1,
+      lineWidth: 0,
+    }
+    const chart = {
+      ctx,
+      bbox: { left: 3, top: 0, width: 100, height: 512 },
+      valToPos: vi.fn(() => 42.4),
+    }
+    hook?.(chart as unknown as uPlot)
+
+    // Стиль — как у `eegCanvas.drawNullLine`: пунктир [5, 4]×pxRatio (в моке pxRatio = 1)
+    expect(ctx.setLineDash).toHaveBeenCalledWith([5, 4])
+    expect(ctx.strokeStyle).toBe('#c3ceda')
+    expect(ctx.globalAlpha).toBe(0.4)
+    // Координаты — только через valToPos (canvas-пиксели), y = Math.round(42.4) + 0.5
+    expect(chart.valToPos).toHaveBeenCalledWith(0, 'y', true)
+    expect(ctx.moveTo).toHaveBeenCalledWith(3, 42.5)
+    expect(ctx.lineTo).toHaveBeenCalledWith(103, 42.5)
+    expect(ctx.stroke).toHaveBeenCalled()
+
+    // Живой флаг: превью того же чарта линию не рисует — опции при этом те же (P1/P4)
+    ctx.setLineDash.mockClear()
+    flag.current = false
+    hook?.(chart as unknown as uPlot)
+    expect(ctx.setLineDash).not.toHaveBeenCalled()
+    expect(ctx.stroke).toHaveBeenCalledTimes(1)
+  })
+
+  it('без showZero хука drawClear нет', () => {
+    expect(makeTrackOptions(960, 64, WINDOW, [-20, 20], true).hooks?.drawClear).toBeUndefined()
   })
 })

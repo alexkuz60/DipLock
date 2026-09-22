@@ -241,6 +241,21 @@ export function visibleZones(
   return zones.filter((zone) => visibility[zone.kind] !== false)
 }
 
+/**
+ * Зоны, попавшие в канал трека (развёрнутый вид): детектор сработал на этом
+ * канале либо на всём монтаже (пустой список каналов = весь монтаж — так же
+ * читает `artifactZoneText`). Остальные зоны на трек канала не попадают: полоса
+ * чужого канала на развёрнутом холсте — шум, а не информация.
+ */
+export function zonesForChannel(
+  zones: readonly ArtifactZone[],
+  channel: string,
+): ArtifactZone[] {
+  return zones.filter(
+    (zone) => zone.channels.length === 0 || zone.channels.includes(channel),
+  )
+}
+
 /** Интервал зоны для тултипа: «0.300–1.100 с» */
 export function formatSecondsRange(onsetSec: number, durationSec: number): string {
   return `${onsetSec.toFixed(3)}–${(onsetSec + durationSec).toFixed(3)} с`

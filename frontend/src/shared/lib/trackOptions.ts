@@ -12,13 +12,19 @@
  * синхронизированы с темой (`styles/index.css`: `--color-accent` #4da3ff,
  * `--color-fg-2` #8695a8, `--color-border`).
  */
-import type uPlot from 'uplot'
+import uPlot from 'uplot'
 import type { TimeWindow } from './viewerMath'
 
 const STROKE = '#4da3ff'
 const ENVELOPE_FILL = 'rgba(77, 163, 255, 0.22)'
 const AXIS_TEXT = '#8695a8'
 const AXIS_GRID = 'rgba(44, 58, 77, 0.6)'
+/**
+ * Цвет нулевой линии развёрнутого трека: тот же `--color-fg-1`, что у линии
+ * отсчёта трека в разделе «ЭЭГ» (`eegCanvas.drawNullLine`, `theme.frame`);
+ * пунктир и alpha 0.4 повторяют её стиль.
+ */
+const ZERO_LINE = '#c3ceda'
 
 /** Высота одного трека и ширина колонки подписей каналов. */
 export const TRACK_HEIGHT = 64
@@ -50,10 +56,54 @@ export function yRangeFor(
   return [envMin - pad, envMax + pad]
 }
 
+/** Живой флаг нулевой линии: хук рисовки читает его на каждой перерисовке. */
+export type ShowZeroFlag = { current: boolean }
+
+/**
+ * Включает ноль в диапазон шкалы Y (п. 1 среза «оверлеи развёрнутого трека»):
+ * при дрейфе базовой линии (окно целиком, например, +30…+55 мкВ) авто-диапазон
+ * уводит линию отсчёта за край, и полярность сигнала читать не по чему. Если
+ * ноль уже в кадре — диапазон не трогаем; у края или за кадром — включаем его
+ * с зазором 5% спана, чтобы пунктир нуля не лёг на границу поля.
+ */
+export function expandRangeWithZero([lo, hi]: [number, number]): [number, number] {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return [-1, 1]
+  if (lo < 0 && hi > 0) return [lo, hi]
+  const gap = (hi - lo) * 0.05
+  return lo >= 0 ? [-gap, hi] : [lo, gap]
+}
+
+/**
+ * Нулевая линия развёрнутого трека (хук `drawClear`): пунктир по нулю шкалы Y —
+ * стиль линии отсчёта трека в разделе «ЭЭГ» (`eegCanvas.drawNullLine`). Рисуется
+ * **до** серии (сигнал поверх линии), координаты — только через `valToPos`
+ * (canvas-пиксели: в них uPlot рисует и держит `bbox`). Видимость гейтится живым
+ * флагом `showZero`: чарт при развороте **не пересоздаётся** (P1/P4), поэтому
+ * флаг читается в момент отрисовки, а не запекается в опции.
+ */
+function makeZeroLineHook(showZero: ShowZeroFlag): (chart: uPlot) => void {
+  return (chart) => {
+    if (!showZero.current) return
+    const ctx = chart.ctx
+    const y = Math.round(chart.valToPos(0, 'y', true)) + 0.5
+    ctx.save()
+    ctx.beginPath()
+    ctx.setLineDash([5 * uPlot.pxRatio, 4 * uPlot.pxRatio])
+    ctx.strokeStyle = ZERO_LINE
+    ctx.globalAlpha = 0.4
+    ctx.lineWidth = uPlot.pxRatio
+    ctx.moveTo(chart.bbox.left, y)
+    ctx.lineTo(chart.bbox.left + chart.bbox.width, y)
+    ctx.stroke()
+    ctx.restore()
+  }
+}
+
 /**
  * Опции одного трека: общая ось времени (у нижнего трека), огибающая min/max
  * как band (пики артефактов видны на любом зуме) и отключённые собственные
- * жесты чарта — окном управляет обёртка вьюера.
+ * жесты чарта — окном управляет обёртка вьюера. `showZero` включает хук
+ * нулевой линии (только развёрнутый вид).
  */
 export function makeTrackOptions(
   width: number,
@@ -61,6 +111,7 @@ export function makeTrackOptions(
   window: TimeWindow,
   yRange: [number, number],
   showXAxis: boolean,
+  showZero?: ShowZeroFlag,
 ): uPlot.Options {
   return {
     width,
@@ -96,5 +147,8 @@ export function makeTrackOptions(
       { show: true, points: { show: false }, stroke: STROKE, width: 1.25 },
     ],
     bands: [{ series: [2, 1], fill: ENVELOPE_FILL, dir: 1 }],
+    hooks: {
+      ...(showZero ? { drawClear: [makeZeroLineHook(showZero)] } : {}),
+    },
   }
 }

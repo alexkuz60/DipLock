@@ -23,6 +23,7 @@ import {
   visibleZones,
   type ArtifactZone,
   type EdfViewerLayers,
+  zonesForChannel,
 } from '@/shared/lib/viewerLayers'
 
 const VISIBLE_ALL = { zscore_outlier: true, peak_to_peak: true, flat_line: true, ica_eog: true }
@@ -259,5 +260,23 @@ describe('фикстура слоёв', () => {
       expect(item.onsetSec + item.durationSec).toBeLessThanOrEqual(0.5001)
     }
     expect(rejectedEpochs).toEqual([0])
+  })
+})
+
+describe('зоны развёрнутого трека по каналу (срез 5, п. 4)', () => {
+  const zones: ArtifactZone[] = [
+    { id: 'z-1', kind: 'zscore_outlier', onsetSec: 1, durationSec: 1, channels: ['F3'] },
+    { id: 'z-2', kind: 'flat_line', onsetSec: 5, durationSec: 0.5, channels: ['C3', 'F4'] },
+    { id: 'z-3', kind: 'ica_eog', onsetSec: 2, durationSec: 0.5, channels: [] },
+  ]
+
+  it('пустой список каналов — зона всего монтажа и попадает на любой трек', () => {
+    expect(zonesForChannel(zones, 'F3').map((zone) => zone.id)).toEqual(['z-1', 'z-3'])
+    expect(zonesForChannel(zones, 'F4').map((zone) => zone.id)).toEqual(['z-2', 'z-3'])
+  })
+
+  it('зона чужого канала на трек не попадает', () => {
+    expect(zonesForChannel(zones, 'Fp1').map((zone) => zone.id)).toEqual(['z-3'])
+    expect(zonesForChannel([], 'F3')).toEqual([])
   })
 })

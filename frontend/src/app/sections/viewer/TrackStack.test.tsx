@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SignalData } from '@/shared/lib/demoSignal'
+import { formatUvLevel } from '@/shared/lib/eegView'
 import { frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
 import type { EdfViewerLayers } from '@/shared/lib/viewerLayers'
 import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
@@ -793,6 +794,145 @@ describe('экспорт окна вьюера', () => {
 
     expect(screen.getByRole('button', { name: 'Скачать PNG окна' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Скачать CSV окна' })).toBeDisabled()
+  })
+})
+
+/**
+ * Оверлеи развёрнутого трека (срез 5): ноль в диапазоне Y и линия нуля (п. 1/2),
+ * линия уровня по клику (п. 3), зоны артефактов своего канала (п. 4).
+ */
+describe('оверлеи развёрнутого трека (срез 5)', () => {
+  beforeEach(() => {
+    uplotCharts().length = 0
+    localStorage.clear()
+    useEdfRecording.setState({ channelQc: null, channelQcThresholds: { warn: 0.05, bad: 0.2 } })
+  })
+
+  /** Слои: зона канала F3 и зона всего монтажа (10 с, обе в начале сессии). */
+  function expandedLayersFixture(): EdfViewerLayers {
+    return {
+      source: 'demo',
+      artifacts: [
+        {
+          id: 'zscore_outlier-1',
+          kind: 'zscore_outlier',
+          onsetSec: 1,
+          durationSec: 1,
+          channels: ['F3'],
+        },
+        { id: 'flat_line-1', kind: 'flat_line', onsetSec: 5, durationSec: 0.5, channels: [] },
+      ],
+      rejectedEpochs: [],
+      epochLengthMs: null,
+    }
+  }
+
+  it('разворот не пересобирает чарт и включает ноль в диапазон Y (п. 1/2)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], amplitudeMode: 'per_channel' })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    const chart = uplotCharts()[0] as MockUPlotChart
+    // Хук нулевой линии живёт в опциях с самого начала: видимость решает живой флаг
+    expect(chart.options.hooks?.drawClear).toHaveLength(1)
+
+    await user.click(screen.getByTestId('track-expand-F3'))
+
+    // Чарт тот же (пересоздание добавило бы второй), а ноль включён в шкалу Y
+    expect(uplotCharts()).toHaveLength(1)
+    expect(chart.destroy).not.toHaveBeenCalled()
+    expect(chart.options.hooks?.drawClear).toHaveLength(1)
+    const yScales = chart.setScale.mock.calls.filter((call) => call[0] === 'y')
+    const last = yScales.at(-1)?.[1] as { min: number; max: number }
+    expect(last.min).toBeLessThan(0)
+    expect(last.max).toBeGreaterThan(0)
+  })
+
+  it('клик по развёрнутому треку ставит линию уровня с подписью мкВ (п. 3)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], timeLevel: 2 })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+    await user.click(screen.getByTestId('track-expand-F3'))
+
+    const plot = screen.getByTestId('track-plot-F3')
+    // jsdom не считает раскладку: верх шкалы чарта задаём сами (0 сверху)
+    plot.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 960, height: 512, right: 960, bottom: 512 }) as DOMRect
+
+    expect(screen.queryByTestId('level-line')).not.toBeInTheDocument()
+
+    // Клик на 51 px от верха: у мока uPlot мкВ = 300 − y (posToVal обратен valToPos)
+    await user.pointer({ keys: '[MouseLeft]', target: plot, coords: { clientX: 240, clientY: 51 } })
+
+    const chart = uplotCharts()[0] as MockUPlotChart
+    expect(screen.getByTestId('level-line')).toHaveStyle({ top: '51px' })
+    expect(screen.getByTestId('level-label')).toHaveTextContent(
+      formatUvLevel(chart.posToVal(51, 'y', true)),
+    )
+    expect(chart.posToVal).toHaveBeenCalledWith(51, 'y', true)
+
+    // Новый клик переставляет линию, а не добавляет вторую
+    await user.pointer({ keys: '[MouseLeft]', target: plot, coords: { clientX: 300, clientY: 102 } })
+    expect(screen.getAllByTestId('level-line')).toHaveLength(1)
+    expect(screen.getByTestId('level-label')).toHaveTextContent(
+      formatUvLevel(chart.posToVal(102, 'y', true)),
+    )
+  })
+
+  it('линия уровня сбрасывается при панораме, и клик после drag её не ставит (п. 3)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], timeLevel: 2 })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+    await user.click(screen.getByTestId('track-expand-F3'))
+
+    const plot = screen.getByTestId('track-plot-F3')
+    plot.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 960, height: 512, right: 960, bottom: 512 }) as DOMRect
+    await user.pointer({ keys: '[MouseLeft]', target: plot, coords: { clientX: 240, clientY: 51 } })
+    expect(screen.getByTestId('level-line')).toBeInTheDocument()
+
+    // Drag = панорама (как и по всему стеку): окно сдвигается, хвостовой клик жеста подавлен
+    const region = screen.getByRole('region', { name: 'Треки ЭЭГ' })
+    Object.defineProperty(region, 'clientWidth', { value: 1024, configurable: true })
+    await user.pointer([
+      { keys: '[MouseLeft>]', target: plot, coords: { clientX: 300, clientY: 20 } },
+      { coords: { clientX: 420, clientY: 20 } },
+      { keys: '[/MouseLeft]', coords: { clientX: 420, clientY: 20 } },
+    ])
+
+    expect(screen.queryByTestId('level-line')).not.toBeInTheDocument()
+  })
+
+  it('зоны артефактов на развёрнутом треке — только его канал (п. 4)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3', 'F4'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={expandedLayersFixture()} />)
+
+    // Пока трек не развёрнут, зоны рисует общий слой поверх всех треков
+    expect(screen.getByTestId('zone-zscore_outlier-1')).toBeInTheDocument()
+    expect(screen.getByTestId('zone-flat_line-1')).toBeInTheDocument()
+
+    await user.click(screen.getByTestId('track-expand-F3'))
+    // Общий слой уступил строке канала: у F3 своя зона и общая — по одному разу
+    expect(screen.getAllByTestId('zone-zscore_outlier-1')).toHaveLength(1)
+    expect(screen.getAllByTestId('zone-flat_line-1')).toHaveLength(1)
+
+    await user.click(screen.getByTestId('track-expand-F4'))
+    // У F4 своей зоны zscore нет: на его холсте только зона всего монтажа
+    expect(screen.queryByTestId('zone-zscore_outlier-1')).not.toBeInTheDocument()
+    expect(screen.getAllByTestId('zone-flat_line-1')).toHaveLength(1)
+  })
+
+  it('клик по полосе зоны выделяет её и не ставит линию уровня (п. 3/4)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={expandedLayersFixture()} />)
+    await user.click(screen.getByTestId('track-expand-F3'))
+
+    await user.click(screen.getByTestId('zone-zscore_outlier-1'))
+    expect(screen.getByTestId('zone-zscore_outlier-1')).toHaveAttribute('data-selected', 'true')
+    // Полоса зоны — кнопка: клик по кнопке уровнем не считается
+    expect(screen.queryByTestId('level-line')).not.toBeInTheDocument()
   })
 })
 

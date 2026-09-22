@@ -53,6 +53,7 @@ import {
   demoLayers,
   gridEpochLength,
   visibleZones,
+  zonesForChannel,
   type EdfViewerLayers,
 } from '@/shared/lib/viewerLayers'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue } from '@/shared/state/edfParams'
@@ -107,6 +108,12 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   }, [centerSec])
   const [cursor, setCursor] = useState<{ xPx: number; timeSec: number } | null>(null)
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
+  /**
+   * Линия уровня развёрнутого трека (п. 3 среза, клик по нему): `{ yPx, levelUv }` —
+   * позиция CSS-пикселями от верха чарта и уровень в мкВ (считает uPlot `posToVal`,
+   * см. `TrackRow`). Живёт до следующего клика — та же семантика, что у курсора.
+   */
+  const [levelMark, setLevelMark] = useState<{ yPx: number; levelUv: number } | null>(null)
   /**
    * Развёрнутый трек (срез 2.9) — локальное состояние вьюера: клик по стрелке у
    * названия канала поднимает строку на фикс `EXPANDED_TRACK_HEIGHT` (×8 к превью),
@@ -210,6 +217,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   useEffect(() => {
     setCenterSec(signal.durationSec / 2)
     setCursor(null)
+    setLevelMark(null)
   }, [signal.sourceId, signal.durationSec])
 
   // Ширина области треков: окно без колонки подписей и зазора. Высоту **не меряем**:
@@ -233,6 +241,11 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     }
   }, [expandedChannel, params.visibleChannels])
 
+  // Линия уровня принадлежит конкретному развёрнутому треку: свернули/сменили трек — убрать
+  useEffect(() => {
+    setLevelMark(null)
+  }, [expandedChannel])
+
   const factor = TIME_LEVELS[params.timeLevel] ?? 1
   /**
    * Окно вьюера. Мемоизируется по **числам**, а не создаётся на каждый рендер:
@@ -244,6 +257,12 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     () => zoomWindow(signal.durationSec, factor, centerSec),
     [signal.durationSec, factor, centerSec],
   )
+
+  // Линия уровня привязана и к окну (п. 3 среза): панорама/зум/листание сдвигают
+  // шкалу, старый уровень перестаёт читаться — сбрасываем при любой смене окна
+  useEffect(() => {
+    setLevelMark(null)
+  }, [window.t0, window.t1])
 
   /*
     Навигация из тулс-хедера (`<<` `<` `>` `>>`, срез 2.9): кнопки живут в шапке,
@@ -265,6 +284,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     const level = useEdfParams.getState().params.timeLevel
     const widthSec = signal.durationSec / (TIME_LEVELS[level] ?? 1)
     setCursor(null)
+    setLevelMark(null)
     setCenterSec((current) => {
       const target =
         command === 'start'
@@ -446,6 +466,22 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const geometry = { window, trackWidth: width }
   const handleZoneSelect = useCallback((id: string | null) => setSelectedZoneId(id), [])
 
+  /**
+   * Зоны развёрнутого трека — только его канал (п. 4 среза): полоса чужого канала
+   * на холсте ×8 — шум. Пока трек не развёрнут, зоны рисует общий слой поверх всех
+   * треков (как раньше); при развороте общий слой уступает слою строки канала.
+   */
+  const expandedZones = useMemo(
+    () => (expandedChannel ? zonesForChannel(visibleZoneList, expandedChannel) : []),
+    [visibleZoneList, expandedChannel],
+  )
+  /** Клик по развёрнутому треку: уровень под курсором ставит линию уровня (п. 3) */
+  const handlePickLevel = useCallback((mark: { yPx: number; levelUv: number }) => {
+    setLevelMark(mark)
+  }, [])
+  /** Панорама только что двигала окно — клик не ставит ни курсор, ни уровень */
+  const handleWasDragged = useCallback(() => draggedRef.current, [])
+
   // Порядок отображения — порядок каналов сигнала (монтаж), а не порядок кликов
   const visible = signal.channels.filter(
     (name) => params.visibleChannels.includes(name) && signal.max[name],
@@ -561,6 +597,12 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 onLabelClick={handleLabelClick}
                 onToggleExpand={handleToggleExpand}
                 onCanvas={registerCanvas}
+                zones={name === expandedChannel ? expandedZones : []}
+                selectedZoneId={selectedZoneId}
+                onZoneSelect={handleZoneSelect}
+                levelMark={name === expandedChannel ? levelMark : null}
+                onPickLevel={handlePickLevel}
+                wasDragged={handleWasDragged}
               />
             ))
           )}
@@ -583,12 +625,18 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 showBoundaries={params.epochBoundaries}
                 showHatch={params.droppedEpochsHatched}
               />
-              <ArtifactZoneLayer
-                zones={visibleZoneList}
-                geometry={geometry}
-                selectedId={selectedZoneId}
-                onSelect={handleZoneSelect}
-              />
+              {/*
+                Зоны артефактов — поверх всех треков, но пока трек не развёрнут: при
+                развороте их рисует строка канала — только его зоны (п. 4 среза).
+              */}
+              {expandedChannel === null ? (
+                <ArtifactZoneLayer
+                  zones={visibleZoneList}
+                  geometry={geometry}
+                  selectedId={selectedZoneId}
+                  onSelect={handleZoneSelect}
+                />
+              ) : null}
             </div>
           ) : null}
 
