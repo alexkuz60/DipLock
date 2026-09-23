@@ -106,7 +106,7 @@ def _result(**overrides) -> dict[str, Any]:
 # ---------- сборка записей эпох (без БД) ----------
 
 def _raw_with_rejected_epoch() -> mne.io.RawArray:
-    """Синтетическая запись 4 с: во второй секунде спайк 1000 мкВ (не пройдёт reject)."""
+    """Синтетическая запись 4 с: во второй секунде спайк 1000 мкВ (его роняет BAD_)."""
     sfreq = 250.0
     ch_names = list(settings.standard_channels)
     rng = np.random.RandomState(7)
@@ -123,11 +123,16 @@ def _raw_with_rejected_epoch() -> mne.io.RawArray:
 
 
 def _epochs_with_spike():
-    """Raw + нарезанные эпохи (одна отброшена спайком, последняя короче окна)."""
+    """Raw + нарезанные эпохи (одна отброшена BAD_-аннотацией, последняя короче окна).
+
+    Amplitude reject MNE отключён: всплеск больше не роняет эпоху сам по себе —
+    его, как это делают детекторы, помечает аннотация ``BAD_peak_to_peak``.
+    """
     raw = _raw_with_rejected_epoch()
     epochs = segment_epochs(
-        raw, mne.Annotations([], [], []),
-        epoch_length_ms=1000.0, reject_threshold_uv=150.0,
+        raw,
+        mne.Annotations([1.2], [0.05], ["BAD_peak_to_peak"]),
+        epoch_length_ms=1000.0,
     )
     return raw, epochs
 

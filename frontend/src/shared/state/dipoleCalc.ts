@@ -149,7 +149,6 @@ export type DipoleCalcState = {
   setPlaybackEpoch: (epochIndex: number) => void
   setEpochLengthMs: (value: number) => void
   setGridMm: (value: number) => void
-  setRejectThresholdUv: (value: number) => void
   /** Выбор пресета фильтра: полоса пресета — данные (ритмы идут из `/meta`) */
   setFilterPreset: (preset: CalcFilterPresetId, freqBands: Record<string, number[]>) => void
   /** Полоса фильтра числом (поля «свой диапазон»): границы нормализуются */
@@ -291,8 +290,6 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       // Окно уточнения — только варианты списка: произвольное число здесь значило
       // бы «случайные 40 секунд счёта», а не выбор точности (шаг 1.5)
       setRefineHalfwinMs: (value) => set({ refineHalfwinMs: normalizeRefineHalfwin(value) }),
-      setRejectThresholdUv: (value) =>
-        set((state) => ({ params: { ...state.params, rejectThresholdUv: Math.max(0, value) } })),
       setFilterPreset: (preset, freqBands) =>
         set((state) => ({
           params: {

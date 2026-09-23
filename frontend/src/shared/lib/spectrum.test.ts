@@ -33,7 +33,6 @@ const QUERY = {
   filterBandHz: [1, 40] as [number, number],
   notchHz: 50,
   epochLengthMs: 1000,
-  rejectThresholdUv: 150,
 }
 
 function band(overrides: Partial<SpectrumBandOut> = {}): SpectrumBandOut {
@@ -62,7 +61,6 @@ function spectrum(overrides: Partial<SpectrumResult> = {}): SpectrumResult {
     n_fft: 256,
     filter_band_hz: [1, 40],
     notch_hz: 50,
-    reject_threshold_uv: 150,
     freqs: [1, 10, 40],
     psd_mean_uv2: [1, 100, 2],
     bands: [band()],
@@ -85,10 +83,10 @@ describe('спектр по диапазонам', () => {
 
   it('собирает строку запроса топокарты из параметров расчёта', () => {
     expect(spectrumQueryString(QUERY)).toBe(
-      'band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000&reject_threshold_uv=150',
+      'band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000',
     )
     expect(spectrumQueryString({ ...QUERY, filterBandHz: null, notchHz: null })).toBe(
-      'epoch_length_ms=1000&reject_threshold_uv=150',
+      'epoch_length_ms=1000',
     )
   })
 
@@ -96,7 +94,7 @@ describe('спектр по диапазонам', () => {
     const url = topomapUrl(spectrum(), band(), QUERY)
 
     expect(url).toBe(
-      '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000&reject_threshold_uv=150&v=abc123',
+      '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000&v=abc123',
     )
     // Смена фильтра меняет URL — браузер не подставит картинку прошлого расчёта
     expect(topomapUrl(spectrum(), band(), { ...QUERY, filterBandHz: [4, 8] })).toContain(
@@ -161,7 +159,6 @@ describe('спектр по диапазонам', () => {
       filterBandHz: [4, 8],
       notchHz: 60,
       epochLengthMs: 500,
-      rejectThresholdUv: 150,
     })
     expect(spectrumQueryOf(spectrum({ filter_band_hz: null })).filterBandHz).toBeNull()
     // Битые/короткие массивы полосы не превращаются в «диапазон из одного числа»

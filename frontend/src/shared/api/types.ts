@@ -134,7 +134,6 @@ export type PreprocessResult = {
   /** Отброшенные эпохи с каналами-виновниками (причины блокировки в UI) */
   rejected_epoch_channels: EpochRejectOut[]
   /** Порог reject-фильтра амплитуды, мкВ (строка причины в UI) */
-  reject_threshold_uv: number
   warnings: string[]
   duration_sec_calc: number
 }
@@ -173,7 +172,6 @@ export type SpectrumResult = {
   filter_band_hz: number[] | null
   notch_hz: number | null
   /** Порог reject эпох: входит в URL картинки топокарты (и в её ETag) */
-  reject_threshold_uv: number
   freqs: number[]
   psd_mean_uv2: number[]
   bands: SpectrumBandOut[]
@@ -224,7 +222,6 @@ export type DipoleScanResult = {
   channels: string[]
   sfreq: number
   epoch_length_ms: number
-  reject_threshold_uv: number
   filter_band_hz: number[] | null
   notch_hz: number | null
   n_epochs_total: number
@@ -328,7 +325,6 @@ export type PipelineInfo = {
   dipole_fit_max_epochs: number
   z_threshold: number
   pp_threshold_uv: number
-  reject_threshold_uv: number
   ica_requested: boolean
   ica_applied: boolean
   edf_units: string | null
@@ -407,7 +403,6 @@ export type ArtifactThresholds = {
   peak_to_peak_threshold_uv: number
   flat_line_threshold_uv: number
   flat_line_min_duration_ms: number
-  reject_threshold_uv: number
   /** Минимальная длительность мышечного (ЭМГ) эпизода, мс */
   muscle_min_duration_ms: number
   /** Минимальная длительность разрыва записи, мс */

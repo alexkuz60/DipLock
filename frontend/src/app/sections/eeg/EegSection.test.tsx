@@ -331,7 +331,6 @@ describe('рабочая область раздела «ЭЭГ»', () => {
         ],
         rejectedEpochs: [],
         rejectChannels: {},
-        rejectThresholdUv: null,
         epochLengthMs: null,
         source: 'result',
       },

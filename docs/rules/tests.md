@@ -275,6 +275,12 @@ EDF при разных сторах), `viewer/TrackStack.test.tsx` (перех�
 не сохраняется — история остаётся, API отвечает «не сохранён»; `JOB_STORE_ENABLED=false`;
 `prune_records` по исчезнувшей записи и по лимиту; битый и чужой по версии файл пропускаются; путь
 файла защищён от `../`; `to_record`/`from_record` сохраняют `meta`).
+Срез «reject=None» (23.09.2026): amplitude reject MNE отключён, `reject_threshold_uv` удалён из
+стека. `tests/test_preprocess.py` — 3 теста переписаны под BAD_-отбраковку (пустые
+`rejected_epoch_channels[*].channels`, отсутствие ключа порога в ответе, «Все эпохи отброшены
+аннотациями BAD_»); `tests/test_api_params.py`, `tests/test_analysis_db.py` — синтетика эпох с
+`BAD_peak_to_peak` вместо амплитудного reject; тексты ошибок задач — «аннотациями BAD_»
+(`test_job_manager.py`, `test_job_store.py`, `test_api_contract.py`).
 Всего **686 тестов Vitest (58 файлов) и 407 pytest** (без маркера `integration`; со всеми — 414) (из них
 26 — геометрия, укладка и кэш среза МРТ, 25 — контуры атласа (изолинии, выборка осей,
 производная BA-разметка, структура по MNI, кэш, роуты), 14 — спектр и быстрый расчёт,

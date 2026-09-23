@@ -94,7 +94,7 @@ def test_finished_job_is_written_and_restored():
 def test_failed_job_is_restored_with_error():
     """Провал тоже переживает рестарт: текст ошибки сохраняется для UI."""
     manager = JobManager(max_concurrent=1, history_limit=10)
-    job = _run_job(manager, error=ValueError("Все эпохи отброшены reject-фильтром"))
+    job = _run_job(manager, error=ValueError("Все эпохи отброшены аннотациями BAD_"))
 
     fresh = JobManager(max_concurrent=1, history_limit=10)
     assert fresh.restore(settings) == 1
@@ -102,12 +102,12 @@ def test_failed_job_is_restored_with_error():
 
     assert restored is not None
     assert restored.status == "failed"
-    assert "reject-фильтром" in (restored.error or "")
+    assert "аннотациями BAD_" in (restored.error or "")
     assert restored.result is None
     # N31: traceback переживает рестарт — текст ошибки говорит «что», он — «где».
     assert restored.error_traceback is not None
     assert "ValueError" in restored.error_traceback
-    assert "reject-фильтром" in restored.error_traceback
+    assert "аннотациями BAD_" in restored.error_traceback
     assert "error_traceback" in restored.as_dict()
     with pytest.raises(Exception) as exc:
         _require_finished(restored)

@@ -62,7 +62,8 @@ def test_load_edf_rejects_unknown_channels():
 def test_load_edf_auto_scales_units():
     """EDF без physical dimension не должен давать нефизиологичный масштаб (вольты).
 
-    Иначе reject-порог в мкВ отбросит все эпохи (см. audit.md, баг #8).
+    Иначе амплитуды уедут в «вольты» и детекторы/отбраковка эпох собьются
+    (см. audit.md, баг #8).
     """
     raw = load_edf(_REAL_EDF, settings.standard_channels)
     median_std_v = float(np.median(np.std(raw.get_data(verbose=False), axis=1)))

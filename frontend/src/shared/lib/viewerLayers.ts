@@ -76,8 +76,6 @@ export type EdfViewerLayers = {
   rejectedEpochs: number[]
   /** Каналы-виновники отбраковки по индексам эпох (рамки в треках, причины) */
   rejectChannels: Record<number, string[]>
-  /** Порог reject-фильтра, мкВ (строка причины в тултипе); `null` — не задан */
-  rejectThresholdUv: number | null
   epochLengthMs: number | null
   /** Откуда слои: фикстура разработки или результат задачи (срез 2.7) */
   source: 'demo' | 'result'
@@ -190,38 +188,32 @@ export function cellAtTime(cells: readonly EpochCell[], timeSec: number): EpochC
 }
 
 /**
- * Причина reject-фильтра для тултипа: порог амплитуды и каналы-виновники.
- * Каналы приходят из `drop_log` MNE; у эпох отсечённого края или отбраковки по
- * аннотации BAD_ виновника может не быть — так и пишем.
+ * Причина reject-фильтра для тултипа: каналы-виновники (если есть).
+ * Amplitude reject MNE отключён (reject=None): каналы приходят только
+ * из аннотаций BAD_ от наших детекторов — пустые. Зоны детекторов на треках
+ * показывают, какой канал затронут.
  */
 export function epochRejectReason(
   cell: EpochCell,
-  rejectThresholdUv: number | null = null,
 ): string {
-  const threshold =
-    rejectThresholdUv != null
-      ? `порог ${Math.round(rejectThresholdUv * 10) / 10} мкВ`
-      : 'reject-фильтр'
   const channels = cell.rejectChannels ?? []
-  const who = channels.length
+  return channels.length
     ? `каналы: ${channels.join(', ')}`
-    : 'канал-виновник не определён'
-  return `${threshold}, ${who}`
+    : 'обнаружен артефакт (детектор)'
 }
 
 /**
- * Подпись эпохи для тултипа: итоговый вердикт, причина reject-фильтра (порог +
- * каналы-виновники) и подсказка жеста. Причина показывается, пока эпоха
+ * Подпись эпохи для тултипа: итоговый вердикт, причина reject-фильтра
+ * (каналы-виновники) и подсказка жеста. Причина показывается, пока эпоха
  * заблокирована решением алгоритма; ручная правка называет себя.
  */
 export function epochMarkTitle(
   cell: EpochCell,
-  rejectThresholdUv: number | null = null,
 ): string {
   const range = formatSecondsRange(cell.onsetSec, cell.durationSec)
   if (isEpochBlocked(cell.rejected, cell.manual)) {
     const reason = cell.rejected
-      ? epochRejectReason(cell, rejectThresholdUv)
+      ? epochRejectReason(cell)
       : 'заблокирована вручную'
     return `Эпоха ${cell.index + 1}: ${range} — не в расчёте (${reason}) · клик снимает правку`
   }
@@ -451,7 +443,6 @@ export function demoLayers(
     artifacts,
     rejectedEpochs,
     rejectChannels,
-    rejectThresholdUv: 150,
     epochLengthMs: null,
     source: 'demo',
   }

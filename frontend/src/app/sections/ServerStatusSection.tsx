@@ -136,11 +136,6 @@ export function ServerStatusSection() {
                 <InfoRow label="Каналы 10-20" value={meta.data.standard_channels.length} mono />
                 <InfoRow label="decim фитинга" value={meta.data.dipole_fit_decim} mono />
                 <InfoRow label="max эпох" value={meta.data.dipole_fit_max_epochs} mono />
-                <InfoRow
-                  label="reject, мкВ"
-                  value={meta.data.artifact_thresholds.reject_threshold_uv}
-                  mono
-                />
                 <InfoRow label="z-порог" value={meta.data.artifact_thresholds.z_score_threshold} mono />
                 <InfoRow label="параллельных задач" value={meta.data.max_concurrent_jobs} mono />
                 <InfoRow label="surface version" value={meta.data.surface_version} mono />

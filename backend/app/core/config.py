@@ -198,12 +198,8 @@ class Settings(BaseSettings):
     qc_channel_warn_share: float = Field(default=0.05)
     qc_channel_bad_share: float = Field(default=0.20)
 
-    # Порог reject при нарезке эпох (мкВ): эпохи выше порога отбрасываются MNE.
-    # Отдельно от peak_to_peak_threshold_uv: детекция артефактов и reject-фильтр
-    # решают разные задачи (первая — аннотации, второй — отбраковка эпох).
-    reject_threshold_uv: float = Field(default=150.0)
-
-    # Нарезка эпох (без overlap)
+    # Нарезка эпох (без overlap) — reject-фильтр MNE отключён: отбраковка идёт
+    # только по аннотациям BAD_ от наших 11 детекторов (срез артефактов).
     epoch_lengths_ms: list[float] = [250, 500, 750, 1000, 1250, 1500, 1750, 2000]
     default_epoch_length_ms: float = 2000.0
 

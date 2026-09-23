@@ -158,7 +158,6 @@ describe('состояние расчёта диполей', () => {
             filterBandHz: [8, 13],
             notchHz: null,
             epochLengthMs: 500,
-            rejectThresholdUv: 200,
             gridMm: 9,
           },
         },

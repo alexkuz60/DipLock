@@ -241,14 +241,11 @@ class PreprocessResult(BaseModel):
     n_epochs_total: int = 0
     n_epochs_used: int = 0
     rejected_epochs: list[int] = Field(
-        default_factory=list, description="Индексы эпох, отброшенных reject-фильтром"
+        default_factory=list, description="Индексы эпох, отброшенных аннотациями BAD_"
     )
     rejected_epoch_channels: list[EpochRejectOut] = Field(
         default_factory=list,
         description="Отброшенные эпохи с каналами-виновниками (причины блокировки в UI)",
-    )
-    reject_threshold_uv: float = Field(
-        default=150.0, description="Порог reject-фильтра амплитуды, мкВ (строка причины в UI)"
     )
 
     warnings: list[str] = Field(default_factory=list)
@@ -387,7 +384,6 @@ class PipelineInfo(BaseModel):
     dipole_fit_max_epochs: int
     z_threshold: float
     pp_threshold_uv: float
-    reject_threshold_uv: float
     ica_requested: bool = False
     ica_applied: bool = Field(default=False, description="ICA реально применена (нужны EOG-каналы)")
     edf_units: str | None = Field(default=None, description="None = автоопределение единиц")
@@ -590,9 +586,6 @@ class SpectrumResult(BaseModel):
         default=None, description="Полоса фильтра, на которой считался спектр; None — без фильтра"
     )
     notch_hz: float | None = None
-    reject_threshold_uv: float = Field(
-        default=150.0, description="Порог reject эпох: входит в URL/ETag топокарты"
-    )
     freqs: list[float] = Field(description="Частоты PSD, Гц")
     psd_mean_uv2: list[float] = Field(description="PSD, усреднённый по каналам, мкВ²/Гц")
     bands: list[SpectrumBandOut] = Field(default_factory=list)
@@ -657,7 +650,6 @@ class DipoleScanResult(BaseModel):
     channels: list[str]
     sfreq: float
     epoch_length_ms: float
-    reject_threshold_uv: float
     filter_band_hz: list[float] | None = None
     notch_hz: float | None = None
     n_epochs_total: int = Field(description="Сколько эпох нарезано (включая отброшенные)")
@@ -832,7 +824,6 @@ class ArtifactThresholds(BaseModel):
     peak_to_peak_threshold_uv: float
     flat_line_threshold_uv: float
     flat_line_min_duration_ms: float
-    reject_threshold_uv: float
     muscle_min_duration_ms: float = Field(
         description="Минимальная длительность мышечного (ЭМГ) эпизода, мс",
     )

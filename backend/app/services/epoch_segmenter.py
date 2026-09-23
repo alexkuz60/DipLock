@@ -28,9 +28,14 @@ def segment_epochs(
     raw: mne.io.BaseRaw,
     artifact_annotations: mne.Annotations,
     epoch_length_ms: float = 2000.0,
-    reject_threshold_uv: float = 150.0,
 ) -> mne.Epochs:
-    """Разбивает сессию на эпохи без наложения (non-overlapping)."""
+    """Разбивает сессию на эпохи без наложения (non-overlapping).
+
+    Amplitude reject MNE отключён (``reject=None``): отбраковка идёт только
+    по аннотациям ``BAD_`` от наших 11 детекторов — они строже порога MNE
+    (peak_to_peak 100 мкВ < MNE reject 150 мкВ) и дают адресную информацию
+    (тип артефакта, канал, время). Номера эпох — на липкой шкале.
+    """
     valid_lengths = settings.epoch_lengths_ms  # DRY: единый список из config.py
     if epoch_length_ms not in valid_lengths:
         raise ValueError(f"Длина эпохи {epoch_length_ms} мс не в списке: {valid_lengths}")
@@ -41,22 +46,23 @@ def segment_epochs(
     # События без overlap
     events = make_epoch_events(raw, epoch_length_ms)
 
-    # Эпохи с reject-фильтрацией: эпохи с артефактами ОТБРАСЫВАЮТСЯ (drop),
-    # если превышают порог. Пропущенные доступны через epochs.drop_log/metrics.
     # baseline=None явно: MNE по умолчанию берёт (None, 0), что при tmin=0
     # даёт интервал в 1 сэмпл и ValueError. Для continuous EEG без стимула
     # коррекция по baseline неприменима.
+    # reject=None: амплитудный reject MNE отключён — наши детекторы (BAD_
+    # аннотации) уже отбраковывают эпохи с артефактами, включая
+    # peak_to_peak (порог 100 мкВ < старый MNE reject 150 мкВ).
     epochs = mne.Epochs(
         raw, events, tmin=0, tmax=epoch_length_sec,
         baseline=None,
-        reject=dict(eeg=reject_threshold_uv * 1e-6),
+        reject=None,
         preload=True, verbose=False,
     )
 
     if len(epochs) == 0:
         raise ValueError(
-            f"Все эпохи отброшены reject-фильтром (порог {reject_threshold_uv} мкВ). "
-            "Проверьте масштаб/единицы EDF и качество сигнала."
+            "Все эпохи отброшены аннотациями BAD_ (детекторы артефактов). "
+            "Проверьте параметры детекции и качество сигнала."
         )
 
     return epochs
@@ -81,6 +87,9 @@ def epoch_records(
     ``band_powers`` — мощности по каждой эпохе (второй элемент
     ``compute_band_powers``): у отброшенных эпох PSD не считался, поэтому их
     мощности пусты (в БД — NULL, а не 0).
+
+    .. note:: Amplitude reject MNE отключён (см. ``segment_epochs``):
+       ``has_artifact=True`` только для аннотаций BAD_ от наших детекторов.
     """
     sfreq = float(epochs.info["sfreq"])
     drop_log = list(epochs.drop_log)

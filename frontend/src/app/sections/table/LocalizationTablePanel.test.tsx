@@ -88,7 +88,6 @@ describe('панель раздела «Таблица локализации»'
     expect(screen.getByText('Строк: 4')).toBeInTheDocument()
     expect(screen.getByText('Метод: fast_grid, сетка 7 мм')).toBeInTheDocument()
     expect(screen.getByText('Эпох в расчёте: 4 из 4')).toBeInTheDocument()
-    expect(screen.getByText('Порог reject: 150 мкВ')).toBeInTheDocument()
     expect(screen.getByText('Полоса: 1–40 Гц')).toBeInTheDocument()
     expect(screen.queryByText('Результата нет')).not.toBeInTheDocument()
   })
@@ -105,8 +104,7 @@ describe('панель раздела «Таблица локализации»'
 
   it('предупреждает, что параметры расчёта изменили после расчёта', () => {
     useDipoleCalc.setState({
-      result: dipoleScanResultFixture(),
-      params: { ...CALC_PARAM_DEFAULTS, rejectThresholdUv: 300 },
+      result: dipoleScanResultFixture({ epoch_length_ms: 500 }),
     })
     renderWithProviders(<LocalizationTablePanel />)
 

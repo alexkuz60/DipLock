@@ -107,7 +107,6 @@ export function LocalizationTablePanel() {
           <ul className="space-y-1 text-sm text-fg-2">
             <li>{`Метод: ${result.method}, сетка ${result.grid_mm} мм`}</li>
             <li>{`Эпох в расчёте: ${result.n_epochs_used} из ${result.n_epochs_total}`}</li>
-            <li>{`Порог reject: ${result.reject_threshold_uv} мкВ`}</li>
             <li>
               {result.filter_band_hz
                 ? `Полоса: ${result.filter_band_hz[0]}–${result.filter_band_hz[1]} Гц`

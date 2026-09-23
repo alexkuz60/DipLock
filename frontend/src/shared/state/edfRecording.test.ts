@@ -276,7 +276,6 @@ describe('стадии предподготовки (срез 2.7)', () => {
       ],
       rejectedEpochs: [5],
       rejectChannels: { 5: ['F3'] },
-      rejectThresholdUv: 150,
       epochLengthMs: 500,
       source: 'result' as const,
     }
@@ -285,7 +284,6 @@ describe('стадии предподготовки (срез 2.7)', () => {
     expect(afterEpochs.rejectedEpochs).toEqual([2, 7])
     // Каналы-виновники и порог едут с той же стадией — причины блокировки в UI
     expect(afterEpochs.rejectChannels).toEqual({ 2: ['F3', 'C3'], 7: [] })
-    expect(afterEpochs.rejectThresholdUv).toBe(150)
     // Индексы отброшенных эпох имеют смысл только с длиной своей нарезки (срез 2.10)
     expect(afterEpochs.epochLengthMs).toBe(2000)
     expect(afterEpochs.artifacts).toEqual(previous.artifacts)
@@ -315,7 +313,6 @@ describe('стадии предподготовки (срез 2.7)', () => {
       ],
       rejectedEpochs: [1],
       rejectChannels: {},
-      rejectThresholdUv: null,
       epochLengthMs: null,
       source: 'demo' as const,
     }

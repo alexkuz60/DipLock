@@ -97,7 +97,6 @@ class DipoleScanParams:
     filter_band: tuple[float, float] | None = None
     notch_hz: float | None = None
     epoch_length_ms: float = 1000.0
-    reject_threshold_uv: float = 150.0
     reference: str = "average"
     reference_channels: list[str] | None = None
     grid_mm: float = GRID_STEP_MM
@@ -363,13 +362,12 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParam
     try:
         with journal.step(
             "dipoles", "segment_epochs",
-            note=f"epoch={params.epoch_length_ms:g}ms, reject={params.reject_threshold_uv:g}",
+            note=f"epoch={params.epoch_length_ms:g}ms",
         ) as entry:
             epochs = segment_epochs(
                 raw,
                 mne.Annotations([], [], []),
                 epoch_length_ms=params.epoch_length_ms,
-                reject_threshold_uv=params.reject_threshold_uv,
             )
             entry.epochs = len(epochs.drop_log)
     except ValueError as exc:
@@ -431,8 +429,7 @@ def compute_dipole_scan(
     dropped = len(epochs.drop_log) - n_epochs
     if dropped:
         warnings.append(
-            f"Отброшено эпох reject-фильтром: {dropped} из {len(epochs.drop_log)} "
-            f"(порог {params.reject_threshold_uv:.0f} мкВ)"
+            f"Отброшено эпох аннотациями BAD_: {dropped} из {len(epochs.drop_log)}"
         )
     if len(used_channels) < len(channels):
         missing = [name for name in channels if name not in positions]
@@ -541,7 +538,6 @@ def compute_dipole_scan(
         "channels": used_channels,
         "sfreq": float(raw.info["sfreq"]),
         "epoch_length_ms": params.epoch_length_ms,
-        "reject_threshold_uv": params.reject_threshold_uv,
         "filter_band_hz": list(params.filter_band) if params.filter_band else None,
         "notch_hz": params.notch_hz,
         "n_epochs_total": len(epochs.drop_log),

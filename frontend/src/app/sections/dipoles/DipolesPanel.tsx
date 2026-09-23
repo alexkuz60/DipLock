@@ -82,7 +82,6 @@ export function DipolesPanel() {
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
   const setEpochLengthMs = useDipoleCalc((state) => state.setEpochLengthMs)
   const setGridMm = useDipoleCalc((state) => state.setGridMm)
-  const setRejectThresholdUv = useDipoleCalc((state) => state.setRejectThresholdUv)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const setFilterPreset = useDipoleCalc((state) => state.setFilterPreset)
   const setFilterBand = useDipoleCalc((state) => state.setFilterBand)
@@ -328,16 +327,6 @@ export function DipolesPanel() {
           unit="мм"
           onChange={setGridMm}
           hint="Перебор узлов: мельче сетка — точнее позиция и заметно дольше расчёт."
-        />
-        <NumberField
-          label="Порог reject"
-          value={calcParams.rejectThresholdUv}
-          min={0}
-          max={1000}
-          step={10}
-          unit="мкВ"
-          onChange={setRejectThresholdUv}
-          hint="Эпохи выше порога в расчёт не попадают (тот же смысл, что у нарезки эпох)."
         />
         {/*
           Окно уточнения (шаг 1.5): свободный фитинг «Уточнить…» идёт по окну вокруг

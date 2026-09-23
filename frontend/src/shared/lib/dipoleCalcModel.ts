@@ -88,7 +88,6 @@ export type CalcParams = {
   /** Ширина полосы вокруг одиночной частоты, Гц */
   bandwidthHz: number
   epochLengthMs: number
-  rejectThresholdUv: number
   /** Шаг объёмной сетки поиска диполей, мм */
   gridMm: number
 }
@@ -103,7 +102,6 @@ export const CALC_PARAM_DEFAULTS: CalcParams = {
   singleFreqHz: 7.83,
   bandwidthHz: 0.5,
   epochLengthMs: 1000,
-  rejectThresholdUv: 150,
   gridMm: 7,
 }
 
@@ -155,7 +153,6 @@ export function buildDipoleForm(params: CalcParams): FormData {
   }
   if (params.notchHz) form.set('notch_hz', String(params.notchHz))
   form.set('epoch_length_ms', String(params.epochLengthMs))
-  form.set('reject_threshold_uv', String(params.rejectThresholdUv))
   form.set('grid_mm', String(params.gridMm))
   return form
 }
@@ -182,7 +179,6 @@ export function buildRefineForm(
     form.set('reference_channels', result.reference_channels.join(','))
   }
   form.set('epoch_length_ms', String(result.epoch_length_ms))
-  form.set('reject_threshold_uv', String(result.reject_threshold_uv))
   form.set('grid_mm', String(result.grid_mm))
   // Окно свободного фитинга (шаг 1.5): 0 — только пик GFP. Каждый отсчёт стоит
   // ≈7 с на сервере, поэтому окно — явный выбор пользователя, а не «пошире».
@@ -329,7 +325,6 @@ export function buildSpectrumForm(params: CalcParams): FormData {
   }
   if (params.notchHz) form.set('notch_hz', String(params.notchHz))
   form.set('epoch_length_ms', String(params.epochLengthMs))
-  form.set('reject_threshold_uv', String(params.rejectThresholdUv))
   return form
 }
 
@@ -346,7 +341,6 @@ function signatureOf(parts: {
   band: [number, number] | null
   notchHz: number | null
   epochLengthMs: number
-  rejectThresholdUv: number
   gridMm: number
 }): string {
   const band = parts.band ? `${parts.band[0]}-${parts.band[1]}` : 'none'
@@ -354,7 +348,6 @@ function signatureOf(parts: {
     band,
     parts.notchHz ?? 'none',
     parts.epochLengthMs,
-    parts.rejectThresholdUv,
     parts.gridMm,
   ].join('|')
 }
@@ -365,7 +358,6 @@ export function calcSignature(params: CalcParams): string {
     band: params.filterBandHz,
     notchHz: params.notchHz,
     epochLengthMs: params.epochLengthMs,
-    rejectThresholdUv: params.rejectThresholdUv,
     gridMm: params.gridMm,
   })
 }
@@ -377,7 +369,6 @@ export function resultSignature(result: DipoleScanResult): string {
     band: band && band.length === 2 ? [band[0], band[1]] : null,
     notchHz: result.notch_hz,
     epochLengthMs: result.epoch_length_ms,
-    rejectThresholdUv: result.reject_threshold_uv,
     gridMm: result.grid_mm,
   })
 }
@@ -415,6 +406,5 @@ export function normalizeCalcParams(params: CalcParams): CalcParams {
     bandwidthHz: clamp(params.bandwidthHz, BANDWIDTH_RANGE),
     epochLengthMs: Math.round(params.epochLengthMs),
     gridMm: clamp(params.gridMm, GRID_MM_RANGE),
-    rejectThresholdUv: Math.max(0, params.rejectThresholdUv),
   }
 }

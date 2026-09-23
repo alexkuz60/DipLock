@@ -181,8 +181,6 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
       ),
     [signal.durationSec, epochLengthMs, layers, epochMarks],
   )
-  /** Порог reject-фильтра слоя — для строки причины в тултипах эпох */
-  const rejectThresholdUv = layers?.rejectThresholdUv ?? null
   /**
    * Сколько ручных пометок поставил пользователь (Ctrl+двойной клик).
    *
@@ -609,7 +607,6 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
           <EpochRuler
             cells={epochs}
             geometry={geometry}
-            rejectThresholdUv={rejectThresholdUv}
             onToggle={handleToggleEpoch}
           />
           {visible.length === 0 ? (
@@ -674,7 +671,6 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 geometry={geometry}
                 showBoundaries={params.epochBoundaries}
                 showHatch={params.droppedEpochsHatched}
-                rejectThresholdUv={rejectThresholdUv}
               />
               {/*
                 Зоны артефактов — поверх всех треков, но пока трек не развёрнут: при
@@ -756,7 +752,6 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
               cells={epochs}
               geometry={geometry}
               durationSec={signal.durationSec}
-              rejectThresholdUv={rejectThresholdUv}
               onToggleAt={handleToggleEpochAt}
             />
           ) : null}

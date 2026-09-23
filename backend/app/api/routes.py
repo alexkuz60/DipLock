@@ -316,7 +316,6 @@ async def create_preprocess_job(
     flat_line_ms: float = Form(200.0),
     run_ica: bool = Form(False, description="ICA-ветка детекции (тяжёлая — по умолчанию выключена)"),
     epoch_length_ms: float = Form(2000.0),
-    reject_threshold_uv: float = Form(150.0),
     notch_harmonics: int = Form(0, description="Гармоники notch (100/150/200 Гц), 0–4"),
     bad_channels: str | None = Form(None, description="Плохие каналы через запятую"),
     interpolate_bads: bool = Form(False, description="Интерполировать bad-каналы (до ICA/SSP)"),
@@ -342,10 +341,10 @@ async def create_preprocess_job(
         z_threshold=z_threshold, pp_threshold_uv=pp_threshold_uv,
         flat_line_uv=flat_line_uv, flat_line_ms=flat_line_ms,
         run_ica=run_ica,
+        epoch_length_ms=epoch_length_ms,
         notch_harmonics=notch_harmonics, bad_channels=bad_channels,
         interpolate_bads=interpolate_bads,
         clean_method=clean_method, ica_n_components=ica_n_components,
-        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
     )
     return submit_recording_job("preprocess", recording, params, meta={"stage": stage})
 
@@ -372,7 +371,6 @@ async def create_spectrum_job(
     reference: str = Form("average", description="average | custom"),
     reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     epoch_length_ms: float = Form(2000.0, description="Длина эпохи для PSD"),
-    reject_threshold_uv: float = Form(150.0, description="Порог reject: эпохи выше — не в спектр"),
 ) -> JobCreated:
     """Спектр записи по ритмам δ…γ — фоновой задачей (202 + ``job_id``).
 
@@ -386,7 +384,7 @@ async def create_spectrum_job(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
         reference=reference, reference_channels=reference_channels,
-        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
+        epoch_length_ms=epoch_length_ms,
     )
     return submit_recording_job(
         "spectrum", recording, params, meta={"epoch_length_ms": epoch_length_ms},
@@ -416,7 +414,6 @@ async def get_spectrum_topomap(
     band_max: float | None = Query(None, description="Полоса фильтра, верхняя граница, Гц"),
     notch_hz: float | None = Query(None, description="Сетевой фильтр, Гц"),
     epoch_length_ms: float = Query(2000.0, description="Длина эпохи для PSD"),
-    reject_threshold_uv: float = Query(150.0, description="Порог reject"),
     if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """PNG топокарты ритма в раскладке скальпа; вне круга голова прозрачна.
@@ -433,7 +430,7 @@ async def get_spectrum_topomap(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
         reference="average", reference_channels=None,
-        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
+        epoch_length_ms=epoch_length_ms,
     )
     try:
         data, version = await asyncio.to_thread(
@@ -463,7 +460,6 @@ async def create_dipole_scan_job(
     reference: str = Form("average", description="average | custom"),
     reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     epoch_length_ms: float = Form(1000.0, description="Длина эпохи для расчёта"),
-    reject_threshold_uv: float = Form(150.0, description="Порог reject эпох"),
     grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг объёмной сетки поиска, мм"),
 ) -> JobCreated:
     """Быстрый режим («fast»): одна точка на эпоху в пике GFP на сетке узлов.
@@ -477,7 +473,7 @@ async def create_dipole_scan_job(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
         reference=reference, reference_channels=reference_channels,
-        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
+        epoch_length_ms=epoch_length_ms,
         grid_mm=grid_mm,
     )
     return submit_recording_job(
@@ -508,7 +504,6 @@ async def create_dipole_refine_job(
     reference: str = Form("average", description="average | custom"),
     reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     epoch_length_ms: float = Form(1000.0, description="Длина эпохи — как в быстром расчёте"),
-    reject_threshold_uv: float = Form(150.0, description="Порог reject эпох"),
     grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг сетки быстрого расчёта, мм"),
     halfwin_ms: float | None = Form(
         None,
@@ -530,7 +525,7 @@ async def create_dipole_refine_job(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
         reference=reference, reference_channels=reference_channels,
-        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
+        epoch_length_ms=epoch_length_ms,
         grid_mm=grid_mm,
         halfwin_ms=halfwin_ms,
     )
@@ -946,7 +941,6 @@ async def get_meta() -> MetaResponse:
             peak_to_peak_threshold_uv=settings.peak_to_peak_threshold_uv,
             flat_line_threshold_uv=settings.flat_line_threshold_uv,
             flat_line_min_duration_ms=settings.flat_line_min_duration_ms,
-            reject_threshold_uv=settings.reject_threshold_uv,
             muscle_min_duration_ms=settings.muscle_min_duration_ms,
             break_min_duration_ms=settings.break_min_duration_ms,
             line_noise_ratio=settings.line_noise_ratio,

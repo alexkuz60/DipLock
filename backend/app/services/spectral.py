@@ -103,7 +103,6 @@ class SpectrumParams:
     epoch_length_ms: float = 2000.0
     reference: str = "average"
     reference_channels: list[str] | None = None
-    reject_threshold_uv: float = 150.0
     n_fft: int = SPECTRUM_N_FFT
 
 
@@ -119,7 +118,6 @@ def spectrum_signature(params: SpectrumParams, cfg: Settings, channels: Sequence
         band,
         f"notch={params.notch_hz}",
         f"epoch={params.epoch_length_ms:g}",
-        f"reject={params.reject_threshold_uv:g}",
         f"nfft={params.n_fft}",
         f"ref={params.reference}",
         ",".join(channels),
@@ -360,13 +358,12 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams)
     try:
         with journal.step(
             "spectrum", "segment_epochs",
-            note=f"epoch={params.epoch_length_ms:g}ms, reject={params.reject_threshold_uv:g}",
+            note=f"epoch={params.epoch_length_ms:g}ms",
         ) as entry:
             epochs = segment_epochs(
                 raw,
                 mne.Annotations([], [], []),
                 epoch_length_ms=params.epoch_length_ms,
-                reject_threshold_uv=params.reject_threshold_uv,
             )
             entry.epochs = len(epochs.drop_log)
     except ValueError as exc:
@@ -530,7 +527,6 @@ def compute_spectrum(
         "n_fft": n_fft,
         "filter_band_hz": list(params.filter_band) if params.filter_band else None,
         "notch_hz": params.notch_hz,
-        "reject_threshold_uv": params.reject_threshold_uv,
         "freqs": [float(value) for value in freqs],
         "psd_mean_uv2": [float(value) for value in psd_ch_mean],
         "bands": bands_out,

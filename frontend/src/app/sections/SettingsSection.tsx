@@ -127,7 +127,6 @@ export function SettingsSection() {
               value={meta.data.artifact_thresholds.peak_to_peak_threshold_uv}
               mono
             />
-            <InfoRow label="reject, мкВ" value={meta.data.artifact_thresholds.reject_threshold_uv} mono />
             <InfoRow label="параллельных задач" value={meta.data.max_concurrent_jobs} mono />
           </>
         ) : null}

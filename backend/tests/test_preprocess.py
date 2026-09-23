@@ -236,8 +236,9 @@ def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
     """Инвариант N6: отброшены эпохи с всплеском И пересекающие зоны детектора.
 
     Ожидание не хардкодится: сначала стадия artifacts возвращает зоны, затем
-    стадия epochs обязана отбросить ровно эпохи, пересекающие эти зоны, плюс
-    эпоху амплитудного reject (всплеск 250 мкВ > порога 150 мкВ — это эпоха 5).
+    стадия epochs обязана отбросить ровно эпохи, пересекающие эти зоны
+    (отбраковка — только аннотации ``BAD_``; amplitude reject MNE отключён,
+    всплеск 250 мкВ попадает в зоны детекторов — это эпоха 5).
     """
     recording = _register(tmp_path, spike_edf)
 
@@ -255,8 +256,7 @@ def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
     result = run_preprocess(
         recording, settings,
         PreprocessParams(
-            stage="epochs", pp_threshold_uv=100.0,
-            epoch_length_ms=1000.0, reject_threshold_uv=150.0,
+            stage="epochs", pp_threshold_uv=100.0, epoch_length_ms=1000.0,
         ),
         progress=lambda *_, **__: None,
     )
@@ -280,16 +280,21 @@ def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
 
 
 def test_epochs_stage_rejects_all_epochs_with_clear_error(tmp_path, edf_file):
-    """Все эпохи отброшены — понятная ошибка стадии, а не пустой результат."""
+    """Все эпохи отброшены BAD_-аннотациями — понятная ошибка стадии, а не пустой результат.
+
+    Детекторы помечают BAD_ всю запись (``z_threshold=0`` — любое отклонение от
+    медианы выброс): каждая эпоха пересекает зону и уходит в отбраковку.
+    """
     from app.services.preprocess import PreprocessError
 
     recording = _register(tmp_path, edf_file)
 
-    with pytest.raises(PreprocessError, match="Все эпохи отброшены"):
+    with pytest.raises(PreprocessError, match="Все эпохи отброшены аннотациями BAD_"):
         run_preprocess(
             recording, settings,
             PreprocessParams(
-                stage="epochs", epoch_length_ms=1000.0, reject_threshold_uv=1.0,
+                stage="epochs", epoch_length_ms=1000.0,
+                z_threshold=0.0, pp_threshold_uv=1e9, flat_line_uv=-1.0,
             ),
             progress=lambda *_, **__: None,
         )
@@ -423,13 +428,14 @@ def test_reject_channels_filters_service_drop_log_entries():
     assert _reject_channels((), names) == []
 
 
-def test_epochs_stage_returns_reject_channels_and_threshold(tmp_path, spike_edf):
-    """Каналы-виновники и порог reject-фильтра приходят вместе с индексами эпох.
+def test_epochs_stage_returns_reject_channels_without_amplitude_reject(tmp_path, spike_edf):
+    """Отбраковка — только BAD_-аннотации: каналы-виновники пусты, порога в ответе нет.
 
-    Детекторы глушим огромными порогами (flat-line — отрицательным: размах не
-    бывает меньше нуля), чтобы амплитудный reject был единственной причиной:
-    MNE именует виновника в ``drop_log``, и это имя едет в UI для рамок в треке
-    канала и строки причины. Всплеск 250 мкВ на первом канале роняет свою эпоху,
+    Amplitude reject MNE отключён (``reject=None``): ``drop_log`` несёт описание
+    аннотации (``BAD_…``), а не имя канала, поэтому ``rejected_epoch_channels``
+    приходит с пустыми списками — рамки в треках не рисуются, зоны детекторов
+    видны отдельными слоями. Всплеск 250 мкВ на первом канале ловит z-score
+    (дефолтный порог, его зона целиком внутри эпохи 5): отброшена только эпоха 5,
     соседние остаются — «все отброшены» дал бы ошибку стадии.
     """
     recording = _register(tmp_path, spike_edf)
@@ -437,14 +443,12 @@ def test_epochs_stage_returns_reject_channels_and_threshold(tmp_path, spike_edf)
     result = run_preprocess(
         recording, settings,
         PreprocessParams(
-            stage="epochs", epoch_length_ms=1000.0, reject_threshold_uv=150.0,
-            z_threshold=1e9, pp_threshold_uv=1e9, flat_line_uv=-1.0,
+            stage="epochs", epoch_length_ms=1000.0,
+            pp_threshold_uv=1e9, flat_line_uv=-1.0,
         ),
         progress=lambda *_, **__: None,
     )
 
-    assert result["reject_threshold_uv"] == 150.0
-    by_index = {item["index"]: item["channels"] for item in result["rejected_epoch_channels"]}
-    assert set(by_index) == set(result["rejected_epochs"])
-    # Всплеск целиком в эпохе 6 (индекс 5), кадры 1260–1490: виновник — канал 0
-    assert by_index == {5: [settings.standard_channels[0]]}
+    assert result["rejected_epochs"] == [5]
+    assert result["rejected_epoch_channels"] == [{"index": 5, "channels": []}]
+    assert "reject_threshold_uv" not in result

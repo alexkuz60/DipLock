@@ -89,7 +89,6 @@ def preprocess_params(
     flat_line_ms: float,
     run_ica: bool,
     epoch_length_ms: float,
-    reject_threshold_uv: float,
     notch_harmonics: int = 0,
     bad_channels: str | None = None,
     interpolate_bads: bool = False,
@@ -136,7 +135,6 @@ def preprocess_params(
         flat_line_ms=flat_line_ms,
         run_ica=run_ica,
         epoch_length_ms=epoch_length_ms,
-        reject_threshold_uv=reject_threshold_uv,
     )
 
 
@@ -148,7 +146,6 @@ def spectrum_params(
     reference: str,
     reference_channels: str | None,
     epoch_length_ms: float,
-    reject_threshold_uv: float,
 ) -> SpectrumParams:
     """Параметры расчёта спектра по диапазонам (Welch PSD)."""
     require_epoch_length(epoch_length_ms)
@@ -159,7 +156,6 @@ def spectrum_params(
         epoch_length_ms=epoch_length_ms,
         reference=reference,
         reference_channels=parse_reference_channels(reference_channels),
-        reject_threshold_uv=reject_threshold_uv,
     )
 
 
@@ -225,7 +221,6 @@ def dipole_scan_params(
     reference: str,
     reference_channels: str | None,
     epoch_length_ms: float,
-    reject_threshold_uv: float,
     grid_mm: float,
 ) -> DipoleScanParams:
     """Параметры быстрого расчёта диполей (перебор сетки узлов)."""
@@ -235,7 +230,6 @@ def dipole_scan_params(
         filter_band=parse_filter_band(band_min, band_max),
         notch_hz=notch_hz,
         epoch_length_ms=epoch_length_ms,
-        reject_threshold_uv=reject_threshold_uv,
         reference=reference,
         reference_channels=parse_reference_channels(reference_channels),
         grid_mm=grid_mm,
@@ -271,7 +265,6 @@ def dipole_refine_params(
     reference: str,
     reference_channels: str | None,
     epoch_length_ms: float,
-    reject_threshold_uv: float,
     grid_mm: float,
     halfwin_ms: float | None = None,
 ) -> DipoleRefineParams:
@@ -284,7 +277,7 @@ def dipole_refine_params(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
         reference=reference, reference_channels=reference_channels,
-        epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
+        epoch_length_ms=epoch_length_ms,
         grid_mm=grid_mm,
     )
     if epoch_index < 0:

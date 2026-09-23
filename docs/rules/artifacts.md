@@ -18,6 +18,14 @@
 вовсе** — инвариант держит `test_bad_rule_annotations_only_reject_kinds`.
 Добавили вид — пополнили `ANNOTATION_DESC` (только если reject) и каталоги выше.
 
+**Amplitude reject MNE отключён** (23.09.2026, `reject=None` в `epoch_segmenter`): эпохи
+отбраковываются **только** через `BAD_` — адресно (тип, канал, время зоны); порог амплитудного
+reject удалён из всего стека (config → services → API → schemas → UI). Следствие для контракта:
+`rejected_epoch_channels` (`EpochRejectOut`) собирается из `drop_log`, но списки каналов **всегда
+пустые** — `drop_log` несёт причины (`BAD_…`, `TOO_SHORT`/`NO_DATA`/`USER`), а не имена каналов;
+рамки `epoch-frame` не рисуются. «Все эпохи отброшены» — ошибка «Все эпохи отброшены
+аннотациями BAD_».
+
 ## Детекторы (MNE/NumPy/SciPy only, без новых зависимостей)
 
 * `zscore_outlier` — robust z (медиана/MAD, M11): выброс не тянет порог за собой;

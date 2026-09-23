@@ -56,7 +56,7 @@
   (мкВ²/Гц) вместе с частотой пика `psd_peak_hz` (Гц — предлагаю; поправьте, если частота не нужна).
   Частота пика — готовый вход для выбора узких поддиапазонов (С3).
 - **Единицы (B4):** имя поля несёт единицу — `band_power_uv2`, `psd_uv2_hz`, `relative_power`,
-  `iaf_hz` (как уже принято в проекте: `amplitude_nam`, `reject_threshold_uv`). Децибелы — только
+  `iaf_hz` (как уже принято в проекте: `amplitude_nam`, `pp_threshold_uv`). Децибелы — только
   представление (как сетка `DPS2`), не единица хранения; `None` вместо нуля, когда не измерено.
 - **Набор полос (B7):** базовые пресеты из `freq_bands` (`/meta`) + полосы эксперта + «свой набор»
   с сохранением именованного набора. Набор — это **данные** (список границ) с отпечатком, а не
@@ -113,7 +113,7 @@
 | `psd_peak_hz` | float | Гц | **новое** — частота этого максимума (вход для выбора узких поддиапазонов) |
 | `relative_power` | float | доля 0…1 | есть (N16), но считается по сессии |
 | `iaf_hz` | float | Гц | есть, по сессии (не по эпохе) |
-| паспорт: `reference`, `filter_band_hz`, `notch_hz`, `reject_threshold_uv`, `n_fft`, `epoch_length_ms`, `n_epochs`, `topomap_version` | — | — | есть в `SpectrumResult` |
+| паспорт: `reference`, `filter_band_hz`, `notch_hz`, `n_fft`, `epoch_length_ms`, `n_epochs`, `topomap_version` | — | — | есть в `SpectrumResult` |
 
 **B5 «Спектральный ряд во времени»** — одна точка ряда = эпоха.
 
@@ -153,7 +153,7 @@
 | `kd_passed` | bool | — | **новое** — вердикт составного критерия |
 | `kd_basis` | `{moment_share_x, gof_min, moment_max_nam}` | доля 0…1, 0…1, нА·м | **новое** — базис КД: X %, порог GOF, максимум момента **в этом поддиапазоне** |
 | `refined` | `{method, halfwin_ms, shift_mm, grid_gof_bem, free_fit, gof}` или None | — | есть по частям (`DipoleRefineResult`); предлагаю держать уточнение **полем точки**, а не отдельной записью — «было/стало» не должно терять связь |
-| паспорт задачи: `reference`, `reference_channels`, `channels`, `sfreq`, `epoch_length_ms`, `reject_threshold_uv`, `band_hz`, `notch_hz`, `grid_mm`, `n_epochs_total`, `n_epochs_used` | — | — | есть в `DipoleScanResult` |
+| паспорт задачи: `reference`, `reference_channels`, `channels`, `sfreq`, `epoch_length_ms`, `band_hz`, `notch_hz`, `grid_mm`, `n_epochs_total`, `n_epochs_used` | — | — | есть в `DipoleScanResult` |
 
 **B7 «Прогон по набору поддиапазонов»** — одна запись = запуск по списку полос.
 
@@ -162,7 +162,7 @@
 | `run_id` | str | — | **новое** (сейчас id задачи есть, набора полос — нет) |
 | `recording_id` | str | — | есть |
 | `bands` | list[`{band_lo_hz, band_hi_hz, label}`] | Гц | **новое** — набор полос (шаг 2: пресеты + «свой набор») |
-| `params` | `{epoch_length_ms, reject_threshold_uv, grid_mm, reference, notch_hz}` | — | частично есть |
+| `params` | `{epoch_length_ms, grid_mm, reference, notch_hz}` | — | частично есть |
 | `fingerprint` | str | — | **новое** — отпечаток набора и параметров (аналоги уже есть: `spectrum_signature`, отпечаток ассетов) |
 | `per_band_status` | list[`{band_lo_hz, band_hi_hz, state, n_points, n_kd_passed, n_errors, moment_max_nam}`] | — | **новое** — включая максимум момента **по своей полосе** (база КД) |
 | `created_at`, `duration_sec_calc` | — | — | частично (`duration_sec_calc` есть) |

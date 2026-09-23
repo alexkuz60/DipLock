@@ -84,13 +84,10 @@ function RulerTag({ text }: { text: string }) {
 export function EpochRuler({
   cells,
   geometry,
-  rejectThresholdUv,
   onToggle,
 }: {
   cells: EpochCell[]
   geometry: LayerGeometry
-  /** Порог reject-фильтра слоя — для причины в тултипе (null — не задан) */
-  rejectThresholdUv: number | null
   onToggle: EpochToggleHandler
 }) {
   return (
@@ -110,7 +107,7 @@ export function EpochRuler({
           const clipped = clipToWindow(cell.onsetSec, cell.durationSec, geometry)
           if (!clipped) return null
           const blocked = isEpochBlocked(cell.rejected, cell.manual)
-          const title = epochMarkTitle(cell, rejectThresholdUv)
+          const title = epochMarkTitle(cell)
           return (
             <button
               key={cell.index}
@@ -155,14 +152,11 @@ export function TimeRuler({
   cells,
   geometry,
   durationSec,
-  rejectThresholdUv,
   onToggleAt,
 }: {
   cells: EpochCell[]
   geometry: LayerGeometry
   durationSec: number
-  /** Порог reject-фильтра слоя — для причины в тултипе (null — не задан) */
-  rejectThresholdUv: number | null
   onToggleAt: (timeSec: number) => void
 }) {
   const first = Math.max(0, Math.floor(geometry.window.t0))
@@ -189,7 +183,7 @@ export function TimeRuler({
           const cell = cellAtTime(cells, sec + 0.5)
           const blocked = cell ? isEpochBlocked(cell.rejected, cell.manual) : false
           const title = cell
-            ? `Секунда ${sec}–${sec + 1} с · ${epochMarkTitle(cell, rejectThresholdUv)}`
+            ? `Секунда ${sec}–${sec + 1} с · ${epochMarkTitle(cell)}`
             : `Секунда ${sec}–${sec + 1} с`
           return (
             <button

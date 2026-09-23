@@ -534,7 +534,6 @@ describe('слои результата вьюера', () => {
       ],
       rejectedEpochs: [1, 3],
       rejectChannels: { 1: ['F3'], 3: [] },
-      rejectThresholdUv: 150,
       epochLengthMs: null,
     }
   }
@@ -762,19 +761,19 @@ describe('слои результата вьюера', () => {
     ])
   })
 
-  it('тултип ячейки шкалы объясняет причину: порог и каналы-виновники', () => {
+  it('тултип ячейки шкалы объясняет причину: каналы-виновники', () => {
     paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000 })
     renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
 
-    // Эпоха 2 (2–4 с) отброшена фикстурой по каналу F3 при пороге 150 мкВ
+    // Эпоха 2 (2–4 с) отброшена фикстурой по каналу F3
     expect(screen.getByTestId('epoch-ruler-2')).toHaveAttribute(
       'title',
-      'Эпоха 2: 2.000–4.000 с — не в расчёте (порог 150 мкВ, каналы: F3) · клик снимает правку',
+      'Эпоха 2: 2.000–4.000 с — не в расчёте (каналы: F3) · клик снимает правку',
     )
-    // Эпоха 4 отброшена без канала-виновника — причина говорит и об этом
+    // Эпоха 4 отброшена без канала-виновника — «обнаружен артефакт (детектор)»
     expect(screen.getByTestId('epoch-ruler-4')).toHaveAttribute(
       'title',
-      expect.stringContaining('канал-виновник не определён'),
+      expect.stringContaining('обнаружен артефакт (детектор)'),
     )
     // Секунда ссылается на свою эпоху с той же причиной
     expect(screen.getByTestId('second-3')).toHaveAttribute(
@@ -923,7 +922,6 @@ describe('оверлеи развёрнутого трека (срез 5)', () =
       ],
       rejectedEpochs: [],
       rejectChannels: {},
-      rejectThresholdUv: null,
       epochLengthMs: null,
     }
   }

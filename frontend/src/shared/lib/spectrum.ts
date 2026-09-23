@@ -30,7 +30,6 @@ export type SpectrumQuery = {
   filterBandHz: [number, number] | null
   notchHz: number | null
   epochLengthMs: number
-  rejectThresholdUv: number
 }
 
 /** Русские подписи ритмов; неизвестный ключ показывается как есть (не «теряется»). */
@@ -59,7 +58,6 @@ export function spectrumQueryString(query: SpectrumQuery): string {
   }
   if (query.notchHz) parts.push(`notch_hz=${query.notchHz}`)
   parts.push(`epoch_length_ms=${query.epochLengthMs}`)
-  parts.push(`reject_threshold_uv=${query.rejectThresholdUv}`)
   return parts.join('&')
 }
 
@@ -90,7 +88,6 @@ export function spectrumQueryOf(result: SpectrumResult): SpectrumQuery {
     filterBandHz: band && band.length === 2 ? [band[0], band[1]] : null,
     notchHz: result.notch_hz,
     epochLengthMs: result.epoch_length_ms,
-    rejectThresholdUv: result.reject_threshold_uv,
   }
 }
 

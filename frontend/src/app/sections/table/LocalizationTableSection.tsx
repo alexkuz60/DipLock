@@ -145,7 +145,7 @@ export function LocalizationTableSection() {
       <Placeholder
         icon={<Table2 className="size-12" />}
         title="В результате расчёта нет точек"
-        description={`Эпох прошло reject-фильтр: ${result.n_epochs_used} из ${result.n_epochs_total} при пороге ${result.reject_threshold_uv} мкВ. Таблица пуста, потому что расчёт не дал ни одной точки, а не потому что результат потерян.`}
+        description={`Эпох прошло reject-фильтр: ${result.n_epochs_used} из ${result.n_epochs_total}. Таблица пуста, потому что расчёт не дал ни одной точки, а не потому что результат потерян.`}
       >
         <StatusPill tone="warn">
           Смягчите порог reject в панели раздела «Диполи» и пересчитайте
@@ -172,7 +172,7 @@ export function LocalizationTableSection() {
         </StatusPill>
         <StatusPill tone="neutral">{`Сортировка: ${sortDirectionLabel(sortDirection)}`}</StatusPill>
         <StatusPill tone="neutral">
-          {`Эпох в расчёте: ${result.n_epochs_used} из ${result.n_epochs_total} · reject ${result.reject_threshold_uv} мкВ`}
+          {`Эпох в расчёте: ${result.n_epochs_used} из ${result.n_epochs_total}`}
         </StatusPill>
         <StatusPill tone="neutral">
           {`Полоса: ${filterBandText(result.filter_band_hz)}${result.notch_hz ? ` · notch ${result.notch_hz} Гц` : ''}`}

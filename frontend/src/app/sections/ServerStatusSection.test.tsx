@@ -35,7 +35,6 @@ describe('раздел «Состояние сервера»', () => {
     renderWithProviders(<ServerStatusSection />)
 
     expect(await screen.findByText('Параметры расчёта')).toBeInTheDocument()
-    expect(screen.getByText('150')).toBeInTheDocument() // reject, мкВ
     expect(screen.getByText('abc123def456')).toBeInTheDocument() // surface version
   })
 

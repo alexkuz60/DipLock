@@ -78,7 +78,6 @@ class PreprocessParams:
     run_ica: bool = False
     # Стадия `epochs`
     epoch_length_ms: float = 2000.0
-    reject_threshold_uv: float = 150.0
 
 
 def _reject_channels(log: tuple[str, ...] | list[str], ch_names: list[str]) -> list[str]:
@@ -194,9 +193,7 @@ def _params_note(params: PreprocessParams, extra: str = "") -> str:
         if params.run_ica:
             parts.append("ica=1")
     if params.stage == "epochs":
-        parts.append(
-            f"epoch={params.epoch_length_ms:g}ms, reject={params.reject_threshold_uv:g}"
-        )
+        parts.append(f"epoch={params.epoch_length_ms:g}ms")
     if extra:
         parts.append(extra)
     return ", ".join(parts)
@@ -298,14 +295,14 @@ def run_preprocess(
         _journal(extra=f"artifacts={stats['total']}")
         return base
 
-    # Стадия `epochs`: нарезка + reject-фильтр. Отброшенные эпохи нужны UI для
-    # штриховки, поэтому вместо одного числа отдаём индексы (порядок событий).
+    # Стадия `epochs`: нарезка. Отброшенные эпохи (по аннотациям BAD_ от наших
+    # детекторов) нужны UI для штриховки, поэтому вместо одного числа отдаём
+    # индексы (порядок событий).
     progress("epochs", message=f"Нарезка эпох по {params.epoch_length_ms:.0f} мс")
     try:
         epochs = segment_epochs(
             raw, annotations,
             epoch_length_ms=params.epoch_length_ms,
-            reject_threshold_uv=params.reject_threshold_uv,
         )
     except ValueError as exc:
         raise PreprocessError(str(exc)) from exc
@@ -318,17 +315,18 @@ def run_preprocess(
         "n_epochs_used": len(epochs),
         "rejected_epochs": rejected,
         # Каналы-виновники — из drop_log MNE: UI показывает причины блокировки
-        # (порог + каналы) и рамки в соответствующих треках
+        # и рамки в соответствующих треках. Amplitude reject MNE отключён
+        # (reject=None), поэтому каналы приходят только из аннотаций BAD_
+        # (пустые) — frame-слои не показываются, зоны детекторов — на треках.
         "rejected_epoch_channels": [
             {"index": index, "channels": _reject_channels(epochs.drop_log[index], ch_names)}
             for index in rejected
         ],
-        "reject_threshold_uv": params.reject_threshold_uv,
     })
     if rejected:
         warnings.append(
             f"Отброшено эпох: {len(rejected)} из {len(epochs.drop_log)} "
-            f"(порог {params.reject_threshold_uv:.0f} мкВ)"
+            f"(аннотации BAD_ от детекторов артефактов)"
         )
     progress("done", 1.0, message=f"Эпох: {len(epochs)} из {len(epochs.drop_log)}")
     base["duration_sec_calc"] = round(time.perf_counter() - started, 3)

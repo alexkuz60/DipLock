@@ -68,13 +68,13 @@ def test_job_failure_keeps_error_text():
         manager = JobManager()
 
         def worker(progress):
-            raise ValueError("Все эпохи отброшены reject-фильтром")
+            raise ValueError("Все эпохи отброшены аннотациями BAD_")
 
         job = manager.submit("analyze", "bad.edf", worker)
         await job.task
 
         assert job.status == "failed"
-        assert "reject-фильтром" in (job.error or "")
+        assert "аннотациями BAD_" in (job.error or "")
         assert job.message.startswith("Ошибка:")
         assert job.result is None
         assert job.finished_at is not None

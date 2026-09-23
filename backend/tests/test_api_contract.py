@@ -98,7 +98,6 @@ def _fake_analysis_result(session_id: str = "session-test", filename: str = "rec
             "dipole_fit_max_epochs": 0,
             "z_threshold": 5.0,
             "pp_threshold_uv": 100.0,
-            "reject_threshold_uv": 150.0,
             "ica_requested": True,
             "ica_applied": False,
             "edf_units": None,
@@ -167,7 +166,6 @@ def test_meta_endpoint_returns_environment(client):
     assert body["database_backend"].split("+")[0] in ("sqlite", "postgresql")
     assert body["freq_bands"]["alpha"] == [8.0, 13.0]
     assert body["standard_channels"] == list(settings.standard_channels)
-    assert body["artifact_thresholds"]["reject_threshold_uv"] == settings.reject_threshold_uv
     assert body["surface_url"] == f"{_PREFIX}/surface"
     assert body["max_concurrent_jobs"] >= 1
     assert any("5173" in origin for origin in body["cors_origins"])
@@ -347,7 +345,7 @@ def test_failed_job_reports_error_and_409_on_result(client, isolated_io, monkeyp
     """Ошибка пайплайна не роняет сервер: статус failed + текст ошибки в UI."""
 
     def _boom(progress, *args, **kwargs):
-        raise ValueError("Все эпохи отброшены reject-фильтром")
+        raise ValueError("Все эпохи отброшены аннотациями BAD_")
 
     monkeypatch.setattr(analysis_pipeline, "run_analysis", _boom)
 
@@ -356,11 +354,11 @@ def test_failed_job_reports_error_and_409_on_result(client, isolated_io, monkeyp
     status = _wait_finished(client, job_id)
 
     assert status["status"] == "failed"
-    assert "reject-фильтром" in status["error"]
+    assert "аннотациями BAD_" in status["error"]
     assert status["result_url"] is None
     result = client.get(f"{_PREFIX}/jobs/{job_id}/result")
     assert result.status_code == 409
-    assert "reject-фильтром" in result.json()["detail"]
+    assert "аннотациями BAD_" in result.json()["detail"]
 
 
 

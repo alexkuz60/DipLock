@@ -47,7 +47,7 @@ describe('выдвижная панель раздела «Диполи»', () =
 
     const alpha = screen.getByAltText('Топокарта α — альфа (8–13 Гц)')
     expect(alpha.getAttribute('src')).toBe(
-      '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&epoch_length_ms=1000&reject_threshold_uv=150&v=spec1234abcd',
+      '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&epoch_length_ms=1000&v=spec1234abcd',
     )
     // Мощность подписана рядом с картинкой; неизмеренная — «—», а не «0.00»
     expect(screen.getByText(/8–13 Гц · 12.50 мкВ² · 55 %/)).toBeInTheDocument()

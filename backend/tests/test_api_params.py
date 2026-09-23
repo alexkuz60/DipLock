@@ -105,7 +105,7 @@ def test_preprocess_params_filter_stage_ignores_epoch_length():
         stage="filter", band_min=8.0, band_max=13.0, notch_hz=50.0,
         reference="custom", reference_channels="F3,F4",
         z_threshold=4.0, pp_threshold_uv=120.0, flat_line_uv=6.0, flat_line_ms=250.0,
-        run_ica=True, epoch_length_ms=123.0, reject_threshold_uv=160.0,
+        run_ica=True, epoch_length_ms=123.0,
     )
 
     assert params.filter_band == (8.0, 13.0)
@@ -120,7 +120,7 @@ def test_preprocess_params_epochs_stage_validates_epoch_length():
             stage="epochs", band_min=None, band_max=None, notch_hz=None,
             reference="average", reference_channels=None,
             z_threshold=5.0, pp_threshold_uv=100.0, flat_line_uv=5.0, flat_line_ms=200.0,
-            run_ica=False, epoch_length_ms=123.0, reject_threshold_uv=150.0,
+            run_ica=False, epoch_length_ms=123.0,
         )
 
     assert err.value.status_code == 400
@@ -133,7 +133,7 @@ def test_preprocess_params_carry_cleaning_options():
         stage="filter", band_min=None, band_max=None, notch_hz=50.0,
         reference="average", reference_channels=None,
         z_threshold=5.0, pp_threshold_uv=100.0, flat_line_uv=5.0, flat_line_ms=200.0,
-        run_ica=False, epoch_length_ms=2000.0, reject_threshold_uv=150.0,
+        run_ica=False, epoch_length_ms=2000.0,
         notch_harmonics=3, bad_channels="C3, XYZ", interpolate_bads=True,
         clean_method="ica", ica_n_components=8,
     )
@@ -152,7 +152,7 @@ def test_preprocess_params_reject_unknown_clean_method():
             stage="filter", band_min=None, band_max=None, notch_hz=None,
             reference="average", reference_channels=None,
             z_threshold=5.0, pp_threshold_uv=100.0, flat_line_uv=5.0, flat_line_ms=200.0,
-            run_ica=False, epoch_length_ms=2000.0, reject_threshold_uv=150.0,
+            run_ica=False, epoch_length_ms=2000.0,
             clean_method="asr",
         )
 
@@ -166,7 +166,7 @@ def test_preprocess_params_bounds_notch_harmonics_and_ica_components():
         stage="filter", band_min=None, band_max=None, notch_hz=None,
         reference="average", reference_channels=None,
         z_threshold=5.0, pp_threshold_uv=100.0, flat_line_uv=5.0, flat_line_ms=200.0,
-        run_ica=False, epoch_length_ms=2000.0, reject_threshold_uv=150.0,
+        run_ica=False, epoch_length_ms=2000.0,
     )
     with pytest.raises(HTTPException) as err:
         preprocess_params(**base, notch_harmonics=9)
@@ -177,23 +177,22 @@ def test_preprocess_params_bounds_notch_harmonics_and_ica_components():
     assert "ica_n_components" in err.value.detail
 
 
-def test_spectrum_params_carry_band_notch_and_thresholds():
+def test_spectrum_params_carry_band_notch_and_epoch_length():
     params = spectrum_params(
         band_min=4.0, band_max=8.0, notch_hz=50.0, reference="average",
-        reference_channels=None, epoch_length_ms=1000.0, reject_threshold_uv=140.0,
+        reference_channels=None, epoch_length_ms=1000.0,
     )
 
     assert params.filter_band == (4.0, 8.0)
     assert params.notch_hz == 50.0
     assert params.epoch_length_ms == 1000.0
-    assert params.reject_threshold_uv == 140.0
 
 
 def test_dipole_scan_params_keep_grid_step():
     params = dipole_scan_params(
         band_min=None, band_max=None, notch_hz=None, reference="average",
         reference_channels=None, epoch_length_ms=1000.0,
-        reject_threshold_uv=150.0, grid_mm=4.0,
+        grid_mm=4.0,
     )
 
     assert params.grid_mm == 4.0

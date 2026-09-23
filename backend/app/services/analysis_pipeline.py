@@ -106,12 +106,11 @@ def run_analysis(
     progress("epochs", message=f"Нарезка эпох по {epoch_length_ms:.0f} мс")
     with journal.step(
         "analyze", "epochs",
-        note=f"epoch={epoch_length_ms:g}ms, reject={settings.reject_threshold_uv:g}",
+        note=f"epoch={epoch_length_ms:g}ms",
     ) as entry:
         epochs = segment_epochs(
             raw, annotations,
             epoch_length_ms=epoch_length_ms,
-            reject_threshold_uv=settings.reject_threshold_uv,
         )
         entry.epochs = int(len(epochs.drop_log) if hasattr(epochs, "drop_log") else len(epochs))
     # len(epochs.events) — все созданные эпохи, len(epochs) — прошедшие reject
@@ -180,7 +179,6 @@ def run_analysis(
         "dipole_fit_max_epochs": settings.dipole_fit_max_epochs,
         "z_threshold": z_threshold,
         "pp_threshold_uv": pp_threshold_uv,
-        "reject_threshold_uv": settings.reject_threshold_uv,
         "ica_requested": run_ica,
         "ica_applied": bool(artifact_stats.get("ica_applied")),
         "edf_units": settings.edf_units,

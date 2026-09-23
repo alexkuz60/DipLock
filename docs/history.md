@@ -3,6 +3,23 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 23.09.2026 — отбраковка эпох: только BAD_-зоны детекторов (amplitude reject отключён)
+
+Убран amplitude reject MNE (`reject=None` в `epoch_segmenter.py`) и параметр порога амплитудного
+reject (`reject_threshold_uv`/`rejectThresholdUv`) из всего стека: config → services → API →
+schemas → frontend → тесты → docs. Отбраковка эпох идёт **только** по аннотациям `BAD_` от
+11 детекторов — адресно (тип, канал, время зоны), без «глухого» порога по всей эпохе.
+`rejected_epoch_channels` (`EpochRejectOut`) остаётся в контракте, но списки каналов теперь
+**всегда пустые** (`drop_log` при `reject=None` несёт причины, а не имена каналов) — рамки
+`epoch-frame` не рисуются. Ключ `spectrum_signature` больше не включает порог (сигнатуры и ETag
+топокарт пересчитались). Сообщение «Все эпохи отброшены» заменено на «Все эпохи отброшены
+аннотациями BAD_».
+Тесты — `test_preprocess.py` (3 семантических теста переписаны под BAD_), `test_api_params.py`,
+`test_analysis_db.py`, `test_api_contract.py`; всего 414 pytest / 686 Vitest. Правила —
+`docs/rules/artifacts.md` (решение), `docs/rules/edf-viewer.md`, `docs/rules/dipoles.md`,
+`docs/rules/api-jobs.md`, `docs/data_map.md`, `docs/data-blocks.md`.
+
+
 ## 23.09.2026 — вьюер: номера эпох — только на липкой шкале, лёгкая прозрачность шкалы
 
 Ручная проверка (23.09.2026): номера эпох дублировались строкой над верхним треком (F3) — их
@@ -19,7 +36,7 @@ PNG-экспорт номера и раньше не рисовал (`epochMarks
 
 - **Бэкенд:** стадия `epochs` (`preprocess.py`) отдаёт `rejected_epoch_channels` — индекс эпохи +
   каналы-виновники из `epochs.drop_log` MNE (`_reject_channels` отсекает служебные записи
-  `TOO_SHORT`/`NO_DATA`/`USER`) — и `reject_threshold_uv`; контракт — `EpochRejectOut`,
+  `TOO_SHORT`/`NO_DATA`/`USER`) — и порог reject-фильтра (позже удалён, см. запись ниже); контракт — `EpochRejectOut`,
   `PreprocessResult`.
 - **UI:** `viewer/TrackRulers.tsx` — верхняя липкая шкала эпох и нижняя шкала секунд поверх оси
   uPlot: `cursor: pointer`, hover-подсветка, метки ролей, **одиночный клик — тоггл эпохи**
@@ -27,7 +44,7 @@ PNG-экспорт номера и раньше не рисовал (`epochMarks
   порог + каналы-виновники / ручная правка). Рамки `EpochFrameLayer` (`epoch-frame-{n}`) стоят в
   треках каналов-виновников и **дополняют** полновысотную штриховку (`epochFramesForChannel`,
   `EpochCell.rejectChannels`); демо-фикстура `demoLayers` несёт детерминированные
-  каналы-виновники и порог 150 мкВ (тултипы причин работают и в демо).
+  каналы-виновники и порог reject-фильтра (тултипы причин работают и в демо).
 
 Правила — `docs/rules/edf-viewer.md`; тесты — `test_preprocess.py` (+2),
 `viewerLayers.test.ts` (+6), `TrackLayers.test.tsx` (+2), `TrackStack.test.tsx` (+4),

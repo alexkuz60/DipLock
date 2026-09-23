@@ -42,7 +42,6 @@ describe('домен расчёта диполей: формы, отпечатк
       band_min: '1',
       band_max: '40',
       epoch_length_ms: '1000',
-      reject_threshold_uv: '150',
       grid_mm: '7',
     })
     // Спектр считается с той же полосой, но без шага сетки (он не нужен PSD)
@@ -50,7 +49,6 @@ describe('домен расчёта диполей: формы, отпечатк
       band_min: '1',
       band_max: '40',
       epoch_length_ms: '1000',
-      reject_threshold_uv: '150',
     })
   })
 
@@ -141,9 +139,6 @@ describe('домен расчёта диполей: формы, отпечатк
     // Правка любого параметра расчёта делает старый результат «посчитанным
     // на других настройках»: таблица обязана об этом сказать, а не молчать
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, gridMm: 12 })).toBe(false)
-    expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, rejectThresholdUv: 300 })).toBe(
-      false,
-    )
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, filterBandHz: null })).toBe(false)
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, notchHz: 50 })).toBe(false)
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, epochLengthMs: 500 })).toBe(false)
@@ -165,7 +160,6 @@ describe('точное уточнение эпохи (F19, «Уточнить…
       notch_hz: '50',
       reference: 'average',
       epoch_length_ms: '500',
-      reject_threshold_uv: '150',
       grid_mm: '5',
       // Окно свободного фитинга (шаг 1.5): по умолчанию только пик GFP
       halfwin_ms: '0',

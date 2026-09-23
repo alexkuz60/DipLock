@@ -110,7 +110,6 @@ describe('нарезка эпох и ручные пометки (срез 2.10)
       artifacts: [],
       rejectedEpochs: [],
       rejectChannels: {},
-      rejectThresholdUv: null,
       epochLengthMs: 2000,
       source: 'result',
     }
@@ -127,7 +126,6 @@ describe('нарезка эпох и ручные пометки (срез 2.10)
       artifacts: [],
       rejectedEpochs: [4],
       rejectChannels: { 4: ['F3'] },
-      rejectThresholdUv: 150,
       epochLengthMs: 2000,
       source: 'result',
     }
@@ -285,9 +283,8 @@ describe('фикстура слоёв', () => {
     }
   })
 
-  it('эпохи-отбросы несут каналы-виновники и порог reject-фильтра', () => {
-    const { rejectedEpochs, rejectChannels, rejectThresholdUv } = demoLayers(60, ['F3', 'F4'])
-    expect(rejectThresholdUv).toBe(150)
+  it('эпохи-отбросы несут каналы-виновники', () => {
+    const { rejectedEpochs, rejectChannels } = demoLayers(60, ['F3'])
     expect(Object.keys(rejectChannels).map(Number)).toEqual([...rejectedEpochs].sort((a, b) => a - b))
     for (const names of Object.values(rejectChannels)) {
       for (const name of names) expect(['F3', 'F4']).toContain(name)
@@ -333,32 +330,31 @@ describe('причины и каналы блокировки эпох', () => {
     expect(tail[4]!.rejectChannels).toEqual([])
   })
 
-  it('причина reject-фильтра называет порог и каналы, без канала — так и пишет', () => {
-    expect(epochRejectReason(cells[1]!, 150)).toBe('порог 150 мкВ, каналы: F3, C3')
-    expect(epochRejectReason(cells[1]!, null)).toBe('reject-фильтр, каналы: F3, C3')
-    expect(epochRejectReason({ ...cells[4]!, rejected: true, rejectChannels: [] }, 150)).toBe(
-      'порог 150 мкВ, канал-виновник не определён',
+  it('причина reject-фильтра называет каналы, без канала — «обнаружен артефакт»', () => {
+    expect(epochRejectReason(cells[1]!)).toBe('каналы: F3, C3')
+    expect(epochRejectReason({ ...cells[4]!, rejected: true, rejectChannels: [] })).toBe(
+      'обнаружен артефакт (детектор)',
     )
   })
 
   it('тултип эпохи — вердикт, причина и подсказка жеста', () => {
-    expect(epochMarkTitle(cells[1]!, 150)).toBe(
-      'Эпоха 2: 2.000–4.000 с — не в расчёте (порог 150 мкВ, каналы: F3, C3) · клик снимает правку',
+    expect(epochMarkTitle(cells[1]!)).toBe(
+      'Эпоха 2: 2.000–4.000 с — не в расчёте (каналы: F3, C3) · клик снимает правку',
     )
-    expect(epochMarkTitle(cells[0]!, 150)).toBe(
+    expect(epochMarkTitle(cells[0]!)).toBe(
       'Эпоха 1: 0.000–2.000 с — в расчёте · клик блокирует',
     )
     // Ручная правка называет себя: снятая блокировка и поставленная вручную
     const restored = buildEpochCells(10, 2000, [1], [{ onsetSec: 2, durationSec: 2, blocked: false }], {
       1: ['F3'],
     })
-    expect(epochMarkTitle(restored[1]!, 150)).toBe(
+    expect(epochMarkTitle(restored[1]!)).toBe(
       'Эпоха 2: 2.000–4.000 с — в расчёте (блокировка снята вручную) · клик блокирует',
     )
     const handBlocked = buildEpochCells(10, 2000, [], [
       { onsetSec: 0, durationSec: 2, blocked: true },
     ])
-    expect(epochMarkTitle(handBlocked[0]!, 150)).toBe(
+    expect(epochMarkTitle(handBlocked[0]!)).toBe(
       'Эпоха 1: 0.000–2.000 с — не в расчёте (заблокирована вручную) · клик снимает правку',
     )
   })

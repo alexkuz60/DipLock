@@ -104,14 +104,11 @@ export function EpochLayer({
   geometry,
   showBoundaries,
   showHatch,
-  rejectThresholdUv = null,
 }: {
   cells: EpochCell[]
   geometry: LayerGeometry
   showBoundaries: boolean
   showHatch: boolean
-  /** Порог reject-фильтра слоя — для причины в тултипе эпохи (null — не задан) */
-  rejectThresholdUv?: number | null
 }) {
   const marks = cells.filter(
     (cell) => cell.manual !== null || (showHatch && isEpochBlocked(cell.rejected, cell.manual)),
@@ -128,7 +125,7 @@ export function EpochLayer({
         )
         if (right <= 0 || left >= geometry.trackWidth) return null
         const clippedLeft = Math.max(0, left)
-        const title = epochMarkTitle(cell, rejectThresholdUv)
+        const title = epochMarkTitle(cell)
         const manual = cell.manual
         return (
           <div

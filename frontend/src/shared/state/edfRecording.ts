@@ -122,7 +122,6 @@ export function layersFromResult(
           artifacts: [],
           rejectedEpochs: [],
           rejectChannels: {},
-          rejectThresholdUv: null,
           epochLengthMs: null,
           source: 'result',
         }
@@ -146,7 +145,6 @@ export function layersFromResult(
       channelsByIndex[item.index] = [...item.channels]
     }
     next.rejectChannels = channelsByIndex
-    next.rejectThresholdUv = result.reject_threshold_uv
     // Индексы отброшенных эпох имеют смысл только вместе с длиной нарезки, в
     // которой они получены: вьюер строит по ней свою сетку (срез 2.10).
     next.epochLengthMs = result.epoch_length_ms > 0 ? result.epoch_length_ms : null
