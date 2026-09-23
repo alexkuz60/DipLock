@@ -66,6 +66,12 @@ export type ArtifactZoneOut = {
   channels: string[]
 }
 
+/** Отброшенная reject-фильтром эпоха: индекс в нарезке и каналы-виновники */
+export type EpochRejectOut = {
+  index: number
+  channels: string[]
+}
+
 /** QC-строка канала (шаг 0.4): доля времени в зонах артефактов (иконки вьюера) */
 export type ChannelQc = {
   channel: string
@@ -125,6 +131,10 @@ export type PreprocessResult = {
   n_epochs_total: number
   n_epochs_used: number
   rejected_epochs: number[]
+  /** Отброшенные эпохи с каналами-виновниками (причины блокировки в UI) */
+  rejected_epoch_channels: EpochRejectOut[]
+  /** Порог reject-фильтра амплитуды, мкВ (строка причины в UI) */
+  reject_threshold_uv: number
   warnings: string[]
   duration_sec_calc: number
 }

@@ -115,6 +115,23 @@ class ArtifactZoneOut(BaseModel):
     channels: list[str] = Field(default_factory=list)
 
 
+class EpochRejectOut(BaseModel):
+    """Отброшенная reject-фильтром эпоха: индекс в нарезке и каналы-виновники.
+
+    Каналы извлекаются из ``epochs.drop_log`` MNE: амплитудный reject именует
+    каналы, роняющие эпоху, а служебные записи (``TOO_SHORT``/``NO_DATA``/
+    ``USER``) виновниками не считаются — у отсечённого края виновника может не
+    быть вовсе (`channels` пуст). UI показывает каналы рамками в треках и
+    строкой причины в тултипе эпохи.
+    """
+
+    index: int = Field(description="Индекс эпохи в нарезке (порядок событий)")
+    channels: list[str] = Field(
+        default_factory=list,
+        description="Каналы, из-за которых эпоха отброшена (из drop_log MNE)",
+    )
+
+
 class ChannelQcOut(BaseModel):
     """QC-строка канала (шаг 0.4): сколько времени канал был в зонах артефактов.
 
@@ -225,6 +242,13 @@ class PreprocessResult(BaseModel):
     n_epochs_used: int = 0
     rejected_epochs: list[int] = Field(
         default_factory=list, description="Индексы эпох, отброшенных reject-фильтром"
+    )
+    rejected_epoch_channels: list[EpochRejectOut] = Field(
+        default_factory=list,
+        description="Отброшенные эпохи с каналами-виновниками (причины блокировки в UI)",
+    )
+    reject_threshold_uv: float = Field(
+        default=150.0, description="Порог reject-фильтра амплитуды, мкВ (строка причины в UI)"
     )
 
     warnings: list[str] = Field(default_factory=list)

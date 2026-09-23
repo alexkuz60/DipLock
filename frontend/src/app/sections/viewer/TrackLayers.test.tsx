@@ -11,11 +11,13 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import {
   ArtifactZoneLayer,
+  EpochFrameLayer,
   EpochLayer,
   LayersLegend,
   SelectedZoneCard,
   type LayerGeometry,
 } from './TrackLayers'
+import { epochFramesForChannel } from '@/shared/lib/viewerLayers'
 import type { ArtifactZone, EpochCell } from '@/shared/lib/viewerLayers'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
@@ -35,6 +37,7 @@ function cellsOf(patches: Partial<EpochCell>[] = []): EpochCell[] {
     durationSec: 2,
     rejected: false,
     manual: null,
+    rejectChannels: null,
     ...patch,
   }))
 }
@@ -130,9 +133,9 @@ describe('слой эпох', () => {
   it('рисует границы с номерами и не рисует линию начала записи', () => {
     // Эпохи по 5 с на 100 px → 50 px на эпоху: номера помещаются
     const cells: EpochCell[] = [
-      { index: 0, onsetSec: 0, durationSec: 5, rejected: false, manual: null },
-      { index: 1, onsetSec: 5, durationSec: 3, rejected: false, manual: null },
-      { index: 2, onsetSec: 8, durationSec: 2, rejected: false, manual: null },
+      { index: 0, onsetSec: 0, durationSec: 5, rejected: false, manual: null, rejectChannels: null },
+      { index: 1, onsetSec: 5, durationSec: 3, rejected: false, manual: null, rejectChannels: null },
+      { index: 2, onsetSec: 8, durationSec: 2, rejected: false, manual: null, rejectChannels: null },
     ]
     renderWithProviders(
       <EpochLayer cells={cells} geometry={GEOMETRY} showBoundaries showHatch={false} />,
@@ -152,6 +155,7 @@ describe('слой эпох', () => {
       durationSec: 0.1,
       rejected: false,
       manual: null,
+      rejectChannels: null,
     }))
     renderWithProviders(
       <EpochLayer cells={many} geometry={GEOMETRY} showBoundaries showHatch={false} />,
@@ -208,5 +212,29 @@ describe('панель выделенной зоны', () => {
 
     await user.click(screen.getByRole('button', { name: 'Скрыть детали зоны' }))
     expect(onClose).toHaveBeenCalled()
+  })
+})
+
+describe('рамки эпох-отбросов в треке канала-виновника', () => {
+  it('рисует рамку своей эпохи, клики не перехватывает', () => {
+    const cells = cellsOf([{ rejected: true, rejectChannels: ['F3'] }, {}])
+    renderWithProviders(<EpochFrameLayer cells={cells} geometry={GEOMETRY} />)
+
+    // Нумерация testid с 1 (как у номеров эпох); рамка — декоративная обводка
+    const frame = screen.getByTestId('epoch-frame-1')
+    expect(frame).toHaveStyle({ left: '0px', width: '20px' })
+    expect(frame.className).toContain('pointer-events-none')
+  })
+
+  it('не рисует рамки вне окна; эпоха без канала-виновника рамок не даёт', () => {
+    const cells = cellsOf([
+      { onsetSec: 20, durationSec: 2, rejected: true, rejectChannels: ['F3'] },
+      { rejected: true, rejectChannels: [] },
+    ])
+    renderWithProviders(<EpochFrameLayer cells={epochFramesForChannel(cells, 'F3')} geometry={GEOMETRY} />)
+
+    // Эпоха за правым кром окна обрезана, «без виновника» фильтром канала не прошла
+    expect(screen.queryByTestId('epoch-frame-1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('epoch-frame-2')).not.toBeInTheDocument()
   })
 })

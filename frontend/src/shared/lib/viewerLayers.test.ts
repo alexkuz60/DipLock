@@ -15,6 +15,9 @@ import {
   buildEpochCells,
   cellAtTime,
   demoLayers,
+  epochFramesForChannel,
+  epochMarkTitle,
+  epochRejectReason,
   formatSecondsRange,
   gridEpochLength,
   isEpochBlocked,
@@ -106,6 +109,8 @@ describe('нарезка эпох и ручные пометки (срез 2.10)
     const result: EdfViewerLayers = {
       artifacts: [],
       rejectedEpochs: [],
+      rejectChannels: {},
+      rejectThresholdUv: null,
       epochLengthMs: 2000,
       source: 'result',
     }
@@ -121,6 +126,8 @@ describe('нарезка эпох и ручные пометки (срез 2.10)
     const layers: EdfViewerLayers = {
       artifacts: [],
       rejectedEpochs: [4],
+      rejectChannels: { 4: ['F3'] },
+      rejectThresholdUv: 150,
       epochLengthMs: 2000,
       source: 'result',
     }
@@ -278,6 +285,15 @@ describe('фикстура слоёв', () => {
     }
   })
 
+  it('эпохи-отбросы несут каналы-виновники и порог reject-фильтра', () => {
+    const { rejectedEpochs, rejectChannels, rejectThresholdUv } = demoLayers(60, ['F3', 'F4'])
+    expect(rejectThresholdUv).toBe(150)
+    expect(Object.keys(rejectChannels).map(Number)).toEqual([...rejectedEpochs].sort((a, b) => a - b))
+    for (const names of Object.values(rejectChannels)) {
+      for (const name of names) expect(['F3', 'F4']).toContain(name)
+    }
+  })
+
   it('короткая запись не даёт зон за границей (нулевая длительность тоже)', () => {
     const { artifacts, rejectedEpochs } = demoLayers(0.5, [])
     for (const item of artifacts) {
@@ -302,5 +318,59 @@ describe('зоны развёрнутого трека по каналу (сре
   it('зона чужого канала на трек не попадает', () => {
     expect(zonesForChannel(zones, 'Fp1').map((zone) => zone.id)).toEqual(['z-3'])
     expect(zonesForChannel([], 'F3')).toEqual([])
+  })
+})
+
+describe('причины и каналы блокировки эпох', () => {
+  const cells = buildEpochCells(10, 2000, [1], [], { 1: ['F3', 'C3'] })
+
+  it('buildEpochCells привязывает каналы-виновники к отброшенным эпохам', () => {
+    expect(cells[1]!.rejectChannels).toEqual(['F3', 'C3'])
+    // Не отбрасывалась — каналов нет (null), а не пустой список
+    expect(cells[0]!.rejectChannels).toBeNull()
+    // Эпоха отброшена, но в слое нет каналов — «виновник не определён», эпоха не теряется
+    const tail = buildEpochCells(10, 2000, [1, 4], [], { 1: ['F3'] })
+    expect(tail[4]!.rejectChannels).toEqual([])
+  })
+
+  it('причина reject-фильтра называет порог и каналы, без канала — так и пишет', () => {
+    expect(epochRejectReason(cells[1]!, 150)).toBe('порог 150 мкВ, каналы: F3, C3')
+    expect(epochRejectReason(cells[1]!, null)).toBe('reject-фильтр, каналы: F3, C3')
+    expect(epochRejectReason({ ...cells[4]!, rejected: true, rejectChannels: [] }, 150)).toBe(
+      'порог 150 мкВ, канал-виновник не определён',
+    )
+  })
+
+  it('тултип эпохи — вердикт, причина и подсказка жеста', () => {
+    expect(epochMarkTitle(cells[1]!, 150)).toBe(
+      'Эпоха 2: 2.000–4.000 с — не в расчёте (порог 150 мкВ, каналы: F3, C3) · клик снимает правку',
+    )
+    expect(epochMarkTitle(cells[0]!, 150)).toBe(
+      'Эпоха 1: 0.000–2.000 с — в расчёте · клик блокирует',
+    )
+    // Ручная правка называет себя: снятая блокировка и поставленная вручную
+    const restored = buildEpochCells(10, 2000, [1], [{ onsetSec: 2, durationSec: 2, blocked: false }], {
+      1: ['F3'],
+    })
+    expect(epochMarkTitle(restored[1]!, 150)).toBe(
+      'Эпоха 2: 2.000–4.000 с — в расчёте (блокировка снята вручную) · клик блокирует',
+    )
+    const handBlocked = buildEpochCells(10, 2000, [], [
+      { onsetSec: 0, durationSec: 2, blocked: true },
+    ])
+    expect(epochMarkTitle(handBlocked[0]!, 150)).toBe(
+      'Эпоха 1: 0.000–2.000 с — не в расчёте (заблокирована вручную) · клик снимает правку',
+    )
+  })
+
+  it('рамки достаются трекам каналов-виновников, чужие и разблокированные не попадают', () => {
+    expect(epochFramesForChannel(cells, 'F3').map((cell) => cell.index)).toEqual([1])
+    expect(epochFramesForChannel(cells, 'C3').map((cell) => cell.index)).toEqual([1])
+    expect(epochFramesForChannel(cells, 'Fp1')).toEqual([])
+    // Снятая вручную блокировка рамки не оставляет: эпоха вернулась в расчёт
+    const released = buildEpochCells(10, 2000, [1], [{ onsetSec: 2, durationSec: 2, blocked: false }], {
+      1: ['F3'],
+    })
+    expect(epochFramesForChannel(released, 'F3')).toEqual([])
   })
 })

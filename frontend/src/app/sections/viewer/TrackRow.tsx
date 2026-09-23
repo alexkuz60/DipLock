@@ -30,10 +30,10 @@ import {
   makeTrackOptions,
   yRangeFor,
 } from '@/shared/lib/trackOptions'
-import type { ArtifactZone } from '@/shared/lib/viewerLayers'
+import type { ArtifactZone, EpochCell } from '@/shared/lib/viewerLayers'
 import type { ChannelQcStatus } from '@/shared/lib/channelQc'
 import { cx } from '@/shared/ui/cx'
-import { ArtifactZoneLayer } from './TrackLayers'
+import { ArtifactZoneLayer, EpochFrameLayer } from './TrackLayers'
 
 export type TrackRowProps = {
   name: string
@@ -64,6 +64,8 @@ export type TrackRowProps = {
   selectedZoneId?: string | null
   /** Клик по полосе зоны на развёрнутом треке */
   onZoneSelect?: (id: string | null) => void
+  /** Рамки эпох-отбросов этого канала (причины блокировки, `epochFramesForChannel`) */
+  epochFrames?: EpochCell[]
   /** Линия уровня: yPx — CSS-пиксели от верха чарта, levelUv — уровень в мкВ */
   levelMark?: { yPx: number; levelUv: number } | null
   /** Клик по развёрнутому треку отдаёт уровень сигнала под курсором */
@@ -89,6 +91,7 @@ export function TrackRow({
   zones = [],
   selectedZoneId = null,
   onZoneSelect,
+  epochFrames = [],
   levelMark = null,
   onPickLevel,
   wasDragged,
@@ -270,6 +273,18 @@ export function TrackRow({
         (п. 3). Рисуются поверх canvas строки, кликов не перехватывают (кроме полос
         зон — они кнопки, `ArtifactZoneLayer`), координаты те же, что у чарта.
       */}
+      {/*
+        Рамки эпох-отбросов этого канала (причины блокировки): reject-фильтр ронял
+        эпохи именно по нему. Дополняют штриховку `EpochLayer`, клики не берут.
+      */}
+      {epochFrames.length > 0 ? (
+        <div
+          className="pointer-events-none absolute top-0 bottom-0"
+          style={{ left: LABEL_WIDTH + 4, width }}
+        >
+          <EpochFrameLayer cells={epochFrames} geometry={{ window, trackWidth: width }} />
+        </div>
+      ) : null}
       {expanded && zones.length > 0 && onZoneSelect ? (
         <div
           className="pointer-events-none absolute top-0 bottom-0"

@@ -10,8 +10,9 @@
   отдельный бинарный эндпоинт (2.5) и здесь не дублируются;
 * ``artifacts`` — детекция артефактов на предподготовленном сигнале; зоны
   (onset/duration/каналы) уходят прямо в слои вьюера (2.6);
-* ``epochs`` — нарезка эпох без наложения + reject-фильтр; индексы
-  отброшенных эпох приходят в UI для штриховки.
+* ``epochs`` — нарезка эпох без наложения + reject-фильтр; индексы и
+  каналы-виновники отброшенных эпох приходят в UI (штриховка, причины
+  блокировки и рамки в треках каналов-виновников).
 
 Стадии раздельные: пересчёт фильтра не обесценивает найденные артефакты, а
 правка порогов не заставляет пересчитывать эпохи. Но каждая стадия считает
@@ -78,6 +79,18 @@ class PreprocessParams:
     # Стадия `epochs`
     epoch_length_ms: float = 2000.0
     reject_threshold_uv: float = 150.0
+
+
+def _reject_channels(log: tuple[str, ...] | list[str], ch_names: list[str]) -> list[str]:
+    """Каналы-виновники отбраковки эпохи из её записи ``epochs.drop_log`` MNE.
+
+    Амплитудный reject именует каналы, роняющие эпоху; рядом лежат служебные
+    записи (``TOO_SHORT`` — хвост нарезки, ``NO_DATA``/``USER`` — отсечённые
+    края и аннотации ``BAD_``) — виновниками считаем только реальные каналы
+    записи, у эпох без канала-виновника список пуст.
+    """
+    known = set(ch_names)
+    return [str(name) for name in log if str(name) in known]
 
 
 def _prepare_raw(
@@ -298,11 +311,19 @@ def run_preprocess(
         raise PreprocessError(str(exc)) from exc
 
     rejected = [index for index, log in enumerate(epochs.drop_log) if log]
+    ch_names = list(raw.ch_names)
     base.update({
         "epoch_length_ms": params.epoch_length_ms,
         "n_epochs_total": len(epochs.drop_log),
         "n_epochs_used": len(epochs),
         "rejected_epochs": rejected,
+        # Каналы-виновники — из drop_log MNE: UI показывает причины блокировки
+        # (порог + каналы) и рамки в соответствующих треках
+        "rejected_epoch_channels": [
+            {"index": index, "channels": _reject_channels(epochs.drop_log[index], ch_names)}
+            for index in rejected
+        ],
+        "reject_threshold_uv": params.reject_threshold_uv,
     })
     if rejected:
         warnings.append(

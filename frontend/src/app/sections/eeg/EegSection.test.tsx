@@ -330,6 +330,8 @@ describe('рабочая область раздела «ЭЭГ»', () => {
           { id: 'other', kind: 'peak_to_peak', onsetSec: 3, durationSec: 0.2, channels: ['O1'] },
         ],
         rejectedEpochs: [],
+        rejectChannels: {},
+        rejectThresholdUv: null,
         epochLengthMs: null,
         source: 'result',
       },

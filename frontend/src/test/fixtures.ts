@@ -318,6 +318,14 @@ export function preprocessResultFixture(
     n_epochs_total: stage === 'epochs' ? 15 : 0,
     n_epochs_used: stage === 'epochs' ? 13 : 0,
     rejected_epochs: stage === 'epochs' ? [2, 7] : [],
+    rejected_epoch_channels:
+      stage === 'epochs'
+        ? [
+            { index: 2, channels: ['F3', 'C3'] },
+            { index: 7, channels: [] },
+          ]
+        : [],
+    reject_threshold_uv: 150,
     warnings: [],
     duration_sec_calc: 0.4,
     ...overrides,

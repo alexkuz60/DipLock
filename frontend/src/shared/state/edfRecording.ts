@@ -118,7 +118,14 @@ export function layersFromResult(
   const base: EdfViewerLayers =
     previous && previous.source === 'result'
       ? previous
-      : { artifacts: [], rejectedEpochs: [], epochLengthMs: null, source: 'result' }
+      : {
+          artifacts: [],
+          rejectedEpochs: [],
+          rejectChannels: {},
+          rejectThresholdUv: null,
+          epochLengthMs: null,
+          source: 'result',
+        }
   const next: EdfViewerLayers = { ...base, source: 'result' }
 
   if (result.stage === 'artifacts') {
@@ -132,6 +139,14 @@ export function layersFromResult(
   }
   if (result.stage === 'epochs') {
     next.rejectedEpochs = result.rejected_epochs
+    // Каналы-виновники и порог reject-фильтра — причины блокировки: рамки в
+    // треках соответствующих каналов и строка в тултипе эпохи
+    const channelsByIndex: Record<number, string[]> = {}
+    for (const item of result.rejected_epoch_channels) {
+      channelsByIndex[item.index] = [...item.channels]
+    }
+    next.rejectChannels = channelsByIndex
+    next.rejectThresholdUv = result.reject_threshold_uv
     // Индексы отброшенных эпох имеют смысл только вместе с длиной нарезки, в
     // которой они получены: вьюер строит по ней свою сетку (срез 2.10).
     next.epochLengthMs = result.epoch_length_ms > 0 ? result.epoch_length_ms : null

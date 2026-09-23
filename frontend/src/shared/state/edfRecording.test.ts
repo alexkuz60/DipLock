@@ -275,20 +275,26 @@ describe('стадии предподготовки (срез 2.7)', () => {
         },
       ],
       rejectedEpochs: [5],
+      rejectChannels: { 5: ['F3'] },
+      rejectThresholdUv: 150,
       epochLengthMs: 500,
       source: 'result' as const,
     }
 
     const afterEpochs = layersFromResult(preprocessResultFixture('epochs'), previous)
     expect(afterEpochs.rejectedEpochs).toEqual([2, 7])
+    // Каналы-виновники и порог едут с той же стадией — причины блокировки в UI
+    expect(afterEpochs.rejectChannels).toEqual({ 2: ['F3', 'C3'], 7: [] })
+    expect(afterEpochs.rejectThresholdUv).toBe(150)
     // Индексы отброшенных эпох имеют смысл только с длиной своей нарезки (срез 2.10)
     expect(afterEpochs.epochLengthMs).toBe(2000)
     expect(afterEpochs.artifacts).toEqual(previous.artifacts)
 
     const afterArtifacts = layersFromResult(preprocessResultFixture('artifacts'), afterEpochs)
     expect(afterArtifacts.rejectedEpochs).toEqual([2, 7])
-    // Стадия артефактов не трогает нарезку эпох: длина остаётся прежней
+    // Стадия артефактов не трогает нарезку эпох: длина и причины остаются прежними
     expect(afterArtifacts.epochLengthMs).toBe(2000)
+    expect(afterArtifacts.rejectChannels).toEqual({ 2: ['F3', 'C3'], 7: [] })
     expect(afterArtifacts.artifacts.map((zone) => zone.kind)).toEqual([
       'zscore_outlier',
       'peak_to_peak',
@@ -308,6 +314,8 @@ describe('стадии предподготовки (срез 2.7)', () => {
         },
       ],
       rejectedEpochs: [1],
+      rejectChannels: {},
+      rejectThresholdUv: null,
       epochLengthMs: null,
       source: 'demo' as const,
     }

@@ -22,6 +22,7 @@ import { perfReset, perfStats } from '@/shared/lib/perf'
 import { uplotCharts, type MockUPlotChart } from '@/test/uplot'
 
 import { TrackStack } from './TrackStack'
+import { EPOCH_RULER_HEIGHT } from './TrackRulers'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 /** Короткий сигнал: 3 канала, 10 с, 100 Гц — арифметика в тестах проверяема. */
@@ -390,7 +391,9 @@ describe('вьюер треков', () => {
     // иначе при прокрутке треков вниз она «уезжала» на высоту видимой области
     // и обрывалась на середине стека (замечание ручного просмотра)
     expect(line.parentElement).toBe(content)
-    expect(line.className).toContain('inset-y-0')
+    // Линия тянется на весь стек треков — от низа шкалы эпох до низа стека
+    expect(line.style.top).toBe(`${EPOCH_RULER_HEIGHT}px`)
+    expect(line.style.bottom).toBe('0px')
 
     // Подпись времени липнет к верху видимой области: время видно при скролле
     const label = screen.getByTestId('cursor-time')
@@ -530,6 +533,8 @@ describe('слои результата вьюера', () => {
         { id: 'flat_line-1', kind: 'flat_line', onsetSec: 5, durationSec: 0.5, channels: [] },
       ],
       rejectedEpochs: [1, 3],
+      rejectChannels: { 1: ['F3'], 3: [] },
+      rejectThresholdUv: 150,
       epochLengthMs: null,
     }
   }
@@ -708,6 +713,84 @@ describe('слои результата вьюера', () => {
     expect(hatch.style.backgroundImage).toBe('')
   })
 
+  it('таймлайны эпох и секунд кликабельны: cursor: pointer и тоггл одиночным кликом', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000 })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    // Обе полосы — интерактивные оси с метками ролей
+    expect(screen.getByTestId('epoch-ruler')).toHaveAttribute('role', 'group')
+    expect(screen.getByTestId('time-ruler')).toHaveAttribute('role', 'group')
+    expect(screen.getByRole('group', { name: /Шкала эпох/ })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: /Шкала секунд/ })).toBeInTheDocument()
+
+    const cell = screen.getByTestId('epoch-ruler-1')
+    expect(cell.className).toContain('cursor-pointer')
+    expect(cell).toHaveAttribute('aria-pressed', 'false')
+
+    // Одиночный клик блокирует эпоху 1 (0–2 с), повторный возвращает вердикт алгоритма
+    await user.click(cell)
+    expect(useEdfRecording.getState().epochMarks).toEqual([
+      { onsetSec: 0, durationSec: 2, blocked: true },
+    ])
+    expect(screen.getByTestId('epoch-ruler-1')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('epoch-hatch-0')).toHaveAttribute('data-manual', 'blocked')
+
+    await user.click(screen.getByTestId('epoch-ruler-1'))
+    expect(useEdfRecording.getState().epochMarks).toEqual([])
+    expect(screen.queryByTestId('epoch-hatch-0')).not.toBeInTheDocument()
+  })
+
+  it('клик по секунде нижней шкалы тогглит эпоху, в которую она попадает', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000 })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    // Секунда 5 (5–6 с) — внутри эпохи 3 (4–6 с), её фикстура не отбрасывала
+    await user.click(screen.getByTestId('second-5'))
+    expect(useEdfRecording.getState().epochMarks).toEqual([
+      { onsetSec: 4, durationSec: 2, blocked: true },
+    ])
+  })
+
+  it('тултип ячейки шкалы объясняет причину: порог и каналы-виновники', () => {
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000 })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    // Эпоха 2 (2–4 с) отброшена фикстурой по каналу F3 при пороге 150 мкВ
+    expect(screen.getByTestId('epoch-ruler-2')).toHaveAttribute(
+      'title',
+      'Эпоха 2: 2.000–4.000 с — не в расчёте (порог 150 мкВ, каналы: F3) · клик снимает правку',
+    )
+    // Эпоха 4 отброшена без канала-виновника — причина говорит и об этом
+    expect(screen.getByTestId('epoch-ruler-4')).toHaveAttribute(
+      'title',
+      expect.stringContaining('канал-виновник не определён'),
+    )
+    // Секунда ссылается на свою эпоху с той же причиной
+    expect(screen.getByTestId('second-3')).toHaveAttribute(
+      'title',
+      expect.stringContaining('Эпоха 2:'),
+    )
+  })
+
+  it('рамки причин стоят в треках каналов-виновников и дополняют штриховку', () => {
+    paramsState({
+      visibleChannels: ['F3', 'F4'],
+      epochLengthMs: 2000,
+      droppedEpochsHatched: true,
+    })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    // Эпоха 2 (index 1) отброшена по F3: рамка — только в её треке, чужой трек чист
+    const frames = screen.getAllByTestId('epoch-frame-2')
+    expect(frames).toHaveLength(1)
+    expect(screen.getByTestId('track-F3').contains(frames[0])).toBe(true)
+    expect(screen.getByTestId('track-F4').querySelectorAll('[data-testid^="epoch-frame"]')).toHaveLength(0)
+    // Полновысотная штриховка той же эпохи остаётся — рамка её дополняет
+    expect(screen.getByTestId('epoch-hatch-1')).toBeInTheDocument()
+  })
+
   it('ручная пометка видна, даже когда штриховка эпох выключена', () => {
     paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000, droppedEpochsHatched: false })
     renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
@@ -830,6 +913,8 @@ describe('оверлеи развёрнутого трека (срез 5)', () =
         { id: 'flat_line-1', kind: 'flat_line', onsetSec: 5, durationSec: 0.5, channels: [] },
       ],
       rejectedEpochs: [],
+      rejectChannels: {},
+      rejectThresholdUv: null,
       epochLengthMs: null,
     }
   }

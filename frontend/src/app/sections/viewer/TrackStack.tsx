@@ -51,6 +51,7 @@ import {
   buildEpochCells,
   cellAtTime,
   demoLayers,
+  epochFramesForChannel,
   gridEpochLength,
   visibleZones,
   zonesForChannel,
@@ -68,6 +69,7 @@ import {
   SelectedZoneCard,
 } from './TrackLayers'
 import { ExportActions } from './ExportActions'
+import { EPOCH_RULER_HEIGHT, EpochRuler, TimeRuler } from './TrackRulers'
 import { TrackRow } from './TrackRow'
 
 export type TrackStackProps = {
@@ -169,9 +171,17 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   )
   const epochs = useMemo(
     () =>
-      buildEpochCells(signal.durationSec, epochLengthMs, layers?.rejectedEpochs ?? [], epochMarks),
+      buildEpochCells(
+        signal.durationSec,
+        epochLengthMs,
+        layers?.rejectedEpochs ?? [],
+        epochMarks,
+        layers?.rejectChannels ?? {},
+      ),
     [signal.durationSec, epochLengthMs, layers, epochMarks],
   )
+  /** Порог reject-фильтра слоя — для строки причины в тултипах эпох */
+  const rejectThresholdUv = layers?.rejectThresholdUv ?? null
   /**
    * Сколько ручных пометок поставил пользователь (Ctrl+двойной клик).
    *
@@ -457,6 +467,31 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     )
   }
 
+  /**
+   * Тоггл эпохи с таймлайнов (одиночный клик по шкале эпох или секунд): тот же
+   * `toggleEpochBlock`, что и Ctrl+двойной клик по треку, но интервал уже
+   * известен ячейке шкалы — эпоха под курсором не ищется.
+   */
+  const handleToggleEpoch = useCallback(
+    (interval: { onsetSec: number; durationSec: number }, rejectedByAlgorithm: boolean) => {
+      toggleEpochBlock(interval, rejectedByAlgorithm)
+    },
+    [toggleEpochBlock],
+  )
+
+  /** Клик по секунде нижней шкалы — тоггл эпохи, содержащей эту секунду */
+  const handleToggleEpochAt = useCallback(
+    (timeSec: number) => {
+      const cell = cellAtTime(epochs, timeSec)
+      if (!cell) return
+      toggleEpochBlock(
+        { onsetSec: cell.onsetSec, durationSec: cell.durationSec },
+        cell.rejected,
+      )
+    },
+    [epochs, toggleEpochBlock],
+  )
+
   /** Высота трека: развёрнутый занимает видимую область, обычный — TRACK_HEIGHT. */
   function trackHeight(name: string): number {
     return name === expandedChannel ? EXPANDED_TRACK_HEIGHT : TRACK_HEIGHT
@@ -522,7 +557,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         {manualMarkCount > 0 ? (
           <StatusPill
             tone="warn"
-            title="Пометки пользователя: интервалы на таймлайне записи (Ctrl+двойной клик по треку переключает блокировку эпохи под курсором). Пометка живёт на таймлайне, поэтому после смены длины эпохи она накрывает несколько эпох новой нарезки — штриховок может быть больше, чем пометок. «Снять» — в панели «Эпохи»."
+            title="Пометки пользователя: интервалы на таймлайне записи (клик по шкале эпох или секунд и Ctrl+двойной клик по треку переключают блокировку эпохи). Пометка живёт на таймлайне, поэтому после смены длины эпохи она накрывает несколько эпох новой нарезки — штриховок может быть больше, чем пометок. «Снять» — в панели «Эпохи»."
           >
             ручных пометок: {manualMarkCount}
           </StatusPill>
@@ -543,7 +578,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         <span className="ml-auto truncate">
           Колесо — прокрутка треков · зум — селект «Зум отрисовки ЭЭГ» · drag — панорама · клик —
           курсор · клик по названию — канал в разделе «ЭЭГ» · стрелка у названия — развернуть
-          трек · Ctrl+двойной клик — блокировка эпохи
+          трек · клик по шкале эпох/секунд — блокировка эпохи · Ctrl+двойной клик — то же
         </span>
       </div>
 
@@ -565,6 +600,17 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         onDoubleClick={handleTrackDoubleClick}
       >
         <div className="relative" data-testid="viewer-content">
+          {/*
+            Таймлайн эпох — липкая полоса-тумблер вверху стека: одиночный клик по
+            ячейке блокирует эпоху или снимает блокировку (тултип — причина:
+            reject-фильтр с порогом и каналами-виновниками либо ручная правка).
+          */}
+          <EpochRuler
+            cells={epochs}
+            geometry={geometry}
+            rejectThresholdUv={rejectThresholdUv}
+            onToggle={handleToggleEpoch}
+          />
           {visible.length === 0 ? (
             <p className="p-4 text-sm text-fg-2">
               Все каналы скрыты — включите их в панели «Каналы» справа.
@@ -600,6 +646,9 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 zones={name === expandedChannel ? expandedZones : []}
                 selectedZoneId={selectedZoneId}
                 onZoneSelect={handleZoneSelect}
+                epochFrames={
+                  params.droppedEpochsHatched ? epochFramesForChannel(epochs, name) : []
+                }
                 levelMark={name === expandedChannel ? levelMark : null}
                 onPickLevel={handlePickLevel}
                 wasDragged={handleWasDragged}
@@ -616,14 +665,15 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
           {showLayers ? (
             <div
               data-testid="track-layers"
-              className="pointer-events-none absolute inset-y-0"
-              style={{ left: LABEL_WIDTH + 4, width }}
+              className="pointer-events-none absolute"
+              style={{ left: LABEL_WIDTH + 4, width, top: EPOCH_RULER_HEIGHT, bottom: 0 }}
             >
               <EpochLayer
                 cells={epochs}
                 geometry={geometry}
                 showBoundaries={params.epochBoundaries}
                 showHatch={params.droppedEpochsHatched}
+                rejectThresholdUv={rejectThresholdUv}
               />
               {/*
                 Зоны артефактов — поверх всех треков, но пока трек не развёрнут: при
@@ -653,11 +703,14 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
               <div
                 aria-hidden
                 data-testid="cursor-line"
-                className="pointer-events-none absolute inset-y-0 w-px bg-fg-2/70"
-                style={{ left: cursor.xPx }}
+                className="pointer-events-none absolute w-px bg-fg-2/70"
+                style={{ left: cursor.xPx, top: EPOCH_RULER_HEIGHT, bottom: 0 }}
               />
-              <div className="pointer-events-none absolute inset-0">
-                <div className="sticky top-1 h-0">
+              <div
+                className="pointer-events-none absolute inset-x-0 bottom-0"
+                style={{ top: EPOCH_RULER_HEIGHT }}
+              >
+                <div className="sticky h-0" style={{ top: EPOCH_RULER_HEIGHT + 4 }}>
                   <div
                     data-testid="cursor-time"
                     className="tnum absolute rounded bg-bg-3 px-1.5 py-0.5 text-xs text-fg-0"
@@ -675,8 +728,14 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
             зоны не уезжают за верх области, когда пользователь прокручивает треки.
           */}
           {selectedZone ? (
-            <div className="pointer-events-none absolute inset-0">
-              <div className="sticky top-1 flex justify-end pr-2">
+            <div
+              className="pointer-events-none absolute inset-x-0 bottom-0"
+              style={{ top: EPOCH_RULER_HEIGHT }}
+            >
+              <div
+                className="sticky flex justify-end pr-2"
+                style={{ top: EPOCH_RULER_HEIGHT + 4 }}
+              >
                 <SelectedZoneCard
                   zone={selectedZone}
                   onClose={() => setSelectedZoneId(null)}
@@ -684,6 +743,21 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 />
               </div>
             </div>
+          ) : null}
+
+          {/*
+            Таймлайн секунд — полоса поверх оси времени последнего трека (ось
+            uPlot остаётся визуальным бэкграундом): клик по секунде тогглит
+            эпоху, в которую она попадает.
+          */}
+          {visible.length > 0 ? (
+            <TimeRuler
+              cells={epochs}
+              geometry={geometry}
+              durationSec={signal.durationSec}
+              rejectThresholdUv={rejectThresholdUv}
+              onToggleAt={handleToggleEpochAt}
+            />
           ) : null}
         </div>
       </div>

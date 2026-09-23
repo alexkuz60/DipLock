@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from app.core.config import settings
-from app.services.preprocess import PreprocessParams, run_preprocess
+from app.services.preprocess import PreprocessParams, _reject_channels, run_preprocess
 from app.services.recordings import recording_registry
 from tests.conftest import write_minimal_edf
 
@@ -411,3 +411,40 @@ def test_artifacts_stage_returns_qc_numbers(tmp_path, edf_file):
     assert 0.0 <= result["good_data_percent"] <= 100.0
     assert isinstance(result["artifact_share_by_kind"], dict)
     assert all(name in result["channels"] for name in result["bad_channels"])
+
+
+def test_reject_channels_filters_service_drop_log_entries():
+    """Служебные записи drop_log виновниками не считаются — только каналы записи."""
+    names = ["Fp1", "Fp2"]
+    assert _reject_channels(("Fp2", "TOO_SHORT"), names) == ["Fp2"]
+    assert _reject_channels(("NO_DATA", "Fp1"), names) == ["Fp1"]
+    assert _reject_channels(("USER",), names) == []
+    assert _reject_channels(("EQUALIZED_COUNTS",), names) == []
+    assert _reject_channels((), names) == []
+
+
+def test_epochs_stage_returns_reject_channels_and_threshold(tmp_path, spike_edf):
+    """Каналы-виновники и порог reject-фильтра приходят вместе с индексами эпох.
+
+    Детекторы глушим огромными порогами (flat-line — отрицательным: размах не
+    бывает меньше нуля), чтобы амплитудный reject был единственной причиной:
+    MNE именует виновника в ``drop_log``, и это имя едет в UI для рамок в треке
+    канала и строки причины. Всплеск 250 мкВ на первом канале роняет свою эпоху,
+    соседние остаются — «все отброшены» дал бы ошибку стадии.
+    """
+    recording = _register(tmp_path, spike_edf)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(
+            stage="epochs", epoch_length_ms=1000.0, reject_threshold_uv=150.0,
+            z_threshold=1e9, pp_threshold_uv=1e9, flat_line_uv=-1.0,
+        ),
+        progress=lambda *_, **__: None,
+    )
+
+    assert result["reject_threshold_uv"] == 150.0
+    by_index = {item["index"]: item["channels"] for item in result["rejected_epoch_channels"]}
+    assert set(by_index) == set(result["rejected_epochs"])
+    # Всплеск целиком в эпохе 6 (индекс 5), кадры 1260–1490: виновник — канал 0
+    assert by_index == {5: [settings.standard_channels[0]]}

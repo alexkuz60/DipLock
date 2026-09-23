@@ -103,11 +103,14 @@ export function EpochLayer({
   geometry,
   showBoundaries,
   showHatch,
+  rejectThresholdUv = null,
 }: {
   cells: EpochCell[]
   geometry: LayerGeometry
   showBoundaries: boolean
   showHatch: boolean
+  /** Порог reject-фильтра слоя — для причины в тултипе эпохи (null — не задан) */
+  rejectThresholdUv?: number | null
 }) {
   const spacing =
     cells.length > 1
@@ -131,7 +134,7 @@ export function EpochLayer({
         )
         if (right <= 0 || left >= geometry.trackWidth) return null
         const clippedLeft = Math.max(0, left)
-        const title = epochMarkTitle(cell)
+        const title = epochMarkTitle(cell, rejectThresholdUv)
         const manual = cell.manual
         return (
           <div
@@ -182,6 +185,49 @@ export function EpochLayer({
             )
           })
         : null}
+    </>
+  )
+}
+
+/**
+ * Рамки эпох-отбросов в треке канала-виновника (причины блокировки): reject-
+ * фильтр ронял эти эпохи именно по этому каналу (`drop_log` MNE →
+ * `EpochCell.rejectChannels`). Рамка **дополняет** полновысотную штриховку
+ * `EpochLayer`: штриховка — факт блокировки по всей высоте стека, рамка — какой
+ * канал её вызвал. Декоративна: клики и тултипы причин живут на таймлайнах
+ * (`TrackRulers`), треки клик остаётся курсором.
+ */
+export function EpochFrameLayer({
+  cells,
+  geometry,
+}: {
+  cells: EpochCell[]
+  geometry: LayerGeometry
+}) {
+  return (
+    <>
+      {cells.map((cell) => {
+        const left = timeToX(cell.onsetSec, geometry.window, geometry.trackWidth)
+        const right = timeToX(
+          cell.onsetSec + cell.durationSec,
+          geometry.window,
+          geometry.trackWidth,
+        )
+        if (right <= 0 || left >= geometry.trackWidth) return null
+        const clippedLeft = Math.max(0, left)
+        return (
+          <div
+            key={cell.index}
+            aria-hidden
+            data-testid={`epoch-frame-${cell.index + 1}`}
+            className="pointer-events-none absolute inset-y-0 rounded-[3px] border-2 border-danger/80"
+            style={{
+              left: clippedLeft,
+              width: Math.max(2, Math.min(geometry.trackWidth, right) - clippedLeft),
+            }}
+          />
+        )
+      })}
     </>
   )
 }

@@ -39,6 +39,12 @@ export type EpochCell = {
   rejected: boolean
   /** Пометка пользователя (`null` — правок нет; см. `toggleEpochMark`) */
   manual: EpochManualVerdict | null
+  /**
+   * Каналы-виновники reject-фильтра (причина блокировки): `null` — эпоху
+   * алгоритм не отбрасывал, `[]` — отбрасывал без именованного канала
+   * (отсечённый край, аннотация BAD_), иначе — каналы из `drop_log` MNE.
+   */
+  rejectChannels: string[] | null
 }
 
 /**
@@ -68,6 +74,10 @@ export type EpochMark = {
 export type EdfViewerLayers = {
   artifacts: ArtifactZone[]
   rejectedEpochs: number[]
+  /** Каналы-виновники отбраковки по индексам эпох (рамки в треках, причины) */
+  rejectChannels: Record<number, string[]>
+  /** Порог reject-фильтра, мкВ (строка причины в тултипе); `null` — не задан */
+  rejectThresholdUv: number | null
   epochLengthMs: number | null
   /** Откуда слои: фикстура разработки или результат задачи (срез 2.7) */
   source: 'demo' | 'result'
@@ -179,14 +189,44 @@ export function cellAtTime(cells: readonly EpochCell[], timeSec: number): EpochC
   return null
 }
 
-/** Подпись эпохи: решение алгоритма, ручная блокировка или снятая блокировка. */
-export function epochMarkTitle(cell: EpochCell): string {
+/**
+ * Причина reject-фильтра для тултипа: порог амплитуды и каналы-виновники.
+ * Каналы приходят из `drop_log` MNE; у эпох отсечённого края или отбраковки по
+ * аннотации BAD_ виновника может не быть — так и пишем.
+ */
+export function epochRejectReason(
+  cell: EpochCell,
+  rejectThresholdUv: number | null = null,
+): string {
+  const threshold =
+    rejectThresholdUv != null
+      ? `порог ${Math.round(rejectThresholdUv * 10) / 10} мкВ`
+      : 'reject-фильтр'
+  const channels = cell.rejectChannels ?? []
+  const who = channels.length
+    ? `каналы: ${channels.join(', ')}`
+    : 'канал-виновник не определён'
+  return `${threshold}, ${who}`
+}
+
+/**
+ * Подпись эпохи для тултипа: итоговый вердикт, причина reject-фильтра (порог +
+ * каналы-виновники) и подсказка жеста. Причина показывается, пока эпоха
+ * заблокирована решением алгоритма; ручная правка называет себя.
+ */
+export function epochMarkTitle(
+  cell: EpochCell,
+  rejectThresholdUv: number | null = null,
+): string {
   const range = formatSecondsRange(cell.onsetSec, cell.durationSec)
-  if (cell.manual === 'blocked') return `Эпоха ${cell.index + 1}: заблокирована вручную · ${range}`
-  if (cell.manual === 'allowed') {
-    return `Эпоха ${cell.index + 1}: блокировка reject-фильтра снята вручную · ${range}`
+  if (isEpochBlocked(cell.rejected, cell.manual)) {
+    const reason = cell.rejected
+      ? epochRejectReason(cell, rejectThresholdUv)
+      : 'заблокирована вручную'
+    return `Эпоха ${cell.index + 1}: ${range} — не в расчёте (${reason}) · клик снимает правку`
   }
-  return `Эпоха ${cell.index + 1}: отброшена reject-фильтром · ${range}`
+  const restored = cell.manual === 'allowed' ? ' (блокировка снята вручную)' : ''
+  return `Эпоха ${cell.index + 1}: ${range} — в расчёте${restored} · клик блокирует`
 }
 
 /**
@@ -201,7 +241,8 @@ export const MAX_EPOCH_CELLS = 2000
  * Эпохи покрывают запись подряд; последняя может быть короче (хвост сессии) —
  * так же, как нарезает `epoch_segmenter.py` на бэкенде.
  *
- * `rejected` — индексы отброшенных эпох **этой** нарезки, `marks` — ручные
+ * `rejected` — индексы отброшенных эпох **этой** нарезки, `rejectChannels` —
+ * их каналы-виновники по индексам (причины блокировки), `marks` — ручные
  * пометки пользователя (интервалы на таймлайне): они раскладываются по сетке
  * пересечением, поэтому переживают смену длины эпохи.
  */
@@ -210,6 +251,7 @@ export function buildEpochCells(
   epochLengthMs: number,
   rejected: readonly number[] = [],
   marks: readonly EpochMark[] = [],
+  rejectChannels: Readonly<Record<number, string[]>> = {},
 ): EpochCell[] {
   const lengthSec = Math.max(MIN_EPOCH_SEC, epochLengthMs / 1000)
   const totalSec = Math.max(0, durationSec)
@@ -223,11 +265,13 @@ export function buildEpochCells(
     const onsetSec = index * lengthSec
     const durationSecCell = Math.min(lengthSec, totalSec - onsetSec)
     const interval = { onsetSec, durationSec: durationSecCell }
+    const isRejected = rejectedSet.has(index)
     cells.push({
       index,
       ...interval,
-      rejected: rejectedSet.has(index),
+      rejected: isRejected,
       manual: marks.length ? manualVerdict(marks, interval) : null,
+      rejectChannels: isRejected ? (rejectChannels[index] ?? []) : null,
     })
   }
   return cells
@@ -253,6 +297,24 @@ export function zonesForChannel(
 ): ArtifactZone[] {
   return zones.filter(
     (zone) => zone.channels.length === 0 || zone.channels.includes(channel),
+  )
+}
+
+/**
+ * Эпохи, заблокированные «из-за» канала трека: reject-фильтр отбрасывал их по
+ * этому каналу и вердикт ещё действует (рамка в треке показывает причину).
+ * Эпохи с ручной блокировкой канала-виновника не имеют — их несут рамки правки
+ * в штриховке (`EpochLayer`).
+ */
+export function epochFramesForChannel(
+  cells: readonly EpochCell[],
+  channel: string,
+): EpochCell[] {
+  return cells.filter(
+    (cell) =>
+      cell.rejected &&
+      isEpochBlocked(cell.rejected, cell.manual) &&
+      (cell.rejectChannels ?? []).includes(channel),
   )
 }
 
@@ -377,5 +439,20 @@ export function demoLayers(
   }
   if (rejectedEpochs.length === 0) rejectedEpochs.push(Math.min(2, approxCells - 1))
 
-  return { artifacts, rejectedEpochs, epochLengthMs: null, source: 'demo' }
+  // Каналы-виновники отброшенных эпох — 1–2 из пула, иногда пустые (отсечённый
+  // край, аннотация BAD_): причины в тултипах должны уметь и «канал-виновник не
+  // определён». Порог reject-фильтра фикстуры — дефолтные 150 мкВ.
+  const rejectChannels: Record<number, string[]> = {}
+  for (const index of rejectedEpochs) {
+    rejectChannels[index] = rand() < 0.25 ? [] : pickChannels(pool, rand, 2)
+  }
+
+  return {
+    artifacts,
+    rejectedEpochs,
+    rejectChannels,
+    rejectThresholdUv: 150,
+    epochLengthMs: null,
+    source: 'demo',
+  }
 }
