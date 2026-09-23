@@ -280,6 +280,13 @@ const ZONE_TOKENS: Record<ArtifactKind, { token: string; fallback: string }> = {
   zscore_outlier: { token: '--color-artifact-zscore', fallback: '#ff7b72' },
   peak_to_peak: { token: '--color-artifact-pp', fallback: '#ffb454' },
   flat_line: { token: '--color-artifact-flat', fallback: '#8b949e' },
+  clipping: { token: '--color-artifact-clipping', fallback: '#f778ba' },
+  break: { token: '--color-artifact-break', fallback: '#39c5cf' },
+  electrode_pop: { token: '--color-artifact-pop', fallback: '#e3b341' },
+  muscle_emg: { token: '--color-artifact-muscle', fallback: '#2f81f7' },
+  line_noise: { token: '--color-artifact-line', fallback: '#3fb950' },
+  ocular: { token: '--color-artifact-ocular', fallback: '#d29922' },
+  ecg: { token: '--color-artifact-ecg', fallback: '#db61a2' },
   ica_eog: { token: '--color-artifact-ica', fallback: '#a78bfa' },
 }
 

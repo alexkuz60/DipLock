@@ -56,6 +56,13 @@ export function canvasTheme(doc: Document = document): CanvasTheme {
     zscore_outlier: '#ff7b72',
     peak_to_peak: '#ffb454',
     flat_line: '#8b949e',
+    clipping: '#f778ba',
+    break: '#39c5cf',
+    electrode_pop: '#e3b341',
+    muscle_emg: '#2f81f7',
+    line_noise: '#3fb950',
+    ocular: '#d29922',
+    ecg: '#db61a2',
     ica_eog: '#a78bfa',
   }
   const artifacts = {} as Record<ArtifactKind, string>

@@ -6,7 +6,6 @@
 """
 from app.schemas.analysis import (
     AnalyzeResponse,
-    ArtifactTypes,
     BestFitDipole,
     BrodmannAreaOut,
     BrodmannIndexOut,
@@ -24,7 +23,6 @@ from app.schemas.analysis import (
 
 __all__ = [
     "AnalyzeResponse",
-    "ArtifactTypes",
     "BestFitDipole",
     "BrodmannAreaOut",
     "BrodmannIndexOut",

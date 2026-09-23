@@ -26,7 +26,19 @@ import {
   zonesForChannel,
 } from '@/shared/lib/viewerLayers'
 
-const VISIBLE_ALL = { zscore_outlier: true, peak_to_peak: true, flat_line: true, ica_eog: true }
+const VISIBLE_ALL = {
+  zscore_outlier: true,
+  peak_to_peak: true,
+  flat_line: true,
+  clipping: true,
+  break: true,
+  electrode_pop: true,
+  muscle_emg: true,
+  line_noise: true,
+  ocular: true,
+  ecg: true,
+  ica_eog: true,
+}
 
 function zone(overrides: Partial<ArtifactZone> = {}): ArtifactZone {
   return {
@@ -204,6 +216,13 @@ describe('видимость и подписи зон', () => {
       zscore_outlier: 1,
       peak_to_peak: 0,
       flat_line: 1,
+      clipping: 0,
+      break: 0,
+      electrode_pop: 0,
+      muscle_emg: 0,
+      line_noise: 0,
+      ocular: 0,
+      ecg: 0,
       ica_eog: 1,
     })
   })
@@ -233,13 +252,18 @@ describe('фикстура слоёв', () => {
     }
   })
 
-  it('EOG-компонент ICA бьёт по всему монтажу, остальные — по подмножеству', () => {
+  it('ICA и сетевой шум бьют по всему монтажу, остальные — по подмножеству', () => {
     const channels = ['F3', 'F4', 'C3', 'C4']
     const { artifacts } = demoLayers(60, channels)
 
     const ica = artifacts.find((item) => item.kind === 'ica_eog')!
     expect(ica.channels).toEqual(channels)
-    for (const item of artifacts.filter((zone) => zone.kind !== 'ica_eog')) {
+    for (const item of artifacts.filter((zone) => zone.kind === 'line_noise')) {
+      expect(item.channels).toEqual(channels)
+    }
+    for (const item of artifacts.filter(
+      (zone) => zone.kind !== 'ica_eog' && zone.kind !== 'line_noise',
+    )) {
       expect(item.channels.length).toBeLessThanOrEqual(3)
       for (const name of item.channels) expect(channels).toContain(name)
     }

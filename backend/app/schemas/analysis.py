@@ -78,18 +78,25 @@ class EpochSummary(BaseModel):
     )
 
 
-class ArtifactTypes(BaseModel):
-    """Счётчики артефактов по типам детекции."""
-
-    zscore_outlier: int = 0
-    peak_to_peak: int = 0
-    flat_line: int = 0
-    ica_eog: int = 0
+# Счётчики артефактов по видам — открытый словарь `artifact_types: dict[str, int]`
+# (модель ArtifactTypes удалена: новый детектор не должен ломать контракт)
 
 
 # Тип артефакта и стадия предподготовки (срез 2.7): те же строки, что в UI
 # (`shared/lib/artifacts.ts` и `shared/state/edfParams.ts` STAGE_PARAM_KEYS).
-ArtifactKind = Literal["zscore_outlier", "peak_to_peak", "flat_line", "ica_eog"]
+ArtifactKind = Literal[
+    "zscore_outlier",
+    "peak_to_peak",
+    "flat_line",
+    "clipping",
+    "break",
+    "electrode_pop",
+    "muscle_emg",
+    "line_noise",
+    "ocular",
+    "ecg",
+    "ica_eog",
+]
 PreprocessStage = Literal["filter", "artifacts", "epochs"]
 
 
@@ -123,6 +130,36 @@ class ChannelQcOut(BaseModel):
     )
 
 
+class CleanReportOut(BaseModel):
+    """Отчёт очистки сигнала (стадия ``filter``, этап 4): что сделано и «до/после».
+
+    Одно число амплитуды (p95 |x| по монтажу, мкВ) до и после — минимальная
+    оценка «стало ли лучше» без полного отчёта спектральных метрик (L5-lite).
+    """
+
+    method: str = Field(default="none", description="Метод очистки: none | ica | ssp")
+    notch_harmonics: int = Field(default=0, description="Сколько гармоник notch применено")
+    interpolated_channels: list[str] = Field(
+        default_factory=list, description="Интерполированные bad-каналы",
+    )
+    n_components_removed: int = Field(
+        default=0, description="Удалено компонент ICA (ica.apply)",
+    )
+    removed_components: list[int] = Field(
+        default_factory=list, description="Индексы удалённых компонент ICA",
+    )
+    n_projectors: int = Field(default=0, description="Применено SSP-проекторов")
+    amplitude_p95_uv_before: float | None = Field(
+        default=None, description="p95 |x| по монтажу до очистки, мкВ",
+    )
+    amplitude_p95_uv_after: float | None = Field(
+        default=None, description="p95 |x| по монтажу после очистки, мкВ",
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Что не применилось и почему (тексты для UI)",
+    )
+
+
 class PreprocessResult(BaseModel):
     """Результат задачи предподготовки записи (стадия ``preprocess``).
 
@@ -149,7 +186,10 @@ class PreprocessResult(BaseModel):
 
     # Стадия `artifacts`: зоны для слоёв вьюера (срез 2.6)
     artifacts: list[ArtifactZoneOut] = Field(default_factory=list)
-    artifact_types: ArtifactTypes = Field(default_factory=ArtifactTypes)
+    artifact_types: dict[str, int] = Field(
+        default_factory=dict,
+        description="Счётчики зон по видам артефактов (ключи — `ArtifactKind`)",
+    )
     ica_applied: bool = False
     channel_qc: list[ChannelQcOut] = Field(
         default_factory=list,
@@ -161,6 +201,23 @@ class PreprocessResult(BaseModel):
     qc_bad_share: float = Field(
         default=0.20, description="Порог «плохо» для доли времени в артефактах"
     )
+
+    # Числа QC (этап «числа QC»): приходят со стадией `artifacts`
+    good_data_percent: float = Field(
+        default=100.0,
+        description="Доля чистых данных, % (100 минус средняя доля времени в зонах)",
+    )
+    artifact_share_by_kind: dict[str, float] = Field(
+        default_factory=dict, description="Средняя по каналам доля времени в зонах по видам",
+    )
+    line_noise_level: float | None = Field(
+        default=None, description="Уровень сетевого шума: пик 50/60 Гц к фону (≥1)",
+    )
+    bad_channels: list[str] = Field(
+        default_factory=list, description="Авто-список плохих каналов (для интерполяции)",
+    )
+    # Очистка (этап 4): заполняется стадией `filter`, когда заданы опции очистки
+    clean: CleanReportOut | None = None
 
     # Стадия `epochs`: сетка эпох и отброшенные reject-фильтром
     epoch_length_ms: float = 0.0
@@ -684,7 +741,10 @@ class AnalyzeResponse(BaseModel):
     n_epochs_used: int = Field(description="Сколько эпох прошло reject-фильтр")
     n_epochs_dropped: int = Field(default=0, description="Отброшено reject-фильтром")
     n_artifacts: int
-    artifact_types: ArtifactTypes
+    artifact_types: dict[str, int] = Field(
+        default_factory=dict,
+        description="Счётчики артефактов по видам детекции (ключи — `ArtifactKind`)",
+    )
     frequency_powers: dict[str, float]
     surface: SurfaceRef
     dipoles: list[DipoleFit]
@@ -749,6 +809,22 @@ class ArtifactThresholds(BaseModel):
     flat_line_threshold_uv: float
     flat_line_min_duration_ms: float
     reject_threshold_uv: float
+    muscle_min_duration_ms: float = Field(
+        description="Минимальная длительность мышечного (ЭМГ) эпизода, мс",
+    )
+    break_min_duration_ms: float = Field(
+        description="Минимальная длительность разрыва записи, мс",
+    )
+    line_noise_ratio: float = Field(
+        description="Во сколько раз пик 50/60 Гц должен превышать соседние частоты",
+    )
+    clipping_share: float = Field(
+        description="Доля отсчётов у предела АЦП в окне, с которой объявляется клиппинг",
+    )
+    pop_step_uv: float = Field(description="Шаг ступеньки всплеска электрода (pop), мкВ")
+    bad_channel_z: float = Field(
+        description="Порог z-score дисперсии канала для списка bad (плохие каналы)",
+    )
 
 
 class MetaResponse(BaseModel):

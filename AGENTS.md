@@ -58,7 +58,7 @@ backend/app/
 │                      # marching_squares.py (изолинии маски без зависимостей)
 ├── services/          # КАЖДЫЙ модуль = один шаг пайплайна
 │   ├── edf_loader.py  # read_raw_edf → pick/montage/reference/filter
-│   ├── artifact_detector.py, epoch_segmenter.py, bandpass_filter.py
+│   ├── artifact_detector.py, artifact_cleaner.py, epoch_segmenter.py, bandpass_filter.py
 │   ├── dipole_fitter.py     # точный фитинг (эксперим.): mne.fit_dipole по эпохам, цена в /meta
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
@@ -128,6 +128,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 |---|---|
 | `concept.md`, `docs/data-blocks.md` | зачем проект (миссия, критерии метода, способности) и кирпичики данных (структура до БД) |
 | `docs/rules/edf-viewer.md` | вьюер треков: интерактив, разметка эпох, оверлеи |
+| `docs/rules/artifacts.md` | артефакты: каталог 11 видов, правило BAD_, числа QC, MNE-only-очистка |
 | `docs/rules/dipoles.md` | раздел «Диполи»: проекции, быстрый расчёт, воспроизведение, таблица, формы фильтров |
 | `docs/rules/atlas-mri.md` | срез МРТ, анатомические структуры и поля Бродмана |
 | `docs/rules/eeg.md` | раздел «ЭЭГ»: трек канала и спектрограмма |

@@ -179,7 +179,8 @@ def test_openapi_documents_response_schemas(client):
     schemas = spec["components"]["schemas"]
     for name in (
         "AnalyzeResponse", "EpochSummary", "DipoleFit", "TrajectoryPoint", "BestFitDipole",
-        "ArtifactTypes", "PipelineInfo", "SurfaceRef", "SurfaceOut",
+        "ArtifactThresholds", "PreprocessResult", "ArtifactZoneOut",
+        "PipelineInfo", "SurfaceRef", "SurfaceOut",
         "BrodmannAreaOut", "BrodmannLabelsOut", "JobCreated", "JobStatus", "MetaResponse",
     ):
         assert name in schemas, f"в OpenAPI нет схемы {name}"

@@ -176,6 +176,23 @@ class Settings(BaseSettings):
     # полосового сигнала ближе к нулю, чем 5 мкВ.
     flat_line_window_ms: float = Field(default=100.0)
 
+    # Новые детекторы артефактов (11 видов, этап «поиск + QC»): пороги каждого
+    # вида отдельно, чтобы правка одного не трогала остальные (DRY с /meta).
+    # Мышечный (ЭМГ): минимальная длительность эпизода (annotate_muscle_zscore).
+    muscle_min_duration_ms: float = Field(default=100.0)
+    # Разрыв записи: минимальная длительность NaN/пропуска, с которого он зона.
+    break_min_duration_ms: float = Field(default=500.0)
+    # Сетевой шум: во сколько раз пик 50/60 Гц (+ гармоники) выше соседних частот.
+    line_noise_ratio: float = Field(default=4.0)
+    # Частота сети для детектора/нотча (в РФ/ЕС 50 Гц, в США 60 Гц).
+    line_noise_hz: float = Field(default=50.0)
+    # Клиппинг: доля отсчётов у предела АЦП в окне, с которой объявляется насыщение.
+    clipping_share: float = Field(default=0.05)
+    # Всплеск электрода (pop): минимальный скачок ступеньки, мкВ.
+    pop_step_uv: float = Field(default=80.0)
+    # Плохие каналы: z-score дисперсии канала (медиана/MAD по монтажу).
+    bad_channel_z: float = Field(default=3.5)
+
     # QC-индикаторы каналов вьюера (шаг 0.4): доля времени канала в зонах
     # артефактов. < warn — «ок», warn..bad — «внимание», >= bad — «плохо».
     qc_channel_warn_share: float = Field(default=0.05)

@@ -187,7 +187,7 @@ describe('рабочая область раздела EDF', () => {
     // Демо-режим — единственное место со слоями-фикстурой: зоны и легенда видны
     expect(useEdfRecording.getState().layers?.source).toBe('demo')
     expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
-    expect(screen.getAllByTestId(/^legend-/)).toHaveLength(4)
+    expect(screen.getAllByTestId(/^legend-/)).toHaveLength(11)
     const urls = fetchMock.mock.calls.map(([url]) => String(url))
     expect(urls.every((url) => url.includes('/meta'))).toBe(true)
   })

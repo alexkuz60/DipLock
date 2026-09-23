@@ -11,7 +11,7 @@
  */
 import { create } from 'zustand'
 import { api, apiErrorText } from '@/shared/api/client'
-import type { ChannelQc, PreprocessResult, RecordingMeta } from '@/shared/api/types'
+import type { ChannelQc, CleanReport, PreprocessResult, RecordingMeta } from '@/shared/api/types'
 import { uploadRecording } from '@/shared/api/upload'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
 import { makeDemoSignal } from '@/shared/lib/demoSignal'
@@ -87,6 +87,12 @@ export function buildPreprocessForm(stage: RecalcStage, params: EdfParams): Form
   if (params.reference === 'custom' && params.visibleChannels.length) {
     form.set('reference_channels', params.visibleChannels.join(','))
   }
+  // Очистка (этап 4) — параметры стадии `filter`: она меняет сигнал подготовки
+  form.set('notch_harmonics', String(params.notchHarmonics))
+  if (params.badChannels.trim()) form.set('bad_channels', params.badChannels.trim())
+  form.set('interpolate_bads', String(params.interpolateBads))
+  form.set('clean_method', params.cleanMethod)
+  form.set('ica_n_components', String(params.icaNComponents))
 
   if (stage === 'artifacts') {
     form.set('z_threshold', String(params.zScoreThreshold))
@@ -176,6 +182,13 @@ export type StageJob = {
 /** Команды навигации по окну вьюера из тулс-хедера (срез 2.9) */
 export type EdfNavCommand = 'start' | 'prev' | 'next' | 'end'
 
+/** Числа QC стадии artifacts для панели (чистые данные, 50 Гц, bad-каналы) */
+export type QcSummary = {
+  goodDataPercent: number
+  lineNoiseLevel: number | null
+  badChannels: string[]
+}
+
 export type EdfRecordingState = {
   /** Паспорт загруженной записи (null — не загружена) */
   recording: RecordingMeta | null
@@ -212,6 +225,10 @@ export type EdfRecordingState = {
    * живёт при записи, сбрасывается вместе с ней.
    */
   channelQc: Record<string, ChannelQc> | null
+  /** Числа QC стадии artifacts: чистые данные, уровень 50 Гц, авто-bad-каналы */
+  qcSummary: QcSummary | null
+  /** Отчёт очистки стадии filter (ICA/SSP/интерполяция, метрика до/после) */
+  cleanReport: CleanReport | null
   /** Пороги статуса иконок из результата стадии (конфиг сервера) */
   channelQcThresholds: { warn: number; bad: number }
   /**
@@ -281,6 +298,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   epochMarks: [],
   stageJobs: {},
   channelQc: null,
+  qcSummary: null,
+  cleanReport: null,
   channelQcThresholds: { warn: 0.05, bad: 0.2 },
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
@@ -440,11 +459,24 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         result.stage === 'artifacts'
           ? { warn: result.qc_warn_share, bad: result.qc_bad_share }
           : get().channelQcThresholds
+      // Числа QC (good_data_percent, 50 Гц, bad-каналы) и отчёт очистки — в
+      // панель раздела (легенда артефактов и блок «Фильтры и референс»)
+      const qcSummary =
+        result.stage === 'artifacts'
+          ? {
+              goodDataPercent: result.good_data_percent,
+              lineNoiseLevel: result.line_noise_level,
+              badChannels: result.bad_channels,
+            }
+          : get().qcSummary
+      const cleanReport = result.stage === 'filter' ? result.clean : get().cleanReport
 
       set((state) => ({
         layers: layersFromResult(result, state.layers),
         channelQc,
         channelQcThresholds,
+        qcSummary,
+        cleanReport,
         stageJobs: {
           ...state.stageJobs,
           [stage]: {
@@ -499,6 +531,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       epochMarks: [],
       stageJobs: {},
       channelQc: null,
+      qcSummary: null,
+      cleanReport: null,
       passport: { ...EMPTY_PASSPORT },
     })
     // Выбор каналов и результат предподготовки привязаны к записи

@@ -48,6 +48,12 @@ export const metaFixture: MetaResponse = {
     flat_line_threshold_uv: 1,
     flat_line_min_duration_ms: 200,
     reject_threshold_uv: 150,
+    muscle_min_duration_ms: 100,
+    break_min_duration_ms: 500,
+    line_noise_ratio: 4,
+    clipping_share: 0.05,
+    pop_step_uv: 80,
+    bad_channel_z: 3.5,
   },
   dipole_fit_decim: 5,
   dipole_fit_max_epochs: 0,
@@ -276,6 +282,11 @@ export function preprocessResultFixture(
     reference: 'average',
     sfreq: recordingFixture.sfreq,
     duration_sec: recordingFixture.duration_sec,
+    good_data_percent: 100,
+    artifact_share_by_kind: {},
+    line_noise_level: null,
+    bad_channels: [],
+    clean: null,
     artifacts:
       stage === 'artifacts'
         ? [

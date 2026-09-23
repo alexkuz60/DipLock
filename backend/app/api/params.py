@@ -16,6 +16,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.schemas.analysis import PreprocessStage
+from app.services.artifact_cleaner import CLEAN_METHODS
 from app.services.dipole_scanner import DipoleRefineParams, DipoleScanParams
 from app.services.preprocess import PreprocessParams
 from app.services.spectral import SpectrumParams
@@ -89,10 +90,34 @@ def preprocess_params(
     run_ica: bool,
     epoch_length_ms: float,
     reject_threshold_uv: float,
+    notch_harmonics: int = 0,
+    bad_channels: str | None = None,
+    interpolate_bads: bool = False,
+    clean_method: str = "none",
+    ica_n_components: int = 0,
 ) -> PreprocessParams:
-    """Параметры стадии предподготовки; длина эпохи важна только стадии ``epochs``."""
+    """Параметры стадии предподготовки; длина эпохи важна только стадии ``epochs``.
+
+    Опции очистки (гармоники notch, bad-каналы, ICA/SSP) валидируются здесь же:
+    неизвестный метод — 400 с текстом для UI, а не молчаливое «none» (правило 8,
+    `docs/rules/api-jobs.md`).
+    """
     if stage == "epochs":
         require_epoch_length(epoch_length_ms)
+    if clean_method not in CLEAN_METHODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"clean_method должен быть одним из {list(CLEAN_METHODS)}",
+        )
+    if not 0 <= notch_harmonics <= 4:
+        raise HTTPException(
+            status_code=400,
+            detail="notch_harmonics — целое 0…4 (гармоники 50/60 Гц: 100/150/200/240 Гц)",
+        )
+    if ica_n_components < 0:
+        raise HTTPException(
+            status_code=400, detail="ica_n_components неотрицателен (0 — auto, MNE выберет)",
+        )
 
     return PreprocessParams(
         stage=stage,
@@ -100,6 +125,11 @@ def preprocess_params(
         notch_hz=notch_hz,
         reference=reference,
         reference_channels=parse_reference_channels(reference_channels),
+        notch_harmonics=notch_harmonics,
+        bad_channels=parse_reference_channels(bad_channels),
+        interpolate_bads=interpolate_bads,
+        clean_method=clean_method,
+        ica_n_components=ica_n_components,
         z_threshold=z_threshold,
         pp_threshold_uv=pp_threshold_uv,
         flat_line_uv=flat_line_uv,

@@ -33,6 +33,13 @@
   --color-artifact-pp: #ffb454;
   --color-artifact-flat: #8b949e;
   --color-artifact-ica: #a78bfa;
+  --color-artifact-clipping: #f778ba;
+  --color-artifact-break: #39c5cf;
+  --color-artifact-pop: #e3b341;
+  --color-artifact-muscle: #2f81f7;
+  --color-artifact-line: #3fb950;
+  --color-artifact-ocular: #d29922;
+  --color-artifact-ecg: #db61a2;
 
   /* Слои проекций мозга (раздел «Диполи», срез 3.1): силуэт головы, MNI-срез,
      поля Бродмана, точки диполей с векторами. Цвета читает и canvas

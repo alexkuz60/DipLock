@@ -50,12 +50,10 @@ export type EpochSummary = {
   band_powers: Record<string, number>
 }
 
-export type ArtifactTypes = {
-  zscore_outlier: number
-  peak_to_peak: number
-  flat_line: number
-  ica_eog: number
-}
+export type ArtifactKind = import('@/shared/lib/artifacts').ArtifactKind
+
+/** Счётчики артефактов по типам (ключи — `ArtifactKind`, их может стать больше) */
+export type ArtifactTypes = Partial<Record<import('@/shared/lib/artifacts').ArtifactKind, number>>
 
 /** Стадия предподготовки записи (срез 2.7) — совпадает с `RecalcStage` в UI */
 export type PreprocessStage = 'filter' | 'artifacts' | 'epochs'
@@ -79,6 +77,19 @@ export type ChannelQc = {
   by_kind: Partial<Record<import('@/shared/lib/artifacts').ArtifactKind, number>>
 }
 
+/** Отчёт очистки сигнала (стадия filter, этап 4): что сделано и «до/после» */
+export type CleanReport = {
+  method: string
+  notch_harmonics: number
+  interpolated_channels: string[]
+  n_components_removed: number
+  removed_components: number[]
+  n_projectors: number
+  amplitude_p95_uv_before: number | null
+  amplitude_p95_uv_after: number | null
+  warnings: string[]
+}
+
 /**
  * Результат одной стадии предподготовки (`GET /recordings/{id}/preprocess/{job}`).
  * Заполнены только поля запрошенной стадии, остальные — пустые значения.
@@ -100,6 +111,16 @@ export type PreprocessResult = {
   /** Пороги статуса иконок (из конфига сервера, приезжают с результатом) */
   qc_warn_share: number
   qc_bad_share: number
+  /** Доля чистых данных, % (100 минус средняя доля времени в зонах) */
+  good_data_percent: number
+  /** Средняя по каналам доля времени в зонах по видам артефактов */
+  artifact_share_by_kind: Record<string, number>
+  /** Уровень сетевого шума: пик 50/60 Гц к фону (≥1); null — не измерялся */
+  line_noise_level: number | null
+  /** Авто-список плохих каналов (можно подставить в очистку) */
+  bad_channels: string[]
+  /** Отчёт очистки (стадия filter, когда заданы опции очистки) */
+  clean: CleanReport | null
   epoch_length_ms: number
   n_epochs_total: number
   n_epochs_used: number
@@ -377,6 +398,18 @@ export type ArtifactThresholds = {
   flat_line_threshold_uv: number
   flat_line_min_duration_ms: number
   reject_threshold_uv: number
+  /** Минимальная длительность мышечного (ЭМГ) эпизода, мс */
+  muscle_min_duration_ms: number
+  /** Минимальная длительность разрыва записи, мс */
+  break_min_duration_ms: number
+  /** Во сколько раз пик 50/60 Гц должен превышать соседние частоты */
+  line_noise_ratio: number
+  /** Доля отсчётов у предела АЦП в окне, с которой объявляется клиппинг */
+  clipping_share: number
+  /** Шаг ступеньки всплеска электрода (pop), мкВ */
+  pop_step_uv: number
+  /** Порог z-score дисперсии канала для списка bad (плохие каналы) */
+  bad_channel_z: number
 }
 
 export type MetaResponse = {

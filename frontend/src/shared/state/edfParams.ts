@@ -37,6 +37,15 @@ export type AmplitudeMode = 'shared' | 'per_channel'
 
 export type ReferenceMode = 'average' | 'custom'
 
+/** Метод артефактуальной очистки (стадия «Фильтр и референс», MNE-only) */
+export type CleanMethod = 'none' | 'ica' | 'ssp'
+
+export const CLEAN_METHOD_OPTIONS: { value: CleanMethod; label: string; title: string }[] = [
+  { value: 'none', label: 'Нет', title: 'Без артефактуальной очистки' },
+  { value: 'ica', label: 'ICA', title: 'ICA: удаление EOG/ECG-компонент (ica.apply), отчёт — сколько удалено' },
+  { value: 'ssp', label: 'SSP', title: 'SSP: EOG-проекторы MNE. Экспериментально — проекторы необратимы' },
+]
+
 /** Единицы EDF: 'auto' — авто-детект масштаба на бэкенде (см. EDF_UNITS) */
 export type EdfUnits = 'auto' | 'V' | 'mV' | 'uV'
 
@@ -87,6 +96,16 @@ export type EdfParams = {
   peakToPeakUv: number
   flatLineUv: number
   flatLineMs: number
+  /** Гармоники notch (0–4: 100/150/200/240 Гц для сети 50/60 Гц) */
+  notchHarmonics: number
+  /** Плохие каналы для интерполяции: имена через запятую («C3, T7») */
+  badChannels: string
+  /** Интерполировать bad-каналы (до ICA/SSP — по PDF «Артефакты ЭЭГ») */
+  interpolateBads: boolean
+  /** Метод артефактуальной очистки сигнала */
+  cleanMethod: CleanMethod
+  /** Число компонент ICA (0 — auto, MNE выберет сам) */
+  icaNComponents: number
   epochLengthMs: number
   edfUnits: EdfUnits
   artifactVisibility: Record<ArtifactKind, boolean>
@@ -109,12 +128,24 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   // в окне 100 мс, а не абсолютная амплитуда (N7/F20). /meta уточняет.
   flatLineUv: 1,
   flatLineMs: 200,
+  notchHarmonics: 0,
+  badChannels: '',
+  interpolateBads: false,
+  cleanMethod: 'none',
+  icaNComponents: 0,
   epochLengthMs: 2000,
   edfUnits: 'auto',
   artifactVisibility: {
     zscore_outlier: true,
     peak_to_peak: true,
     flat_line: true,
+    clipping: true,
+    break: true,
+    electrode_pop: true,
+    muscle_emg: true,
+    line_noise: true,
+    ocular: true,
+    ecg: true,
     ica_eog: true,
   },
   epochBoundaries: true,
@@ -165,7 +196,10 @@ export const RECALC_STAGE_LABELS: Record<RecalcStage, string> = {
  * каналам» он меняет результат фильтрации, поэтому относится к стадии «фильтр».
  */
 export const STAGE_PARAM_KEYS: Record<RecalcStage, (keyof EdfParams)[]> = {
-  filter: ['filterPreset', 'customBand', 'notchHz', 'reference', 'edfUnits', 'visibleChannels'],
+  filter: [
+    'filterPreset', 'customBand', 'notchHz', 'reference', 'edfUnits', 'visibleChannels',
+    'notchHarmonics', 'badChannels', 'interpolateBads', 'cleanMethod', 'icaNComponents',
+  ],
   artifacts: ['zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs'],
   epochs: ['epochLengthMs'],
 }

@@ -29,9 +29,15 @@ from typing import Any
 from app.core.config import Settings
 from app.schemas.analysis import ArtifactZoneOut, PreprocessStage
 from app.services import journal
-from app.services.artifact_detector import channel_qc_summary, detect_artifacts
+from app.services.artifact_cleaner import CleanSpec
+from app.services.artifact_detector import (
+    channel_qc_summary,
+    detect_artifacts,
+    find_bad_channels,
+    qc_summary,
+)
 from app.services.epoch_segmenter import segment_epochs
-from app.services.prepared_signal import prepared_raw
+from app.services.prepared_signal import prepared_raw_report
 from app.services.recordings import Recording
 
 logger = logging.getLogger(__name__)
@@ -56,6 +62,13 @@ class PreprocessParams:
     notch_hz: float | None = None
     reference: str = "average"
     reference_channels: list[str] | None = None
+    # Очистка (этап 4) — тоже `filter`: она меняет сигнал подготовки и входит в
+    # ключ кэша prepared_raw (A4/N5). Порядок шагов — `services/artifact_cleaner.py`.
+    notch_harmonics: int = 0  # доп. гармоники notch (50 → 100/150/200 Гц)
+    bad_channels: list[str] | None = None  # каналы «bad» для интерполяции
+    interpolate_bads: bool = False
+    clean_method: str = "none"  # none | ica | ssp
+    ica_n_components: int = 0  # 0 — auto (MNE выберет сам)
     # Стадия `artifacts`
     z_threshold: float = 5.0
     pp_threshold_uv: float = 100.0
@@ -67,7 +80,9 @@ class PreprocessParams:
     reject_threshold_uv: float = 150.0
 
 
-def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) -> Any:
+def _prepare_raw(
+    recording: Recording, cfg: Settings, params: PreprocessParams,
+) -> tuple[Any, dict[str, Any]]:
     """Читает запись и применяет предподготовку (монтаж, референс, фильтры).
 
     Полоса фильтра — из параметров стадии `filter`; ``None`` означает «без
@@ -82,8 +97,15 @@ def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) 
     if params.filter_band is not None:
         l_freq, h_freq = params.filter_band
 
+    spec = CleanSpec(
+        notch_harmonics=params.notch_harmonics,
+        bad_channels=tuple(params.bad_channels or ()),
+        interpolate_bads=params.interpolate_bads,
+        method=params.clean_method,
+        ica_n_components=params.ica_n_components,
+    )
     try:
-        return prepared_raw(
+        return prepared_raw_report(
             recording,
             cfg,
             l_freq=l_freq,
@@ -92,6 +114,9 @@ def _prepare_raw(recording: Recording, cfg: Settings, params: PreprocessParams) 
             reference_channels=params.reference_channels,
             # Имя пайплайна для журнала шагов: стадии различимы в замерах
             pipeline=f"preprocess-{params.stage}",
+            # Пустая очистка — прежний ключ кэша: без опций сигнал общий со
+            # спектром/спектрограммой/диполями (A4/N5)
+            clean=spec if spec != CleanSpec() else None,
         )
     except ValueError as exc:
         raise PreprocessError(str(exc)) from exc
@@ -136,7 +161,16 @@ def _params_note(params: PreprocessParams, extra: str = "") -> str:
     if params.filter_band is not None:
         parts.append(f"band={params.filter_band[0]:g}-{params.filter_band[1]:g}")
     if params.notch_hz:
-        parts.append(f"notch={params.notch_hz:g}")
+        note = f"notch={params.notch_hz:g}"
+        if params.notch_harmonics:
+            note += f"(+{params.notch_harmonics} гарм.)"
+        parts.append(note)
+    if params.bad_channels:
+        parts.append(f"bad={','.join(params.bad_channels)}")
+    if params.interpolate_bads:
+        parts.append("interp=1")
+    if params.clean_method != "none":
+        parts.append(f"clean={params.clean_method}")
     if params.reference != "average":
         parts.append(f"ref={params.reference}")
     if params.stage == "artifacts":
@@ -178,7 +212,7 @@ def run_preprocess(
             epochs=epochs,
         )
 
-    raw = _prepare_raw(recording, cfg, params)
+    raw, clean_report = _prepare_raw(recording, cfg, params)
     warnings: list[str] = []
 
     base: dict[str, Any] = {
@@ -198,7 +232,14 @@ def run_preprocess(
             "band_hz": band,
             "notch_hz": params.notch_hz,
             "reference": params.reference,
+            "clean": clean_report or None,
         })
+        warnings.extend(clean_report.get("warnings", []))
+        if params.clean_method == "ssp":
+            warnings.append(
+                "SSP-очистка — экспериментальна: проекторы необратимы и режут "
+                "подпространство сигнала целиком (альтернатива — метод ICA)"
+            )
         progress("done", 1.0, message="Фильтр и референс применены")
         base["duration_sec_calc"] = round(time.perf_counter() - started, 3)
         _journal()
@@ -207,17 +248,34 @@ def run_preprocess(
     annotations, stats = _detect(raw, cfg, params, progress)
 
     if params.stage == "artifacts":
+        zones = stats.get("zones", [])
+        bad_channels = find_bad_channels(raw, cfg.bad_channel_z)
+        qc = qc_summary(
+            zones, list(raw.ch_names), base["duration_sec"],
+            line_noise_level=stats.get("line_noise_level"),
+            bad_channels=bad_channels,
+        )
         base.update({
             "artifacts": [zone.model_dump() for zone in _zones(stats)],
             "artifact_types": stats["by_type"],
             "ica_applied": bool(stats.get("ica_applied")),
             # QC-иконки каналов (шаг 0.4): сводка из тех же зон + пороги из конфига
             "channel_qc": channel_qc_summary(
-                stats.get("zones", []), list(raw.ch_names), base["duration_sec"],
+                zones, list(raw.ch_names), base["duration_sec"],
             ),
             "qc_warn_share": float(cfg.qc_channel_warn_share),
             "qc_bad_share": float(cfg.qc_channel_bad_share),
+            # Числа QC (этап «числа QC»): чистые данные, доли по типам, уровень 50 Гц
+            "good_data_percent": qc["good_data_percent"],
+            "artifact_share_by_kind": qc["artifact_share_by_kind"],
+            "line_noise_level": qc["line_noise_level"],
+            "bad_channels": bad_channels,
         })
+        if bad_channels:
+            warnings.append(
+                f"Плохие каналы (авто): {', '.join(bad_channels)} — можно интерполировать "
+                "(стадия «Фильтр и референс», опция «Интерполировать bad-каналы»)"
+            )
         if not stats.get("ica_applied") and params.run_ica:
             warnings.append(
                 "ICA не применена: в записи нет EOG-подобных каналов или фитинг не удался"

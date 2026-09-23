@@ -277,6 +277,13 @@ export function artifactCounts(zones: readonly ArtifactZone[]): Record<ArtifactK
     zscore_outlier: 0,
     peak_to_peak: 0,
     flat_line: 0,
+    clipping: 0,
+    break: 0,
+    electrode_pop: 0,
+    muscle_emg: 0,
+    line_noise: 0,
+    ocular: 0,
+    ecg: 0,
     ica_eog: 0,
   } satisfies Record<ArtifactKind, number>
   for (const zone of zones) counts[zone.kind] += 1
@@ -295,6 +302,13 @@ const ZONE_DURATION_SEC: Record<ArtifactKind, [number, number]> = {
   zscore_outlier: [0.4, 1.6],
   peak_to_peak: [0.15, 0.7],
   flat_line: [0.2, 1.1],
+  clipping: [0.2, 1.2],
+  break: [0.5, 2.5],
+  electrode_pop: [0.1, 0.4],
+  muscle_emg: [0.3, 1.4],
+  line_noise: [1.5, 4.5],
+  ocular: [0.2, 0.6],
+  ecg: [0.3, 0.6],
   ica_eog: [0.8, 2.6],
 }
 
@@ -346,7 +360,10 @@ export function demoLayers(
         kind,
         onsetSec: round3(onsetSec),
         durationSec: round3(durationSec),
-        channels: kind === 'ica_eog' ? [...pool] : pickChannels(pool, rand, 3),
+        // ICA-EOG и сетевой шум бьют по всем каналам сразу, остальные детекторы —
+        // по подмножеству: тултип зоны должен уметь показать и один, и весь монтаж.
+        channels:
+          kind === 'ica_eog' || kind === 'line_noise' ? [...pool] : pickChannels(pool, rand, 3),
       })
     }
   })

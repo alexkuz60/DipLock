@@ -150,8 +150,13 @@ def test_artifacts_stage_returns_zones_with_channels(tmp_path, edf_file):
     )
 
     kinds = {zone["kind"] for zone in result["artifacts"]}
-    assert kinds == {"peak_to_peak"}
-    assert result["artifact_types"]["peak_to_peak"] == len(result["artifacts"])
+    # Низкий порог делает непустыми зоны peak-to-peak; другие детекторы
+    # (мышечный, сетевой) могут добавить информационные зоны — каталог открыт.
+    assert "peak_to_peak" in kinds
+    for kind in kinds:
+        assert result["artifact_types"][kind] == sum(
+            1 for zone in result["artifacts"] if zone["kind"] == kind
+        ), f"счётчик {kind} должен равняться числу зон вида"
     for zone in result["artifacts"]:
         assert zone["duration_sec"] > 0
         assert zone["channels"], "зона должна знать свои каналы (тултип слоя)"
@@ -360,3 +365,49 @@ def test_preprocess_validates_band_and_epoch_length(client, edf_file):
 def test_preprocess_unknown_recording_is_404(client):
     response = client.post(f"{_PREFIX}/recordings/nope/preprocess", data={"stage": "filter"})
     assert response.status_code == 404
+
+
+def test_filter_stage_cleaning_reports_interpolation(tmp_path, edf_file):
+    """Опции очистки стадии filter → отчёт «что сделано» + метрика до/после."""
+    recording = _register(tmp_path, edf_file)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="filter", bad_channels=["C3"], interpolate_bads=True),
+        progress=lambda *_, **__: None,
+    )
+
+    clean = result["clean"]
+    assert clean["interpolated_channels"] == ["C3"]
+    # Метрика «до/после» присутствует (сплайн может слегка повысить p95 —
+    # числа показывают динамику, а не гарантируют убывание)
+    assert clean["amplitude_p95_uv_before"] is not None
+    assert clean["amplitude_p95_uv_after"] is not None
+
+
+def test_filter_stage_ssp_warns_in_result(tmp_path, edf_file):
+    """SSP-метод помечен предупреждением — UI обязан его показать."""
+    recording = _register(tmp_path, edf_file)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="filter", clean_method="ssp"),
+        progress=lambda *_, **__: None,
+    )
+
+    assert any("SSP" in warning for warning in result["warnings"])
+
+
+def test_artifacts_stage_returns_qc_numbers(tmp_path, edf_file):
+    """Стадия artifacts отдаёт числа QC: чистые данные, доли по типам, bad-каналы."""
+    recording = _register(tmp_path, edf_file)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="artifacts", run_ica=False),
+        progress=lambda *_, **__: None,
+    )
+
+    assert 0.0 <= result["good_data_percent"] <= 100.0
+    assert isinstance(result["artifact_share_by_kind"], dict)
+    assert all(name in result["channels"] for name in result["bad_channels"])

@@ -151,7 +151,7 @@ describe('панель раздела EDF', () => {
     await screen.findByLabelText('Fp1')
 
     // 4 типа артефактов: у каждого чекбокс с цветной меткой зоны вьюера (срез 2.6)
-    expect(screen.getAllByTestId('checkbox-swatch')).toHaveLength(4)
+    expect(screen.getAllByTestId('checkbox-swatch')).toHaveLength(11)
     expect(screen.getByLabelText('z-score выбросы')).toBeChecked()
 
     const callsBefore = fetchMock.mock.calls.length

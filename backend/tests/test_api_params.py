@@ -127,6 +127,56 @@ def test_preprocess_params_epochs_stage_validates_epoch_length():
     assert "epoch_length_ms" in err.value.detail
 
 
+def test_preprocess_params_carry_cleaning_options():
+    """Опции очистки (гармоники notch, bad-каналы, метод) доходят до сервиса."""
+    params = preprocess_params(
+        stage="filter", band_min=None, band_max=None, notch_hz=50.0,
+        reference="average", reference_channels=None,
+        z_threshold=5.0, pp_threshold_uv=100.0, flat_line_uv=5.0, flat_line_ms=200.0,
+        run_ica=False, epoch_length_ms=2000.0, reject_threshold_uv=150.0,
+        notch_harmonics=3, bad_channels="C3, XYZ", interpolate_bads=True,
+        clean_method="ica", ica_n_components=8,
+    )
+
+    assert params.notch_harmonics == 3
+    assert params.bad_channels == ["C3", "XYZ"]
+    assert params.interpolate_bads is True
+    assert params.clean_method == "ica"
+    assert params.ica_n_components == 8
+
+
+def test_preprocess_params_reject_unknown_clean_method():
+    """Неизвестный метод очистки — 400 с текстом, а не молчаливое «none»."""
+    with pytest.raises(HTTPException) as err:
+        preprocess_params(
+            stage="filter", band_min=None, band_max=None, notch_hz=None,
+            reference="average", reference_channels=None,
+            z_threshold=5.0, pp_threshold_uv=100.0, flat_line_uv=5.0, flat_line_ms=200.0,
+            run_ica=False, epoch_length_ms=2000.0, reject_threshold_uv=150.0,
+            clean_method="asr",
+        )
+
+    assert err.value.status_code == 400
+    assert "clean_method" in err.value.detail
+
+
+def test_preprocess_params_bounds_notch_harmonics_and_ica_components():
+    """Гармоники notch — 0…4, число компонент ICA неотрицательно (0 — auto)."""
+    base = dict(
+        stage="filter", band_min=None, band_max=None, notch_hz=None,
+        reference="average", reference_channels=None,
+        z_threshold=5.0, pp_threshold_uv=100.0, flat_line_uv=5.0, flat_line_ms=200.0,
+        run_ica=False, epoch_length_ms=2000.0, reject_threshold_uv=150.0,
+    )
+    with pytest.raises(HTTPException) as err:
+        preprocess_params(**base, notch_harmonics=9)
+    assert "notch_harmonics" in err.value.detail
+
+    with pytest.raises(HTTPException) as err:
+        preprocess_params(**base, ica_n_components=-1)
+    assert "ica_n_components" in err.value.detail
+
+
 def test_spectrum_params_carry_band_notch_and_thresholds():
     params = spectrum_params(
         band_min=4.0, band_max=8.0, notch_hz=50.0, reference="average",

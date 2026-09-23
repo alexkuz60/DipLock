@@ -242,6 +242,27 @@ describe('стадии предподготовки (срез 2.7)', () => {
     expect(filterBandOf({ ...EDF_PARAM_DEFAULTS, filterPreset: 'none' })).toBeNull()
   })
 
+  it('buildPreprocessForm: опции очистки (гармоники notch, bad-каналы, ICA/SSP)', () => {
+    const form = buildPreprocessForm('filter', {
+      ...EDF_PARAM_DEFAULTS,
+      notchHz: 50,
+      notchHarmonics: 3,
+      badChannels: ' C3, T7 ',
+      interpolateBads: true,
+      cleanMethod: 'ica',
+      icaNComponents: 8,
+    })
+    expect(form.get('notch_harmonics')).toBe('3')
+    expect(form.get('bad_channels')).toBe('C3, T7')
+    expect(form.get('interpolate_bads')).toBe('true')
+    expect(form.get('clean_method')).toBe('ica')
+    expect(form.get('ica_n_components')).toBe('8')
+
+    // Пустой список bad-каналов в форму не уходит (сервер видит «не задано»)
+    const plain = buildPreprocessForm('filter', EDF_PARAM_DEFAULTS)
+    expect(plain.get('bad_channels')).toBeNull()
+  })
+
   it('layersFromResult заменяет слот своей стадии, сохраняя слот другой', () => {
     const previous = {
       artifacts: [

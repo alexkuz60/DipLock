@@ -317,6 +317,11 @@ async def create_preprocess_job(
     run_ica: bool = Form(False, description="ICA-ветка детекции (тяжёлая — по умолчанию выключена)"),
     epoch_length_ms: float = Form(2000.0),
     reject_threshold_uv: float = Form(150.0),
+    notch_harmonics: int = Form(0, description="Гармоники notch (100/150/200 Гц), 0–4"),
+    bad_channels: str | None = Form(None, description="Плохие каналы через запятую"),
+    interpolate_bads: bool = Form(False, description="Интерполировать bad-каналы (до ICA/SSP)"),
+    clean_method: str = Form("none", description="Очистка артефактов: none | ica | ssp"),
+    ica_n_components: int = Form(0, description="Компонент ICA (0 — auto)"),
 ) -> JobCreated:
     """Предподготовка записи **по кнопке**: одна стадия = одна задача.
 
@@ -337,6 +342,9 @@ async def create_preprocess_job(
         z_threshold=z_threshold, pp_threshold_uv=pp_threshold_uv,
         flat_line_uv=flat_line_uv, flat_line_ms=flat_line_ms,
         run_ica=run_ica,
+        notch_harmonics=notch_harmonics, bad_channels=bad_channels,
+        interpolate_bads=interpolate_bads,
+        clean_method=clean_method, ica_n_components=ica_n_components,
         epoch_length_ms=epoch_length_ms, reject_threshold_uv=reject_threshold_uv,
     )
     return submit_recording_job("preprocess", recording, params, meta={"stage": stage})
@@ -939,6 +947,12 @@ async def get_meta() -> MetaResponse:
             flat_line_threshold_uv=settings.flat_line_threshold_uv,
             flat_line_min_duration_ms=settings.flat_line_min_duration_ms,
             reject_threshold_uv=settings.reject_threshold_uv,
+            muscle_min_duration_ms=settings.muscle_min_duration_ms,
+            break_min_duration_ms=settings.break_min_duration_ms,
+            line_noise_ratio=settings.line_noise_ratio,
+            clipping_share=settings.clipping_share,
+            pop_step_uv=settings.pop_step_uv,
+            bad_channel_z=settings.bad_channel_z,
         ),
         dipole_fit_decim=settings.dipole_fit_decim,
         dipole_fit_max_epochs=settings.dipole_fit_max_epochs,

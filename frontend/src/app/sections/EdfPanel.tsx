@@ -16,6 +16,7 @@ import {
   ARTIFACT_COLORS,
   ARTIFACT_KINDS,
   ARTIFACT_LABELS,
+  CLEAN_METHOD_OPTIONS,
   EDF_UNITS_OPTIONS,
   FILTER_PRESETS,
   RECALC_STAGES,
@@ -36,6 +37,7 @@ import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { TextField } from '@/shared/ui/TextField'
 
 const AMPLITUDE_MODES: { value: AmplitudeMode; label: string; title: string }[] = [
   { value: 'shared', label: 'Общий', title: 'Одна шкала мкВ/дел для всех каналов' },
@@ -68,6 +70,9 @@ export function EdfPanel() {
   const stageJobs = useEdfRecording((state) => state.stageJobs)
   /** Ручные пометки эпох живут при записи (Ctrl+двойной клик во вьюере, срез 2.10) */
   const manualMarks = useEdfRecording((state) => state.epochMarks)
+  /** Числа QC и отчёт очистки приходят результатами стадий (этапы «числа QC» и 4) */
+  const qcSummary = useEdfRecording((state) => state.qcSummary)
+  const cleanReport = useEdfRecording((state) => state.cleanReport)
   const clearEpochMarks = useEdfRecording((state) => state.clearEpochMarks)
   const recalc = useEdfRecalcStatus()
 
@@ -164,6 +169,66 @@ export function EdfPanel() {
           onChange={(value) => setParams({ reference: value })}
           hint="Референс применяется при предподготовке записи."
         />
+        <NumberField
+          label="Гармоники notch"
+          value={params.notchHarmonics}
+          min={0}
+          max={4}
+          step={1}
+          hint="Доп. частоты 100/150/200/240 Гц (гармоники сети 50/60 Гц); 0 — только основная."
+          onChange={(value) => setParams({ notchHarmonics: value })}
+        />
+        <SegmentedControl
+          label="Очистка"
+          value={params.cleanMethod}
+          options={CLEAN_METHOD_OPTIONS}
+          onChange={(value) => setParams({ cleanMethod: value })}
+          hint={
+            params.cleanMethod === 'ssp'
+              ? 'SSP — экспериментально: проекторы необратимы и режут подпространство сигнала целиком. Предпочтительнее ICA.'
+              : 'Метод артефактуальной очистки: ICA удаляет EOG/ECG-компоненты (ica.apply) и отчитывается, сколько удалено.'
+          }
+        />
+        {params.cleanMethod === 'ica' ? (
+          <NumberField
+            label="Компонент ICA"
+            value={params.icaNComponents}
+            min={0}
+            max={64}
+            step={1}
+            hint="0 — авто (MNE выберет число по данным)."
+            onChange={(value) => setParams({ icaNComponents: value })}
+          />
+        ) : null}
+        <TextField
+          label="Плохие каналы"
+          mono
+          value={params.badChannels}
+          placeholder="C3, T7"
+          hint="Имена через запятую — каналы для интерполяции (авто-список QC — в легенде артефактов)."
+          onChange={(value) => setParams({ badChannels: value })}
+        />
+        <CheckboxRow
+          label="Интерполировать bad"
+          checked={params.interpolateBads}
+          onChange={(checked) => setParams({ interpolateBads: checked })}
+        />
+        {cleanReport ? (
+          <p className="mt-1 text-sm text-fg-2" data-testid="clean-report">
+            Очистка:
+            {cleanReport.n_components_removed
+              ? ` ICA −${cleanReport.n_components_removed} комп. (индексы: ${cleanReport.removed_components.join(', ')})`
+              : ''}
+            {cleanReport.n_projectors ? ` SSP: ${cleanReport.n_projectors} проекторов` : ''}
+            {cleanReport.interpolated_channels.length
+              ? ` интерполировано: ${cleanReport.interpolated_channels.join(', ')}`
+              : ''}
+            {cleanReport.amplitude_p95_uv_before !== null &&
+            cleanReport.amplitude_p95_uv_after !== null
+              ? ` (p95 ${cleanReport.amplitude_p95_uv_before} → ${cleanReport.amplitude_p95_uv_after} мкВ)`
+              : ''}
+          </p>
+        ) : null}
       </Panel>
 
       <Panel title="Пороги артефактов" hint="Значения по умолчанию — из backend/.env.">
@@ -314,6 +379,27 @@ export function EdfPanel() {
         title="Легенда артефактов"
         hint="Цвет зоны и число совпадают с легендой над треками. Чекбоксы управляют видимостью слоёв и расчёт не запускают; у записи зоны появятся после стадии «Поиск артефактов», в демо-режиме это фикстура."
       >
+        {qcSummary ? (
+          <div className="mb-2 flex flex-wrap items-center gap-2" data-testid="qc-summary">
+            <StatusPill tone={qcSummary.goodDataPercent >= 80 ? 'ok' : 'warn'}>
+              Чистых данных: {Math.round(qcSummary.goodDataPercent)}%
+            </StatusPill>
+            {qcSummary.lineNoiseLevel !== null ? (
+              <StatusPill tone={qcSummary.lineNoiseLevel >= 4 ? 'warn' : 'neutral'}>
+                50/60 Гц: ×{qcSummary.lineNoiseLevel}
+              </StatusPill>
+            ) : null}
+            {qcSummary.badChannels.length ? (
+              <Button
+                variant="ghost"
+                title="Подставить авто-список плохих каналов в опцию интерполяции"
+                onClick={() => setParams({ badChannels: qcSummary.badChannels.join(', ') })}
+              >
+                Плохие каналы: {qcSummary.badChannels.join(', ')}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         {ARTIFACT_KINDS.map((kind) => (
           <CheckboxRow
             key={kind}
