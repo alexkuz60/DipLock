@@ -16,9 +16,16 @@ export type ErrorBlockProps = {
   title?: string
   message: string
   onRetry?: () => void
+  /** Подпись кнопки повтора («Перезагрузить» у ErrorBoundary) */
+  retryLabel?: string
 }
 
-export function ErrorBlock({ title = 'Не удалось получить данные', message, onRetry }: ErrorBlockProps) {
+export function ErrorBlock({
+  title = 'Не удалось получить данные',
+  message,
+  onRetry,
+  retryLabel = 'Повторить',
+}: ErrorBlockProps) {
   return (
     <div className="rounded-lg border border-danger/40 bg-danger/10 p-3">
       <div className="flex items-start gap-2">
@@ -30,7 +37,7 @@ export function ErrorBlock({ title = 'Не удалось получить да�
       </div>
       {onRetry ? (
         <Button className="mt-3" icon={<RefreshCw className="size-4" />} onClick={onRetry}>
-          Повторить
+          {retryLabel}
         </Button>
       ) : null}
     </div>

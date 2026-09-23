@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { ErrorBoundary } from '@/shared/ui/ErrorBoundary'
 import { applyUiPreferences, useUiStore } from '@/shared/state/uiStore'
 import './styles/index.css'
 
@@ -13,6 +14,9 @@ if (!container) throw new Error('Не найден контейнер #root')
 
 createRoot(container).render(
   <StrictMode>
-    <App />
+    {/* Граница ошибок рендера: падение компонента не обнуляет всё приложение */}
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 )
