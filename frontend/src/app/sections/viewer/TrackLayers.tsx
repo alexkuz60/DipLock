@@ -81,16 +81,17 @@ export function ArtifactZoneLayer({
   )
 }
 
-/** Порог, после которого номера эпох перестают помещаться и остаются только линии. */
-const EPOCH_NUMBER_MIN_PX = 26
-
 /** Косая штриховка «эпоха не пойдёт в расчёт»: цвет — токен темы, не hex в JS. */
 function hatchImage(density: number): string {
   return `repeating-linear-gradient(45deg, color-mix(in srgb, var(--color-danger) ${density}%, transparent) 0 2px, transparent 2px 7px)`
 }
 
 /**
- * Границы эпох с номерами и штриховка эпох, исключённых из расчёта.
+ * Границы эпох и штриховка эпох, исключённых из расчёта.
+ *
+ * Номера эпох рисует только липкая шкала (`TrackRulers.EpochRuler`): строки
+ * границ без подписей — иначе номера дублировались бы над верхним треком
+ * (ручная проверка, 23.09.2026).
  *
  * Штриховка рисуется по итоговому вердикту (`isEpochBlocked`): решение
  * reject-фильтра плюс ручная правка пользователя (срез 2.10). Правка видна
@@ -112,13 +113,6 @@ export function EpochLayer({
   /** Порог reject-фильтра слоя — для причины в тултипе эпохи (null — не задан) */
   rejectThresholdUv?: number | null
 }) {
-  const spacing =
-    cells.length > 1
-      ? timeToX(cells[1]!.onsetSec, geometry.window, geometry.trackWidth) -
-        timeToX(cells[0]!.onsetSec, geometry.window, geometry.trackWidth)
-      : Infinity
-  const showNumbers = spacing >= EPOCH_NUMBER_MIN_PX
-
   const marks = cells.filter(
     (cell) => cell.manual !== null || (showHatch && isEpochBlocked(cell.rejected, cell.manual)),
   )
@@ -175,13 +169,7 @@ export function EpochLayer({
                 className="pointer-events-none absolute inset-y-0 border-l border-dashed border-fg-2/45"
                 data-testid={`epoch-edge-${cell.index}`}
                 style={{ left }}
-              >
-                {showNumbers ? (
-                  <span className="tnum absolute top-0 left-0.5 rounded bg-bg-2/80 px-1 text-[10px] text-fg-2">
-                    {cell.index + 1}
-                  </span>
-                ) : null}
-              </div>
+              />
             )
           })
         : null}

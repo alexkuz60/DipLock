@@ -565,6 +565,15 @@ describe('слои результата вьюера', () => {
     expect(screen.queryByTestId('epoch-hatch-0')).not.toBeInTheDocument()
   })
 
+  it('номера эпох — только на липкой шкале, слой границ над треком без номеров', () => {
+    paramsState({ visibleChannels: ['F3'], epochLengthMs: 2000 })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    // Шкала несёт номера (ячейка 2 → «2»), строки границ пустые: дубля над F3 нет
+    expect(screen.getByTestId('epoch-ruler-2')).toHaveTextContent('2')
+    expect(screen.getByTestId('epoch-edge-1')).toBeEmptyDOMElement()
+  })
+
   it('тумблеры панели убирают слои: видимость типа и геометрию эпох', () => {
     paramsState({
       visibleChannels: ['F3'],

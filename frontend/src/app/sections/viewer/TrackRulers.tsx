@@ -5,7 +5,9 @@
  * ячейки), где одиночный клик переключает блокировку эпохи — тот же вердикт,
  * что и Ctrl+двойной клик по трекам (`TrackStack.handleTrackDoubleClick`):
  *
- * * **верхняя** (липкая, `sticky top-0`) — сетка эпох с номерами; тултип ячейки
+ * * **верхняя** (липкая, `sticky top-0`, фон с лёгкой прозрачностью `bg-bg-2/85`) — сетка
+ *   эпох с номерами (единственное место номеров: слой границ эпох их не рисует — иначе
+ *   дубль над верхним треком); тултип ячейки
  *   объясняет причину: reject-фильтр (порог + каналы-виновники из `drop_log`
  *   MNE) либо ручная правка пользователя;
  * * **нижняя** — полоса поверх оси времени последнего трека (ось uPlot остаётся
@@ -96,7 +98,7 @@ export function EpochRuler({
       data-testid="epoch-ruler"
       role="group"
       aria-label="Шкала эпох: клик блокирует эпоху или снимает блокировку"
-      className="sticky top-0 z-20 shrink-0 border-b border-border bg-bg-2"
+      className="sticky top-0 z-20 shrink-0 border-b border-border bg-bg-2/85"
       style={{ height: EPOCH_RULER_HEIGHT }}
     >
       <RulerTag text="эпохи" />

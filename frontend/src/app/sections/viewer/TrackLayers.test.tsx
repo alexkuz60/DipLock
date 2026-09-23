@@ -130,8 +130,9 @@ describe('слой эпох', () => {
     expect(screen.getByTestId('epoch-hatch-2')).toBeInTheDocument()
   })
 
-  it('рисует границы с номерами и не рисует линию начала записи', () => {
-    // Эпохи по 5 с на 100 px → 50 px на эпоху: номера помещаются
+  it('рисует границы без номеров и не рисует линию начала записи', () => {
+    // Эпохи по 5 с на 100 px → 50 px на эпоху: широкие, но номера здесь всё равно
+    // не рисуются — их несёт только липкая шкала (иначе дубль над верхним треком)
     const cells: EpochCell[] = [
       { index: 0, onsetSec: 0, durationSec: 5, rejected: false, manual: null, rejectChannels: null },
       { index: 1, onsetSec: 5, durationSec: 3, rejected: false, manual: null, rejectChannels: null },
@@ -141,14 +142,14 @@ describe('слой эпох', () => {
       <EpochLayer cells={cells} geometry={GEOMETRY} showBoundaries showHatch={false} />,
     )
 
-    // Первая эпоха начинается в t0 (край записи) — линии нет
+    // Первая эпоха начинается в t0 (край записи) — линии нет; строки границ пустые
     expect(screen.queryByTestId('epoch-edge-0')).not.toBeInTheDocument()
-    expect(screen.getByTestId('epoch-edge-1')).toHaveTextContent('2')
-    expect(screen.getByTestId('epoch-edge-2')).toHaveTextContent('3')
+    expect(screen.getByTestId('epoch-edge-1')).toBeEmptyDOMElement()
+    expect(screen.getByTestId('epoch-edge-2')).toBeEmptyDOMElement()
   })
 
-  it('скрывает номера, когда эпохи слишком узкие', () => {
-    // 100 эпох по 0.1 с на 100 px → 1 px на эпоху, номера не помещаются
+  it('рисует границы и при узких эпохах: линии от порога читаемости не зависят', () => {
+    // 100 эпох по 0.1 с на 100 px → 1 px на эпоху: линии есть, номеров и тут нет
     const many = Array.from({ length: 100 }, (_, index) => ({
       index,
       onsetSec: index * 0.1,
@@ -220,7 +221,7 @@ describe('рамки эпох-отбросов в треке канала-вин
     const cells = cellsOf([{ rejected: true, rejectChannels: ['F3'] }, {}])
     renderWithProviders(<EpochFrameLayer cells={cells} geometry={GEOMETRY} />)
 
-    // Нумерация testid с 1 (как у номеров эпох); рамка — декоративная обводка
+    // Нумерация testid с 1 (как у ячеек шкалы эпох); рамка — декоративная обводка
     const frame = screen.getByTestId('epoch-frame-1')
     expect(frame).toHaveStyle({ left: '0px', width: '20px' })
     expect(frame.className).toContain('pointer-events-none')
