@@ -9,7 +9,9 @@
  * Геометрия общая с курсором и мышью вьюера: колонка подписей (``LABEL_WIDTH``)
  * вычитается из координат один раз, дальше всё живёт в пикселях трека.
  */
+import { useEffect, useRef, useState } from 'react'
 import { ARTIFACT_COLORS, ARTIFACT_KINDS, ARTIFACT_SHORT_LABELS, artifactFill } from '@/shared/lib/artifacts'
+import type { NavMode } from '@/shared/state/edfParams'
 import { timeToX, type TimeWindow } from '@/shared/lib/viewerMath'
 import {
   artifactZoneText,
@@ -218,21 +220,62 @@ export function EpochFrameLayer({
 }
 
 /**
- * Легенда вьюера: чипы типов артефактов с числом зон в текущем кадре. Клик —
- * тумблер видимости того же параметра, что и чекбоксы в правой панели: состояние
- * одно (`artifactVisibility`), поэтому легенда и панель не расходятся.
+ * Легенда вьюера: чипы типов артефактов с числом зон в текущем кадре.
+ *
+ * Клик по пилюле (правка 24.09.2026, уточнение — по числу зон типа):
+ *
+ * * **зон этого типа нет (0)** — сразу тумблер слоя (`onToggle`), меню не
+ *   открывается: пункту «Навигация» нечего предлагать, шагать не по чему;
+ * * **зоны есть (> 0)** — меню: «Вкл/Выкл слой» — тот же тумблер, что чекбоксы
+ *   правой панели (состояние одно — `artifactVisibility`), разделитель и
+ *   «Вкл/Выкл режима "Навигация"» — режим навигатора зума в шапке, шагающий
+ *   **по артефактам этого типа** («по своим»: галочка — только у своей пилюли,
+ *   `navKind`; клик по своей выключает режим, по чужой — переключает на её тип).
+ *
+ * Меню открывается **над** пилюлей и слоем выше липкой шкалы эпох
+ * (`TrackRulers.EpochRuler` держит `z-20`, меню — `z-30`): при равных z и
+ * открытии вниз шкала рисовалась поверх меню (фидбэк 24.09.2026).
+ * ICA-чип — информационный, меню не имеет.
  */
 export function LayersLegend({
   counts,
   visibility,
   onToggle,
+  navMode = 'window',
+  navKind = null,
+  onToggleNavMode,
   className,
 }: {
   counts: Record<string, number>
   visibility: Record<string, boolean>
   onToggle: (kind: (typeof ARTIFACT_KINDS)[number]) => void
+  /** Режим навигатора шапки: галочка пункта меню */
+  navMode?: NavMode
+  /** Тип артефактов текущей «Навигации» («по своим»): галочка — у своей пилюли */
+  navKind?: (typeof ARTIFACT_KINDS)[number] | null
+  /** Тумблер режима «Навигация» по артефактам типа (нет — пункт меню не показывается) */
+  onToggleNavMode?: (kind: (typeof ARTIFACT_KINDS)[number]) => void
   className?: string
 }) {
+  /** Открытое меню пилюли: одно на легенду, закрывается кликом мимо или Escape */
+  const [openKind, setOpenKind] = useState<(typeof ARTIFACT_KINDS)[number] | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (openKind === null) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpenKind(null)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpenKind(null)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [openKind])
+
   return (
     <div
       className={cx('flex flex-wrap items-center gap-1.5', className)}
@@ -263,26 +306,90 @@ export function LayersLegend({
           )
         }
         return (
-          <button
-            key={kind}
-            type="button"
-            aria-pressed={on}
-            data-testid={`legend-${kind}`}
-            onClick={() => onToggle(kind)}
-            title={`${ARTIFACT_SHORT_LABELS[kind]}: ${counts[kind] ?? 0} зон — клик скрывает или показывает слой`}
-            className={cx(
-              'flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition',
-              on ? 'border-border text-fg-1' : 'border-border/60 text-fg-2/60',
-            )}
-          >
-            <span
-              aria-hidden
-              className="size-2 rounded-full"
-              style={{ backgroundColor: ARTIFACT_COLORS[kind], opacity: on ? 1 : 0.3 }}
-            />
-            {ARTIFACT_SHORT_LABELS[kind]}
-            <span className="tnum text-fg-2">{counts[kind] ?? 0}</span>
-          </button>
+          <div key={kind} className="relative" ref={openKind === kind ? menuRef : null}>
+            <button
+              type="button"
+              aria-pressed={on}
+              aria-haspopup="menu"
+              aria-expanded={openKind === kind}
+              data-testid={`legend-${kind}`}
+              onClick={() => {
+                // Зон этого типа нет — сразу тумблер слоя, без меню: «Навигации»
+                // нечего предлагать (фидбэк 24.09.2026)
+                if ((counts[kind] ?? 0) === 0) {
+                  onToggle(kind)
+                  return
+                }
+                setOpenKind((current) => (current === kind ? null : kind))
+              }}
+              title={
+                (counts[kind] ?? 0) === 0
+                  ? `${ARTIFACT_SHORT_LABELS[kind]}: 0 зон — клик включает/выключает слой`
+                  : `${ARTIFACT_SHORT_LABELS[kind]}: ${counts[kind]} зон — клик открывает меню (слой и режим «Навигация» по этим артефактам)`
+              }
+              className={cx(
+                'flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition',
+                on ? 'border-border text-fg-1' : 'border-border/60 text-fg-2/60',
+              )}
+            >
+              <span
+                aria-hidden
+                className="size-2 rounded-full"
+                style={{ backgroundColor: ARTIFACT_COLORS[kind], opacity: on ? 1 : 0.3 }}
+              />
+              {ARTIFACT_SHORT_LABELS[kind]}
+              <span className="tnum text-fg-2">{counts[kind] ?? 0}</span>
+            </button>
+            {openKind === kind ? (
+              <div
+                role="menu"
+                data-testid={`legend-menu-${kind}`}
+                aria-label={`Меню слоя ${ARTIFACT_SHORT_LABELS[kind]}`}
+                // Над пилюлей и слоем выше липкой шкалы эпох (`EpochRuler` — z-20):
+                // при равных z и открытии вниз линейка рисовалась поверх меню
+                className="absolute bottom-full left-0 z-30 mb-1 min-w-56 rounded-lg border border-border bg-bg-2 p-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={on}
+                  data-testid={`legend-menu-toggle-${kind}`}
+                  onClick={() => {
+                    onToggle(kind)
+                    setOpenKind(null)
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-fg-1 hover:bg-bg-3"
+                >
+                  <span aria-hidden className="w-3 text-center">
+                    {on ? '✓' : ''}
+                  </span>
+                  Вкл/Выкл слой
+                </button>
+                {onToggleNavMode ? (
+                  <>
+                    <div role="separator" className="my-1 border-t border-border" />
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={navMode === 'artifact' && navKind === kind}
+                      data-testid={`legend-menu-nav-${kind}`}
+                      title="Режим «Навигация» в шапке: кнопки шагают по артефактам этого типа"
+                      onClick={() => {
+                        onToggleNavMode(kind)
+                        setOpenKind(null)
+                      }}
+                      className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-fg-1 hover:bg-bg-3"
+                    >
+                      <span aria-hidden className="w-3 text-center">
+                        {navMode === 'artifact' && navKind === kind ? '✓' : ''}
+                      </span>
+                      Вкл/Выкл режима "Навигация"
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         )
       })}
     </div>

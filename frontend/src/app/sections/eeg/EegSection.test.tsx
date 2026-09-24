@@ -9,7 +9,7 @@
  * поэтому проверяются контракт компонентов и состояние, а арифметика шкал покрыта
  * `shared/lib/eegView.test.ts` и `eegCanvas.test.ts`.
  */
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { EegSection } from './EegSection'
@@ -66,6 +66,44 @@ describe('рабочая область раздела «ЭЭГ»', () => {
     expect(screen.getByText('Запись не открыта')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Перейти в раздел EDF/ })).toBeInTheDocument()
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/signals'))).toBe(false)
+  })
+
+  it('режим «Навигация» из меню пиуль легенды: шаги по артефактам своего типа', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    openRecording()
+    // Три зоны канала («весь монтаж») двух типов: навигация из пилюли z-score
+    // шагает только «по своим» — зонам типа кликнутой пилюли
+    useEdfRecording.setState({
+      layers: {
+        source: 'result',
+        artifacts: [
+          { id: 'z-1', kind: 'zscore_outlier', onsetSec: 2, durationSec: 0.5, channels: [] },
+          { id: 'z-2', kind: 'peak_to_peak', onsetSec: 5, durationSec: 0.5, channels: [] },
+          { id: 'z-3', kind: 'zscore_outlier', onsetSec: 8, durationSec: 0.5, channels: [] },
+        ],
+        rejectedEpochs: [],
+        rejectChannels: {},
+        epochLengthMs: 2000,
+      },
+    })
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    // Включение режима сразу шагает к первому артефакту («1/2»)
+    await user.click(screen.getByTestId('legend-zscore_outlier'))
+    await user.click(screen.getByTestId('legend-menu-nav-zscore_outlier'))
+
+    expect(useEegParams.getState().params.navMode).toBe('artifact')
+    expect(useEegParams.getState().params.navKind).toBe('zscore_outlier')
+    // «По своим»: в счётчике только зоны типа пилюли (2 из трёх)
+    expect(useEegParams.getState().artifactNav).toEqual({ index: 0, total: 2 })
+
+    // «К последнему артефакту» — та же команда eegNav, что и у кнопок шапки
+    act(() => {
+      useEegParams.getState().requestNav('end')
+    })
+    expect(useEegParams.getState().artifactNav?.index).toBe(1)
   })
 
   it('рисует две половины, одну полосу времени и разделитель', async () => {

@@ -32,6 +32,7 @@ import {
   DEMO_LAYERS_SEED,
   demoLayers,
   toggleEpochMark,
+  type ArtifactNavStep,
   type EdfViewerLayers,
   type EpochMark,
 } from '@/shared/lib/viewerLayers'
@@ -100,7 +101,10 @@ export function buildPreprocessForm(stage: RecalcStage, params: EdfParams): Form
   form.set('clean_method', params.cleanMethod)
   form.set('ica_n_components', String(params.icaNComponents))
 
-  if (stage === 'artifacts') {
+  if (stage === 'artifacts' || stage === 'epochs') {
+    // Пороги детекции — вход и стадии «нарезка эпох» тоже: она пересчитывает
+    // детекцию для BAD_-пометок, и без порогов считала бы дефолтами — зоны
+    // расходились с пиулями легенды (199 против 8, случай 24.09.2026)
     form.set('z_threshold', String(params.zScoreThreshold))
     form.set('pp_threshold_uv', String(params.peakToPeakUv))
     form.set('flat_line_uv', String(params.flatLineUv))
@@ -285,6 +289,11 @@ export type EdfRecordingState = {
    * команда передаётся через состояние с монотонным `seq` (как `fileDialogRequest`).
    */
   navRequest: { command: EdfNavCommand; seq: number } | null
+  /**
+   * Шаг режима «Навигация» навигатора зума (меню пиуль легенды): индекс текущего
+   * артефакта и их число — счётчик «3/47» в шапке. Держит вьюер, живёт при записи.
+   */
+  artifactNav: ArtifactNavStep | null
   beginUpload: () => void
   setUploadProgress: (ratio: number) => void
   failUpload: (message: string) => void
@@ -306,6 +315,8 @@ export type EdfRecordingState = {
   requestFileDialog: () => void
   /** Запросить навигацию по окну вьюера (тулс-хедер → вьюер, срез 2.9) */
   requestNav: (command: EdfNavCommand) => void
+  /** Шаг навигации по артефактам (счётчик навигатора; null — режим «окно») */
+  setArtifactNav: (step: ArtifactNavStep | null) => void
   /**
    * Инверсия блокировки эпохи (Ctrl+двойной клик, срез 2.10). `interval` — эпоха
    * под курсором, `rejectedByAlgorithm` — её вердикт из результата стадии.
@@ -340,6 +351,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
   navRequest: null,
+  artifactNav: null,
 
   beginUpload: () => set({ uploadProgress: 0, uploadError: null, demo: null }),
   setUploadProgress: (ratio) => set({ uploadProgress: Math.min(1, Math.max(0, ratio)) }),
@@ -558,6 +570,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   requestNav: (command) =>
     set((state) => ({ navRequest: { command, seq: (state.navRequest?.seq ?? 0) + 1 } })),
 
+  setArtifactNav: (step) => set({ artifactNav: step }),
+
   toggleEpochBlock: (interval, rejectedByAlgorithm) =>
     set((state) => ({
       epochMarks: toggleEpochMark(state.epochMarks, interval, rejectedByAlgorithm),
@@ -579,6 +593,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       signalsError: null,
       // Слои результата тоже принадлежат записи — сбрасываем вместе с ней
       layers: null,
+      artifactNav: null,
       epochMarks: [],
       stageJobs: {},
       channelQc: null,

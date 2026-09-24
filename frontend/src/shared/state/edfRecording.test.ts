@@ -219,9 +219,16 @@ describe('стадии предподготовки (срез 2.7)', () => {
     // Длина эпохи — параметр другой стадии, в артефактах её быть не должно
     expect(artifacts.get('epoch_length_ms')).toBeNull()
 
+    // Нарезка пересчитывает детекцию для BAD_-пометок — пороги идут и сюда
+    // (24.09.2026: без них стадия считала дефолтами — «199 зон» в ошибке нарезки
+    // против 8 в пиулях легенды)
     const epochs = buildPreprocessForm('epochs', { ...params, epochLengthMs: 1000 })
     expect(epochs.get('epoch_length_ms')).toBe('1000')
-    expect(epochs.get('z_threshold')).toBeNull()
+    expect(epochs.get('z_threshold')).toBe(String(params.zScoreThreshold))
+    expect(epochs.get('pp_threshold_uv')).toBe(String(params.peakToPeakUv))
+    expect(epochs.get('flat_line_uv')).toBe(String(params.flatLineUv))
+    expect(epochs.get('flat_line_ms')).toBe(String(params.flatLineMs))
+    expect(epochs.get('run_ica')).toBe('false')
   })
 
   it('buildPreprocessForm: notch, референс по каналам и пресет «без фильтра»', () => {

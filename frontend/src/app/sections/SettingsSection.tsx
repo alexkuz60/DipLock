@@ -122,6 +122,7 @@ export function SettingsSection() {
             <InfoRow label="decim фитинга" value={meta.data.dipole_fit_decim} mono />
             <InfoRow label="max эпох" value={meta.data.dipole_fit_max_epochs} mono />
             <InfoRow label="z-порог артефактов" value={meta.data.artifact_thresholds.z_score_threshold} mono />
+            <InfoRow label="Окно z-score, с" value={meta.data.artifact_thresholds.zscore_window_sec} mono />
             <InfoRow
               label="peak-to-peak, мкВ"
               value={meta.data.artifact_thresholds.peak_to_peak_threshold_uv}

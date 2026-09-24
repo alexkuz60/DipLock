@@ -182,7 +182,7 @@ describe('легенда слоёв', () => {
     expect(screen.getByRole('group', { name: 'Легенда слоёв' })).toBeInTheDocument()
   })
 
-  it('клик по чипу отдаёт тип наружу (состояние одно с панелью)', async () => {
+  it('клик по пилюле открывает меню, «Вкл/Выкл слой» отдаёт тип наружу', async () => {
     const user = userEvent.setup()
     const onToggle = vi.fn()
     renderWithProviders(
@@ -190,7 +190,105 @@ describe('легенда слоёв', () => {
     )
 
     await user.click(screen.getByTestId('legend-flat_line'))
+    expect(screen.getByTestId('legend-menu-flat_line')).toBeInTheDocument()
+    await user.click(screen.getByTestId('legend-menu-toggle-flat_line'))
     expect(onToggle).toHaveBeenCalledWith('flat_line')
+    // Меню закрывается после действия — пилюля снова просто пилюля
+    expect(screen.queryByTestId('legend-menu-flat_line')).not.toBeInTheDocument()
+  })
+
+  it('пилюля без зон тогглит слой сразу, без меню', async () => {
+    const user = userEvent.setup()
+    const onToggle = vi.fn()
+    renderWithProviders(
+      <LayersLegend counts={counts} visibility={visibility} onToggle={onToggle} />,
+    )
+
+    // У peak_to_peak ноль зон — меню не открывается, слой тумблерится кликом
+    await user.click(screen.getByTestId('legend-peak_to_peak'))
+    expect(onToggle).toHaveBeenCalledWith('peak_to_peak')
+    expect(screen.queryByTestId('legend-menu-peak_to_peak')).not.toBeInTheDocument()
+  })
+
+  it('меню открывается над пилюлей и слоем выше липкой шкалы эпох', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <LayersLegend counts={counts} visibility={visibility} onToggle={() => {}} />,
+    )
+
+    await user.click(screen.getByTestId('legend-zscore_outlier'))
+    const menu = screen.getByTestId('legend-menu-zscore_outlier')
+    // Над пилюлей (`bottom-full`) и z-30 против z-20 у `EpochRuler`: при равных z
+    // линейка эпох рисовалась поверх меню (фидбэк 24.09.2026)
+    expect(menu.className).toContain('bottom-full')
+    expect(menu.className).toContain('z-30')
+  })
+
+  it('меню несёт разделитель и тумблер режима «Навигация» (вкл/выкл, с галочкой)', async () => {
+    const user = userEvent.setup()
+    const onToggleNavMode = vi.fn()
+    renderWithProviders(
+      <LayersLegend
+        counts={counts}
+        visibility={visibility}
+        onToggle={() => {}}
+        navMode="window"
+        onToggleNavMode={onToggleNavMode}
+      />,
+    )
+
+    await user.click(screen.getByTestId('legend-zscore_outlier'))
+    const menu = screen.getByTestId('legend-menu-zscore_outlier')
+    expect(menu).toHaveTextContent('Вкл/Выкл слой')
+    expect(menu).toHaveTextContent('Вкл/Выкл режима "Навигация"')
+    expect(screen.getByRole('separator')).toBeInTheDocument()
+    expect(screen.getByTestId('legend-menu-nav-zscore_outlier')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
+
+    await user.click(screen.getByTestId('legend-menu-nav-zscore_outlier'))
+    // Режим включается по артефактам кликнутой пилюли («по своим»)
+    expect(onToggleNavMode).toHaveBeenCalledWith('zscore_outlier')
+  })
+
+  it('галочка «Навигация» — только у пилюли своего типа', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <LayersLegend
+        counts={counts}
+        visibility={visibility}
+        onToggle={() => {}}
+        navMode="artifact"
+        navKind="zscore_outlier"
+        onToggleNavMode={() => {}}
+      />,
+    )
+
+    await user.click(screen.getByTestId('legend-zscore_outlier'))
+    expect(screen.getByTestId('legend-menu-nav-zscore_outlier')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByTestId('legend-flat_line'))
+    expect(screen.getByTestId('legend-menu-nav-flat_line')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    )
+  })
+
+  it('без обработчика навигации пункт не показывается; Escape закрывает меню', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(
+      <LayersLegend counts={counts} visibility={visibility} onToggle={() => {}} />,
+    )
+
+    await user.click(screen.getByTestId('legend-zscore_outlier'))
+    expect(screen.queryByTestId('legend-menu-nav-zscore_outlier')).not.toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('legend-menu-zscore_outlier')).not.toBeInTheDocument()
   })
 })
 

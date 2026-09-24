@@ -435,6 +435,8 @@ export type JobStatus = {
 
 export type ArtifactThresholds = {
   z_score_threshold: number
+  /** Окно скользящих медианы/MAD для z-score, с (устойчивость к нестационарности) */
+  zscore_window_sec: number
   peak_to_peak_threshold_uv: number
   flat_line_threshold_uv: number
   flat_line_min_duration_ms: number
@@ -613,6 +615,8 @@ export type InitStatus = {
   checks: Record<string, CheckStatus>
   status: 'ready' | 'pending'
   versions: Record<string, string | null>
+  /** Свежесть кода бэкенда: `stale` = исходники новее старта процесса (сервер не обновлён) */
+  code: { code_mtime: string; server_started_at: string; stale: boolean }
   ui: { built: boolean; url: string; legacy_url: string }
   paths: {
     subjects_dir: string

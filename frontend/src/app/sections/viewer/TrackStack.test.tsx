@@ -651,11 +651,70 @@ describe('слои результата вьюера', () => {
     vi.stubGlobal('fetch', fetchSpy)
     renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
 
+    // Клик по пилюле — меню; слой гасит пункт «Вкл/Выкл слой» (правка 24.09.2026)
     await user.click(screen.getByTestId('legend-zscore_outlier'))
+    await user.click(screen.getByTestId('legend-menu-toggle-zscore_outlier'))
 
     expect(useEdfParams.getState().params.artifactVisibility.zscore_outlier).toBe(false)
     expect(screen.queryByTestId('zone-zscore_outlier-1')).not.toBeInTheDocument()
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('режим «Навигация» из меню пилюли: шаг по артефактам своего типа (N9/UI)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], navMode: 'window', navKind: null, timeLevel: 2 })
+    // Три зоны двух типов: навигация из пилюли z-score шагает только «по своим»
+    const layers: EdfViewerLayers = {
+      ...layersFixture(),
+      artifacts: [
+        ...layersFixture().artifacts,
+        {
+          id: 'zscore_outlier-2',
+          kind: 'zscore_outlier',
+          onsetSec: 8,
+          durationSec: 1,
+          channels: ['F3'],
+        },
+      ],
+    }
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layers} />)
+
+    // Включение режима сразу шагает к первому артефакту по времени («1/N»)
+    await user.click(screen.getByTestId('legend-zscore_outlier'))
+    await user.click(screen.getByTestId('legend-menu-nav-zscore_outlier'))
+
+    expect(useEdfParams.getState().params.navMode).toBe('artifact')
+    expect(useEdfParams.getState().params.navKind).toBe('zscore_outlier')
+    const step = useEdfRecording.getState().artifactNav
+    expect(step?.index).toBe(0)
+    // «По своим артефактам»: в счётчике только зоны типа пилюли (2 из трёх)
+    expect(step?.total).toBe(2)
+    // Шаг выделяет зону — панель деталей объясняет, куда попал навигатор
+    expect(screen.getByTestId('zone-details')).toBeInTheDocument()
+
+    // «Следующий артефакт» — та же команда navRequest, что и у кнопок шапки
+    act(() => {
+      useEdfRecording.getState().requestNav('next')
+    })
+    expect(useEdfRecording.getState().artifactNav?.index).toBe(1)
+
+    // Выключение режима снимает счётчик, окно не трогает
+    await user.click(screen.getByTestId('legend-zscore_outlier'))
+    await user.click(screen.getByTestId('legend-menu-nav-zscore_outlier'))
+    expect(useEdfParams.getState().params.navMode).toBe('window')
+    expect(useEdfParams.getState().params.navKind).toBeNull()
+    expect(useEdfRecording.getState().artifactNav).toBeNull()
+  })
+
+  it('клик по пилюле без зон сразу гасит слой, меню не открывается', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'] })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
+
+    // В фикстуре зон peak_to_peak нет — пилюля работает тумблером без меню
+    await user.click(screen.getByTestId('legend-peak_to_peak'))
+    expect(useEdfParams.getState().params.artifactVisibility.peak_to_peak).toBe(false)
+    expect(screen.queryByTestId('legend-menu-peak_to_peak')).not.toBeInTheDocument()
   })
 
   it('демо-кадру без пропа даёт фикстуру под длину сигнала', () => {

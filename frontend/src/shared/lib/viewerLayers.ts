@@ -269,6 +269,13 @@ export function buildEpochCells(
   return cells
 }
 
+/**
+ * Шаг навигации по артефактам (режим «Навигация» навигатора зума): индекс
+ * текущей зоны (0-based, порядок по времени) и их число — счётчик «3/47»
+ * в шапке раздела.
+ */
+export type ArtifactNavStep = { index: number; total: number }
+
 /** Зоны, включённые в легенде: `artifactVisibility` из параметров отрисовки. */
 export function visibleZones(
   zones: readonly ArtifactZone[],

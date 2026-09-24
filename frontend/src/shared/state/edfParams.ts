@@ -37,6 +37,9 @@ export type AmplitudeMode = 'shared' | 'per_channel'
 
 export type ReferenceMode = 'average' | 'custom'
 
+/** Режим навигатора зума в шапке: листание окон или прыжки по номеру артефакта */
+export type NavMode = 'window' | 'artifact'
+
 /** Метод артефактуальной очистки (стадия «Фильтр и референс», MNE-only) */
 export type CleanMethod = 'none' | 'ica' | 'ssp'
 
@@ -87,6 +90,10 @@ export type EdfParams = {
   amplitudeScaleUv: number
   /** Уровень зума: индекс в TIME_LEVELS (0 = вся сессия) */
   timeLevel: number
+  /** Режим навигатора зума: окно (листание) или «Навигация» по артефактам */
+  navMode: NavMode
+  /** Тип артефактов режима «Навигация» («по своим»); null — тип не выбран */
+  navKind: ArtifactKind | null
   filterPreset: FilterPresetId
   customBand: [number, number]
   /** Частота notch-фильтра, Гц (0 — выключен) */
@@ -120,6 +127,8 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   amplitudeMode: 'shared',
   amplitudeScaleUv: 50,
   timeLevel: 0,
+  navMode: 'window',
+  navKind: null,
   filterPreset: 'band_1_40',
   customBand: [1, 40],
   notchHz: 0,
@@ -205,7 +214,11 @@ export const STAGE_PARAM_KEYS: Record<RecalcStage, (keyof EdfParams)[]> = {
     'notchHarmonics', 'badChannels', 'interpolateBads', 'cleanMethod', 'icaNComponents',
   ],
   artifacts: ['zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs', 'runIca'],
-  epochs: ['epochLengthMs'],
+  // Пороги детекции — тоже вход нарезки: стадия «эпохи» пересчитывает детекцию
+  // для BAD_-пометок, и правка порога обязана помечать устаревшими обе стадии
+  epochs: [
+    'epochLengthMs', 'zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs', 'runIca',
+  ],
 }
 
 /** Состояние стадии: не считалась / параметры изменились / результат актуален. */
@@ -314,6 +327,12 @@ export type EdfParamsState = {
    * не устаревает и запросов не делает (легенда в панели и в шапке вьюера).
    */
   toggleArtifactVisibility: (kind: ArtifactKind) => void
+  /**
+   * Тумблер режима навигатора: окно ↔ «Навигация» **по артефактам типа `kind`**
+   * (меню пиуль легенды). Галочка — только у пилюли своего типа: клик по своей
+   * выключает режим, по чужой — переключает навигацию на её артефакты.
+   */
+  toggleNavMode: (kind: ArtifactKind) => void
 }
 
 export const useEdfParams = create<EdfParamsState>()(
@@ -396,6 +415,17 @@ export const useEdfParams = create<EdfParamsState>()(
             },
           },
         })),
+      toggleNavMode: (kind) =>
+        set((state) => {
+          const active = state.params.navMode === 'artifact' && state.params.navKind === kind
+          return {
+            params: {
+              ...state.params,
+              navMode: active ? 'window' : 'artifact',
+              navKind: active ? null : kind,
+            },
+          }
+        }),
     }),
     {
       name: 'diplock.edf',

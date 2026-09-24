@@ -385,3 +385,80 @@ def test_ica_detection_skipped_without_eog_or_frontal():
 
     assert stats["ica_applied"] is False
     assert stats["by_type"]["ica_eog"] == 0
+
+
+# ---------- N9 (шаг 2.3): robust z в скользящем окне, зоны p2p интервалами ----------
+
+
+def test_zscore_sliding_window_kills_long_zones_on_level_shift():
+    """Смещение уровня записи — не длинная зона выброса (N9, фидбэк 24.09.2026).
+
+    «Длинные z-score-зоны после смены референса»: глобальная медиана/MAD
+    помечала весь смещённый хвост одной зоной zscore_outlier и роняла эпохи.
+    Скользящая «норма» следует за уровнем — длинных зон нет (короткие на стыке
+    смещения допустимы).
+    """
+    data = _noise(60.0)
+    data[:, int(40 * _SFREQ):] += 15e-6  # смещённый хвост записи
+
+    _, stats = detect_artifacts(_raw(data), settings, run_ica=False)
+
+    z_zones = [z for z in stats["zones"] if z["kind"] == "zscore_outlier"]
+    assert all(z["duration_sec"] < 5.0 for z in z_zones)
+
+
+def test_zscore_window_beyond_recording_falls_back_to_global():
+    """Окно больше записи → глобальная оценка (фолбэк) видит хвост длинной зоной.
+
+    Контраст к тесту выше: та же запись с окном 600 с даёт зону ≥ 15 с —
+    значит длинные зоны снимало именно скользящее окно, а не случайность.
+    """
+    data = _noise(60.0)
+    data[:, int(40 * _SFREQ):] += 15e-6
+    cfg = settings.model_copy(update={"zscore_window_sec": 600.0})
+
+    _, stats = detect_artifacts(_raw(data), cfg, run_ica=False)
+
+    z_zones = [z for z in stats["zones"] if z["kind"] == "zscore_outlier"]
+    assert any(z["duration_sec"] >= 15.0 for z in z_zones)
+
+
+def test_zscore_still_catches_burst_inside_shifted_segment():
+    """Сенситивность сохранена: всплеск 200 мкВ в смещённом хвосте — зона."""
+    data = _noise(60.0)
+    data[:, int(40 * _SFREQ):] += 15e-6
+    data[:, int(45 * _SFREQ): int(45.1 * _SFREQ)] += 200e-6
+
+    _, stats = detect_artifacts(_raw(data), settings, run_ica=False)
+
+    z_zones = [z for z in stats["zones"] if z["kind"] == "zscore_outlier"]
+    assert any(44.0 <= z["onset_sec"] <= 46.0 for z in z_zones)
+
+
+def test_peak_to_peak_single_event_is_single_zone():
+    """Перекрывающиеся окна события сливаются: всплеск = одна зона (N9).
+
+    Окно 2 с с шагом 1 с попадало в событие 2–3 раза и раздувало
+    ``by_type``/``total``: зона теперь — интервал покрытия, а не окно.
+    """
+    data = _noise(10.0)
+    data[:, int(4 * _SFREQ): int(4.2 * _SFREQ)] += 250e-6  # всплеск на всех каналах
+
+    _, stats = detect_artifacts(_raw(data), settings, run_ica=False)
+
+    pp_zones = [z for z in stats["zones"] if z["kind"] == "peak_to_peak"]
+    assert len(pp_zones) == 1
+    assert stats["by_type"]["peak_to_peak"] == 1
+    assert set(pp_zones[0]["channels"]) == set(_CHANNELS)
+    assert pp_zones[0]["onset_sec"] < 4.0 < pp_zones[0]["onset_sec"] + pp_zones[0]["duration_sec"]
+
+
+def test_peak_to_peak_two_events_are_two_zones():
+    """Два далёких события — две зоны: слияние не склеивает разные всплески."""
+    data = _noise(12.0)
+    data[:, int(3 * _SFREQ): int(3.2 * _SFREQ)] += 250e-6
+    data[:, int(9 * _SFREQ): int(9.2 * _SFREQ)] += 250e-6
+
+    _, stats = detect_artifacts(_raw(data), settings, run_ica=False)
+
+    assert stats["by_type"]["peak_to_peak"] == 2

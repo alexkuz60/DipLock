@@ -14,7 +14,7 @@ from app.api.routes import router as api_router
 from app.core.config import settings
 from app.services.job_manager import job_manager
 from app.services.orphans import sweep_orphans
-from app.utils.versions import library_versions
+from app.utils.versions import code_freshness, library_versions
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,9 @@ async def ui_app(rest_of_path: str = ""):
         candidate = os.path.normpath(os.path.join(UI_DIR, rest_of_path))
         if candidate.startswith(UI_DIR + os.sep) and os.path.isfile(candidate):
             return FileResponse(candidate)
-    return HTMLResponse(_read_html(index_path))
+    # no-cache: эвристический кэш браузера держал старый index.html со ссылкой
+    # на прежний бандл — «нового кода нет» при живой сборке (случай 24.09.2026)
+    return HTMLResponse(_read_html(index_path), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
@@ -237,6 +239,9 @@ async def init_status() -> dict:
         "status": "ready" if ready else "pending",
         # Расширенная информация для раздела UI «Состояние сервера»
         "versions": library_versions(),
+        # Трекер обновления бэкенда: `stale` = исходники app/ новее старта процесса
+        # (uvicorn работает на старом коде — случай 24.09.2026)
+        "code": code_freshness(),
         "ui": {
             "built": os.path.exists(os.path.join(UI_DIR, "index.html")),
             "url": "/ui/",

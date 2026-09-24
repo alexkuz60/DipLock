@@ -53,7 +53,9 @@ import {
 } from '@/shared/lib/eegSpectrogram'
 import { DB_RANGE_LIMITS, normalizeAmplitudeUv } from '@/shared/lib/eegView'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
-import { TIME_LEVELS } from './edfParams'
+import type { ArtifactNavStep } from '@/shared/lib/viewerLayers'
+import { ARTIFACT_KINDS } from '@/shared/lib/artifacts'
+import { TIME_LEVELS, type ArtifactKind, type NavMode } from './edfParams'
 import { calcJobFromStatus, calcJobSummary, type CalcJob } from '@/shared/lib/dipoleCalcModel'
 
 export { TIME_LEVELS }
@@ -89,6 +91,10 @@ export type EegParams = {
   amplitudeUv: number
   /** Уровень зума по времени: индекс в `TIME_LEVELS` (0 — вся запись) */
   timeLevel: number
+  /** Режим навигатора зума: окно (листание) или «Навигация» по артефактам */
+  navMode: NavMode
+  /** Тип артефактов режима «Навигация» («по своим»); null — тип не выбран */
+  navKind: ArtifactKind | null
   /** Центр окна времени, с: общий для трека и спектрограммы */
   windowCenterSec: number
   /** Окно частот спектрограммы, Гц (`null` — вся сетка) */
@@ -116,6 +122,8 @@ export const EEG_PARAM_DEFAULTS: EegParams = {
   channel: null,
   amplitudeUv: 50,
   timeLevel: 0,
+  navMode: 'window',
+  navKind: null,
   windowCenterSec: 0,
   freqWindow: null,
   palette: 'viridis',
@@ -237,6 +245,10 @@ export function normalizeEegParams(params: EegParams): EegParams {
     channel: params.channel ?? null,
     amplitudeUv: normalizeAmplitudeUv(params.amplitudeUv),
     timeLevel: clampIndex(params.timeLevel),
+    navMode: params.navMode === 'artifact' ? 'artifact' : 'window',
+    // Тип навигации — только из каталога артефактов, иначе «по своим» пуст
+    navKind:
+      params.navKind != null && ARTIFACT_KINDS.includes(params.navKind) ? params.navKind : null,
     windowCenterSec: Number.isFinite(params.windowCenterSec) ? params.windowCenterSec : 0,
     freqWindow: normalizeFreqWindow(params.freqWindow),
     dbRangeDb: normalizeDbRange(params.dbRangeDb ?? EEG_PARAM_DEFAULTS.dbRangeDb),
@@ -310,6 +322,8 @@ export type EegState = {
   gridError: string | null
   /** Команда листания окна из тулс-хедера */
   eegNav: EegNavRequest | null
+  /** Шаг режима «Навигация»: номер артефакта и их число (счётчик навигатора) */
+  artifactNav: ArtifactNavStep | null
   setParams: (patch: Partial<EegParams>) => void
   /** Канал трека: смена канала обесценивает спектрограмму другого канала */
   setChannel: (channel: string) => void
@@ -325,6 +339,14 @@ export type EegState = {
   setBandwidth: (value: number) => void
   /** Команда листания окна: `<<` `<` `>` `>>` (исполняет рабочая область) */
   requestNav: (command: EegNavCommand) => void
+  /** Шаг навигации по артефактам (счётчик навигатора; null — режим «окно») */
+  setArtifactNav: (step: ArtifactNavStep | null) => void
+  /**
+   * Тумблер режима навигатора: окно ↔ «Навигация» **по артефактам типа `kind`**
+   * (меню пиуль легенды). Галочка — только у пилюли своего типа: клик по своей
+   * выключает режим, по чужой — переключает навигацию на её артефакты.
+   */
+  toggleNavMode: (kind: ArtifactKind) => void
   /** Запуск расчёта: **единственное** место, где уходит задача */
   runSpectrogram: (recordingId: string | null, channel: string | null) => Promise<void>
   /** Сброс результата (новая запись / закрытие записи): параметры просмотра остаются */
@@ -341,6 +363,7 @@ export const useEegParams = create<EegState>()(
       error: null,
       gridError: null,
       eegNav: null,
+      artifactNav: null,
 
       setParams: (patch) => set((state) => ({ params: { ...state.params, ...patch } })),
       setChannel: (channel) => set((state) => ({ params: { ...state.params, channel } })),
@@ -430,6 +453,18 @@ export const useEegParams = create<EegState>()(
 
       requestNav: (command) =>
         set((state) => ({ eegNav: { command, seq: (state.eegNav?.seq ?? 0) + 1 } })),
+      setArtifactNav: (step) => set({ artifactNav: step }),
+      toggleNavMode: (kind) =>
+        set((state) => {
+          const active = state.params.navMode === 'artifact' && state.params.navKind === kind
+          return {
+            params: {
+              ...state.params,
+              navMode: active ? 'window' : 'artifact',
+              navKind: active ? null : kind,
+            },
+          }
+        }),
 
       runSpectrogram: async (recordingId, channel) => {
         if (!recordingId || !channel) return
@@ -477,6 +512,7 @@ export const useEegParams = create<EegState>()(
           error: null,
           gridError: null,
           eegNav: null,
+          artifactNav: null,
           // Канал и окно принадлежат записи: откроют другую — выберут свой канал
           params: { ...state.params, channel: null, windowCenterSec: 0, timeLevel: 0 },
         }))
@@ -498,6 +534,7 @@ export const useEegParams = create<EegState>()(
           error: null,
           gridError: null,
           eegNav: null,
+          artifactNav: null,
           params: normalizeEegParams({ ...current.params, ...(stored.params ?? {}) }),
         }
       },

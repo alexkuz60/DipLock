@@ -226,7 +226,8 @@ export function TrackRow({
             title={qc.tooltip}
             aria-label={`Качество канала ${name}: ${qc.tooltip}`}
             className={cx(
-              'absolute top-1/2 left-0.5 size-2 -translate-y-1/2 rounded-full',
+              // Точка ×2 (правка 24.09.2026) + отступ от левого края вьюера
+              'absolute top-1/2 left-2 size-4 -translate-y-1/2 rounded-full',
               qc.status === 'ok' && 'bg-ok',
               qc.status === 'warn' && 'bg-warn',
               qc.status === 'bad' && 'bg-danger',

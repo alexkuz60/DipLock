@@ -938,6 +938,7 @@ async def get_meta() -> MetaResponse:
         signal_base_points=settings.signal_base_points,
         artifact_thresholds=ArtifactThresholds(
             z_score_threshold=settings.z_score_threshold,
+            zscore_window_sec=settings.zscore_window_sec,
             peak_to_peak_threshold_uv=settings.peak_to_peak_threshold_uv,
             flat_line_threshold_uv=settings.flat_line_threshold_uv,
             flat_line_min_duration_ms=settings.flat_line_min_duration_ms,

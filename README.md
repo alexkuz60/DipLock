@@ -107,6 +107,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # ESLint
 npm run test       # Vitest (jsdom)
 npm run build      # → backend/app/static/ui, раздаётся FastAPI по /ui/
+npm run build:watch # автосборка туда же при правках: :8000/ui/ не отдаёт устаревший бандл
 ```
 
 Разделы: **Главная**, **EDF** (просмотр записи и подготовка эпох), **Диполи** (3 проекции с реальным

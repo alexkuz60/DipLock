@@ -118,6 +118,20 @@ export function ServerStatusSection() {
               <InfoRow label="Swagger" value={init.data.api.docs_url} mono />
               <InfoRow label="meta" value={init.data.api.meta_url} mono />
               <InfoRow label="UI собран" value={init.data.ui.built} />
+              <InfoRow
+                label="Код бэкенда"
+                value={
+                  init.data.code.stale
+                    ? 'устарел — код новее сервера'
+                    : `свежий (${init.data.code.code_mtime})`
+                }
+              />
+              {init.data.code.stale ? (
+                <p className="text-sm text-warn">
+                  Бэкенд работает на старом коде: перезапустите uvicorn (с `--reload` такого не
+                  бывает) и пересчитайте запись — файлы задач и результаты переживают перезагрузку.
+                </p>
+              ) : null}
               <InfoRow label="UI URL" value={init.data.ui.url} mono />
               <InfoRow label="Legacy" value={init.data.ui.legacy_url} mono />
             </Panel>
@@ -137,6 +151,7 @@ export function ServerStatusSection() {
                 <InfoRow label="decim фитинга" value={meta.data.dipole_fit_decim} mono />
                 <InfoRow label="max эпох" value={meta.data.dipole_fit_max_epochs} mono />
                 <InfoRow label="z-порог" value={meta.data.artifact_thresholds.z_score_threshold} mono />
+                <InfoRow label="Окно z-score, с" value={meta.data.artifact_thresholds.zscore_window_sec} mono />
                 <InfoRow label="параллельных задач" value={meta.data.max_concurrent_jobs} mono />
                 <InfoRow label="surface version" value={meta.data.surface_version} mono />
               </Panel>

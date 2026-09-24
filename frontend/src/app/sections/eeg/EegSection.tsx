@@ -63,7 +63,7 @@ import { anchoredCenter, panByPixels, windowCenter } from '@/shared/lib/viewerMa
 import { resolveSignalLevel, selectFrame, type SignalFrame } from '@/shared/lib/signalFrame'
 import { artifactZonesForChannels, zonesInWindow } from '@/shared/lib/eegArtifacts'
 import { artifactCounts, visibleZones } from '@/shared/lib/viewerLayers'
-import { useEdfParams } from '@/shared/state/edfParams'
+import { useEdfParams, type ArtifactKind } from '@/shared/state/edfParams'
 import { TIME_LEVELS, eegResultMatchesParams, useEegParams } from '@/shared/state/eegParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
@@ -245,6 +245,15 @@ function EegWorkspace({
   const zoneCounts = useMemo(() => artifactCounts(layerZones), [layerZones])
   const zonesInView = useMemo(() => zonesInWindow(zones, window), [zones, window])
   const artifactsComputed = layers?.source === 'result' && layerZones.length > 0
+  /**
+   * Артефакты в порядке времени — шаги режима «Навигация» (номер = порядок слева).
+   * Шаги — **по артефактам типа пилюли**, из которой включён режим («по своим»),
+   * как в вьюере EDF; без выбранного типа — по всем видимым зонам канала.
+   */
+  const navZones = useMemo(() => {
+    const scoped = params.navKind ? zones.filter((zone) => zone.kind === params.navKind) : zones
+    return [...scoped].sort((a, b) => a.onsetSec - b.onsetSec)
+  }, [zones, params.navKind])
 
   // Новый источник сигнала — окно к «вся сессия» и без меток: курсор, частота и
   // уровень относятся к прежней записи, а не к новой
@@ -283,6 +292,33 @@ function EegWorkspace({
     setCursorSec(null)
     setFreqMarkerHz(null)
     setLevelUv(null)
+    // Режим «Навигация» (вкл. из меню пиуль легенды): кнопки шагают по номеру
+    // найденного артефакта канала, окно центрируется на зоне текущим зумом
+    // (как в вьюере EDF)
+    if (state.params.navMode === 'artifact') {
+      const total = navZones.length
+      if (total === 0) return
+      const current = state.artifactNav?.index ?? 0
+      const index =
+        command === 'start'
+          ? 0
+          : command === 'end'
+            ? total - 1
+            : command === 'prev'
+              ? Math.max(0, current - 1)
+              : Math.min(total - 1, current + 1)
+      const zone = navZones[index]
+      if (!zone) return
+      state.setParams({
+        windowCenterSec: clampEegCenter(
+          zone.onsetSec + zone.durationSec / 2,
+          widthSec,
+          frame.durationSec,
+        ),
+      })
+      state.setArtifactNav({ index, total })
+      return
+    }
     state.setParams({
       windowCenterSec: clampEegCenter(
         command === 'start'
@@ -296,7 +332,38 @@ function EegWorkspace({
         frame.durationSec,
       ),
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eegNav, frame.durationSec])
+
+  /**
+   * Счётчик навигатора («3/47») в шапке: режим «Навигация» держит шаг в сторе
+   * — его показывает `EegWindowControls`. Список зон меняется (смена канала,
+   * тумблеры видимости) — держим total актуальным, индекс зажимаем.
+   */
+  useEffect(() => {
+    const state = useEegParams.getState()
+    if (params.navMode !== 'artifact') {
+      if (state.artifactNav) state.setArtifactNav(null)
+      return
+    }
+    const total = navZones.length
+    const index = Math.min(state.artifactNav?.index ?? 0, Math.max(0, total - 1))
+    if (state.artifactNav?.index !== index || state.artifactNav?.total !== total) {
+      state.setArtifactNav({ index, total })
+    }
+  }, [params.navMode, navZones])
+
+  /**
+   * Тумблер режима «Навигация» из меню пиуль легенды: включение (и смена типа)
+   * сразу шагает к первому артефакту канала этого типа («1/N»), выключение
+   * возвращает листание окна.
+   */
+  function handleToggleNavMode(kind: ArtifactKind) {
+    const state = useEegParams.getState()
+    const active = state.params.navMode === 'artifact' && state.params.navKind === kind
+    state.toggleNavMode(kind)
+    if (!active) state.requestNav('start')
+  }
 
   // Колесо — дискретный зум с якорем в точке курсора (родной слушатель: React
   // вешает wheel как passive, а нужен preventDefault, чтобы не скроллить область)
@@ -556,13 +623,17 @@ function EegWorkspace({
         ) : null}
       </div>
 
-      {/* Легенда слоёв — общая с вьюером EDF: чипы типов и клик «скрыть/показать».
-          Состояние одно (`artifactVisibility`), поэтому разделы не расходятся */}
+      {/* Легенда слоёв — общая с вьюером EDF: клик по пилюле открывает меню
+          (слой и режим «Навигация»). Состояние одно (`artifactVisibility`),
+          поэтому разделы не расходятся */}
       {artifactsComputed ? (
         <LayersLegend
           counts={zoneCounts}
           visibility={artifactVisibility}
           onToggle={toggleArtifactVisibility}
+          navMode={params.navMode}
+          navKind={params.navKind}
+          onToggleNavMode={handleToggleNavMode}
         />
       ) : null}
     </div>

@@ -58,7 +58,7 @@ import {
   zonesForChannel,
   type EdfViewerLayers,
 } from '@/shared/lib/viewerLayers'
-import { TIME_LEVELS, useEdfParams, useEdfParamsValue } from '@/shared/state/edfParams'
+import { TIME_LEVELS, useEdfParams, useEdfParamsValue, type ArtifactKind } from '@/shared/state/edfParams'
 import { channelQcStatus, channelQcTooltip } from '@/shared/lib/channelQc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useEegParams } from '@/shared/state/eegParams'
@@ -286,6 +286,18 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   */
   const navRequest = useEdfRecording((state) => state.navRequest)
   /**
+   * Артефакты в порядке времени — шаги режима «Навигация»: номер шага совпадает
+   * с порядком зон слева направо, а не с порядком из детектора. Шаги — **по
+   * артефактам типа пилюли**, из которой включён режим («по своим»); без выбранного
+   * типа (старый localStorage) — по всем видимым зонам, как раньше.
+   */
+  const navZones = useMemo(() => {
+    const scoped = params.navKind
+      ? visibleZoneList.filter((zone) => zone.kind === params.navKind)
+      : visibleZoneList
+    return [...scoped].sort((a, b) => a.onsetSec - b.onsetSec)
+  }, [visibleZoneList, params.navKind])
+  /**
    * Последняя обработанная команда. Инициализируется текущим `seq`: если вьюер
    * смонтировался уже после команды (переключение раздела и обратно), прокручивать
    * окно к старой цели не нужно — прыжок был бы неожиданным.
@@ -300,6 +312,28 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     const widthSec = signal.durationSec / (TIME_LEVELS[level] ?? 1)
     setCursor(null)
     setLevelMark(null)
+    // Режим «Навигация» (вкл. из меню пиуль легенды): кнопки шагают по номеру
+    // найденного артефакта, окно центрируется на зоне текущим зумом (ширина окна
+    // не меняется), зона выделяется — панель деталей объясняет шаг
+    if (useEdfParams.getState().params.navMode === 'artifact') {
+      const total = navZones.length
+      if (total === 0) return
+      const current = useEdfRecording.getState().artifactNav?.index ?? 0
+      const index =
+        command === 'start'
+          ? 0
+          : command === 'end'
+            ? total - 1
+            : command === 'prev'
+              ? Math.max(0, current - 1)
+              : Math.min(total - 1, current + 1)
+      const zone = navZones[index]
+      if (!zone) return
+      setSelectedZoneId(zone.id)
+      setCenterSec(clampCenter(zone.onsetSec + zone.durationSec / 2, widthSec, signal.durationSec))
+      useEdfRecording.getState().setArtifactNav({ index, total })
+      return
+    }
     setCenterSec((current) => {
       const target =
         command === 'start'
@@ -313,6 +347,24 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navRequest?.seq])
+
+  /**
+   * Счётчик навигатора («3/47») в шапке: режим «Навигация» держит шаг в сторе
+   * записи — его показывает `EdfZoomSelect`. Список зон меняется (новая детекция,
+   * тумблеры видимости) — держим total актуальным, индекс зажимаем.
+   */
+  useEffect(() => {
+    const state = useEdfRecording.getState()
+    if (params.navMode !== 'artifact') {
+      if (state.artifactNav) state.setArtifactNav(null)
+      return
+    }
+    const total = navZones.length
+    const index = Math.min(state.artifactNav?.index ?? 0, Math.max(0, total - 1))
+    if (state.artifactNav?.index !== index || state.artifactNav?.total !== total) {
+      state.setArtifactNav({ index, total })
+    }
+  }, [params.navMode, navZones])
 
   /*
    * Колесо мыши **не перехватывается** — оно прокручивает стек треков (ручная
@@ -507,6 +559,18 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const handleZoneSelect = useCallback((id: string | null) => setSelectedZoneId(id), [])
 
   /**
+   * Тумблер режима «Навигация» из меню пиуль легенды: включение (и смена типа)
+   * сразу шагает к первому артефакту этого типа («1/N»), выключение возвращает
+   * листание окна.
+   */
+  function handleToggleNavMode(kind: ArtifactKind) {
+    const state = useEdfParams.getState()
+    const active = state.params.navMode === 'artifact' && state.params.navKind === kind
+    state.toggleNavMode(kind)
+    if (!active) useEdfRecording.getState().requestNav('start')
+  }
+
+  /**
    * Зоны развёрнутого трека — только его канал (п. 4 среза): полоса чужого канала
    * на холсте ×8 — шум. Пока трек не развёрнут, зоны рисует общий слой поверх всех
    * треков (как раньше); при развороте общий слой уступает слою строки канала.
@@ -593,6 +657,9 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
           counts={counts}
           visibility={params.artifactVisibility}
           onToggle={toggleArtifactVisibility}
+          navMode={params.navMode}
+          navKind={params.navKind}
+          onToggleNavMode={handleToggleNavMode}
         />
       ) : null}
 

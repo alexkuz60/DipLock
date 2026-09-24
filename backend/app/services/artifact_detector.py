@@ -106,6 +106,53 @@ def _robust_stats(x: NDArray) -> tuple[float, float]:
     return med, scale
 
 
+def _sliding_robust_z(
+    x: NDArray, sfreq: float, window_sec: float, z_threshold: float,
+) -> NDArray:
+    """Флаг «выброс»: robust z (медиана/MAD) в скользящем окне канала.
+
+    Глобальная оценка (M11) устойчива к самому артефакту, но не к
+    нестационарности: дрейф уровня/амплитуды отдаляет отсчёты от глобальной
+    медианы надолго и давал длинные зоны ``zscore_outlier`` (N9, фидбэк
+    24.09.2026 — «длинные z-score-зоны после смены референса»). Здесь медиана и
+    масштаб считаются по окнам ``window_sec`` с 50 %-ным шагом, и каждый отсчёт
+    оценивает **ближайшее окно** (кусочно-постоянная «норма»): линейная
+    интерполяция между окнами на стыке смещения уровня плодила россыпь микрозон
+    (замер 24.09.2026: 579 ложных отсчётов и 304 зоны у ступеньки 15 мкВ).
+    Запись короче окна считает по глобальной оценке (фолбэк). NaN не флаг (их
+    ловит ``break``), окно с нулевым масштабом берёт глобальный — иначе z
+    взрывается на константных участках.
+    """
+    x = np.asarray(x, dtype=float)
+    n = x.shape[0]
+    if n == 0:
+        return np.zeros(0, dtype=bool)
+    win = max(2, round(window_sec * sfreq))
+    glob_med, glob_scale = _robust_stats(x)
+    if glob_scale <= 0.0:
+        glob_scale = 1.0
+    x_safe = np.where(np.isfinite(x), x, glob_med)
+    if n <= win:
+        return np.abs(x_safe - glob_med) / glob_scale > z_threshold
+    step = max(1, win // 2)
+    starts = list(range(0, n - win + 1, step))
+    if starts[-1] + win < n:
+        starts.append(n - win)
+    meds = np.empty(len(starts))
+    scales = np.empty(len(starts))
+    for k, start in enumerate(starts):
+        meds[k], scales[k] = _robust_stats(x[start: start + win])
+    scales[~np.isfinite(scales) | (scales <= 0.0)] = glob_scale
+    meds[~np.isfinite(meds)] = glob_med
+    centers = np.asarray(starts, dtype=float) + win / 2.0
+    t = np.arange(n, dtype=float)
+    pos = np.searchsorted(centers, t)
+    lo = np.clip(pos - 1, 0, len(centers) - 1)
+    hi = np.clip(pos, 0, len(centers) - 1)
+    nearest = np.where(np.abs(t - centers[lo]) <= np.abs(centers[hi] - t), lo, hi)
+    return np.abs(x_safe - meds[nearest]) / scales[nearest] > z_threshold
+
+
 def _runs_to_zones(
     flag: NDArray, kind: str, min_samples: int, sfreq: float,
 ) -> list[dict[str, Any]]:
@@ -400,39 +447,61 @@ def detect_artifacts(
     наличии EOG-подобных каналов **или** фронтального прокси Fp1/Fp2 (N8 —
     `load_edf` отрезает EOG-каналы), факт — в ``stats["ica_applied"]``.
 
-    Peak-to-peak держит историческую геометрию зоны (onset — центр окна):
-    на неё завязан инвариант «зоны ↔ drop_log» в тестах (N6).
+    Peak-to-peak: серия перекрывающихся превысивших окон — одна зона-интервал
+    события, а не зона на каждое окно (N9), геометрия зоны честная
+    ([начало, конец] серии окон), а не «центр окна». Инвариант «зоны ↔ drop_log»
+    (N6) держит ``test_artifact_zones_actually_drop_epochs``.
     """
     names = list(raw.ch_names)
     sfreq = float(raw.info["sfreq"])
     data = raw.get_data()
     zones: list[dict[str, Any]] = []
 
-    # 1. Z-score: устойчивый (медиана/MAD, M11) — выброс не тянет порог за собой
+    # 1. Z-score: robust (медиана/MAD, M11) в скользящем окне — выброс не тянет
+    # порог за собой, а дрейф уровня не даёт длинных зон (N9, шаг 2.3)
     for i, ch in enumerate(names):
-        med, scale = _robust_stats(data[i])
-        if scale <= 0:
-            continue
         for zone in _runs_to_zones(
-            np.abs(data[i] - med) / scale > z_threshold, "zscore_outlier", 3, sfreq,
+            _sliding_robust_z(data[i], sfreq, float(settings.zscore_window_sec), z_threshold),
+            "zscore_outlier", 3, sfreq,
         ):
             zone["channels"] = [ch]
             zones.append(zone)
 
-    # 2. Peak-to-peak (скользящее окно 2 с): превышение размаха
+    # 2. Peak-to-peak (скользящее окно 2 с): превышение размаха. Серия
+    # перекрывающихся превысивших окон (шаг < окна) — одна зона-интервал события
+    # (N9: окно с шагом в полокна давало 2–3 зоны на всплеск и раздувало
+    # счётчики); разрыв в окнах — отдельное событие. Каналы с одним интервалом —
+    # одна зона, как раньше.
     win = int(2.0 * sfreq)
     if win >= 2 and data.shape[1] > win:
-        for w_start in range(0, data.shape[1] - win, max(1, win // 2)):
+        step = max(1, win // 2)
+        starts = list(range(0, data.shape[1] - win, step))
+        flags = np.zeros((len(names), len(starts)), dtype=bool)
+        for k, w_start in enumerate(starts):
             window = data[:, w_start: w_start + win]
             pp = np.nanmax(window, axis=1) - np.nanmin(window, axis=1)
-            exceeded = np.where(pp > pp_threshold_uv * 1e-6)[0]
-            if exceeded.size:
-                zones.append({
-                    "kind": "peak_to_peak",
-                    "onset_sec": round((w_start + win // 2) / sfreq, 3),
-                    "duration_sec": round(win / sfreq, 3),
-                    "channels": [names[int(i)] for i in exceeded],
-                })
+            flags[:, k] = pp > pp_threshold_uv * 1e-6
+        by_interval: dict[tuple[float, float], list[str]] = {}
+        for i, ch in enumerate(names):
+            k = 0
+            while k < len(starts):
+                if not flags[i, k]:
+                    k += 1
+                    continue
+                k_end = k
+                while k_end + 1 < len(starts) and flags[i, k_end + 1]:
+                    k_end += 1
+                onset = round(starts[k] / sfreq, 3)
+                duration = round((starts[k_end] + win - starts[k]) / sfreq, 3)
+                by_interval.setdefault((onset, duration), []).append(ch)
+                k = k_end + 1
+        for (onset, duration), interval_channels in by_interval.items():
+            zones.append({
+                "kind": "peak_to_peak",
+                "onset_sec": onset,
+                "duration_sec": duration,
+                "channels": interval_channels,
+            })
 
     # 3. Плоская линия / клиппинг (N7/F20 + «эпизоды клиппинга» PDF)
     zones.extend(_detect_flat_or_clipping(data, names, sfreq, settings))

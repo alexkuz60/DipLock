@@ -900,6 +900,9 @@ class ArtifactThresholds(BaseModel):
     """Активные пороги детекции артефактов и reject-фильтра."""
 
     z_score_threshold: float
+    zscore_window_sec: float = Field(
+        description="Окно скользящих медианы/MAD для z-score, с (устойчивость к нестационарности)",
+    )
     peak_to_peak_threshold_uv: float
     flat_line_threshold_uv: float
     flat_line_min_duration_ms: float

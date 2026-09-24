@@ -22,9 +22,9 @@
 | Файл | Хук | localStorage | Что хранит |
 |---|---|---|---|
 | `uiStore.ts` | `useUiStore` | `diplock.ui` | активный раздел, открытая панель, свёрнутые секции панели опций (`collapsedPanels`), служебный UI |
-| `edfParams.ts` | `useEdfParams` | `diplock.edf` | параметры раздела EDF: каналы, пресеты фильтра, пороги, слои |
-| `edfRecording.ts` | `useEdfRecording` | **нет** | сессия записи: паспорт, окно, `navRequest`, `epochMarks` — живёт только в текущей сессии браузера |
-| `eegParams.ts` | `useEegParams` | `diplock.eeg` | канал, окно, зум, палитра/дБ, `eegNav`, отпечаток расчёта |
+| `edfParams.ts` | `useEdfParams` | `diplock.edf` | параметры раздела EDF: каналы, пресеты фильтра, пороги, слои, режим навигатора `navMode` + тип его навигации `navKind` |
+| `edfRecording.ts` | `useEdfRecording` | **нет** | сессия записи: паспорт, окно, `navRequest`, `artifactNav` (шаг режима «Навигация»), `epochMarks` — живёт только в текущей сессии браузера |
+| `eegParams.ts` | `useEegParams` | `diplock.eeg` | канал, окно, зум, `navMode`, `navKind`, `artifactNav`, палитра/дБ, `eegNav`, отпечаток расчёта |
 | `dipoleParams.ts` | `useDipoleParams` | `diplock.dipoles` | слои проекций, срезы, референс-точка, выделенное поле |
 | `dipoleCalc.ts` | `useDipoleCalc` | `diplock.dipoleCalc` | задача расчёта, результат, порог «КД», окно FFT, окно уточнения (`refineHalfwinMs`), playback, `seekSeq` |
 | `tableParams.ts` | `useTableParams` | `diplock.table` | сортировка и состав колонок таблицы (только отображение) |

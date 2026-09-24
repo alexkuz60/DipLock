@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ServerStatusSection } from './ServerStatusSection'
 import { mockApiFetch } from '@/test/apiMocks'
+import { initStatusFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 describe('раздел «Состояние сервера»', () => {
@@ -45,5 +46,26 @@ describe('раздел «Состояние сервера»', () => {
     expect(await screen.findByText(/Сервер не отвечает на \/init-status/)).toBeInTheDocument()
     expect(screen.getByText('Сервис недоступен')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Повторить/ })).toBeInTheDocument()
+  })
+
+  it('показывает свежесть кода бэкенда', async () => {
+    mockApiFetch()
+    renderWithProviders(<ServerStatusSection />)
+
+    expect(await screen.findByText(/свежий \(2026-09-24T12:00:00\)/)).toBeInTheDocument()
+  })
+
+  it('предупреждает, когда бэкенд не обновлён (код новее сервера)', async () => {
+    mockApiFetch({
+      initStatus: {
+        ...initStatusFixture,
+        code: { ...initStatusFixture.code, stale: true },
+      },
+    })
+    renderWithProviders(<ServerStatusSection />)
+
+    expect(await screen.findByText(/устарел — код новее сервера/)).toBeInTheDocument()
+    expect(screen.getByText(/перезапустите uvicorn/i)).toBeInTheDocument()
+    expect(screen.getByText(/пересчитайте запись/i)).toBeInTheDocument()
   })
 })
