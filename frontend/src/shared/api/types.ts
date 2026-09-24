@@ -81,7 +81,7 @@ export type EpochRejectOut = {
   channels: string[]
 }
 
-/** QC-строка канала (шаг 0.4): доля времени в зонах артефактов (иконки вьюера) */
+/** QC-строка канала (шаг 0.4 + расширение 2.2): зоны, SNR, мёртвый канал */
 export type ChannelQc = {
   channel: string
   /** Секунд в зонах артефактов (интервалы слиты, без ica_eog) */
@@ -90,6 +90,10 @@ export type ChannelQc = {
   artifact_share: number
   /** Секунды по типам артефактов (для тултипа иконки) */
   by_kind: Partial<Record<import('@/shared/lib/artifacts').ArtifactKind, number>>
+  /** SNR канала, дБ (ритмические полосы против шумовой полки) */
+  snr_db: number | null
+  /** Мёртвый канал: константный до референса (отвалившийся электрод) */
+  dead: boolean
 }
 
 /** Отчёт очистки сигнала (стадия filter, этап 4): что сделано и «до/после» */
@@ -134,6 +138,18 @@ export type PreprocessResult = {
   line_noise_level: number | null
   /** Авто-список плохих каналов (можно подставить в очистку) */
   bad_channels: string[]
+  /** Медиана SNR по каналам, дБ (шаг 2.2); null — запись короче окна Welch */
+  snr_db_median: number | null
+  /** Мёртвые каналы (константные до референса), не исправленные интерполяцией */
+  dead_channels: string[]
+  /** Светофор записи: ok | warn | bad (худший из четырёх категорий, сервер) */
+  record_status: 'ok' | 'warn' | 'bad'
+  /** Причины вердикта светофора (тултип пилюли UI) */
+  record_status_reasons: string[]
+  /** Порог SNR «внимание» для иконок каналов, дБ (из конфига сервера) */
+  qc_snr_warn_db: number
+  /** Порог SNR «плохо» для иконок каналов, дБ */
+  qc_snr_bad_db: number
   /** Отчёт очистки (стадия filter, когда заданы опции очистки) */
   clean: CleanReport | null
   epoch_length_ms: number

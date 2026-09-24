@@ -169,7 +169,10 @@ def apply_cleaning(
         report.warnings.append(f"Каналов нет в монтаже: {', '.join(missing)}")
     bads = [ch for ch in spec.bad_channels if ch in known]
     if bads:
-        raw.info["bads"] = list(bads)
+        # Объединение, а не перетирание: bads из загрузки (мёртвые электроды
+        # до референса, `edf_loader`) не должны теряться при пометке формы —
+        # интерполяция чинит оба списка.
+        raw.info["bads"] = sorted(set(bads) | set(raw.info["bads"]))
     if spec.interpolate_bads and bads:
         try:
             raw.interpolate_bads(reset_bads=True, verbose=False)

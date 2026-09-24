@@ -5,6 +5,8 @@ import re
 import mne
 import numpy as np
 
+from app.services.artifact_detector import find_dead_channels
+
 logger = logging.getLogger(__name__)
 
 # MNE >= 1.13 переименовал montage 'standard_1020' -> 'colin27_1020'
@@ -134,6 +136,15 @@ def load_edf(
         )
 
     raw.pick(available)
+    # Мёртвые электроды ищем ДО референса (шаг 2.2): средний референс маскирует
+    # константный канал (он становится «−средним остальных») — flat-line его уже
+    # не видит (стратегия `01-signal-quality` §2 п.1). Найденные помечаются в
+    # `info['bads']` стандартным механизмом MNE: интерполяция bad-каналов чинит
+    # их наравне с bad-каналами формы очистки.
+    dead = find_dead_channels(raw)
+    if dead:
+        raw.info["bads"] = sorted(set(raw.info["bads"]) | set(dead))
+        logger.warning("Мёртвые каналы (до референса): %s", ", ".join(dead))
     _apply_standard_montage(raw)
     # Референс применяем сразу (projection=False): mne.fit_dipole требует
     # applied average reference, а не отложенную проекцию. «Без референса» —

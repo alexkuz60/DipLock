@@ -102,7 +102,10 @@ describe('вьюер треков', () => {
       eegNav: null,
     })
     // QC-иконки (шаг 0.4): без стадии «Поиск артефактов» точек у каналов нет
-    useEdfRecording.setState({ channelQc: null, channelQcThresholds: { warn: 0.05, bad: 0.2 } })
+    useEdfRecording.setState({
+      channelQc: null,
+      channelQcThresholds: { warn: 0.05, bad: 0.2, snrWarn: 10, snrBad: 5 },
+    })
   })
 
   it('рисует трек на каждый видимый канал в порядке монтажа', () => {
@@ -123,16 +126,33 @@ describe('вьюер треков', () => {
   it('QC-точки каналов: статус по доле артефактов, тултип с разбивкой (шаг 0.4)', () => {
     useEdfRecording.setState({
       channelQc: {
-        F3: { channel: 'F3', artifact_sec: 3, artifact_share: 0.3, by_kind: { flat_line: 3 } },
-        C3: { channel: 'C3', artifact_sec: 0, artifact_share: 0, by_kind: {} },
+        F3: {
+          channel: 'F3',
+          artifact_sec: 3,
+          artifact_share: 0.3,
+          by_kind: { flat_line: 3 },
+          snr_db: 12,
+          dead: false,
+        },
+        C3: {
+          channel: 'C3',
+          artifact_sec: 0,
+          artifact_share: 0,
+          by_kind: {},
+          snr_db: null,
+          dead: false,
+        },
       },
-      channelQcThresholds: { warn: 0.05, bad: 0.2 },
+      channelQcThresholds: { warn: 0.05, bad: 0.2, snrWarn: 10, snrBad: 5 },
     })
     renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     const bad = screen.getByTestId('track-qc-F3')
     expect(bad).toHaveAttribute('data-status', 'bad')
-    expect(bad).toHaveAttribute('title', 'F3: артефакты 30% времени (Плоская линия 3.0 с)')
+    expect(bad).toHaveAttribute(
+      'title',
+      'F3: артефакты 30% времени (Плоская линия 3.0 с) · SNR 12 дБ',
+    )
     expect(screen.getByTestId('track-qc-C3')).toHaveAttribute('data-status', 'ok')
     // Канала F4 в сводке нет (стадия не вернула строку) — точки нет
     expect(screen.queryByTestId('track-qc-F4')).not.toBeInTheDocument()
@@ -906,7 +926,10 @@ describe('оверлеи развёрнутого трека (срез 5)', () =
   beforeEach(() => {
     uplotCharts().length = 0
     localStorage.clear()
-    useEdfRecording.setState({ channelQc: null, channelQcThresholds: { warn: 0.05, bad: 0.2 } })
+    useEdfRecording.setState({
+      channelQc: null,
+      channelQcThresholds: { warn: 0.05, bad: 0.2, snrWarn: 10, snrBad: 5 },
+    })
   })
 
   /** Слои: зона канала F3 и зона всего монтажа (10 с, обе в начале сессии). */

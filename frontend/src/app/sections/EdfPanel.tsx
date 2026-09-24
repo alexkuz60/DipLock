@@ -387,6 +387,42 @@ export function EdfPanel() {
       >
         {qcSummary ? (
           <div className="mb-2 flex flex-wrap items-center gap-2" data-testid="qc-summary">
+            {/* Светофор записи (шаг 2.2): вердикт сервера по категориям
+                «чистые данные / 50 Гц / SNR / плохие каналы», причины — в тултипе */}
+            <StatusPill
+              tone={
+                qcSummary.recordStatus === 'ok'
+                  ? 'ok'
+                  : qcSummary.recordStatus === 'warn'
+                    ? 'warn'
+                    : 'danger'
+              }
+              title={
+                qcSummary.recordStatusReasons.join('; ') ||
+                'Качество записи в норме по всем категориям'
+              }
+            >
+              Светофор:{' '}
+              {qcSummary.recordStatus === 'ok'
+                ? 'в норме'
+                : qcSummary.recordStatus === 'warn'
+                  ? 'внимание'
+                  : 'плохо'}
+            </StatusPill>
+            {qcSummary.snrDbMedian !== null ? (
+              <StatusPill
+                tone={
+                  qcSummary.snrDbMedian < 5
+                    ? 'danger'
+                    : qcSummary.snrDbMedian < 10
+                      ? 'warn'
+                      : 'ok'
+                }
+                title="SNR: мощность 2–30 Гц против высокочастотного шума (дБ, медиана по каналам)"
+              >
+                SNR: {qcSummary.snrDbMedian} дБ
+              </StatusPill>
+            ) : null}
             <StatusPill tone={qcSummary.goodDataPercent >= 80 ? 'ok' : 'warn'}>
               Чистых данных: {Math.round(qcSummary.goodDataPercent)}%
             </StatusPill>
@@ -394,6 +430,26 @@ export function EdfPanel() {
               <StatusPill tone={qcSummary.lineNoiseLevel >= 4 ? 'warn' : 'neutral'}>
                 50/60 Гц: ×{qcSummary.lineNoiseLevel}
               </StatusPill>
+            ) : null}
+            {qcSummary.deadChannels.length ? (
+              <Button
+                variant="ghost"
+                title="Мёртвые каналы: константные до референса (отвалившийся электрод) — подставить в опцию интерполяции"
+                onClick={() =>
+                  setParams({
+                    badChannels: Array.from(
+                      new Set([
+                        ...params.badChannels.split(',').map((s) => s.trim()),
+                        ...qcSummary.deadChannels,
+                      ]),
+                    )
+                      .filter(Boolean)
+                      .join(', '),
+                  })
+                }
+              >
+                Мёртвые каналы: {qcSummary.deadChannels.join(', ')}
+              </Button>
             ) : null}
             {qcSummary.badChannels.length ? (
               <Button

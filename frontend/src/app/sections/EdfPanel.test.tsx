@@ -164,6 +164,32 @@ describe('панель раздела EDF', () => {
     expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 
+  it('светофор записи: вердикт и причины из стадии artifacts (шаг 2.2)', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    useEdfRecording.setState({
+      recording: recordingFixture,
+      qcSummary: {
+        goodDataPercent: 42,
+        lineNoiseLevel: 9.2,
+        badChannels: ['C3'],
+        snrDbMedian: 3.5,
+        deadChannels: ['P4'],
+        recordStatus: 'bad',
+        recordStatusReasons: ['чистых данных 42 %', 'SNR 4 дБ'],
+      },
+    })
+    renderWithProviders(<EdfPanel />)
+
+    const light = await screen.findByText(/Светофор: плохо/)
+    expect(light).toHaveAttribute('title', 'чистых данных 42 %; SNR 4 дБ')
+    expect(screen.getByText('SNR: 3.5 дБ')).toBeInTheDocument()
+
+    // Мёртвый канал кнопкой подставляется в опцию интерполяции
+    await user.click(screen.getByRole('button', { name: /Мёртвые каналы: P4/ }))
+    expect(useEdfParams.getState().params.badChannels).toBe('P4')
+  })
+
   it('показывает поля своего диапазона только для пресета «Свой диапазон»', async () => {
     const user = userEvent.setup()
     mockApiFetch()

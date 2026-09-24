@@ -404,7 +404,7 @@ def test_filter_stage_ssp_warns_in_result(tmp_path, edf_file):
 
 
 def test_artifacts_stage_returns_qc_numbers(tmp_path, edf_file):
-    """Стадия artifacts отдаёт числа QC: чистые данные, доли по типам, bad-каналы."""
+    """Стадия artifacts отдаёт числа QC и светофор записи (шаг 2.2/N10)."""
     recording = _register(tmp_path, edf_file)
 
     result = run_preprocess(
@@ -416,6 +416,11 @@ def test_artifacts_stage_returns_qc_numbers(tmp_path, edf_file):
     assert 0.0 <= result["good_data_percent"] <= 100.0
     assert isinstance(result["artifact_share_by_kind"], dict)
     assert all(name in result["channels"] for name in result["bad_channels"])
+    # Светофор записи: SNR, мёртвые каналы и вердикт по категориям
+    assert result["snr_db_median"] is None or isinstance(result["snr_db_median"], float)
+    assert all(name in result["channels"] for name in result["dead_channels"])
+    assert result["record_status"] in ("ok", "warn", "bad")
+    assert isinstance(result["record_status_reasons"], list)
 
 
 def test_reject_channels_filters_service_drop_log_entries():

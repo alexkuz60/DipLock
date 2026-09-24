@@ -639,6 +639,10 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                           channelQc[name].artifact_share,
                           qcThresholds.warn,
                           qcThresholds.bad,
+                          channelQc[name].snr_db,
+                          channelQc[name].dead,
+                          qcThresholds.snrWarn,
+                          qcThresholds.snrBad,
                         ),
                         tooltip: channelQcTooltip(name, channelQc[name]),
                       }

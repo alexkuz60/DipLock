@@ -284,6 +284,85 @@ def test_qc_summary_numbers():
     assert qc["bad_channels"] == ["C3"]
 
 
+# ---------- QC-светофор записи (шаг 2.2/N10): SNR, мёртвые, вердикт ----------
+
+
+def test_find_dead_channels_sees_flat_only_before_reference():
+    """Мёртвый канал виден ДО референса; средний референс его маскирует (2.2)."""
+    from app.services.artifact_detector import find_dead_channels
+
+    data = _noise(10.0)
+    data[1] = 5e-6  # C4: отвалившийся электрод — константа с ненулевым уровнем
+
+    raw = _raw(data)
+    assert find_dead_channels(raw) == ["C4"]
+
+    raw.set_eeg_reference("average", projection=False)
+    # после референса константа стала «−средним остальных» — flat-line её не видит
+    assert find_dead_channels(raw) == []
+
+
+def test_channel_snr_db_separates_rhythm_from_hf_noise():
+    """Тон 10 Гц даёт высокий SNR, белый шум — около нуля (шаг 2.2)."""
+    from app.services.artifact_detector import channel_snr_db
+
+    data = _noise(10.0)
+    t = np.arange(data.shape[1]) / _SFREQ
+    data[0] = 2e-5 * np.sin(2 * np.pi * 10.0 * t) + 1e-7 * data[0]  # C3: ритм
+
+    snr = channel_snr_db(_raw(data))
+
+    assert snr["C3"] > snr["C4"] + 20.0
+
+
+def test_record_qc_status_worst_category_wins():
+    """Светофор записи: худшая категория побеждает, причины собираются (2.2)."""
+    from app.services.artifact_detector import record_qc_status
+
+    status, reasons = record_qc_status(95.0, 1.5, 15.0, [], settings)
+    assert (status, reasons) == ("ok", [])
+
+    status, reasons = record_qc_status(60.0, 1.5, 8.0, ["C3"], settings)
+    assert status == "warn"
+    assert any("чистых данных" in r for r in reasons)
+    assert any("SNR" in r for r in reasons)
+    assert any("плохих каналов: 1" in r for r in reasons)
+
+    status, reasons = record_qc_status(40.0, 9.0, 3.0, ["C3", "C4", "Fz"], settings)
+    assert status == "bad"
+    assert len(reasons) == 4
+
+
+def test_qc_summary_carries_snr_and_dead():
+    """SNR (медиана/минимум) и мёртвые каналы доходят до сводки (шаг 2.2)."""
+    from app.services.artifact_detector import qc_summary
+
+    qc = qc_summary(
+        [], ["C3", "C4"], 10.0,
+        snr_db_by_channel={"C3": 12.0, "C4": 4.5},
+        dead_channels=["C4"],
+    )
+
+    assert qc["snr_db"] == 8.2
+    assert qc["snr_db_min"] == 4.5
+    assert qc["dead_channels"] == ["C4"]
+
+
+def test_channel_qc_summary_includes_snr_and_dead():
+    """Строка QC канала несёт SNR и признак мёртвого для иконок (шаг 2.2)."""
+    from app.services.artifact_detector import channel_qc_summary
+
+    summary = channel_qc_summary(
+        [], ["C3", "C4"], 4.0,
+        snr_db={"C3": 12.0}, dead_channels=["C4"],
+    )
+
+    assert summary[0]["snr_db"] == 12.0
+    assert summary[0]["dead"] is False
+    assert summary[1]["snr_db"] is None
+    assert summary[1]["dead"] is True
+
+
 # ---------- ICA-ветка (N8): достижима через фронтальный прокси ----------
 
 

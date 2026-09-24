@@ -151,10 +151,12 @@ class EpochRejectOut(BaseModel):
 
 
 class ChannelQcOut(BaseModel):
-    """QC-строка канала (шаг 0.4): сколько времени канал был в зонах артефактов.
+    """QC-строка канала (шаг 0.4, расширена шагом 2.2): зоны, SNR, мёртвый.
 
     Считается из зон стадии ``artifacts`` (слияние интервалов, без ``ica_eog``);
-    статус «ок/внимание/плохо» выводит UI по порогам ``qc_*_share`` из конфига.
+    ``snr_db`` — SNR канала (``channel_snr_db``), ``dead`` — константный канал
+    (мёртвый до референса, ``find_dead_channels``). Статус «ок/внимание/плохо»
+    выводит UI по порогам ``qc_*_share``/``qc_snr_*`` из конфига.
     """
 
     channel: str
@@ -162,6 +164,12 @@ class ChannelQcOut(BaseModel):
     artifact_share: float = Field(description="Доля времени записи в зонах (0..1)")
     by_kind: dict[str, float] = Field(
         default_factory=dict, description="Секунды по типам артефактов (для тултипа)"
+    )
+    snr_db: float | None = Field(
+        default=None, description="SNR канала, дБ (ритмические полосы против шумовой полки)"
+    )
+    dead: bool = Field(
+        default=False, description="Мёртвый канал: константный до референса (отвалившийся электрод)"
     )
 
 
@@ -250,6 +258,26 @@ class PreprocessResult(BaseModel):
     )
     bad_channels: list[str] = Field(
         default_factory=list, description="Авто-список плохих каналов (для интерполяции)",
+    )
+    # QC-светофор записи (шаг 2.2/N10): SNR, мёртвые каналы и вердикт по категориям
+    snr_db_median: float | None = Field(
+        default=None, description="Медиана SNR по каналам, дБ (channel_snr_db)",
+    )
+    dead_channels: list[str] = Field(
+        default_factory=list,
+        description="Мёртвые каналы (константные до референса), не исправленные интерполяцией",
+    )
+    record_status: str = Field(
+        default="ok", description="Светофор записи: ok | warn | bad (худший из категорий)",
+    )
+    record_status_reasons: list[str] = Field(
+        default_factory=list, description="Причины вердикта светофора (тултип пилюли UI)",
+    )
+    qc_snr_warn_db: float = Field(
+        default=10.0, description="Порог SNR «внимание» для иконок каналов, дБ",
+    )
+    qc_snr_bad_db: float = Field(
+        default=5.0, description="Порог SNR «плохо» для иконок каналов, дБ",
     )
     # Очистка (этап 4): заполняется стадией `filter`, когда заданы опции очистки
     clean: CleanReportOut | None = None

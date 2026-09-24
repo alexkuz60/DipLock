@@ -202,11 +202,19 @@ export type StageJob = {
 /** Команды навигации по окну вьюера из тулс-хедера (срез 2.9) */
 export type EdfNavCommand = 'start' | 'prev' | 'next' | 'end'
 
-/** Числа QC стадии artifacts для панели (чистые данные, 50 Гц, bad-каналы) */
+/** Числа QC стадии artifacts для панели (светофор записи, шаг 2.2) */
 export type QcSummary = {
   goodDataPercent: number
   lineNoiseLevel: number | null
   badChannels: string[]
+  /** Медиана SNR по каналам, дБ (null — запись короче окна Welch) */
+  snrDbMedian: number | null
+  /** Мёртвые каналы (константные до референса, не исправленные интерполяцией) */
+  deadChannels: string[]
+  /** Светофор записи: худший из четырёх категорий (сервер, пороги из конфига) */
+  recordStatus: 'ok' | 'warn' | 'bad'
+  /** Причины вердикта — тултип пилюли светофора */
+  recordStatusReasons: string[]
 }
 
 export type EdfRecordingState = {
@@ -256,7 +264,8 @@ export type EdfRecordingState = {
   /** Отчёт очистки стадии filter (ICA/SSP/интерполяция, метрика до/после) */
   cleanReport: CleanReport | null
   /** Пороги статуса иконок из результата стадии (конфиг сервера) */
-  channelQcThresholds: { warn: number; bad: number }
+  /** Пороги статуса иконок каналов (доля зон + SNR, из конфига сервера) */
+  channelQcThresholds: { warn: number; bad: number; snrWarn: number; snrBad: number }
   /**
    * Задачи предподготовки по стадиям (срез 2.7): прогресс и ошибка каждой.
    * Хранится отдельно от снимков параметров (`stageApplied`): снимок говорит
@@ -327,7 +336,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   qcSummary: null,
   artifactTypes: null,
   cleanReport: null,
-  channelQcThresholds: { warn: 0.05, bad: 0.2 },
+  channelQcThresholds: { warn: 0.05, bad: 0.2, snrWarn: 10, snrBad: 5 },
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
   navRequest: null,
@@ -485,16 +494,25 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
           : get().channelQc
       const channelQcThresholds =
         result.stage === 'artifacts'
-          ? { warn: result.qc_warn_share, bad: result.qc_bad_share }
+          ? {
+              warn: result.qc_warn_share,
+              bad: result.qc_bad_share,
+              snrWarn: result.qc_snr_warn_db,
+              snrBad: result.qc_snr_bad_db,
+            }
           : get().channelQcThresholds
-      // Числа QC (good_data_percent, 50 Гц, bad-каналы) и отчёт очистки — в
-      // панель раздела (легенда артефактов и блок «Фильтры и референс»)
+      // Числа QC (светофор записи, SNR, 50 Гц, bad/мёртвые каналы) и отчёт
+      // очистки — в панель раздела (легенда артефактов и блок «Фильтры и референс»)
       const qcSummary =
         result.stage === 'artifacts'
           ? {
               goodDataPercent: result.good_data_percent,
               lineNoiseLevel: result.line_noise_level,
               badChannels: result.bad_channels,
+              snrDbMedian: result.snr_db_median,
+              deadChannels: result.dead_channels,
+              recordStatus: result.record_status,
+              recordStatusReasons: result.record_status_reasons,
             }
           : get().qcSummary
       const cleanReport = result.stage === 'filter' ? result.clean : get().cleanReport

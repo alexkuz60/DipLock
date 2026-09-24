@@ -511,10 +511,136 @@ def find_bad_channels(raw: mne.io.BaseRaw, bad_channel_z: float) -> list[str]:
     return [str(name) for name, bad in zip(raw.ch_names, flagged, strict=True) if bad]
 
 
+def find_dead_channels(raw: mne.io.BaseRaw) -> list[str]:
+    """Мёртвые электроды по данным ДО референса (шаг 2.2/N10).
+
+    Отвалившийся электрод — канал-константа (потеря контакта). После среднего
+    референса он становится «−средним остальных» и уже не выглядит мёртвым
+    (стратегия `01-signal-quality` §2 п.1: QC — по сырому), поэтому искать его
+    надо до ``set_eeg_reference`` — вызывается из ``edf_loader.load_edf``,
+    который помечает найденные каналы в ``raw.info['bads']`` стандартным
+    механизмом MNE (интерполяция чинит их наравне с bad-каналами формы).
+    Критерий: std канала ≤ 1 % медианы std монтажа (или абсолютно, если монтаж
+    сам по себе константен — запись без сигнала).
+
+    MNE 1.13: `annotate_nan`/`annotate_break` из N10 ищут NaN-сегменты и
+    пропуски между блоками событий; константный канал с ненулевым значением
+    они не ловят — этот критерий именно про «электрод отвалился».
+    """
+    data = raw.get_data(verbose=False)
+    scales = np.array([
+        float(np.std(ch[np.isfinite(ch)])) if np.isfinite(ch).any() else 0.0
+        for ch in data
+    ])
+    finite = scales[np.isfinite(scales)]
+    if finite.size == 0:
+        return []
+    threshold = max(float(np.median(finite)) * 0.01, 1e-15)
+    flagged = scales <= threshold
+    return [str(name) for name, bad in zip(raw.ch_names, flagged, strict=True) if bad]
+
+
+# SNR (шаг 2.2/N10): сигнальная полоса ритмов δ…β против высокочастотного шума.
+_SNR_SIGNAL_HZ = (2.0, 30.0)
+_SNR_FLOOR_POWER = 1e-30
+_SNR_CEILING_DB = 120.0
+
+
+def channel_snr_db(raw: mne.io.BaseRaw) -> dict[str, float]:
+    """SNR канала, дБ (шаг 2.2/N10): ритмические полосы против шумовой полки.
+
+    ``SNR_30 = 10·log10(P(2–30 Гц) / P(30 Гц…Найквист))`` по Welch-PSD на всём
+    канале: «мозговая активность» (δ…β) против высокочастотного шума (мышечный,
+    аппаратный). Это грубая QC-оценка, не классический SNR радиосвязи; при
+    band-pass подготовке (h_freq ≤ 40) верх спектра уже подрезан — цифра
+    оптимистична, честнее сравнивать записи «Без фильтра». Нулевая шумовая
+    полка (точно чистый сигнал) получает потолок ``_SNR_CEILING_DB``.
+    """
+    from scipy.signal import welch
+
+    data = raw.get_data(verbose=False)
+    sfreq = float(raw.info["sfreq"] or 0.0)
+    n_times = data.shape[1]
+    nperseg = int(min(4.0 * sfreq, n_times))
+    result: dict[str, float] = {}
+    if sfreq <= 0 or nperseg < 32 or not np.isfinite(data).any():
+        return result
+    freqs, psd = welch(np.nan_to_num(data), fs=sfreq, nperseg=nperseg, axis=-1)
+    lo, hi = _SNR_SIGNAL_HZ
+    sig_mask = (freqs >= lo) & (freqs <= hi)
+    noise_mask = freqs > hi
+    if not sig_mask.any() or not noise_mask.any():
+        return result
+    for i, name in enumerate(raw.ch_names):
+        signal = float(np.mean(psd[i, sig_mask]))
+        noise = float(np.mean(psd[i, noise_mask]))
+        if noise <= _SNR_FLOOR_POWER:
+            result[str(name)] = _SNR_CEILING_DB
+        else:
+            result[str(name)] = round(
+                10.0 * float(np.log10(max(signal, _SNR_FLOOR_POWER) / noise)), 1,
+            )
+    return result
+
+
+def record_qc_status(
+    good_data_percent: float,
+    line_noise_level: float | None,
+    snr_db: float | None,
+    bad_channels: list[str],
+    settings: Settings,
+) -> tuple[str, list[str]]:
+    """Вердикт QC-светофора записи (шаг 2.2/N10): худший из четырёх категорий.
+
+    Категории: чистые данные (``good_data_percent``), сетевой шум
+    (``line_noise_level``, пик/фон), SNR (медиана по каналам, ``channel_snr_db``),
+    плохие каналы (авто-список ``find_bad_channels`` ∪ мёртвые до референса).
+    Статус — худший по категориям (``ok`` < ``warn`` < ``bad``); причины —
+    короткие тексты для тултипа пилюли UI. Пороги — ``qc_*`` из ``Settings``
+    (ручки владельца, не хардкод: числа порогов уточнятся с реальными
+    записями — стратегия `01-signal-quality` §14).
+    """
+    rank = {"ok": 0, "warn": 1, "bad": 2}
+    status = "ok"
+    reasons: list[str] = []
+
+    def _raise(new: str, reason: str) -> None:
+        nonlocal status
+        if rank[new] > rank[status]:
+            status = new
+        if new != "ok":
+            reasons.append(reason)
+
+    if good_data_percent < settings.qc_good_data_bad_percent:
+        _raise("bad", f"чистых данных {good_data_percent:.0f} %")
+    elif good_data_percent < settings.qc_good_data_warn_percent:
+        _raise("warn", f"чистых данных {good_data_percent:.0f} %")
+
+    if line_noise_level is not None and line_noise_level >= settings.qc_line_noise_warn:
+        level = "bad" if line_noise_level >= settings.qc_line_noise_bad else "warn"
+        _raise(level, f"сетевой шум ×{line_noise_level:.1f}")
+
+    if snr_db is not None:
+        if snr_db < settings.qc_snr_bad_db:
+            _raise("bad", f"SNR {snr_db:.0f} дБ")
+        elif snr_db < settings.qc_snr_warn_db:
+            _raise("warn", f"SNR {snr_db:.0f} дБ")
+
+    n_bad = len(bad_channels)
+    if n_bad >= settings.qc_bad_channels_bad:
+        _raise("bad", f"плохих каналов: {n_bad}")
+    elif n_bad >= settings.qc_bad_channels_warn:
+        _raise("warn", f"плохих каналов: {n_bad}")
+
+    return status, reasons
+
+
 def channel_qc_summary(
     zones: list[dict[str, Any]], channels: list[str], duration_sec: float,
+    snr_db: dict[str, float] | None = None,
+    dead_channels: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """QC-сводка по каналам из зон артефактов (шаг 0.4).
+    """QC-сводка по каналам из зон артефактов (шаг 0.4, расширена шагом 2.2).
 
     Для иконок состояния слева от имён каналов вьюера нужна не география зон,
     а «сколько времени канал был плохим»: суммарные секунды в зонах (интервалы
@@ -522,8 +648,13 @@ def channel_qc_summary(
     и разбивка по типам для тултипа. Считаются виды ``QC_TIME_KINDS``: зоны
     ``ica_eog`` (весь монтаж на всю запись) и ``line_noise`` (спектральный шум,
     его меряет ``line_noise_level``) обнулили бы смысл метрики.
+
+    Шаг 2.2 добавил в строку SNR канала (``channel_snr_db``) и признак
+    «мёртвый» (константный до референса, ``find_dead_channels``): иконка
+    учитывает их наравне с долей времени в зонах (``channelQcStatus`` UI).
     """
     duration = max(float(duration_sec), 1e-9)
+    dead = set(dead_channels or ())
     summary: list[dict[str, Any]] = []
     for name in channels:
         own = [
@@ -554,6 +685,8 @@ def channel_qc_summary(
             "artifact_sec": merged_sec,
             "artifact_share": round(min(merged_sec / duration, 1.0), 4),
             "by_kind": by_kind,
+            "snr_db": (snr_db or {}).get(name),
+            "dead": name in dead,
         })
     return summary
 
@@ -564,18 +697,30 @@ def qc_summary(
     duration_sec: float,
     line_noise_level: float | None = None,
     bad_channels: list[str] | None = None,
+    snr_db_by_channel: dict[str, float] | None = None,
+    dead_channels: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Сводные числа QC (этап «числа QC»): чистые данные, доли по типам, 50 Гц.
+    """Сводные числа QC (этап «числа QC» + светофор шага 2.2): что куда идёт.
 
     * ``good_data_percent`` — 100 % минус **средняя по каналам** доля времени в
       зонах ``QC_TIME_KINDS``: «сколько записи пригодно без правок»;
     * ``artifact_share_by_kind`` — средняя по каналам доля времени в зонах вида
       (доля «грязного» времени по типам артефактов);
     * ``line_noise_level`` — уровень сетевого шума (пик/фон, см. ``line_noise_zones``);
-    * ``bad_channels`` — авто-список плохих каналов (``find_bad_channels``).
+    * ``bad_channels`` — авто-список плохих каналов (``find_bad_channels``);
+    * ``snr_db`` / ``snr_db_min`` / ``snr_db_by_channel`` — SNR каналов
+      (``channel_snr_db``): медиана, худший и по-канально для иконок;
+    * ``dead_channels`` — мёртвые/помеченные каналы (константные до референса
+      либо bads формы, не исправленные интерполяцией).
+
+    Вердикт светофора (``record_status``) считает ``record_qc_status`` — здесь
+    только числа, чтобы сервис чисел не зависел от порогов.
     """
     duration = max(float(duration_sec), 1e-9)
-    rows = channel_qc_summary(zones, channels, duration_sec)
+    rows = channel_qc_summary(
+        zones, channels, duration_sec,
+        snr_db=snr_db_by_channel, dead_channels=dead_channels,
+    )
     dirty = float(np.mean([row["artifact_share"] for row in rows])) if rows else 0.0
     share_by_kind: dict[str, float] = {}
     for kind in QC_TIME_KINDS:
@@ -583,9 +728,14 @@ def qc_summary(
         share = sec / (duration * max(len(channels), 1))
         if share > 0:
             share_by_kind[kind] = round(share, 4)
+    snr_values = [v for v in (snr_db_by_channel or {}).values() if np.isfinite(v)]
     return {
         "good_data_percent": round(100.0 * (1.0 - min(dirty, 1.0)), 1),
         "artifact_share_by_kind": share_by_kind,
         "line_noise_level": line_noise_level,
         "bad_channels": list(bad_channels or []),
+        "snr_db": round(float(np.median(snr_values)), 1) if snr_values else None,
+        "snr_db_min": round(float(np.min(snr_values)), 1) if snr_values else None,
+        "snr_db_by_channel": dict(snr_db_by_channel or {}),
+        "dead_channels": list(dead_channels or []),
     }

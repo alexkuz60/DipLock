@@ -74,6 +74,16 @@ def test_interpolate_bads_replaces_channel_and_reports():
     assert report.amplitude_p95_uv_after <= report.amplitude_p95_uv_before
 
 
+def test_apply_cleaning_keeps_loader_bads():
+    """Пометка bads формы не затирает bads загрузки (мёртвые до референса, 2.2)."""
+    raw = _raw()
+    raw.info["bads"] = ["C4"]  # мёртвый электрод, помеченный `load_edf`
+
+    apply_cleaning(raw, CleanSpec(bad_channels=("C3",), interpolate_bads=False), settings)
+
+    assert set(raw.info["bads"]) == {"C3", "C4"}
+
+
 def test_notch_harmonics_counted_in_report():
     """Гармоники notch (100/150/200 Гц для 50 Гц) считаются в отчёте."""
     report = apply_cleaning(

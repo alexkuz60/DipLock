@@ -285,6 +285,12 @@ export function preprocessResultFixture(
     artifact_share_by_kind: {},
     line_noise_level: null,
     bad_channels: [],
+    snr_db_median: 12.5,
+    dead_channels: [],
+    record_status: 'ok',
+    record_status_reasons: [],
+    qc_snr_warn_db: 10,
+    qc_snr_bad_db: 5,
     clean: null,
     artifacts:
       stage === 'artifacts'

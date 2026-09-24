@@ -191,6 +191,20 @@ class Settings(BaseSettings):
     qc_channel_warn_share: float = Field(default=0.05)
     qc_channel_bad_share: float = Field(default=0.20)
 
+    # QC-светофор записи (шаг 2.2/N10): вердикт по четырём категориям.
+    # «Чистые данные», %: < bad — «плохо», < warn — «внимание».
+    qc_good_data_warn_percent: float = Field(default=80.0)
+    qc_good_data_bad_percent: float = Field(default=50.0)
+    # Сетевой шум (пик/фон, line_noise_level): >= warn — «внимание», >= bad — «плохо».
+    qc_line_noise_warn: float = Field(default=4.0)
+    qc_line_noise_bad: float = Field(default=8.0)
+    # SNR (медиана по каналам, channel_snr_db), дБ: < bad — «плохо», < warn — «внимание».
+    qc_snr_warn_db: float = Field(default=10.0)
+    qc_snr_bad_db: float = Field(default=5.0)
+    # Плохие каналы (авто-список ∪ мёртвые), штук: >= warn — «внимание», >= bad — «плохо».
+    qc_bad_channels_warn: int = Field(default=1)
+    qc_bad_channels_bad: int = Field(default=3)
+
     # Нарезка эпох (без overlap) — reject-фильтр MNE отключён: отбраковка идёт
     # только по аннотациям BAD_ от наших 11 детекторов (срез артефактов).
     epoch_lengths_ms: list[float] = [250, 500, 750, 1000, 1250, 1500, 1750, 2000]

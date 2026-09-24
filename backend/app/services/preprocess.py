@@ -33,9 +33,11 @@ from app.services import journal
 from app.services.artifact_cleaner import CleanSpec
 from app.services.artifact_detector import (
     channel_qc_summary,
+    channel_snr_db,
     detect_artifacts,
     find_bad_channels,
     qc_summary,
+    record_qc_status,
 )
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import prepared_raw_report
@@ -260,31 +262,55 @@ def run_preprocess(
     if params.stage == "artifacts":
         zones = stats.get("zones", [])
         bad_channels = find_bad_channels(raw, cfg.bad_channel_z)
+        # QC-светофор записи (шаг 2.2): SNR каналов, мёртвые (bads загрузки —
+        # константные до референса, `edf_loader`) и вердикт по четырём категориям
+        snr = channel_snr_db(raw)
+        dead_channels = [ch for ch in raw.ch_names if ch in set(raw.info["bads"])]
         qc = qc_summary(
             zones, list(raw.ch_names), base["duration_sec"],
             line_noise_level=stats.get("line_noise_level"),
             bad_channels=bad_channels,
+            snr_db_by_channel=snr,
+            dead_channels=dead_channels,
+        )
+        bad_or_dead = sorted(set(bad_channels) | set(dead_channels))
+        record_status, record_reasons = record_qc_status(
+            qc["good_data_percent"], qc["line_noise_level"], qc["snr_db"],
+            bad_or_dead, cfg,
         )
         base.update({
             "artifacts": [zone.model_dump() for zone in _zones(stats)],
             "artifact_types": stats["by_type"],
             "ica_applied": bool(stats.get("ica_applied")),
-            # QC-иконки каналов (шаг 0.4): сводка из тех же зон + пороги из конфига
+            # QC-иконки каналов (шаг 0.4 + расширение 2.2): сводка из тех же зон,
+            # SNR и признак мёртвого канала + пороги из конфига
             "channel_qc": channel_qc_summary(
                 zones, list(raw.ch_names), base["duration_sec"],
+                snr_db=snr, dead_channels=dead_channels,
             ),
             "qc_warn_share": float(cfg.qc_channel_warn_share),
             "qc_bad_share": float(cfg.qc_channel_bad_share),
+            "qc_snr_warn_db": float(cfg.qc_snr_warn_db),
+            "qc_snr_bad_db": float(cfg.qc_snr_bad_db),
             # Числа QC (этап «числа QC»): чистые данные, доли по типам, уровень 50 Гц
             "good_data_percent": qc["good_data_percent"],
             "artifact_share_by_kind": qc["artifact_share_by_kind"],
             "line_noise_level": qc["line_noise_level"],
             "bad_channels": bad_channels,
+            "snr_db_median": qc["snr_db"],
+            "dead_channels": dead_channels,
+            "record_status": record_status,
+            "record_status_reasons": record_reasons,
         })
         if bad_channels:
             warnings.append(
                 f"Плохие каналы (авто): {', '.join(bad_channels)} — можно интерполировать "
                 "(стадия «Фильтр и референс», опция «Интерполировать bad-каналы»)"
+            )
+        if dead_channels:
+            warnings.append(
+                f"Мёртвые каналы (константные до референса): {', '.join(dead_channels)} — "
+                "интерполяция bad-каналов их чинит"
             )
         if not stats.get("ica_applied") and params.run_ica:
             warnings.append(
