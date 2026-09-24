@@ -5,6 +5,10 @@
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
 httpx>=0.27.0
+# Тесты БД (tests/test_analysis_db.py) держат изолированную sqlite+aiosqlite БД;
+# runtime-зависимость объявлена и в requirements.txt (т.к. приложение само
+# создаёт sqlite+aiosqlite-движок) — дубль здесь осознанный (F3).
+aiosqlite>=0.20.0
 # Линтер и проверка типов: те же входы гоняет CI (.github/workflows/ci.yml),
 # конфигурация — backend/pyproject.toml, правила — docs/rules/tests.md.
 ruff>=0.9.0
