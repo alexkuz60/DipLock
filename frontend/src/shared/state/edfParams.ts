@@ -96,6 +96,8 @@ export type EdfParams = {
   peakToPeakUv: number
   flatLineUv: number
   flatLineMs: number
+  /** Искать EOG-компоненты ICA при поиске артефактов (тяжёлая ветка, N8) */
+  runIca: boolean
   /** Гармоники notch (0–4: 100/150/200/240 Гц для сети 50/60 Гц) */
   notchHarmonics: number
   /** Плохие каналы для интерполяции: имена через запятую («C3, T7») */
@@ -128,6 +130,8 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   // в окне 100 мс, а не абсолютная амплитуда (N7/F20). /meta уточняет.
   flatLineUv: 1,
   flatLineMs: 200,
+  // ICA-ветка детекции тяжёлая — только по явному включению (как на бэкенде)
+  runIca: false,
   notchHarmonics: 0,
   badChannels: '',
   interpolateBads: false,
@@ -200,7 +204,7 @@ export const STAGE_PARAM_KEYS: Record<RecalcStage, (keyof EdfParams)[]> = {
     'filterPreset', 'customBand', 'notchHz', 'reference', 'edfUnits', 'visibleChannels',
     'notchHarmonics', 'badChannels', 'interpolateBads', 'cleanMethod', 'icaNComponents',
   ],
-  artifacts: ['zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs'],
+  artifacts: ['zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs', 'runIca'],
   epochs: ['epochLengthMs'],
 }
 

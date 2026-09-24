@@ -268,6 +268,12 @@ export function EdfPanel() {
           hint="Минимальная длительность плоского участка для срабатывания детектора."
           onChange={(value) => setParams({ flatLineMs: value })}
         />
+        <CheckboxRow
+          label="Искать EOG-компоненты ICA"
+          checked={params.runIca}
+          hint="Тяжёлая ветка (ICA по всей записи). EOG-компоненты ищутся по EOG-каналам записи или фронтальному прокси Fp1/Fp2."
+          onChange={(checked) => setParams({ runIca: checked })}
+        />
       </Panel>
 
       <Panel title="Эпохи" hint={epochsHint}>

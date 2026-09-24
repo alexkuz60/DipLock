@@ -9,6 +9,12 @@ mne-icalabel — вне скоупа, N12/N13). Золотой порядок (P
    после поиска плохих каналов и до ICA/SSP»);
 4. ICA с ``ica.apply`` (удаление EOG/ECG-компонент) ли SSP (EOG-проекторы).
 
+EOG-компоненты ищутся по EOG-каналам записи, а если их нет (`load_edf` оставляет
+только каналы 10-20 — N8) — по фронтальному прокси Fp1/Fp2
+(``find_eog_component_inds``). Фитинг идёт на high-pass-копии 1 Гц, ``ica.apply``
+— на исходном сигнале (``fit_ica``). Теми же хелперами пользуется детекция
+артефактов (ветка ``run_ica`` стадии ``artifacts``).
+
 Шаг живёт в кэше подготовленного сигнала (``prepared_signal``, ключ A4/N5
 включает ``CleanSpec``): стадии `artifacts`/`epochs` с теми же параметрами
 получают уже очищенный сигнал. Отчёт «до/после» — одно число амплитуды
@@ -33,6 +39,18 @@ CLEAN_METHODS: tuple[str, ...] = ("none", "ica", "ssp")
 # Порог корреляции источника ICA с прокси ЭКГ, с которой компонента считается
 # артефактной (для EOG MNE сам считает порог `find_bads_eog`)
 _ECG_CORR_THRESHOLD = 0.35
+
+# Фронтальный прокси EOG для `find_bads_eog`, когда в записи нет EOG-каналов
+# (N8): глазодвигательный потенциал лучше всего выражен на Fp1/Fp2/FPz — тот же
+# приём, что у детектора `ocular` (artifact_detector._FRONTAL).
+FRONTAL_PROXY: tuple[str, ...] = ("FP1", "FP2", "FPZ")
+
+# Порог корреляции источника ICA с фронтальным прокси для прокси-фолбэка
+# `find_bads_eog`. Дефолтный z-score MNE (3.0) при малом числе компонент
+# не срабатывает даже на корреляции −0.999 (z ≈ 2.1 на 6 компонентах — замер
+# 24.09.2026), поэтому прокси-путь идёт явной корреляцией; для нативных
+# EOG-каналов порог MNE остаётся дефолтным.
+_PROXY_CORR_THRESHOLD = 0.5
 
 
 @dataclass(frozen=True)
@@ -169,24 +187,67 @@ def apply_cleaning(
     return report
 
 
+def fit_ica(raw: mne.io.BaseRaw, n_components: int) -> mne.preprocessing.ICA:
+    """Фитинг ICA (fastica) на high-pass-копии — качество разложения (N8).
+
+    MNE требует для ICA high-pass ~1 Гц (иначе дрейф маскирует разложение), но
+    фильтровать исходный сигнал нельзя — он идёт во вьюер и расчёты. Поэтому
+    фит идёт на копии ``raw.copy().filter(1.0, None)``, а ``ica.apply`` вызывает
+    на исходном raw (стандартный рецепт MNE: fit — filtered, apply — original).
+    """
+    fit_raw = (
+        raw
+        if raw.info["highpass"] >= 1.0
+        else raw.copy().filter(1.0, None, fir_design="firwin", verbose=False)
+    )
+    ica = mne.preprocessing.ICA(n_components=n_components, rng=42, max_iter="auto")
+    ica.fit(fit_raw, verbose=False)
+    return ica
+
+
+def find_eog_component_inds(
+    ica: mne.preprocessing.ICA, raw: mne.io.BaseRaw,
+) -> tuple[list[int], str]:
+    """Индексы EOG-компонент ICA и источник признака (``"eog"``/``"proxy"``).
+
+    Нативный путь — EOG-каналы записи; их нет (N8: ``load_edf`` оставляет только
+    каналы 10-20) — берётся фронтальный прокси ``FRONTAL_PROXY``. Ни того, ни
+    другого — ``RuntimeError`` с понятным текстом: вызывающий код переводит его
+    в предупреждение, а не в падение задачи.
+    """
+    try:
+        inds, _ = ica.find_bads_eog(raw, verbose=False)
+        return list(inds), "eog"
+    except RuntimeError:
+        proxy = [ch for ch in raw.ch_names if ch.upper() in FRONTAL_PROXY]
+        if not proxy:
+            raise RuntimeError(
+                "нет EOG-каналов и фронтальных прокси (Fp1/Fp2) — EOG-компоненты не ищутся"
+            ) from None
+        inds, _ = ica.find_bads_eog(
+            raw, ch_name=proxy,
+            measure="correlation", threshold=_PROXY_CORR_THRESHOLD,
+            verbose=False,
+        )
+        return list(inds), "proxy"
+
+
 def _clean_ica(raw: mne.io.BaseRaw, spec: CleanSpec, report: CleanReport) -> None:
     """ICA + ``ica.apply``: удаляет EOG- и ЭКГ-подобные компоненты (MNE-only).
 
-    Отчёт обязан содержать число и индексы удалённых компонент — это единственная
-    видимая пользователю «цена» ICA-очистки (задача 2026-09: «реализовать
-    ica.apply с отчётом»).
+    EOG-компоненты ищутся по EOG-каналам либо фронтальному прокси Fp1/Fp2
+    (``find_eog_component_inds``). Отчёт обязан содержать число и индексы
+    удалённых компонент — это единственная видимая пользователю «цена» ICA-очистки
+    (задача 2026-09: «реализовать ica.apply с отчётом»).
     """
     n_components = spec.ica_n_components or min(15, len(raw.ch_names) - 1)
     try:
-        ica = mne.preprocessing.ICA(
-            n_components=n_components, random_state=42, max_iter="auto",
-        )
-        ica.fit(raw, verbose=False)
-        eog_inds: list[int] = []
+        ica = fit_ica(raw, n_components)
         try:
-            eog_inds, _ = ica.find_bads_eog(raw, verbose=False)
+            eog_inds, _ = find_eog_component_inds(ica, raw)
         except Exception as exc:
             report.warnings.append(f"EOG-компоненты не найдены: {exc}")
+            eog_inds = []
         exclude = sorted({*eog_inds, *_ica_ecg_inds(ica, raw)})
         if exclude:
             ica.exclude = exclude

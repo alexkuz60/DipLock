@@ -16,3 +16,6 @@ fast-simplification>=0.1.7
 # Параллелизм mne.fit_dipole (n_jobs=-1): опциональная зависимость MNE — без неё
 # он молча считает в один поток, и `DIPOLE_REFINE_N_JOBS=-1` ничего не обещает.
 joblib>=1.4.0
+# ICA (детекция EOG-компонент и очистка `ica.apply`): метод fastica MNE требует
+# sklearn — без него `ica.fit` падает ImportError (N8, шаг 2.1).
+scikit-learn>=1.5.0

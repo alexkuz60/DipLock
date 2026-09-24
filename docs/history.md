@@ -3,6 +3,51 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 24.09.2026 — шаг 2.1 (N8): ICA-ветка достижима (прокси Fp1/Fp2 + scikit-learn)
+
+**Из `todo.md` (закрыто 24.09.2026, дословно):**
+> **2.1 (N8, P1):** ICA — сделать ветку достижимой (`pick` по каналам до поиска EOG, Fp1/Fp2 как
+> прокси или SSP `compute_proj_eog`); либо честно отключить и задокументировать.
+
+**Диагноз (замеры на MNE 1.13.2, 24.09.2026):** ветка была мертва **по двум независимым
+причинам**, обе вскрыты прогоном, а не чтением кода:
+
+1. `load_edf` делает `raw.pick(settings.standard_channels)` (20 каналов 10-20) — EOG-каналы EDF
+   отрезаются, `eog_like` всегда пуст; `find_bads_eog`/`compute_proj_eog` без EOG-каналов кидают
+   `RuntimeError: No EOG channel(s) found`;
+2. **`scikit-learn` не был ни установлен, ни указан в requirements** — дефолтный `method='fastica'`
+   требует sklearn, `ica.fit` падал ImportError **всегда**, ошибка глоталась в warning (и очистка
+   `clean_method: ica`, и детекция). Тест `test_ica_clean_reports_removed_components` был «врущим»:
+   `0 == 0` при упавшем fit — pytest зелёный при полностью неработающей ветке.
+
+Дополнительно: дефолтный z-score `find_bads_eog` (3.0) при малом числе компонент не срабатывает
+даже на корреляции −0.999 (6 компонент → z ≈ 2.1) — прокси-путь обязан идти явной корреляцией.
+
+**Реализация:** общий ICA-слой в `artifact_cleaner` — `fit_ica` (fastica + `rng=42`, фит на
+high-pass-копии `raw.copy().filter(1.0, None)`, `ica.apply` на исходном raw) и
+`find_eog_component_inds` (нативные EOG-каналы → фолбэк `find_bads_eog(ch_name=Fp1/Fp2/FPz,
+measure='correlation', threshold=0.5)`; ни того, ни другого — `RuntimeError` → предупреждение).
+Теми же хелперами живут обе ветки: детекция `run_ica` (условие — EOG-каналы **или** фронтальные
+прокси) и очистка `clean_method: ica` (`_clean_ica`). `scikit-learn>=1.5.0` добавлен в
+`requirements.txt` (выбор владельца: fastica вместо infomax «без новых зависимостей»). UI:
+чекбокс «Искать EOG-компоненты ICA» панели «Пороги артефактов» (`runIca`, default false, ключ
+`STAGE_PARAM_KEYS.artifacts`, `run_ica` в форме стадии) — правка параметра расчёт не запускает.
+`pick` в `load_edf` **не менялся**: EOG-каналы по-прежнему не попадают во вьюер/монтаж/QC.
+SSP (`compute_proj_eog`) осталась честно ограниченной: без EOG-каналов — предупреждение
+«проекторы не построены» (прокси-производная Fp2−Fp1 — отдельной задачей).
+
+**Тесты:** `test_artifact_cleaner.py` — ужесточённый «врущий» тест теперь требует
+`n_components_removed >= 1` на синтетике с «морганиями» (синфазные экспоненциальные всплески
+80 мкВ на Fp1/Fp2 каждые 2 с) и пустого `warnings`; новые: HP-копия не мутирует raw, прокси
+находит мимику без EOG-каналов (`source == 'proxy'`), `RuntimeError` без EOG/прокси;
+`test_artifact_detector.py` — `run_ica=True` достижим через прокси (`ica_applied`, `by_type.
+ica_eog ≥ 1`, зона `ica_eog`) и честно пропускается без фронтальных. Vitest: `runIca` в
+`STAGE_PARAM_KEYS.artifacts`/дефолтах и `run_ica` в `buildPreprocessForm`. Числа среза —
+`docs/rules/tests.md`. Правила — `docs/rules/artifacts.md` («ICA: достижимость»),
+`docs/rules/safety.md` (sklearn/fastica, `RuntimeError No EOG`, `random_state→rng`,
+z-score-ловушка), `docs/ui/viewer.md`, `concept.md` (способность «Реставрация и чистка»).
+
+
 ## 23.09.2026 — замер атрибуции диполей (шаг 1.4, N21): расстояния, потолки, «вне мозга»
 
 Замер по точкам уже сохранённых задач (326 точек MNI из 2 файлов `results_dir/jobs`, `fast_grid`

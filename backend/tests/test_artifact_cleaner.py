@@ -1,9 +1,16 @@
 """Очистка сигнала MNE-only (этап 4): гармоники notch, bad-каналы, ICA, SSP."""
 import mne
 import numpy as np
+import pytest
 
 from app.core.config import settings
-from app.services.artifact_cleaner import CLEAN_METHODS, CleanSpec, apply_cleaning
+from app.services.artifact_cleaner import (
+    CLEAN_METHODS,
+    CleanSpec,
+    apply_cleaning,
+    find_eog_component_inds,
+    fit_ica,
+)
 
 _CHANNELS = ["Fp1", "Fp2", "C3", "C4", "T7", "T8", "P3", "P4"]
 _SFREQ = 500.0
@@ -12,6 +19,27 @@ _SFREQ = 500.0
 def _raw(duration_sec: float = 30.0, seed: int = 0) -> mne.io.RawArray:
     rng = np.random.default_rng(seed)
     data = rng.standard_normal((len(_CHANNELS), int(_SFREQ * duration_sec))) * 2e-6
+    raw = mne.io.RawArray(data, mne.create_info(_CHANNELS, _SFREQ, "eeg"), verbose=False)
+    raw.set_montage("standard_1020", verbose=False)
+    return raw
+
+
+def _mimic_raw(duration_sec: float = 20.0, seed: int = 0) -> mne.io.RawArray:
+    """Шум + «моргания»: синфазные экспоненциальные всплески на Fp1/Fp2 (N8).
+
+    Стандартная синтетика ICA-тестов: чистый мимик сильно коррелирует
+    с фронтальным прокси, а фон не содержит других артефактов.
+    """
+    rng = np.random.default_rng(seed)
+    n = int(_SFREQ * duration_sec)
+    data = rng.standard_normal((len(_CHANNELS), n)) * 2e-6
+    mimic = np.zeros(n)
+    for t in range(1, 10):
+        onset = int(t * 2.0 * _SFREQ)
+        burst = 80e-6 * np.exp(-np.arange(int(0.3 * _SFREQ)) / (0.05 * _SFREQ))
+        mimic[onset: onset + burst.size] += burst
+    data[0] += mimic
+    data[1] += mimic
     raw = mne.io.RawArray(data, mne.create_info(_CHANNELS, _SFREQ, "eeg"), verbose=False)
     raw.set_montage("standard_1020", verbose=False)
     return raw
@@ -55,13 +83,53 @@ def test_notch_harmonics_counted_in_report():
 
 
 def test_ica_clean_reports_removed_components():
-    """ICA-очистка: отчёт содержит число/индексы компонент и метрики до/после."""
-    report = apply_cleaning(_raw(), CleanSpec(method="ica", ica_n_components=6), settings)
+    """ICA-очистка находит мимическую компоненту (N8): удалено ≥ 1, отчёт чистый.
+
+    До шага 2.1 тест был «врущим»: fit падал (не было sklearn), ноль удалённых
+    сравнивался с нулём списком — тест оставался зелёным при мёртвой ветке.
+    """
+    report = apply_cleaning(_mimic_raw(), CleanSpec(method="ica", ica_n_components=6), settings)
 
     assert report.method == "ica"
+    assert report.n_components_removed >= 1
     assert report.n_components_removed == len(report.removed_components)
+    assert not report.warnings
     assert report.amplitude_p95_uv_before is not None
     assert report.amplitude_p95_uv_after is not None
+
+
+def test_fit_ica_uses_hp_copy_and_keeps_raw_intact():
+    """Фит ICA идёт на high-pass-копии: исходный raw не фильтруется (N8)."""
+    raw = _mimic_raw()
+
+    ica = fit_ica(raw, 4)
+
+    assert ica.n_components == 4
+    assert raw.info["highpass"] == 0.0
+
+
+def test_find_eog_component_inds_falls_back_to_frontal_proxy():
+    """Без EOG-каналов мимику находит фронтальный прокси Fp1/Fp2 (N8)."""
+    raw = _mimic_raw()
+    ica = fit_ica(raw, 6)
+
+    inds, source = find_eog_component_inds(ica, raw)
+
+    assert source == "proxy"
+    assert len(inds) >= 1
+
+
+def test_find_eog_component_inds_without_eog_or_proxy_raises():
+    """Ни EOG-каналов, ни фронтальных — честное RuntimeError, а не падение (N8)."""
+    rng = np.random.default_rng(1)
+    data = rng.standard_normal((4, int(_SFREQ * 10.0))) * 2e-6
+    raw = mne.io.RawArray(
+        data, mne.create_info(["C3", "C4", "P3", "P4"], _SFREQ, "eeg"), verbose=False,
+    )
+    ica = fit_ica(raw, 3)
+
+    with pytest.raises(RuntimeError, match="прокси"):
+        find_eog_component_inds(ica, raw)
 
 
 def test_ssp_clean_is_reported():

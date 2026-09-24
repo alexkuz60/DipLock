@@ -99,6 +99,7 @@ export function buildPreprocessForm(stage: RecalcStage, params: EdfParams): Form
     form.set('pp_threshold_uv', String(params.peakToPeakUv))
     form.set('flat_line_uv', String(params.flatLineUv))
     form.set('flat_line_ms', String(params.flatLineMs))
+    form.set('run_ica', String(params.runIca))
   }
   if (stage === 'epochs') {
     form.set('epoch_length_ms', String(params.epochLengthMs))

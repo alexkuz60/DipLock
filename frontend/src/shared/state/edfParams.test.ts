@@ -177,6 +177,7 @@ describe('слой параметров EDF', () => {
         [{ peakToPeakUv: 120 }],
         [{ flatLineUv: 3 }],
         [{ flatLineMs: 300 }],
+        [{ runIca: true }],
       ],
       epochs: [[{ epochLengthMs: 1000 }]],
     }
@@ -209,6 +210,9 @@ describe('слой параметров EDF', () => {
       expect(STAGE_PARAM_KEYS[stage]).not.toContain('timeLevel')
       expect(STAGE_PARAM_KEYS[stage]).not.toContain('amplitudeScaleUv')
     }
+    // ICA-ветка детекции (N8) — параметр стадии «артефакты», а не отрисовки
+    expect(STAGE_PARAM_KEYS.artifacts).toContain('runIca')
+    expect(EDF_PARAM_DEFAULTS.runIca).toBe(false)
   })
 
   it('в localStorage уходят параметры, но не снимки результатов', () => {

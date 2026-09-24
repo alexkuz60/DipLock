@@ -213,6 +213,9 @@ describe('стадии предподготовки (срез 2.7)', () => {
     expect(artifacts.get('pp_threshold_uv')).toBe(String(params.peakToPeakUv))
     expect(artifacts.get('flat_line_uv')).toBe(String(params.flatLineUv))
     expect(artifacts.get('flat_line_ms')).toBe(String(params.flatLineMs))
+    expect(artifacts.get('run_ica')).toBe('false')
+    const withIca = buildPreprocessForm('artifacts', { ...params, runIca: true })
+    expect(withIca.get('run_ica')).toBe('true')
     // Длина эпохи — параметр другой стадии, в артефактах её быть не должно
     expect(artifacts.get('epoch_length_ms')).toBeNull()
 

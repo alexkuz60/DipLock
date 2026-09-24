@@ -6,8 +6,15 @@
 - CORS: не комбинировать `allow_origins=["*"]` с `allow_credentials=True`.
 - Валидировать размер загружаемых EDF-файлов.
 - MNE API дрейфует между версиями: `psd_welch`→`compute_psd`, `standard_1020`→`colin27_1020`,
-  `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`.
+  `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`,
+  `ICA(random_state=…)` → `ICA(rng=…)` (сигнатура 1.13 принимает оба, первый deprecated).
   Проверяйте актуальный API через тесты.
+- ICA: `method='fastica'` требует `scikit-learn` — без него `ica.fit` падает `ImportError`
+  (N8: ошибка глоталась в warning, ветка была мертва всегда). `find_bads_eog`/`compute_proj_eog`
+  без EOG-каналов кидают `RuntimeError: No EOG channel(s) found` — прокси-фолбэк
+  `find_bads_eog(ch_name=['Fp1','Fp2'])` с `measure='correlation', threshold=0.5`
+  (дефолтный z-score 3.0 при малом числе компонент не срабатывает даже на corr −0.999,
+  замер 24.09.2026). ICA фитится на high-pass-копии 1 Гц, `ica.apply` — на исходном raw.
 - Фильтровать band-specific фильтром continuous **raw** до нарезки, а не короткие эпохи.
 - Единицы EDF: часть файлов без physical dimension MNE читает как «вольты» (в 1e6 раз больше) —
   есть авто-детект масштаба (`_ensure_physical_units`) и переменная `EDF_UNITS`.

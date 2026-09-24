@@ -19,6 +19,22 @@ def _noise(duration_sec: float, scale: float = 1e-6, seed: int = 0) -> np.ndarra
     return rng.standard_normal((len(_CHANNELS), int(_SFREQ * duration_sec))) * scale
 
 
+def _mimic_raw(duration_sec: float = 20.0, seed: int = 0) -> mne.io.RawArray:
+    """Шум + «моргания» синфазно на Fp1/Fp2 (N8) — синтетика ICA-ветки."""
+    names = ["Fp1", "Fp2", "C3", "C4"]
+    rng = np.random.default_rng(seed)
+    n = int(_SFREQ * duration_sec)
+    data = rng.standard_normal((len(names), n)) * 2e-6
+    mimic = np.zeros(n)
+    for t in range(1, 10):
+        onset = int(t * 2.0 * _SFREQ)
+        burst = 80e-6 * np.exp(-np.arange(int(0.3 * _SFREQ)) / (0.05 * _SFREQ))
+        mimic[onset: onset + burst.size] += burst
+    data[0] += mimic
+    data[1] += mimic
+    return mne.io.RawArray(data, mne.create_info(names, _SFREQ, "eeg"), verbose=False)
+
+
 # ---------- N7/F20: flat-line — «почти константа», а не «близко к нулю» ----------
 
 
@@ -266,3 +282,23 @@ def test_qc_summary_numbers():
     assert qc["artifact_share_by_kind"] == {"peak_to_peak": 0.1}
     assert qc["line_noise_level"] == 6.2
     assert qc["bad_channels"] == ["C3"]
+
+
+# ---------- ICA-ветка (N8): достижима через фронтальный прокси ----------
+
+
+def test_ica_detection_reachable_via_frontal_proxy():
+    """N8: run_ica работает без EOG-каналов — мимику ловит прокси Fp1/Fp2."""
+    _, stats = detect_artifacts(_mimic_raw(), settings, run_ica=True)
+
+    assert stats["ica_applied"] is True
+    assert stats["by_type"]["ica_eog"] >= 1
+    assert any(zone["kind"] == "ica_eog" for zone in stats["zones"])
+
+
+def test_ica_detection_skipped_without_eog_or_frontal():
+    """Ни EOG-каналов, ни фронтальных — ветка пропускается честно, без падения."""
+    _, stats = detect_artifacts(_raw(_noise(10.0)), settings, run_ica=True)
+
+    assert stats["ica_applied"] is False
+    assert stats["by_type"]["ica_eog"] == 0

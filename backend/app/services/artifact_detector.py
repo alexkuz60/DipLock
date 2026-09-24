@@ -21,9 +21,10 @@ raw не попадают **вовсе** — эпоху они убить не �
 значениями (``preprocess._detect``), детектор состояние не держит (DRY).
 
 Новые детекторы (этап «поиск + QC») — MNE/NumPy/SciPy only, без новых
-зависимостей: мышечный — ``mne.preprocessing.annotate_muscle_zscore``,
+зависимостей: мускулатура — ``mne.preprocessing.annotate_muscle_zscore``,
 сетевой шум — свой Welch-PSD по гармоникам 50/60 Гц, окулярный — прокси
-Fp1/Fp2, ЭКГ — QRS-пики T7/T8, клиппинг/разрыв/pop — оконные критерии.
+Fp1/Fp2, ЭКГ — QRS-пики T7/T8, клиппинг/разрыв/pop — оконные критерии,
+ICA-EOG — ``find_bads_eog`` по EOG-каналам либо прокси Fp1/Fp2 (N8).
 """
 import logging
 from typing import Any
@@ -34,6 +35,11 @@ from numpy.typing import NDArray
 from scipy import ndimage
 
 from app.core.config import Settings
+from app.services.artifact_cleaner import (
+    FRONTAL_PROXY,
+    find_eog_component_inds,
+    fit_ica,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -387,8 +393,9 @@ def detect_artifacts(
     эпохи; информационные (мышечный, сетевой, окулярный, ЭКГ, ICA-EOG) дают
     только зоны слоёв вьюера и QC. ``stats["by_type"]`` — число зон по видам
     (исключение: ``ica_eog`` — число EOG-компонент). ``run_ica=False`` полностью
-    пропускает ICA-ветку (быстрый профиль); ICA применяется только при наличии
-    EOG-подобных каналов, факт — в ``stats["ica_applied"]``.
+    пропускает ICA-ветку (быстрый профиль); ICA ищется и применяется только при
+    наличии EOG-подобных каналов **или** фронтального прокси Fp1/Fp2 (N8 —
+    `load_edf` отрезает EOG-каналы), факт — в ``stats["ica_applied"]``.
 
     Peak-to-peak держит историческую геометрию зоны (onset — центр окна):
     на неё завязан инвариант «зоны ↔ drop_log» в тестах (N6).
@@ -438,21 +445,20 @@ def detect_artifacts(
     line_zones, line_level = line_noise_zones(data, sfreq, names, settings)
     zones.extend(line_zones)
 
-    # 10. ICA EOG (только если запрошена и в записи есть EOG-подобные каналы)
+    # 10. ICA EOG: EOG-каналы либо фронтальный прокси Fp1/Fp2 (N8: EOG-каналы
+    # отрезаются `load_edf`, ветка обязана быть достижимой без них)
     eog_like = [ch for ch in names if "eog" in ch.lower()]
+    frontal = [ch for ch in names if ch.upper() in FRONTAL_PROXY]
     ica_applied = False
     ica_components = 0
-    if run_ica and eog_like:
+    if run_ica and (eog_like or frontal):
         try:
-            ica = mne.preprocessing.ICA(
-                n_components=min(18, len(names)), random_state=42, max_iter="auto",
-            )
-            ica.fit(raw, verbose=False)
-            bads, _ = ica.find_bads_eog(raw, verbose=False)
-            ica_components = len(bads)
+            ica = fit_ica(raw, min(18, len(names)))
+            eog_inds, _ = find_eog_component_inds(ica, raw)
+            ica_components = len(eog_inds)
             ica_applied = True
             # Компоненты EOG не привязаны к каналу: помечаем весь монтаж
-            if bads:
+            if eog_inds:
                 zones.append({
                     "kind": "ica_eog",
                     "onset_sec": 0.0,
