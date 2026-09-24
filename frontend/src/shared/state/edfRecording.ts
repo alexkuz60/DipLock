@@ -11,7 +11,13 @@
  */
 import { create } from 'zustand'
 import { api, apiErrorText } from '@/shared/api/client'
-import type { ChannelQc, CleanReport, PreprocessResult, RecordingMeta } from '@/shared/api/types'
+import type {
+  ArtifactTypes,
+  ChannelQc,
+  CleanReport,
+  PreprocessResult,
+  RecordingMeta,
+} from '@/shared/api/types'
 import { uploadRecording } from '@/shared/api/upload'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
 import { makeDemoSignal } from '@/shared/lib/demoSignal'
@@ -241,6 +247,12 @@ export type EdfRecordingState = {
   channelQc: Record<string, ChannelQc> | null
   /** Числа QC стадии artifacts: чистые данные, уровень 50 Гц, авто-bad-каналы */
   qcSummary: QcSummary | null
+  /**
+   * Счётчики типов артефактов из стадии `artifacts` (`artifact_types`): у
+   * `ica_eog` это число EOG-компонент (без зоны — компоненты не привязаны ко
+   * времени, фидбэк 24.09.2026), поэтому легенда берёт ICA отсюда, а не из зон.
+   */
+  artifactTypes: ArtifactTypes | null
   /** Отчёт очистки стадии filter (ICA/SSP/интерполяция, метрика до/после) */
   cleanReport: CleanReport | null
   /** Пороги статуса иконок из результата стадии (конфиг сервера) */
@@ -313,6 +325,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   stageJobs: {},
   channelQc: null,
   qcSummary: null,
+  artifactTypes: null,
   cleanReport: null,
   channelQcThresholds: { warn: 0.05, bad: 0.2 },
   passport: { ...EMPTY_PASSPORT },
@@ -337,6 +350,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       // Демо-фикстура под реальный файл не подставляется — её зоны и штриховка
       // читались бы как результат детектора (ручная проверка, 19.09.2026).
       layers: null,
+      artifactTypes: null,
       // Задачи прежней записи не переносим на новую
       stageJobs: {},
       // Ручные пометки эпох относятся к конкретной записи — начинаем с чистых
@@ -365,7 +379,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     // с реальным выбором пользователя, а не с отдельной веткой логики.
     useEdfParams.getState().setAvailableChannels(signal.channels)
   },
-  closeDemo: () => set({ demo: null, layers: null, epochMarks: [] }),
+  closeDemo: () => set({ demo: null, layers: null, epochMarks: [], artifactTypes: null }),
 
   loadSignals: async (level) => {
     const { recording, signalFrames, signalsInFlight } = get()
@@ -484,6 +498,10 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
             }
           : get().qcSummary
       const cleanReport = result.stage === 'filter' ? result.clean : get().cleanReport
+      // Счётчики типов (`artifact_types`): у `ica_eog` — число EOG-компонент
+      // (зоны ICA контракт больше не отдаёт — фидбэк 24.09.2026)
+      const artifactTypes =
+        result.stage === 'artifacts' ? result.artifact_types : get().artifactTypes
 
       set((state) => ({
         layers: layersFromResult(result, state.layers),
@@ -491,6 +509,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         channelQcThresholds,
         qcSummary,
         cleanReport,
+        artifactTypes,
         stageJobs: {
           ...state.stageJobs,
           [stage]: {
@@ -546,6 +565,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       stageJobs: {},
       channelQc: null,
       qcSummary: null,
+      artifactTypes: null,
       cleanReport: null,
       passport: { ...EMPTY_PASSPORT },
     })

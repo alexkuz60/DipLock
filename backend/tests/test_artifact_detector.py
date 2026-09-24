@@ -288,12 +288,16 @@ def test_qc_summary_numbers():
 
 
 def test_ica_detection_reachable_via_frontal_proxy():
-    """N8: run_ica работает без EOG-каналов — мимику ловит прокси Fp1/Fp2."""
+    """N8: run_ica работает без EOG-каналов — мимику ловит прокси Fp1/Fp2.
+
+    Зона ``ica_eog`` не создаётся (компоненты не привязаны ко времени, фидбэк
+    24.09.2026) — наружу только счётчик ``by_type.ica_eog`` и ``ica_applied``.
+    """
     _, stats = detect_artifacts(_mimic_raw(), settings, run_ica=True)
 
     assert stats["ica_applied"] is True
     assert stats["by_type"]["ica_eog"] >= 1
-    assert any(zone["kind"] == "ica_eog" for zone in stats["zones"])
+    assert not any(zone["kind"] == "ica_eog" for zone in stats["zones"])
 
 
 def test_ica_detection_skipped_without_eog_or_frontal():

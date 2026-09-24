@@ -95,6 +95,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   // QC-иконки каналов (шаг 0.4): сводка стадии «Поиск артефактов»; null — её не было
   const channelQc = useEdfRecording((state) => state.channelQc)
   const qcThresholds = useEdfRecording((state) => state.channelQcThresholds)
+  const artifactTypes = useEdfRecording((state) => state.artifactTypes)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -158,7 +159,12 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
     () => visibleZones(layers?.artifacts ?? [], params.artifactVisibility),
     [layers, params.artifactVisibility],
   )
-  const counts = useMemo(() => artifactCounts(layers?.artifacts ?? []), [layers])
+  const counts = useMemo(() => {
+    const base = artifactCounts(layers?.artifacts ?? [])
+    // `ica_eog` не имеет зоны (компоненты не привязаны ко времени) — число
+    // компонент приходит счётчиком стадии `artifacts`, а не из зон
+    return artifactTypes?.ica_eog != null ? { ...base, ica_eog: artifactTypes.ica_eog } : base
+  }, [layers, artifactTypes])
   /**
    * Длина эпохи сетки вьюера (срез 2.10): у слоя-результата — своя, у фикстуры и
    * до расчёта — параметр панели. Индексы отброшенных эпох живут только внутри

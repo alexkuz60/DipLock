@@ -150,8 +150,10 @@ describe('панель раздела EDF', () => {
     renderWithProviders(<EdfPanel />)
     await screen.findByLabelText('Fp1')
 
-    // 4 типа артефактов: у каждого чекбокс с цветной меткой зоны вьюера (срез 2.6)
-    expect(screen.getAllByTestId('checkbox-swatch')).toHaveLength(11)
+    // Чекбоксы видимости — у типов с временной зоной: у ICA зоны нет
+    // (компоненты не привязаны ко времени — фидбэк 24.09.2026), её чекбокс скрыт
+    expect(screen.getAllByTestId('checkbox-swatch')).toHaveLength(10)
+    expect(screen.queryByLabelText('ICA: EOG-компоненты')).not.toBeInTheDocument()
     expect(screen.getByLabelText('z-score выбросы')).toBeChecked()
 
     const callsBefore = fetchMock.mock.calls.length

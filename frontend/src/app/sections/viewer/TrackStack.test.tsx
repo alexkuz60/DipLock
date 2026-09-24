@@ -644,8 +644,11 @@ describe('слои результата вьюера', () => {
 
     expect(screen.getByTestId('track-layers')).toBeInTheDocument()
     expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
-    // Фикстура даёт минимум две зоны каждого типа — легенда не пустая
-    expect(screen.getByTestId('legend-ica_eog').textContent).toMatch(/[2-4]/)
+    // Фикстура даёт минимум две зоны каждого типа — легенда не пустая; ICA —
+    // информационный чип (зона контрактом не создаётся, счётчик компонент = 0)
+    expect(screen.getByTestId('legend-zscore_outlier').textContent).toMatch(/[2-4]/)
+    expect(screen.getByTestId('legend-ica_eog').textContent).toContain('0')
+    expect(screen.getByTestId('legend-ica_eog').closest('button')).toBeNull()
   })
 
   it('кадру записи без пропа слоёв не рисует: фикстура только демо', () => {

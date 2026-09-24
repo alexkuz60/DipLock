@@ -10,6 +10,7 @@ import mne
 import numpy as np
 
 from app.core.config import settings
+from app.services.artifact_detector import BAD_PREFIX
 
 
 def make_epoch_events(raw: mne.io.BaseRaw, epoch_length_ms: float) -> np.ndarray:
@@ -34,7 +35,10 @@ def segment_epochs(
     Amplitude reject MNE отключён (``reject=None``): отбраковка идёт только
     по аннотациям ``BAD_`` от наших 11 детекторов — они строже порога MNE
     (peak_to_peak 100 мкВ < MNE reject 150 мкВ) и дают адресную информацию
-    (тип артефакта, канал, время). Номера эпох — на липкой шкале.
+    (тип артефакта, канал, время). Номера эпох — на липкой шкале. Когда
+    отбрасывается **всё**, ошибка перечисляет покрытие ``BAD_`` по типам —
+    иначе «кто занял запись» приходится выяснять по слоям вьюера вручную
+    (фидбэк 24.09.2026).
     """
     valid_lengths = settings.epoch_lengths_ms  # DRY: единый список из config.py
     if epoch_length_ms not in valid_lengths:
@@ -60,12 +64,51 @@ def segment_epochs(
     )
 
     if len(epochs) == 0:
+        duration_sec = float(raw.times[-1]) if raw.n_times else 0.0
         raise ValueError(
             "Все эпохи отброшены аннотациями BAD_ (детекторы артефактов). "
-            "Проверьте параметры детекции и качество сигнала."
+            f"Покрытие: {bad_coverage_text(artifact_annotations, duration_sec)}. "
+            "Проверьте пороги детекции, фильтр и референс."
         )
 
     return epochs
+
+
+def bad_coverage_text(
+    annotations: mne.Annotations, duration_sec: float,
+) -> str:
+    """Покрытие BAD_-зон по типам: «тип — N% записи (M зон)», по убыванию.
+
+    Интервалы одного типа сливаются (пересекающиеся зоны не задваивают время),
+    тип берётся из описания без префикса ``BAD_``. Нужно для текста ошибки
+    «все эпохи отброшены»: показать, какой вид занял запись, а не заставлять
+    гадать по слоям вьюера (фидбэк 24.09.2026).
+    """
+    duration = max(float(duration_sec), 1e-9)
+    by_kind: dict[str, list[tuple[float, float]]] = {}
+    for onset, dur, desc in zip(
+        annotations.onset, annotations.duration, annotations.description, strict=True,
+    ):
+        kind = desc.removeprefix(BAD_PREFIX) if desc.startswith(BAD_PREFIX) else desc
+        by_kind.setdefault(kind, []).append((float(onset), float(onset + dur)))
+
+    parts: list[tuple[float, str]] = []
+    for kind, intervals in by_kind.items():
+        merged = 0.0
+        cur_start: float | None = None
+        cur_end = 0.0
+        for start, end in sorted(intervals):
+            if cur_start is None or start > cur_end:
+                if cur_start is not None:
+                    merged += cur_end - cur_start
+                cur_start, cur_end = start, end
+            else:
+                cur_end = max(cur_end, end)
+        if cur_start is not None:
+            merged += cur_end - cur_start
+        share = min(merged / duration, 1.0) * 100.0
+        parts.append((share, f"{kind} — {share:.0f} % записи ({len(intervals)} зон)"))
+    return ", ".join(text for _, text in sorted(parts, reverse=True)) or "зон нет"
 
 
 def epoch_records(

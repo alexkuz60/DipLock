@@ -241,6 +241,27 @@ export function LayersLegend({
     >
       {ARTIFACT_KINDS.map((kind) => {
         const on = visibility[kind] !== false
+        // ICA: EOG-компоненты не привязаны ко времени (зона контрактом не
+        // создаётся — фидбэк 24.09.2026), поэтому чип только информационный:
+        // тумблеру нечего скрывать, а число — счётчик компонент стадии
+        if (kind === 'ica_eog') {
+          return (
+            <span
+              key={kind}
+              data-testid={`legend-${kind}`}
+              title={`ICA: ${counts[kind] ?? 0} EOG-компонент — без привязки ко времени, слой не рисуется`}
+              className="flex items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-fg-1"
+            >
+              <span
+                aria-hidden
+                className="size-2 rounded-full"
+                style={{ backgroundColor: ARTIFACT_COLORS[kind] }}
+              />
+              {ARTIFACT_SHORT_LABELS[kind]}
+              <span className="tnum text-fg-2">{counts[kind] ?? 0}</span>
+            </span>
+          )
+        }
         return (
           <button
             key={kind}

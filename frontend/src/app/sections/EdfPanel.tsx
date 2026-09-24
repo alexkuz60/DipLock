@@ -406,7 +406,10 @@ export function EdfPanel() {
             ) : null}
           </div>
         ) : null}
-        {ARTIFACT_KINDS.map((kind) => (
+        {/* `ica_eog` не показываем: зона контрактом не создаётся (компоненты ICA
+            не привязаны ко времени), у слоя нет видимости — счётчик компонент
+            показывает чип легенды над треками */}
+        {ARTIFACT_KINDS.filter((kind) => kind !== 'ica_eog').map((kind) => (
           <CheckboxRow
             key={kind}
             label={ARTIFACT_LABELS[kind]}

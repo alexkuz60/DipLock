@@ -246,6 +246,11 @@ describe('фикстура слоёв', () => {
 
     for (const kind of ARTIFACT_KINDS) {
       const ofKind = artifacts.filter((item) => item.kind === kind)
+      // У ICA зоны не бывает вовсе: компоненты не привязаны ко времени (24.09.2026)
+      if (kind === 'ica_eog') {
+        expect(ofKind).toHaveLength(0)
+        continue
+      }
       expect(ofKind.length).toBeGreaterThanOrEqual(2)
       expect(ofKind.length).toBeLessThanOrEqual(4)
     }
@@ -257,18 +262,16 @@ describe('фикстура слоёв', () => {
     }
   })
 
-  it('ICA и сетевой шум бьют по всему монтажу, остальные — по подмножеству', () => {
+  it('сетевой шум бьёт по всему монтажу, остальные — по подмножеству', () => {
     const channels = ['F3', 'F4', 'C3', 'C4']
     const { artifacts } = demoLayers(60, channels)
 
-    const ica = artifacts.find((item) => item.kind === 'ica_eog')!
-    expect(ica.channels).toEqual(channels)
+    // Зон ICA нет вовсе (компоненты не привязаны ко времени — фидбэк 24.09.2026)
+    expect(artifacts.some((item) => item.kind === 'ica_eog')).toBe(false)
     for (const item of artifacts.filter((zone) => zone.kind === 'line_noise')) {
       expect(item.channels).toEqual(channels)
     }
-    for (const item of artifacts.filter(
-      (zone) => zone.kind !== 'ica_eog' && zone.kind !== 'line_noise',
-    )) {
+    for (const item of artifacts.filter((zone) => zone.kind !== 'line_noise')) {
       expect(item.channels.length).toBeLessThanOrEqual(3)
       for (const name of item.channels) expect(channels).toContain(name)
     }

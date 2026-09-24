@@ -93,3 +93,33 @@ def test_segment_epochs_returns_mne_epochs(raw_eeg, empty_annotations):
     epochs = segment_epochs(raw_eeg, empty_annotations, epoch_length_ms=2000.0)
     assert isinstance(epochs, mne.Epochs)
     assert len(epochs) == 1
+
+
+def test_segment_epochs_all_rejected_error_lists_bad_coverage(raw_eeg):
+    """«Все эпохи отброшены» называет тип и покрытие BAD_ (фидбэк 24.09.2026)."""
+    annotations = mne.Annotations([0.0], [4.0], ["BAD_zscore_outlier"])
+
+    with pytest.raises(ValueError) as excinfo:
+        segment_epochs(raw_eeg, annotations, epoch_length_ms=1000.0)
+
+    text = str(excinfo.value)
+    assert "Покрытие" in text
+    assert "zscore_outlier" in text
+    assert "100 % записи (1 зон)" in text
+
+
+def test_bad_coverage_text_merges_overlapping_intervals():
+    """Пересекающиеся зоны одного типа сливаются — процент не задваивается."""
+    import mne as mne_lib
+
+    from app.services.epoch_segmenter import bad_coverage_text
+
+    annotations = mne_lib.Annotations(
+        [0.0, 1.0, 2.0], [2.0, 2.0, 1.0], ["BAD_zscore_outlier"] * 2 + ["BAD_peak_to_peak"],
+    )
+
+    text = bad_coverage_text(annotations, 4.0)
+
+    # zscore: слитые интервалы 0–3 с = 75 %, 2 зоны; p2p: 2–3 с = 25 %, 1 зона
+    assert "zscore_outlier — 75 % записи (2 зон)" in text
+    assert "peak_to_peak — 25 % записи (1 зон)" in text

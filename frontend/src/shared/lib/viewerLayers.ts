@@ -350,9 +350,10 @@ export const DEMO_LAYERS_SEED = 42
 /**
  * Разброс длительности зоны по типу артефакта, секунды.
  * Значения отражают природу артефакта: всплеск peak-to-peak короткий, а
- * EOG-компонент ICA тянется секундами.
+ * сетевой шум длится секундами. У `ica_eog` зоны нет вовсе (компоненты не
+ * привязаны ко времени) — записи здесь нет и не должно быть.
  */
-const ZONE_DURATION_SEC: Record<ArtifactKind, [number, number]> = {
+const ZONE_DURATION_SEC: Record<Exclude<ArtifactKind, 'ica_eog'>, [number, number]> = {
   zscore_outlier: [0.4, 1.6],
   peak_to_peak: [0.15, 0.7],
   flat_line: [0.2, 1.1],
@@ -363,7 +364,6 @@ const ZONE_DURATION_SEC: Record<ArtifactKind, [number, number]> = {
   line_noise: [1.5, 4.5],
   ocular: [0.2, 0.6],
   ecg: [0.3, 0.6],
-  ica_eog: [0.8, 2.6],
 }
 
 function round3(value: number): number {
@@ -388,8 +388,9 @@ function pickChannels(pool: string[], rand: () => number, maxCount: number): str
  * и ~18 % отброшенных эпох. Детерминирована сидом, поэтому одинакова между
  * перерисовками и запусками — иначе тесты и сравнение «до/после» были бы шумом.
  *
- * EOG-компонент ICA бьёт по всем каналам сразу, остальные детекторы — по
- * подмножеству: тултип зоны должен уметь показать и один канал, и весь монтаж.
+ * У `ica_eog` зоны нет (компоненты не привязаны ко времени), сетевой шум бьёт
+ * по всем каналам сразу, остальные детекторы — по подмножеству: тултип зоны
+ * должен уметь показать и один канал, и весь монтаж.
  */
 export function demoLayers(
   durationSec: number,
@@ -402,6 +403,9 @@ export function demoLayers(
   const artifacts: ArtifactZone[] = []
 
   ARTIFACT_KINDS.forEach((kind) => {
+    // ICA-зона контрактом не создаётся (компоненты не привязаны ко времени,
+    // фидбэк 24.09.2026) — фикстура её тоже не рисует
+    if (kind === 'ica_eog') return
     const count = 2 + Math.floor(rand() * 3)
     const [minDuration, maxDuration] = ZONE_DURATION_SEC[kind]
     for (let i = 0; i < count; i++) {
@@ -414,10 +418,9 @@ export function demoLayers(
         kind,
         onsetSec: round3(onsetSec),
         durationSec: round3(durationSec),
-        // ICA-EOG и сетевой шум бьют по всем каналам сразу, остальные детекторы —
+        // Сетевой шум бьет по всем каналам сразу, остальные детекторы —
         // по подмножеству: тултип зоны должен уметь показать и один, и весь монтаж.
-        channels:
-          kind === 'ica_eog' || kind === 'line_noise' ? [...pool] : pickChannels(pool, rand, 3),
+        channels: kind === 'line_noise' ? [...pool] : pickChannels(pool, rand, 3),
       })
     }
   })
