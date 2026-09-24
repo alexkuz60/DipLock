@@ -126,7 +126,6 @@ def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
     trans_path = settings.fsaverage_trans
     # Кэшированный один раз (module-level lru_cache)
     transform = _get_transform(subjects_dir, trans_path)
-    ba_centers = _get_ba_centers(subjects_dir)
 
     for result in dipoles_result:
         if "error" in result or not result.get("trajectory"):
@@ -149,19 +148,11 @@ def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
             except Exception:
                 dp["mni_coords"] = [0, 0, 0]
 
-            # Анатомия: тот же атлас, что у контуров срезов и быстрого расчёта
-            # (`aparc+aseg`), поэтому подписи структур в таблице локализации не
-            # расходятся. Объёмы кэшируются (`atlas_contours.load_volumes`) — цена
-            # точки становится поиском в массиве вместо чтения тома на точку (F19).
-            dp["anatomical_structure"] = (
-                _structure_at_mni(settings, mni[0]) if mni is not None else None
-            )
-
-            # Brodmann — через кэшированные центры меток (без повторов read_surface)
-            if mni is not None:
-                dp["brodmann_area"] = _find_ba(mni[0], ba_centers)
-            else:
-                dp["brodmann_area"] = "unknown"
+            # Анатомия одной функцией (шаг 1.4/N21): ближайшая структура и поле
+            # Бродмана с расстояниями и признаком «вне мозга» — общий источник с
+            # контурами среза (`atlas_contours`). Объёмы кэшируются, поэтому цена
+            # точки — поиск в KD-дереве вместо чтения тома на точку (F19).
+            dp.update(attribution_fields(settings, mni[0] if mni is not None else None))
             localized.append(dp)
 
         result["trajectory"] = localized
@@ -177,63 +168,28 @@ def _get_transform(subjects_dir: str, trans_path: str) -> "mne.Transform":
     return mne.read_trans(trans_path, verbose=False)
 
 
-@lru_cache(maxsize=1)
-def _get_ba_centers(subjects_dir: str) -> list[tuple[str, np.ndarray]]:
-    """
-    Центры Brodmann-меток на fsaverage (атлас PALS_B12_Brodmann).
+def attribution_fields(settings: Settings, mni_mm: Any) -> dict[str, Any]:
+    """Поля атрибуции точки из общего источника (``atlas_contours``, шаг 1.4/N21).
 
-    Строится один раз и кэшируется. Возвращает [(name, center_coords), ...],
-    где name имеет вид "BA17-lh".
-    """
-    labels = mne.read_labels_from_annot(
-        "fsaverage", parc="PALS_B12_Brodmann",
-        subjects_dir=subjects_dir, verbose=False,
-    )
-    verts_cache: dict[str, np.ndarray] = {}
-    centers = []
-    for label in labels:
-        # В PALS_B12_Brodmann метки названы "Brodmann.<area>-lh/rh"
-        if not label.name.startswith("Brodmann"):
-            continue
-        hemi = label.hemi  # 'lh' или 'rh'
-        if hemi not in verts_cache:
-            verts, _ = mne.read_surface(
-                f"{subjects_dir}/fsaverage/surf/{hemi}.white", verbose=False,
-            )
-            verts_cache[hemi] = verts
-        verts = verts_cache[hemi]
-        if len(verts) <= max(label.vertices):
-            continue
-        center = verts[label.vertices].mean(axis=0)
-        centers.append((label.name.replace("Brodmann.", "BA"), center))
-    return centers
-
-
-def _find_ba(mni_pos, ba_centers) -> str:
-    """Поиск Brodmann Area по ближайшему центру метки (из кэша)."""
-    best_label = "unknown"
-    best_dist = float("inf")
-    for name, center in ba_centers:
-        dist = np.linalg.norm(center - mni_pos)
-        if dist < best_dist:
-            best_dist = dist
-            best_label = name
-    return best_label
-
-
-def _structure_at_mni(settings: Settings, mni_mm) -> str | None:
-    """Анатомическая структура по MNI-координате — общий источник с UI.
-
-    Ленивый импорт: `atlas_contours` тянет nibabel/scipy, а фитинг без
-    локализации (например, в тестах) не должен зависеть от атласов.
+    Ближайшая структура/поле Бродмана с расстояниями и признаком «вне мозга».
+    Ленивый импорт: ``atlas_contours`` тянет nibabel/scipy, а фитинг без
+    локализации (например, в тестах) не должен зависеть от атласов. Сбой
+    атрибуции не отменяет расчёт: поля остаются пустыми («—» в таблице),
+    а не выдуманными.
     """
     try:
-        from app.services.atlas_contours import structure_at
+        from app.services.atlas_contours import attribution_payload
 
-        return structure_at(settings, [float(value) for value in mni_mm])
+        return attribution_payload(settings, mni_mm)
     except Exception as exc:
-        logger.info("Структура по MNI не определена: %s", exc)
-        return None
+        logger.info("Атрибуция по MNI не определена: %s", exc)
+        return {
+            "anatomical_structure": None,
+            "structure_distance_mm": None,
+            "brodmann_area": None,
+            "brodmann_distance_mm": None,
+            "outside_brain": None,
+        }
 
 
 def _get_covariance(settings) -> Optional["mne.Covariance"]:

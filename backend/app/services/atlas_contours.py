@@ -54,6 +54,7 @@ from app.services.asset_versions import (
     CONTOUR_SIMPLIFY_MM,
     CONTOUR_SPACING_MM,
     MIN_SHAPE_AREA_MM2,
+    MRI_STAMP_RELATIVE,
 )
 from app.services.cache_store import cache_path, cache_write
 from app.services.mri_slices import (
@@ -315,6 +316,38 @@ class ContourVolumes:
     spacing_mm: float = CONTOUR_SPACING_MM
 
 
+# Допуск признака «вне мозга», мм: диагональ вокселя сетки 1 мм — 0.87 мм, поэтому
+# точка у самой границы маски с полувоксельным смещением не считается «вне мозга».
+OUTSIDE_BRAIN_TOL_MM = 1.0
+
+
+@dataclass(frozen=True)
+class PointAttribution:
+    """Атрибуция точки диполя одним источником (шаг 1.4, N21).
+
+    Ближайшая структура ``aparc+aseg`` и ближайшее поле Бродмана — с **расстояниями**
+    до точки, плюс признак «вне мозга» (маска ``brainmask``). Потолок расстояния
+    a priori не задаётся (замер 23.09.2026, `docs/history.md`): строку
+    «около X ~N мм» / «вне мозга (~N мм до X)» собирает UI из раздельных полей.
+    """
+
+    structure_name: str | None
+    structure_distance_mm: float | None
+    area_name: str | None
+    area_distance_mm: float | None
+    outside_brain: bool | None
+
+    def payload(self) -> dict[str, Any]:
+        """Поля в ключах контракта точек (``DipoleScanPointOut``/``TrajectoryPoint``)."""
+        return {
+            "anatomical_structure": self.structure_name,
+            "structure_distance_mm": self.structure_distance_mm,
+            "brodmann_area": self.area_name,
+            "brodmann_distance_mm": self.area_distance_mm,
+            "outside_brain": self.outside_brain,
+        }
+
+
 def _area_label(area_name: str) -> str:
     """Подпись поля: «поле 17 (слева)» из имени ``BA17-lh``."""
     body, _, hemisphere = area_name.rpartition("-")
@@ -540,54 +573,164 @@ def _structure_tree(volumes: ContourVolumes) -> tuple[cKDTree, np.ndarray]:
     return tree, labels
 
 
-def nearest_structure_id(volumes: ContourVolumes, mni_mm: Sequence[float], max_mm: float) -> int:
-    """Ближайшая размеченная метка в радиусе ``max_mm`` (``0`` — в радиусе пусто).
+def nearest_structure(
+    volumes: ContourVolumes, mni_mm: Sequence[float]
+) -> tuple[str | None, float | None]:
+    """Ближайшая размеченная метка ``aparc+aseg`` и расстояние до неё, мм.
 
-    Fallback для ``structure_at``: сферическая сетка быстрого расчёта ставит узлы
-    и между размеченными вокселями атласа, и за край мозга. «Ближайшая метка в
-    паре миллиметров» честнее прочерка для точки у границы структуры, но
-    недопустима для точки вне мозга — отсюда жёсткий радиус.
+    **Без потолка расстояния** (шаг 1.4): сферическая сетка быстрого расчёта ставит
+    узлы и между вокселями атласа, и за край мозга, а «вне мозга ~N мм до X» честнее
+    прочерка (замер 23.09.2026: расстояние само разделяет точки внутри мозга и вне
+    его). ``(None, None)`` — мусор на входе или в объёме нет ни одной метки.
     """
     if len(mni_mm) != 3 or not all(np.isfinite(value) for value in mni_mm):
-        return 0
+        return None, None
     tree, labels = _structure_tree(volumes)
+    if len(labels) == 0:
+        return None, None
     distance, index = tree.query(np.asarray(mni_mm, dtype=np.float64))
-    if not np.isfinite(distance) or distance > max_mm or index >= len(labels):
-        return 0
-    return int(labels[index])
+    if not np.isfinite(distance) or index >= len(labels):
+        return None, None
+    label_id = int(labels[index])
+    name = volumes.structure_labels.get(label_id) or volumes.structure_names.get(label_id)
+    return name, round(float(distance), 1)
 
 
-def structure_at(settings: Settings, mni_mm: Sequence[float]) -> str | None:
-    """Анатомическая структура по MNI-координате точки — подпись для результата.
+def nearest_area(
+    volumes: ContourVolumes, mni_mm: Sequence[float]
+) -> tuple[str | None, float | None]:
+    """Ближайшее поле Бродмана объёмного атласа и расстояние до его узла, мм.
 
-    Тем же атласом (``aparc+aseg``), что и контуры срезов: подпись структуры в
-    таблице локализации и подпись под курсором на проекциях не должны
-    расходиться — это одна и та же метка объёма, прочитанная в двух местах.
-
-    Точная ячейка не размечена (узел сетки между вокселями атласа) — берётся
-    ближайшая размеченная метка в радиусе ``settings.atlas_structure_snap_mm``
-    (находка ручной проверки 19.09.2026: без подтягивания ~треть точек быстрого
-    расчёта оставалась без структуры; медиана расстояния до метки 3.6 мм).
-
-    ``None`` — координат нет, метки в радиусе нет (точка вне мозга) или атлас
-    недоступен: отсутствие анатомии **не отменяет** расчёт (в таблице «—»).
-    Первое обращение собирает объёмы (как и первый запрос контуров), дальше они
-    берутся из кэша процесса/диска.
+    Источник — **тот же** объём ``volumes.areas``, что рисует контуры среза и
+    отвечает на клик: одна точка → одно поле в таблице и на срезе (требование
+    1.4/N21). Без потолка: «через какое поле продырявило ~N мм» — данные, а не
+    выдуманная метка (прежние центроиды PALS давали метку с 3–6 см и расходились
+    с объёмом в 70 % случаев — замер 23.09.2026).
     """
+    if len(mni_mm) != 3 or not all(np.isfinite(value) for value in mni_mm):
+        return None, None
+    tree, values = _area_tree(volumes)
+    if len(values) == 0:
+        return None, None
+    distance, index = tree.query(np.asarray(mni_mm, dtype=np.float64))
+    if not np.isfinite(distance) or index >= len(values):
+        return None, None
+    return volumes.area_names.get(int(values[index])), round(float(distance), 1)
+
+
+_area_trees: dict[str, tuple[cKDTree, np.ndarray]] = {}
+
+
+def _area_tree(volumes: ContourVolumes) -> tuple[cKDTree, np.ndarray]:
+    """KD-дерево узлов ``volumes.areas`` и их меток (в порядке точек дерева).
+
+    По образцу ``_structure_tree``: кэш по версии объёмов, координаты — из
+    модульных ``MRI_BOUNDS``/``spacing_mm``.
+    """
+    cached = _area_trees.get(volumes.version)
+    if cached is not None:
+        return cached
+    nz = np.nonzero(volumes.areas)
+    coords = np.column_stack(
+        [
+            MRI_BOUNDS[axis][0] + nz[position].astype(np.float64) * volumes.spacing_mm
+            for position, axis in enumerate(("x", "y", "z"))
+        ]
+    )
+    tree = cKDTree(coords)
+    values = volumes.areas[nz].astype(np.int32)
+    if len(_area_trees) >= 2:
+        _area_trees.clear()
+    _area_trees[volumes.version] = (tree, values)
+    return tree, values
+
+
+@lru_cache(maxsize=2)
+def brain_mask_tree(ctx: "_ContourCtx") -> cKDTree:
+    """KD-дерево узлов маски мозга ``brainmask.mgz`` на MNI-сетке 1 мм.
+
+    Строится один раз на процесс (≈миллион узлов, секунды) и живёт рядом с
+    объёмами атласа — цена точки остаётся одним запросом дерева. Маска — та же,
+    что затемняет срезы МРТ: «вне мозга» в таблице и на картинке — одно и то же.
+    """
+    path = os.path.join(ctx.subjects_dir, MRI_STAMP_RELATIVE[1])
+    image = cast("nib.MGHImage", nib.load(path))
+    mask = _resample_nearest(np.asanyarray(image.dataobj) > 0, image.affine)
+    nz = np.nonzero(mask)
+    coords = np.column_stack(
+        [
+            MRI_BOUNDS[axis][0] + nz[position].astype(np.float64) * CONTOUR_SPACING_MM
+            for position, axis in enumerate(("x", "y", "z"))
+        ]
+    )
+    return cKDTree(coords)
+
+
+def outside_brainmask(
+    mask_tree: cKDTree, mni_mm: Sequence[float], tol_mm: float = OUTSIDE_BRAIN_TOL_MM
+) -> bool | None:
+    """Точка вне маски мозга: ближайший узел маски дальше ``tol_mm``.
+
+    Допуск в миллиметр (диагональ вокселя — 0.87 мм) оставляет граничные точки у
+    поверхности «внутри»: полувоксельное смещение сетки не превращается в «вне
+    мозга». ``None`` — мусор на входе (расчёт не отменяется, признак неизвестен).
+    """
+    if len(mni_mm) != 3 or not all(np.isfinite(value) for value in mni_mm):
+        return None
+    distance, _ = mask_tree.query(np.asarray(mni_mm, dtype=np.float64))
+    if not np.isfinite(distance):
+        return None
+    return bool(distance > tol_mm)
+
+
+def attribution_at(settings: Settings, mni_mm: Sequence[float] | None) -> PointAttribution | None:
+    """Полная атрибуция точки диполя одним источником (шаг 1.4, N21).
+
+    Ближайшая структура ``aparc+aseg`` + расстояние, ближайшее поле Бродмана из
+    объёмного атласа (тот же объём, что у контуров среза и клика) + расстояние,
+    признак «вне мозга» по маске ``brainmask``. Одна функция на все представления:
+    таблица локализации и срез не могут разойтись в атрибуции.
+
+    ``None`` — координат нет или атлас недоступен: отсутствие анатомии **не
+    отменяет** расчёт (в таблице «—»). Первое обращение собирает объёмы (как и
+    первый запрос контуров), дальше они берутся из кэша процесса/диска.
+    """
+    if mni_mm is None or len(mni_mm) != 3 or not all(np.isfinite(value) for value in mni_mm):
+        return None
     try:
-        volumes = load_volumes(_ContourCtx.from_settings(settings))
+        ctx = _ContourCtx.from_settings(settings)
+        volumes = load_volumes(ctx)
+        mask_tree = brain_mask_tree(ctx)
     except Exception as exc:
-        logger.info("Структура по MNI недоступна: %s", exc)
+        logger.info("Атрибуция по MNI недоступна: %s", exc)
         return None
 
-    label_id = structure_id_at(volumes, mni_mm)
-    if label_id == 0:
-        label_id = nearest_structure_id(
-            volumes, mni_mm, settings.atlas_structure_snap_mm
-        )
-    if label_id == 0:
-        return None
-    return volumes.structure_labels.get(label_id) or volumes.structure_names.get(label_id)
+    structure_name, structure_mm = nearest_structure(volumes, mni_mm)
+    area_name, area_mm = nearest_area(volumes, mni_mm)
+    return PointAttribution(
+        structure_name=structure_name,
+        structure_distance_mm=structure_mm,
+        area_name=area_name,
+        area_distance_mm=area_mm,
+        outside_brain=outside_brainmask(mask_tree, mni_mm),
+    )
+
+
+def attribution_payload(settings: Settings, mni_mm: Sequence[float] | None) -> dict[str, Any]:
+    """Поля атрибуции точки в ключах контракта (общий источник scanner/fitter).
+
+    Нет координат или атласа — все поля ``None``: точка показывается без
+    анатомии, а не с выдуманной меткой.
+    """
+    attribution = attribution_at(settings, mni_mm)
+    empty = PointAttribution(
+        structure_name=None,
+        structure_distance_mm=None,
+        area_name=None,
+        area_distance_mm=None,
+        outside_brain=None,
+    )
+    return attribution.payload() if attribution else empty.payload()
 
 
 def _slice_of(volume: np.ndarray, plane: str, index: int) -> np.ndarray:

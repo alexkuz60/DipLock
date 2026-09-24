@@ -21,7 +21,7 @@
  * Модуль чистый (без DOM и zustand): состояние — `shared/state/dipoleCalc.ts`,
  * часы и отрисовка — `app/sections/dipoles/PlaybackFrame.tsx`.
  */
-import { atlasLabels, type DipolePoint } from './dipolePoints'
+import { atlasLabels, attributionText, type DipolePoint, type PointAttribution } from './dipolePoints'
 import type { MniVector } from './mriProjections'
 import type { DipoleScanResult } from '@/shared/api/types'
 
@@ -181,7 +181,7 @@ export function playbackSummary(
 }
 
 /** Анатомия диполя: структура `aparc+aseg` и поле Бродмана (уже нормализованные). */
-export type AnatomyLabels = { structure: string | null; area: string | null }
+export type AnatomyLabels = PointAttribution
 
 /** Переход анатомии впереди: эпоха, на которой диполь оказывается в других метках. */
 export type AnatomyChange = {
@@ -202,8 +202,7 @@ export const ANATOMY_UNKNOWN_TEXT = 'анатомия не определена'
  * склеиваются только для чтения, а не в одно поле данных.
  */
 export function anatomyText(labels: AnatomyLabels): string {
-  const parts = [labels.structure, labels.area].filter(Boolean)
-  return parts.length > 0 ? parts.join(', ') : ANATOMY_UNKNOWN_TEXT
+  return attributionText(labels, ANATOMY_UNKNOWN_TEXT)
 }
 
 /**

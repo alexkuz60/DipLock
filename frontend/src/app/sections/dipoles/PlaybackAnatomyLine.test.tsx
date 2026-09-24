@@ -27,6 +27,9 @@ function scanPoint(epochIndex: number, overrides: Partial<DipoleScanPoint> = {})
     gof: 0.91,
     brodmann_area: 'BA17-lh',
     anatomical_structure: 'таламус (слева)',
+    structure_distance_mm: 0.4,
+    brodmann_distance_mm: 0.6,
+    outside_brain: false,
     ...overrides,
   }
 }

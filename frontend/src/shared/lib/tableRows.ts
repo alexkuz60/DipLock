@@ -29,7 +29,7 @@
  * просто переворачивало таблицу, а строки одной эпохи не «смешивались».
  */
 import type { DipoleScanResult } from '@/shared/api/types'
-import { atlasLabel } from './dipolePoints'
+import { atlasLabel, attributionText, labelWithDistance, outsideBrainText } from './dipolePoints'
 
 /** Прочерк вместо отсутствующего значения: «не измерено» ≠ «ноль». */
 export const EM_DASH = '—'
@@ -157,6 +157,12 @@ export type LocalizationRow = {
    * или метки в узле нет: в ячейке «—».
    */
   structure: string | null
+  /** Расстояние до ближайшей структуры, мм (шаг 1.4); `null` — координат/атласа нет */
+  structureDistanceMm: number | null
+  /** Расстояние до ближайшего узла поля Бродмана, мм (шаг 1.4) */
+  areaDistanceMm: number | null
+  /** Признак «вне мозга» (`brainmask`, шаг 1.4): `null` — маска недоступна */
+  outsideBrain: boolean | null
 }
 
 /**
@@ -175,6 +181,9 @@ export function localizationRows(result: DipoleScanResult): LocalizationRow[] {
     // становятся `null` — в ячейке «—», в подсказке строки их просто нет.
     area: atlasLabel(point.brodmann_area),
     structure: atlasLabel(point.anatomical_structure),
+    structureDistanceMm: point.structure_distance_mm,
+    areaDistanceMm: point.brodmann_distance_mm,
+    outsideBrain: point.outside_brain,
   }))
 }
 
@@ -218,13 +227,16 @@ export function cellText(row: LocalizationRow, key: TableColumnKey): string {
     case 'hemisphere':
       return hemisphereLabel(hemisphereOf(row.mni?.[0] ?? null))
     case 'structure':
-      return row.structure ?? EM_DASH
+      if (row.outsideBrain) return outsideBrainText(row.structure, row.structureDistanceMm)
+      return row.structure ? labelWithDistance(row.structure, row.structureDistanceMm) : EM_DASH
     case 'amplitude':
       return Number.isFinite(row.amplitudeNaM) ? row.amplitudeNaM.toFixed(1) : EM_DASH
     case 'gof':
       return Number.isFinite(row.gof) ? (row.gof * 100).toFixed(1) : EM_DASH
     case 'area':
-      return row.area ?? EM_DASH
+      // Вне мозга ближайшее поле — выдуманная атрибуция: прочерк вместо метки узла
+      if (row.outsideBrain) return EM_DASH
+      return row.area ? labelWithDistance(row.area, row.areaDistanceMm) : EM_DASH
   }
 }
 
@@ -251,9 +263,18 @@ export function rowTooltip(row: LocalizationRow): string {
   const coords = row.mni
     ? `MNI ${row.mni.map((value) => value.toFixed(1)).join(' / ')}`
     : 'MNI нет (fsaverage недоступен) — на проекции точка не наводится'
-  const area = row.area ? `, ${row.area}` : ''
-  const structure = row.structure ? `, ${row.structure}` : ''
-  return `Эпоха ${row.epochIndex + 1}, пик ${(row.timeMs / 1000).toFixed(3)} с: ${coords}${structure}${area}, ${row.amplitudeNaM.toFixed(1)} нАм, GOF ${(row.gof * 100).toFixed(1)} %`
+  const anatomy = attributionText(
+    {
+      structure: row.structure,
+      area: row.area,
+      structureDistanceMm: row.structureDistanceMm,
+      areaDistanceMm: row.areaDistanceMm,
+      outsideBrain: row.outsideBrain,
+    },
+    '',
+  )
+  const suffix = anatomy ? `, ${anatomy}` : ''
+  return `Эпоха ${row.epochIndex + 1}, пик ${(row.timeMs / 1000).toFixed(3)} с: ${coords}${suffix}, ${row.amplitudeNaM.toFixed(1)} нАм, GOF ${(row.gof * 100).toFixed(1)} %`
 }
 
 /** Подпись сортировки для статуса раздела: направление всегда названо словами. */

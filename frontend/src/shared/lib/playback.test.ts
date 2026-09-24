@@ -45,6 +45,9 @@ function point(epochIndex: number, overrides: Partial<DipolePoint> = {}): Dipole
     gof: 0.9,
     brodmannArea: 'BA17-lh',
     structure: 'таламус (слева)',
+    structureDistanceMm: 0.4,
+    areaDistanceMm: 0.6,
+    outsideBrain: false,
     ...overrides,
   }
 }
@@ -262,7 +265,13 @@ describe('кадр воспроизведения траектории', () => {
     expect(nextAnatomyChange(points, 0)).toEqual({
       epochIndex: 2,
       timeMs: 100,
-      labels: { structure: 'прецентральная извилина (слева)', area: 'BA17-lh' },
+      labels: {
+        structure: 'прецентральная извилина (слева)',
+        area: 'BA17-lh',
+        structureDistanceMm: 0.4,
+        areaDistanceMm: 0.6,
+        outsideBrain: false,
+      },
     })
     expect(nextAnatomyChange(points, 1)).toMatchObject({ epochIndex: 2 })
 
@@ -309,17 +318,44 @@ describe('кадр воспроизведения траектории', () => {
     expect(nextAnatomyChange(new Map([[0, point(0)]]), 3)).toBeNull()
   })
 
-  it('подписывает анатомию словами: «не определена» вместо пустоты и прочерка', () => {
-    expect(anatomyText({ structure: 'таламус (слева)', area: 'BA17-lh' })).toBe(
+  it('подписывает анатомию словами: расстояния, «вне мозга» и «не определена»', () => {
+    const exact = { structureDistanceMm: 0.4, areaDistanceMm: 0.6, outsideBrain: false }
+    expect(anatomyText({ ...exact, structure: 'таламус (слева)', area: 'BA17-lh' })).toBe(
       'таламус (слева), BA17-lh',
     )
-    expect(anatomyText({ structure: null, area: 'BA17-lh' })).toBe('BA17-lh')
-    expect(anatomyText({ structure: null, area: null })).toBe(ANATOMY_UNKNOWN_TEXT)
+    expect(anatomyText({ ...exact, structure: null, area: 'BA17-lh' })).toBe('BA17-lh')
+    expect(anatomyText({ ...exact, structure: null, area: null })).toBe(ANATOMY_UNKNOWN_TEXT)
+    // Дальше ячейки атласа подпись честно растягивается: «около X ~N мм»
+    expect(
+      anatomyText({
+        structure: 'таламус (слева)',
+        area: 'BA17-lh',
+        structureDistanceMm: 3.6,
+        areaDistanceMm: 12,
+        outsideBrain: false,
+      }),
+    ).toBe('около таламус (слева) ~4 мм, около BA17-lh ~12 мм')
+    // Вне мозга — своя форма вместо выдуманной атрибуции
+    expect(
+      anatomyText({
+        structure: 'мозжечок (справа)',
+        area: 'BA17-lh',
+        structureDistanceMm: 14.2,
+        areaDistanceMm: 30,
+        outsideBrain: true,
+      }),
+    ).toBe('вне мозга (~14 мм до мозжечок (справа))')
     expect(
       anatomyChangeText({
         epochIndex: 51,
         timeMs: 26_000,
-        labels: { structure: null, area: null },
+        labels: {
+          structure: null,
+          area: null,
+          structureDistanceMm: null,
+          areaDistanceMm: null,
+          outsideBrain: null,
+        },
       }),
     ).toBe(`дальше: эпоха 52 (26.000 с) → ${ANATOMY_UNKNOWN_TEXT}`)
   })

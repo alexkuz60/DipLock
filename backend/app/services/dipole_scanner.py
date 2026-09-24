@@ -55,7 +55,8 @@ import numpy as np
 
 from app.core.config import Settings
 from app.services import journal
-from app.services.dipole_fitter import _get_bem, _get_covariance
+from app.services.asset_versions import BRODMANN_METHOD
+from app.services.dipole_fitter import _get_bem, _get_covariance, attribution_fields
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
@@ -280,17 +281,15 @@ def _mri_head_transform(trans_path: str) -> Any | None:
         return None
 
 
-def _localize_point(
-    position_m: np.ndarray, cfg: Settings,
-) -> tuple[list[float] | None, str | None]:
-    """MNI-координаты и поле Бродмана позиции; ``(None, None)`` — fsaverage нет.
+def _localize_point(position_m: np.ndarray, cfg: Settings) -> list[float] | None:
+    """MNI-координаты позиции; ``None`` — fsaverage недоступен.
 
     Ошибка локализации не отменяет расчёт: раздел покажет точку в системе
     головы и честное предупреждение вместо выдуманных координат MNI.
     """
     transform = _mri_head_transform(str(cfg.fsaverage_trans))
     if transform is None:
-        return None, None
+        return None
     try:
         mni = mne.head_to_mni(
             position_m.reshape(1, 3),
@@ -301,38 +300,8 @@ def _localize_point(
         )[0]
     except Exception as exc:
         logger.warning("MNI недоступно для точки %s: %s", position_m, exc)
-        return None, None
-
-    area: str | None = None
-    try:
-        from app.services.dipole_fitter import _find_ba, _get_ba_centers
-
-        area = _find_ba(mni, _get_ba_centers(str(cfg.subjects_dir)))
-    except Exception as exc:
-        logger.info("Поле Бродмана не определено: %s", exc)
-    return [float(value) for value in mni], area
-
-
-def _structure_of(cfg: Settings, mni_coords: list[float] | None) -> str | None:
-    """Анатомическая структура по MNI-координате точки (``aparc+aseg``).
-
-    Берётся тем же атласом, что и контуры срезов (`services/atlas_contours.py`),
-    поэтому подпись структуры в таблице локализации совпадает с подписью
-    структуры под курсором на проекциях: это одна метка объёма, прочитанная в
-    двух местах, а не две разные «догадки» об анатомии.
-
-    ``None`` — координат нет, метки в узле нет или атлас недоступен. Отсутствие
-    анатомии **не отменяет** расчёт: в таблице будет «—», как у точки без MNI.
-    """
-    if mni_coords is None:
         return None
-    try:
-        from app.services.atlas_contours import structure_at
-
-        return structure_at(cfg, mni_coords)
-    except Exception as exc:
-        logger.info("Структура по MNI не определена: %s", exc)
-        return None
+    return [float(value) for value in mni]
 
 
 def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParams) -> Any:
@@ -469,11 +438,11 @@ def compute_dipole_scan(
             continue
 
         locate_started = time.perf_counter()
-        mni_coords, area = _localize_point(position_m, cfg)
-        # Структура атласа читается здесь же: первое обращение собирает объёмы
+        mni_coords = _localize_point(position_m, cfg)
+        # Атрибуция читается здесь же (шаг 1.4): первое обращение собирает объёмы
         # (≈1 с на test.edf — видно строкой `asset-contours`), и это время
         # принадлежит локализации, а не перебору сетки.
-        structure = _structure_of(cfg, mni_coords)
+        attribution = attribution_fields(cfg, mni_coords)
         localize_ms += (time.perf_counter() - locate_started) * 1000.0
         if mni_coords is None:
             mni_available = False
@@ -485,8 +454,7 @@ def compute_dipole_scan(
             "moment": [float(value) for value in moment],
             "amplitude_nam": float(amplitude_am * 1e9),
             "gof": float(gof),
-            "brodmann_area": area,
-            "anatomical_structure": structure,
+            **attribution,
         })
         report(
             "scan",
@@ -518,7 +486,7 @@ def compute_dipole_scan(
     journal.record(
         "dipoles", "head_to_mni",
         ms=localize_ms,
-        note="сумма по точкам: head_to_mni + структура атласа",
+        note="сумма по точкам: head_to_mni + атрибуция атласа",
         epochs=len(points),
     )
 
@@ -531,6 +499,7 @@ def compute_dipole_scan(
     return {
         "recording_id": recording.recording_id,
         "method": "fast_grid",
+        "brodmann_method": BRODMANN_METHOD,
         "reference": params.reference,
         "reference_channels": (
             list(params.reference_channels) if params.reference_channels else None
@@ -581,10 +550,10 @@ def _refine_point_payload(
     """Точка уточнения в схеме быстрого расчёта (``DipoleScanPointOut``).
 
     Локализация — те же функции, что у быстрого расчёта (`_localize_point`,
-    `_structure_of`), поэтому структура и поле Бродмана в «было/стало» читаются
-    одним атласом, а не вторым, «своим».
+    `attribution_fields`), поэтому структура и поле Бродмана в «было/стало»
+    читаются одним атласом, а не вторым, «своим».
     """
-    mni_coords, area = _localize_point(position_m, cfg)
+    mni_coords = _localize_point(position_m, cfg)
     return {
         "epoch_index": epoch_index,
         "time_ms": time_ms,
@@ -593,8 +562,7 @@ def _refine_point_payload(
         "moment": [float(value) for value in moment],
         "amplitude_nam": float(amplitude_am * 1e9),
         "gof": gof,
-        "brodmann_area": area,
-        "anatomical_structure": _structure_of(cfg, mni_coords),
+        **attribution_fields(cfg, mni_coords),
     }
 
 

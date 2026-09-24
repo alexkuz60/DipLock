@@ -226,7 +226,13 @@ def test_compute_dipole_scan_returns_point_per_epoch(tmp_path):
         assert np.isclose(np.linalg.norm(point["moment"]), 1.0, atol=1e-6)
         # MNI — либо координаты, либо честное отсутствие (fsaverage не установлен)
         assert point["mni_coords"] is None or len(point["mni_coords"]) == 3
+        # Атрибуция (шаг 1.4): раздельные поля — метки + расстояния + «вне мозга»
         assert "anatomical_structure" in point
+        assert "structure_distance_mm" in point
+        assert "brodmann_distance_mm" in point
+        assert "outside_brain" in point
+    # Признак метода BA-атрибуции в контракте (единый источник — объёмный атлас)
+    assert result["brodmann_method"] == "nearest_cortex_vertex"
     # Каналы без позиций в модель не входят и сообщаются предупреждением
     assert all(name in settings.standard_channels for name in result["channels"])
 

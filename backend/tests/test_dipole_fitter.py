@@ -161,17 +161,29 @@ def test_bem_path_reports_missing_files(monkeypatch):
         dipole_fitter.bem_path(settings)
 
 
-def test_localize_takes_structure_from_shared_atlas(monkeypatch):
-    """Анатомия — из ``atlas_contours.structure_at``: чтения тома на точку нет (F19)."""
+def test_localize_takes_attribution_from_shared_atlas(monkeypatch):
+    """Анатомия — из ``atlas_contours.attribution_payload`` (шаг 1.4/N21).
+
+    Единый источник с контурами среза (структура/поле + расстояния + «вне мозга»),
+    чтения тома на точку нет (F19).
+    """
     from app.services import atlas_contours
 
     seen: list = []
-    monkeypatch.setattr(
-        atlas_contours, "structure_at",
-        lambda cfg, mni: seen.append(list(mni)) or "Precentral Gyrus",
-    )
+    payload = {
+        "anatomical_structure": "Precentral Gyrus",
+        "structure_distance_mm": 1.5,
+        "brodmann_area": "BA4-lh",
+        "brodmann_distance_mm": 3.0,
+        "outside_brain": False,
+    }
+
+    def _stub(cfg, mni):
+        seen.append(list(mni))
+        return dict(payload)
+
+    monkeypatch.setattr(atlas_contours, "attribution_payload", _stub)
     monkeypatch.setattr(dipole_fitter, "_get_transform", lambda subjects_dir, trans: None)
-    monkeypatch.setattr(dipole_fitter, "_get_ba_centers", lambda subjects_dir: [])
     monkeypatch.setattr(
         dipole_fitter.mne, "head_to_mni",
         lambda pos, **kwargs: np.array([[1.0, 2.0, 3.0]]),
@@ -190,7 +202,10 @@ def test_localize_takes_structure_from_shared_atlas(monkeypatch):
     assert seen == [[1.0, 2.0, 3.0]]
     assert localized["anatomical_structure"] == "Precentral Gyrus"
     assert localized["mni_coords"] == [1.0, 2.0, 3.0]
-    assert localized["brodmann_area"] == "unknown"
+    assert localized["brodmann_area"] == "BA4-lh"
+    assert localized["structure_distance_mm"] == 1.5
+    assert localized["brodmann_distance_mm"] == 3.0
+    assert localized["outside_brain"] is False
     assert result[0]["best_fit"]["anatomical_structure"] == "Precentral Gyrus"
 
 
@@ -201,9 +216,8 @@ def test_localize_keeps_none_when_atlas_is_unavailable(monkeypatch):
     def boom(cfg, mni):
         raise OSError("нет атласа")
 
-    monkeypatch.setattr(atlas_contours, "structure_at", boom)
+    monkeypatch.setattr(atlas_contours, "attribution_payload", boom)
     monkeypatch.setattr(dipole_fitter, "_get_transform", lambda subjects_dir, trans: None)
-    monkeypatch.setattr(dipole_fitter, "_get_ba_centers", lambda subjects_dir: [])
     monkeypatch.setattr(
         dipole_fitter.mne, "head_to_mni",
         lambda pos, **kwargs: np.array([[4.0, 5.0, 6.0]]),
@@ -218,42 +232,10 @@ def test_localize_keeps_none_when_atlas_is_unavailable(monkeypatch):
         settings,
     )
 
-    assert result[0]["trajectory"][0]["anatomical_structure"] is None
+    localized = result[0]["trajectory"][0]
+    assert localized["anatomical_structure"] is None
+    assert localized["brodmann_area"] is None
+    assert localized["structure_distance_mm"] is None
+    assert localized["brodmann_distance_mm"] is None
+    assert localized["outside_brain"] is None
     assert result[0]["best_fit"]["gof"] == pytest.approx(90.0)
-
-
-
-def test_find_ba_returns_nearest():
-    import numpy as np
-
-    centers = [("BA_1", np.array([0.0, 0.0, 0.0])), ("BA_2", np.array([10.0, 0.0, 0.0]))]
-    assert dipole_fitter._find_ba(np.array([0.5, 0.0, 0.0]), centers) == "BA_1"
-    assert dipole_fitter._find_ba(np.array([9.0, 0.0, 0.0]), centers) == "BA_2"
-
-
-def test_find_ba_empty_centers():
-    import numpy as np
-
-    assert dipole_fitter._find_ba(np.array([1.0, 2.0, 3.0]), []) == "unknown"
-
-
-def test_get_ba_centers_from_fsaverage():
-    """BA-центры читаются из атласа PALS_B12_Brodmann (nibabel + fsaverage)."""
-    import os
-
-    annot = os.path.join(
-        settings.subjects_dir, "fsaverage", "label", "lh.PALS_B12_Brodmann.annot",
-    )
-    if not os.path.exists(annot):
-        import pytest
-
-        pytest.skip("PALS_B12_Brodmann.annot недоступен")
-
-    dipole_fitter._get_ba_centers.cache_clear()
-    centers = dipole_fitter._get_ba_centers(settings.subjects_dir)
-
-    assert centers, "BA-центры не найдены"
-    names = [name for name, _ in centers]
-    assert any(name.startswith("BA") for name in names)
-    # имена вида BA17-lh / BA4p-rh
-    assert all(name.startswith("BA") for name in names)

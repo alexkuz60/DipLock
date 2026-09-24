@@ -443,6 +443,7 @@ export function dipoleScanResultFixture(
   return {
     recording_id: recordingFixture.recording_id,
     method: 'fast_grid',
+    brodmann_method: 'nearest_cortex_vertex',
     reference: 'average',
     reference_channels: null,
     channels: [...recordingFixture.channels],
@@ -483,6 +484,9 @@ function dipolePoint(
     gof: 0.91,
     brodmann_area: 'BA17-lh',
     anatomical_structure: 'таламус (слева)',
+    structure_distance_mm: 0.4,
+    brodmann_distance_mm: 0.6,
+    outside_brain: false,
   }
 }
 
@@ -494,6 +498,9 @@ export const dipolePointWithoutMni = {
   ...dipolePoint(3, 200, [0, 0, 0], 80),
   mni_coords: null,
   anatomical_structure: null,
+  structure_distance_mm: null,
+  brodmann_distance_mm: null,
+  outside_brain: null,
 }
 
 /** Результат расчёта спектрограммы («ЭЭГ»): метаданные сетки + ссылка на числа. */

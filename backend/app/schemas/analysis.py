@@ -23,11 +23,29 @@ class TrajectoryPoint(BaseModel):
     anatomical_structure: str | None = Field(
         default=None,
         description=(
-            "Анатомическая структура по MNI-координате (aparc+aseg — тот же атлас, "
-            "что у контуров срезов и быстрого расчёта); null — вне метки"
+            "Ближайшая анатомическая структура (aparc+aseg — тот же атлас, что у "
+            "контуров срезов и быстрого расчёта); null — координат/атласа нет"
         ),
     )
-    brodmann_area: str | None = Field(default=None, description="Поле Бродмана, например BA17-lh")
+    brodmann_area: str | None = Field(
+        default=None,
+        description="Ближайшее поле Бродмана объёмного атласа, например BA17-lh",
+    )
+    structure_distance_mm: float | None = Field(
+        default=None,
+        description="Расстояние от точки до ближайшей структуры, мм (шаг 1.4)",
+    )
+    brodmann_distance_mm: float | None = Field(
+        default=None,
+        description="Расстояние от точки до ближайшего узла поля Бродмана, мм (шаг 1.4)",
+    )
+    outside_brain: bool | None = Field(
+        default=None,
+        description=(
+            "Точка вне маски мозга brainmask (шаг 1.4): подпись «вне мозга "
+            "(~N мм до X)» вместо выдуманной атрибуции; null — маска недоступна"
+        ),
+    )
 
 
 class DipoleFit(BaseModel):
@@ -625,12 +643,37 @@ class DipoleScanPointOut(BaseModel):
     moment: list[float] = Field(description="Единичный вектор момента диполя (направление)")
     amplitude_nam: float = Field(description="Амплитуда момента, нА·м")
     gof: float = Field(description="Goodness of fit, 0..1")
-    brodmann_area: str | None = Field(default=None, description="Поле Бродмана, например BA17-lh")
     anatomical_structure: str | None = Field(
         default=None,
         description=(
-            "Анатомическая структура по MNI-координате (aparc+aseg — тот же атлас, "
-            "что и контуры срезов); None — координат/метки нет"
+            "Ближайшая анатомическая структура по MNI-координате (aparc+aseg — тот "
+            "же атлас, что и контуры срезов); None — координат/метки нет"
+        ),
+    )
+    brodmann_area: str | None = Field(
+        default=None,
+        description="Ближайшее поле Бродмана объёмного атласа, например BA17-lh",
+    )
+    structure_distance_mm: float | None = Field(
+        default=None,
+        description=(
+            "Расстояние от точки до ближайшей структуры, мм (шаг 1.4); "
+            "None — координат/атласа нет"
+        ),
+    )
+    brodmann_distance_mm: float | None = Field(
+        default=None,
+        description=(
+            "Расстояние от точки до ближайшего узла поля Бродмана, мм (шаг 1.4); "
+            "None — координат/атласа нет"
+        ),
+    )
+    outside_brain: bool | None = Field(
+        default=None,
+        description=(
+            "Точка вне маски мозга brainmask (шаг 1.4): у такой строки подпись "
+            "«вне мозга (~N мм до X)» вместо выдуманной атрибуции; "
+            "None — маска недоступна"
         ),
     )
 
@@ -646,6 +689,14 @@ class DipoleScanResult(BaseModel):
     )
     reference_channels: list[str] | None = Field(
         default=None, description="Каналы custom-референса; None — average"
+    )
+    brodmann_method: str | None = Field(
+        default=None,
+        description=(
+            "Метод BA-атрибуции (шаг 1.4): `nearest_cortex_vertex` — производная "
+            "разметка объёмного атласа (тот же источник, что у контуров среза); "
+            "None — результат записан до появления признака"
+        ),
     )
     channels: list[str]
     sfreq: float

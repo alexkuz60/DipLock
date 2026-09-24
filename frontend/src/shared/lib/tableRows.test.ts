@@ -36,6 +36,9 @@ function point(overrides: Partial<DipoleScanPoint> = {}): DipoleScanPoint {
     gof: 0.91,
     brodmann_area: 'BA17-lh',
     anatomical_structure: 'таламус (слева)',
+    structure_distance_mm: 0.4,
+    brodmann_distance_mm: 0.6,
+    outside_brain: false,
     ...overrides,
   }
 }
@@ -169,5 +172,32 @@ describe('строки таблицы локализации', () => {
   it('называет направление сортировки словами', () => {
     expect(sortDirectionLabel('asc')).toBe('по номеру эпохи (возрастание)')
     expect(sortDirectionLabel('desc')).toBe('по номеру эпохи (убывание)')
+  })
+
+  it('подписывает атрибуцию в ячейках: «около X ~N мм» и «вне мозга» (шаг 1.4)', () => {
+    const rowsOf = (overrides: Partial<DipoleScanPoint>) =>
+      localizationRows(dipoleScanResultFixture({ points: [point(overrides)] }))[0]
+
+    // Точное попадание (≤ 1 мм) — имя; дальше — «около X ~N мм»
+    const near = rowsOf({})
+    expect(cellText(near, 'structure')).toBe('таламус (слева)')
+    expect(cellText(near, 'area')).toBe('BA17-lh')
+
+    const far = rowsOf({ structure_distance_mm: 3.6, brodmann_distance_mm: 12 })
+    expect(cellText(far, 'structure')).toBe('около таламус (слева) ~4 мм')
+    expect(cellText(far, 'area')).toBe('около BA17-lh ~12 мм')
+
+    // Вне мозга: структура — «вне мозга (~N мм до X)», поле — прочерк (выдуманная атрибуция)
+    const outside = rowsOf({ outside_brain: true, structure_distance_mm: 14.2 })
+    expect(cellText(outside, 'structure')).toBe('вне мозга (~14 мм до таламус (слева))')
+    expect(cellText(outside, 'area')).toBe(EM_DASH)
+
+    // Атлас недоступен (все поля null) — метки без расстояния, ничего не выдумываем
+    const bare = rowsOf({
+      structure_distance_mm: null,
+      brodmann_distance_mm: null,
+      outside_brain: null,
+    })
+    expect(cellText(bare, 'structure')).toBe('таламус (слева)')
   })
 })

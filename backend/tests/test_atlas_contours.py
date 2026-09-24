@@ -456,18 +456,21 @@ def test_real_brodmann_fields_are_in_known_hemispheres():
 _STRUCTURE_BOUNDS = {"x": (-10.0, 10.0), "y": (-10.0, 10.0), "z": (-10.0, 10.0)}
 
 
-def _synthetic_volumes(marked: dict) -> ac.ContourVolumes:
+def _synthetic_volumes(marked: dict, marked_areas: dict | None = None) -> ac.ContourVolumes:
     """Синтетические объёмы 21³ на сетке 1 мм с метками по индексам узлов."""
     structures = np.zeros((21, 21, 21), dtype=np.int16)
     for index, label_id in marked.items():
         structures[index] = label_id
+    areas = np.zeros_like(structures)
+    for index, label_id in (marked_areas or {}).items():
+        areas[index] = label_id
     return ac.ContourVolumes(
         structures=structures,
-        areas=np.zeros_like(structures),
+        areas=areas,
         structure_names={7: "Left-Thalamus-Proper", 9: "Right-Thalamus-Proper"},
         structure_labels={7: "таламус (слева)", 9: "таламус (справа)"},
-        area_names={},
-        area_labels={},
+        area_names={3: "BA1-lh", 5: "BA2-rh"},
+        area_labels={3: "поле 1 (слева)", 5: "поле 2 (справа)"},
         version="test",
     )
 
@@ -497,30 +500,12 @@ def test_structure_id_at_reads_nearest_mni_node(monkeypatch):
     assert ac.structure_id_at(volumes, [0.0, 0.0]) == 0  # не тройка координат
 
 
-def test_structure_at_returns_label_and_none_without_atlas(monkeypatch):
-    """Подпись структуры — русская метка атласа; без атласа — «нет», а не ошибка."""
-    monkeypatch.setattr(ac, "MRI_BOUNDS", _STRUCTURE_BOUNDS)
-    monkeypatch.setattr(ac, "axis_count", lambda axis, spacing=1.0: 21)
-    volumes = _synthetic_volumes({(10, 10, 10): 7, (11, 10, 10): 9})
-    monkeypatch.setattr(ac, "load_volumes", lambda ctx: volumes)
+def test_nearest_structure_returns_name_and_distance(monkeypatch):
+    """Ближайшая структура + расстояние, без потолка радиуса (шаг 1.4).
 
-    assert ac.structure_at(settings, [0.4, 0.2, 0.0]) == "таламус (слева)"
-    assert ac.structure_at(settings, [1.4, 0.2, 0.0]) == "таламус (справа)"
-    assert ac.structure_at(settings, [-9.0, 0.0, 0.0]) is None  # узел без метки
-
-    def _boom(ctx):
-        raise RuntimeError("нет атласа")
-
-    monkeypatch.setattr(ac, "load_volumes", _boom)
-    assert ac.structure_at(settings, [0.0, 0.0, 0.0]) is None
-
-
-def test_nearest_structure_id_within_and_beyond_snap_radius(monkeypatch):
-    """Ближайшая метка в радиусе snap — есть; дальше радиуса — честный 0.
-
-    Fallback для узлов сферической сетки между вокселями атласа (находка ручной
-    проверки 19.09.2026: без подтягивания ~треть точек быстрого расчёта
-    оставалась без структуры).
+    Сферическая сетка быстрого расчёта ставит узлы и между вокселями атласа, и за
+    край мозга: «вне мозга ~N мм до X» с честным расстоянием заменяет прочёрк
+    (замер 23.09.2026 — `docs/history.md`).
     """
     monkeypatch.setattr(ac, "MRI_BOUNDS", _STRUCTURE_BOUNDS)
     monkeypatch.setattr(ac, "axis_count", lambda axis, spacing=1.0: 21)
@@ -528,43 +513,105 @@ def test_nearest_structure_id_within_and_beyond_snap_radius(monkeypatch):
     ac._structure_trees.clear()
     volumes = _synthetic_volumes({(10, 10, 10): 7})
 
-    # 3 мм от метки — в радиусе; ровно на границе — тоже внутри
-    assert ac.nearest_structure_id(volumes, [3.0, 0.0, 0.0], 5.0) == 7
-    assert ac.nearest_structure_id(volumes, [5.0, 0.0, 0.0], 5.0) == 7
-    # Дальше радиуса — метки нет
-    assert ac.nearest_structure_id(volumes, [9.0, 0.0, 0.0], 5.0) == 0
-    # Мусор на входе
-    assert ac.nearest_structure_id(volumes, [0.0, float("nan"), 0.0], 5.0) == 0
-    assert ac.nearest_structure_id(volumes, [0.0, 0.0], 5.0) == 0
-    # Совсем пустой объём — 0, а не падение KD-дерева
+    # Точно в узле метки — расстояние 0
+    assert ac.nearest_structure(volumes, [0.0, 0.0, 0.0]) == ("таламус (слева)", 0.0)
+    # 3 мм от метки — та же метка и честные 3 мм
+    assert ac.nearest_structure(volumes, [3.0, 0.0, 0.0]) == ("таламус (слева)", 3.0)
+    # Дальше любого радиуса метка не исчезает: показывается с расстоянием
+    name, distance = ac.nearest_structure(volumes, [9.0, 0.0, 0.0])
+    assert name == "таламус (слева)" and distance == 9.0
+    # Мусор на входе и пустой объём — (None, None), а не падение KD-дерева
+    assert ac.nearest_structure(volumes, [0.0, float("nan"), 0.0]) == (None, None)
+    assert ac.nearest_structure(volumes, [0.0, 0.0]) == (None, None)
     ac._structure_trees.clear()
-    assert ac.nearest_structure_id(_synthetic_volumes({}), [0.0, 0.0, 0.0], 5.0) == 0
+    assert ac.nearest_structure(_synthetic_volumes({}), [0.0, 0.0, 0.0]) == (None, None)
 
 
-def test_structure_at_snaps_to_nearest_label(monkeypatch):
-    """Неразмеченный узел → ближайшая метка в радиусе; вне радиуса — None."""
+def test_nearest_area_returns_area_and_distance(monkeypatch):
+    """Ближайшее поле Бродмана читается из объёма ``volumes.areas`` (шаг 1.4/N21).
+
+    Это **тот же** объём, что рисует контуры среза и отвечает на клик: одна точка
+    не может получить разные поля в таблице и на срезе.
+    """
+    monkeypatch.setattr(ac, "MRI_BOUNDS", _STRUCTURE_BOUNDS)
+    monkeypatch.setattr(ac, "axis_count", lambda axis, spacing=1.0: 21)
+    ac._area_trees.clear()
+    volumes = _synthetic_volumes({}, marked_areas={(10, 10, 10): 3, (11, 10, 10): 5})
+
+    assert ac.nearest_area(volumes, [0.0, 0.0, 0.0]) == ("BA1-lh", 0.0)
+    assert ac.nearest_area(volumes, [1.0, 0.0, 0.0]) == ("BA2-rh", 0.0)
+    name, distance = ac.nearest_area(volumes, [4.0, 0.0, 0.0])
+    assert name == "BA2-rh" and distance == 3.0
+    assert ac.nearest_area(volumes, [0.0, float("nan"), 0.0]) == (None, None)
+    ac._area_trees.clear()
+    assert ac.nearest_area(_synthetic_volumes({}), [0.0, 0.0, 0.0]) == (None, None)
+
+
+def test_outside_brainmask_uses_voxel_tolerance():
+    """«Вне мозга» — дальше допуска в воксель; мусор — None, а не True."""
+    from scipy.spatial import cKDTree
+
+    tree = cKDTree(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))
+    assert ac.outside_brainmask(tree, [0.5, 0.0, 0.0]) is False
+    # Полувоксельное смещение у границы маски не превращается в «вне мозга»
+    assert ac.outside_brainmask(tree, [1.8, 0.0, 0.0]) is False
+    assert ac.outside_brainmask(tree, [5.0, 0.0, 0.0]) is True
+    assert ac.outside_brainmask(tree, [0.0, float("nan"), 0.0]) is None
+
+
+def test_attribution_at_returns_fields_and_none_without_atlas(monkeypatch):
+    """Атрибуция одной функцией: структура + поле + расстояния + «вне мозга»."""
+    from scipy.spatial import cKDTree
+
     monkeypatch.setattr(ac, "MRI_BOUNDS", _STRUCTURE_BOUNDS)
     monkeypatch.setattr(ac, "axis_count", lambda axis, spacing=1.0: 21)
     ac._structure_trees.clear()
-    volumes = _synthetic_volumes({(10, 10, 10): 7})
+    ac._area_trees.clear()
+    volumes = _synthetic_volumes({(10, 10, 10): 7}, marked_areas={(10, 10, 10): 3})
     monkeypatch.setattr(ac, "load_volumes", lambda ctx: volumes)
+    monkeypatch.setattr(
+        ac, "brain_mask_tree", lambda ctx: cKDTree(np.array([[0.0, 0.0, 0.0]]))
+    )
 
-    # Точный узел размечен — fallback не нужен
-    assert ac.structure_at(settings, [0.0, 0.0, 0.0]) == "таламус (слева)"
-    # Узел пуст, но в 3 мм есть метка — подпись подтянулась
-    assert ac.structure_at(settings, [3.0, 0.0, 0.0]) == "таламус (слева)"
-    # Дальше snap-радиуса (5 мм в настройках) — честное «нет»
-    assert ac.structure_at(settings, [9.0, 0.0, 0.0]) is None
+    attribution = ac.attribution_at(settings, [0.0, 0.0, 0.0])
+    assert attribution is not None
+    assert attribution.structure_name == "таламус (слева)"
+    assert attribution.structure_distance_mm == 0.0
+    assert attribution.area_name == "BA1-lh"
+    assert attribution.area_distance_mm == 0.0
+    assert attribution.outside_brain is False
+    # Дальше маски — «вне мозга», но метки остаются с расстояниями (не прочёрк)
+    far = ac.attribution_at(settings, [8.0, 0.0, 0.0])
+    assert far is not None
+    assert far.outside_brain is True
+    assert far.structure_name == "таламус (слева)" and far.structure_distance_mm == 8.0
+    # Мусор на входе — None, без выдуманных меток
+    assert ac.attribution_at(settings, None) is None
+    assert ac.attribution_at(settings, [0.0, float("nan"), 0.0]) is None
+
+    def _boom(ctx):
+        raise RuntimeError("нет атласа")
+
+    monkeypatch.setattr(ac, "load_volumes", _boom)
+    assert ac.attribution_at(settings, [0.0, 0.0, 0.0]) is None
+    # Контракт точки без атласа — пустые поля, а не ошибка и не «unknown»
+    assert ac.attribution_payload(settings, [0.0, 0.0, 0.0]) == {
+        "anatomical_structure": None,
+        "structure_distance_mm": None,
+        "brodmann_area": None,
+        "brodmann_distance_mm": None,
+        "outside_brain": None,
+    }
 
 
 @pytest.mark.integration
 @_skip_no_atlas
-def test_real_structure_at_reads_same_label_as_volume():
-    """Реальный атлас: подпись по MNI-координате совпадает с меткой объёма.
+def test_real_attribution_structure_matches_volume():
+    """Реальный атлас: ближайшая структура по MNI совпадает с меткой объёма.
 
     Узловая точка берётся **внутри** структуры (медианный воксель метки),
     координата — её MNI через ``affine`` тома: это тот же путь, которым приходят
-    точки расчёта диполей (``head_to_mni`` → структура), и он должен давать
+    точки расчёта диполей (``head_to_mni`` → атрибуция), и он должен давать
     анатомию той структуры, а не соседней.
     """
     import nibabel as nib
@@ -581,10 +628,39 @@ def test_real_structure_at_reads_same_label_as_volume():
         assert voxels.size, f"метка {label_id} не найдена в томе"
         index = np.array(voxels[len(voxels) // 2], dtype=float)
         mni = affine[:3, :3] @ index + affine[:3, 3]
-        label = ac.structure_at(settings, [float(value) for value in mni])
-        assert label is not None, f"метка {label_id}: структура не определена (MNI {np.round(mni, 1)})"
-        assert fragment in label.lower(), f"метка {label_id}: получено {label!r}"
+        name, distance = ac.nearest_structure(volumes, mni)
+        assert name is not None, f"метка {label_id}: структура не определена (MNI {np.round(mni, 1)})"
+        assert fragment in name.lower(), f"метка {label_id}: получено {name!r}"
+        assert distance is not None and distance <= 1.0, f"метка {label_id}: расстояние {distance}"
         assert ac.structure_id_at(volumes, mni) == label_id
+
+
+@pytest.mark.integration
+@_skip_no_atlas
+def test_one_point_one_ba_in_table_and_slice():
+    """Тест 1.4/N21: одна точка → одинаковый BA в таблице и на срезе.
+
+    Атрибуция точки и контуры среза читают **один** объём ``volumes.areas``:
+    поле из таблицы локализации обязано быть среди меток среза через ту же точку
+    (раньше таблица шла по центроидам PALS и расходилась с объёмом в ~70 %).
+    """
+    ac.clear_contour_cache()
+    volumes = ac.load_volumes(ac._ContourCtx.from_settings(settings))
+    offset = np.array([ms.MRI_BOUNDS["x"][0], ms.MRI_BOUNDS["y"][0], ms.MRI_BOUNDS["z"][0]])
+    nodes = np.argwhere(volumes.areas == _area_id(volumes, "BA17-lh"))
+    # Узел внутри поля, а не центроид: центроид метки лежит между узлами сетки 1 мм
+    index = nodes[len(nodes) // 2]
+    mni = (offset + index.astype(float)).tolist()
+
+    attribution = ac.attribution_at(settings, mni)
+    assert attribution is not None
+    assert attribution.area_name == "BA17-lh"
+    assert attribution.area_distance_mm == 0.0
+
+    slice_shapes = ac.slice_contours(settings, "sagittal", float(mni[0]))
+    assert "BA17-lh" in {shape["id"] for shape in slice_shapes["areas"]}, (
+        "поле из таблицы отсутствует на срезе через ту же точку — два источника BA"
+    )
 
 
 @pytest.mark.integration

@@ -50,6 +50,12 @@ export type DipolePoint = {
    * контуры срезов). `null` — координаты/метки нет: подпись не выдумывается.
    */
   structure: string | null
+  /** Расстояние до ближайшей структуры, мм (шаг 1.4); `null` — координат/атласа нет */
+  structureDistanceMm: number | null
+  /** Расстояние до ближайшего узла поля Бродмана, мм (шаг 1.4) */
+  areaDistanceMm: number | null
+  /** Признак «вне мозга» (`brainmask`, шаг 1.4): `null` — маска недоступна */
+  outsideBrain: boolean | null
   /**
    * Сколько диполей стоит в этом узле сетки (поправка ручной проверки, 18.09.2026).
    *
@@ -111,6 +117,9 @@ export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
       gof: point.gof,
       brodmannArea: point.brodmann_area,
       structure: point.anatomical_structure,
+      structureDistanceMm: point.structure_distance_mm,
+      areaDistanceMm: point.brodmann_distance_mm,
+      outsideBrain: point.outside_brain,
     })
   }
   return { points, source: 'result' }
@@ -498,8 +507,17 @@ export function atlasLabel(value: string | null | undefined): string | null {
 export function atlasLabels(point: {
   structure: string | null
   brodmannArea: string | null
-}): { structure: string | null; area: string | null } {
-  return { structure: atlasLabel(point.structure), area: atlasLabel(point.brodmannArea) }
+  structureDistanceMm?: number | null
+  areaDistanceMm?: number | null
+  outsideBrain?: boolean | null
+}): PointAttribution {
+  return {
+    structure: atlasLabel(point.structure),
+    area: atlasLabel(point.brodmannArea),
+    structureDistanceMm: point.structureDistanceMm ?? null,
+    areaDistanceMm: point.areaDistanceMm ?? null,
+    outsideBrain: point.outsideBrain ?? null,
+  }
 }
 
 /**
@@ -514,8 +532,8 @@ export function dipolePointTitle(point: DipolePoint): string {
   // объёма `aparc+aseg` по координате, второе — производная разметка коры.
   // Обе подписываются, иначе «где диполь» выглядело бы одним и тем же вопросом.
   // «unknown» и пустые строки — не метки, их снимает `atlasLabels`.
-  const { structure, area } = atlasLabels(point)
-  const anatomy = [structure, area].filter(Boolean).join(', ')
+  // Анатомия одной строкой с расстояниями и «вне мозга» (шаг 1.4).
+  const anatomy = attributionText(atlasLabels(point), '')
   const suffix = anatomy ? `, ${anatomy}` : ''
   const overlap =
     point.overlapCount === undefined ? '' : `, диполей в узле: ${point.overlapCount}`
@@ -567,7 +585,72 @@ export function demoDipoleLayer(seed = 42, count = 6): DipoleLayer {
       gof: Math.round((0.6 + rand() * 0.39) * 1000) / 1000,
       brodmannArea: null,
       structure: null,
+      structureDistanceMm: null,
+      areaDistanceMm: null,
+      outsideBrain: null,
     })
   }
   return { points, source: 'demo' }
+}
+
+
+/** Итог атрибуции точки (шаг 1.4): метки (уже `atlasLabel`) + расстояния + «вне мозга». */
+export type PointAttribution = {
+  structure: string | null
+  area: string | null
+  structureDistanceMm: number | null
+  areaDistanceMm: number | null
+  outsideBrain: boolean | null
+}
+
+/**
+ * Порог «точного попадания» в ячейку атласа, мм: до него расстояние не
+ * подписывается («~0 мм» — это не измерение, а сетка 1 мм).
+ */
+export const ATTRIBUTION_EXACT_MM = 1
+
+/**
+ * Метка с расстоянием (шаг 1.4): «X» при точном попадании (≤ `ATTRIBUTION_EXACT_MM`)
+ * и «около X ~N мм» дальше — N до целого (сетка атласа 1 мм). Потолка расстояния
+ * нет (замер 23.09.2026, `docs/history.md`): чем дальше узел, тем честнее подпись.
+ */
+export function labelWithDistance(name: string, distanceMm: number | null): string {
+  if (distanceMm === null || !Number.isFinite(distanceMm) || distanceMm <= ATTRIBUTION_EXACT_MM) {
+    return name
+  }
+  return `около ${name} ~${Math.round(distanceMm)} мм`
+}
+
+/**
+ * Подпись точки вне мозга (шаг 1.4): «вне мозга (~N мм до X)» вместо выдуманной
+ * атрибуции (метка ближайшего узла у точки за пределами мозга — не измерение).
+ * Без структуры/расстояния форма короткая: «вне мозга» / «вне мозга (до X)».
+ */
+export function outsideBrainText(
+  structure: string | null,
+  structureDistanceMm: number | null,
+): string {
+  if (!structure) return 'вне мозга'
+  if (structureDistanceMm === null || !Number.isFinite(structureDistanceMm)) {
+    return `вне мозга (до ${structure})`
+  }
+  return `вне мозга (~${Math.round(structureDistanceMm)} мм до ${structure})`
+}
+
+/**
+ * Анатомия точки одной строкой (тултипы проекций, строка кадра): «около X ~N мм,
+ * …» или «вне мозга (~N мм до X)». `fallback` — полное отсутствие анатомии
+ * («анатомия не определена» в строке кадра, пусто в тултипе).
+ */
+export function attributionText(attribution: PointAttribution, fallback: string): string {
+  if (attribution.outsideBrain) {
+    return outsideBrainText(attribution.structure, attribution.structureDistanceMm)
+  }
+  const parts = [
+    attribution.structure
+      ? labelWithDistance(attribution.structure, attribution.structureDistanceMm)
+      : null,
+    attribution.area ? labelWithDistance(attribution.area, attribution.areaDistanceMm) : null,
+  ].filter((part): part is string => part !== null)
+  return parts.length > 0 ? parts.join(', ') : fallback
 }

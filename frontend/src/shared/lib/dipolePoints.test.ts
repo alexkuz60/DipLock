@@ -40,6 +40,9 @@ import {
   hiddenByThreshold,
   atlasLabel,
   atlasLabels,
+  attributionText,
+  labelWithDistance,
+  outsideBrainText,
   thresholdDipoleLayer,
   withOverlapCounts,
   dipoleNodeSiblings,
@@ -60,6 +63,9 @@ const POINT: DipolePoint = {
   gof: 0.92,
   brodmannArea: 'BA17',
   structure: 'таламус (слева)',
+  structureDistanceMm: 0.4,
+  areaDistanceMm: 0.6,
+  outsideBrain: false,
 }
 
 describe('слой диполей', () => {
@@ -127,12 +133,49 @@ describe('слой диполей', () => {
     expect(atlasLabels({ structure: 'таламус (слева)', brodmannArea: 'unknown' })).toEqual({
       structure: 'таламус (слева)',
       area: null,
+      structureDistanceMm: null,
+      areaDistanceMm: null,
+      outsideBrain: null,
     })
 
     // В подписи точки «unknown» не появляется: остаются координаты, амплитуда и GOF
     const title = dipolePointTitle({ ...POINT, structure: 'unknown', brodmannArea: 'unknown' })
     expect(title).not.toContain('unknown')
     expect(title).toContain('MNI 20.0 / -10.0 / 30.0, 40.0 нАм')
+  })
+
+  it('собирает подпись атрибуции из сырых полей: «около X ~N мм» и «вне мозга»', () => {
+    // Точное попадание в ячейку атласа (≤ 1 мм) — имя без «около»: «~0 мм» не измерение
+    expect(labelWithDistance('таламус (слева)', 0.4)).toBe('таламус (слева)')
+    expect(labelWithDistance('BA17-lh', 1)).toBe('BA17-lh')
+    // Дальше — «около X ~N мм» до целого; потолка расстояния нет
+    expect(labelWithDistance('таламус (слева)', 3.6)).toBe('около таламус (слева) ~4 мм')
+    expect(labelWithDistance('BA17-lh', 25.8)).toBe('около BA17-lh ~26 мм')
+    // Нет расстояния (атлас недоступен) — метка без «~N мм», ничего не выдумываем
+    expect(labelWithDistance('BA17-lh', null)).toBe('BA17-lh')
+
+    // Вне мозга — честная форма вместо выдуманной атрибуции
+    expect(outsideBrainText('мозжечок (справа)', 14.2)).toBe('вне мозга (~14 мм до мозжечок (справа))')
+    expect(outsideBrainText('мозжечок (справа)', null)).toBe('вне мозга (до мозжечок (справа))')
+    expect(outsideBrainText(null, null)).toBe('вне мозга')
+
+    const attribution = {
+      structure: 'таламус (слева)',
+      area: 'BA17-lh',
+      structureDistanceMm: 3.6,
+      areaDistanceMm: 12,
+      outsideBrain: false,
+    }
+    expect(attributionText(attribution, '—')).toBe('около таламус (слева) ~4 мм, около BA17-lh ~12 мм')
+    expect(attributionText({ ...attribution, outsideBrain: true }, '—')).toBe(
+      'вне мозга (~4 мм до таламус (слева))',
+    )
+    expect(
+      attributionText(
+        { structure: null, area: null, structureDistanceMm: null, areaDistanceMm: null, outsideBrain: null },
+        '—',
+      ),
+    ).toBe('—')
   })
 
   it('даёт детерминированную фикстуру для отрисовки', () => {

@@ -16,6 +16,15 @@ export type TrajectoryPoint = {
   gof: number
   mni_coords: number[] | null
   anatomical_structure: string | null
+  /** Расстояние от точки до ближайшей структуры, мм (шаг 1.4); `null` — координат/атласа нет */
+  structure_distance_mm: number | null
+  /** Расстояние от точки до ближайшего узла поля Бродмана, мм (шаг 1.4); `null` — координат/атласа нет */
+  brodmann_distance_mm: number | null
+  /**
+   * Точка вне маски мозга `brainmask` (шаг 1.4): подпись «вне мозга (~N мм до X)»
+   * вместо выдуманной атрибуции; `null` — маска недоступна
+   */
+  outside_brain: boolean | null
   brodmann_area: string | null
 }
 
@@ -205,6 +214,15 @@ export type DipoleScanPoint = {
    * и контуры срезов); `null` — координат/метки нет
    */
   anatomical_structure: string | null
+  /** Расстояние от точки до ближайшей структуры, мм (шаг 1.4); `null` — координат/атласа нет */
+  structure_distance_mm: number | null
+  /** Расстояние от точки до ближайшего узла поля Бродмана, мм (шаг 1.4); `null` — координат/атласа нет */
+  brodmann_distance_mm: number | null
+  /**
+   * Точка вне маски мозга `brainmask` (шаг 1.4): подпись «вне мозга (~N мм до X)»
+   * вместо выдуманной атрибуции; `null` — маска недоступна
+   */
+  outside_brain: boolean | null
 }
 
 /**
@@ -215,6 +233,7 @@ export type DipoleScanPoint = {
 export type DipoleScanResult = {
   recording_id: string
   method: string
+  brodmann_method: string | null
   /** Референс расчёта: уточнение эпохи (`dipole_refine`) повторяет нарезку результата */
   reference: string
   /** Каналы custom-референса; `null` — average */
