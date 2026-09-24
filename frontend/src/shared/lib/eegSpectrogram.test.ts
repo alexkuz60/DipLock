@@ -15,6 +15,8 @@ import {
   dbToUnit,
   decodeSpectrogramGrid,
   demoSpectrogramGrid,
+  erdErsPercent,
+  erdToUnit,
   freqIndexRange,
   gridUrlOf,
   gridValueAt,
@@ -22,6 +24,7 @@ import {
   lowerBound,
   paletteLut,
   paletteRgb,
+  resolveBaselineSec,
   smoothSpectrogram,
   spectrogramRaster,
   spectrogramSummary,
@@ -309,6 +312,88 @@ describe('растр в разрешении данных (P1: работа по
     expect(raster.columns).toBe(1)
     expect(raster.rows).toBe(1)
     expect(Array.from(raster.rgba)).toEqual([0, 0, 0, 0])
+  })
+
+  it('лог-шкала раздвигает низ сетки: середина растра — геометрическое среднее окна (N18)', () => {
+    // 41 строка (частоты 0…40, df = 1), значение строки = −номер строки в дБ:
+    // по цвету строки растра однозначно видно, из какой строки сетки она взята
+    const nFreqs = 41
+    const nTimes = 4
+    const values = new Float32Array(nFreqs * nTimes)
+    for (let row = 0; row < nFreqs; row++) {
+      for (let column = 0; column < nTimes; column++) values[row * nTimes + column] = -row
+    }
+    const grid = {
+      ...demoSpectrogramGrid(),
+      freqs: Float32Array.from({ length: nFreqs }, (_, index) => index),
+      times: Float32Array.from({ length: nTimes }, (_, index) => index * 0.5),
+      values,
+      nFreqs,
+      nTimes,
+      dbMin: -60,
+      dbMax: 0,
+    }
+    const lut = paletteLut('gray')
+    const win = { t0: 0, t1: 1.5 }
+    const middle = (raster: { columns: number; rgba: Uint8ClampedArray }) => {
+      const offset = Math.floor(raster.rgba.length / 8) * 4 // середина по высоте, столбец 0
+      return Array.from(raster.rgba.subarray(offset, offset + 3))
+    }
+    const colourOfRow = (row: number) => {
+      const at = Math.round(dbToUnit(-row, [-60, 0], 0) * 255) * 3
+      return [lut[at], lut[at + 1], lut[at + 2]]
+    }
+
+    const lin = spectrogramRaster(grid, win, [0, 40], [-60, 0], lut, 2, 20)
+    const log = spectrogramRaster(grid, win, [0, 40], [-60, 0], lut, 2, 20, 'log')
+
+    // Линейная середина — ≈20 Гц (арифметическое среднее 0…40)
+    expect(middle(lin)).toEqual(colourOfRow(19))
+    // Логарифмическая середина — ≈√(1·40) ≈ 6 Гц: низ окна растянут
+    expect(middle(log)).toEqual(colourOfRow(6))
+  })
+})
+
+describe('ERD/ERS по baseline (N18)', () => {
+  const nTimes = 4
+  const times = Float32Array.from([0, 1, 2, 3])
+  // Одна строка (частота): baseline — два столбца (0 и 1 с) с уровнем 0 дБ
+  const baseline = [0, 1] as [number, number]
+
+  it('считает проценты изменения мощности: −3 дБ → −50 %, +3 дБ → +100 %', () => {
+    const values = Float32Array.from([0, 0, -3.0103, 3.0103])
+    const percent = erdErsPercent(values, 1, nTimes, times, baseline)
+
+    expect(percent).not.toBeNull()
+    expect(percent![0]).toBeCloseTo(0, 3)
+    expect(percent![1]).toBeCloseTo(0, 3)
+    expect(percent![2]).toBeCloseTo(-50, 0)
+    expect(percent![3]).toBeCloseTo(100, 0)
+  })
+
+  it('возвращает null, когда baseline не попал в сетку, и усредняет по столбцам', () => {
+    const values = Float32Array.from([0, 0, -3.0103, 3.0103])
+    // Интервал после последнего окна — отсчитывать не по чему
+    expect(erdErsPercent(values, 1, nTimes, times, [10, 12])).toBeNull()
+    expect(erdErsPercent(new Float32Array(0), 0, 0, times, baseline)).toBeNull()
+    // Baseline из одного столбца (0 с): тот же отсчёт, что и от среднего двух
+    const single = erdErsPercent(values, 1, nTimes, times, [0, 0.5])
+    expect(single![2]).toBeCloseTo(-50, 0)
+  })
+
+  it('окно палитры % зажимает значения, а равное окно не делит на ноль', () => {
+    expect(erdToUnit(-50, [-100, 100])).toBeCloseTo(0.25, 6)
+    expect(erdToUnit(100, [-100, 100])).toBe(1)
+    expect(erdToUnit(-200, [-100, 100])).toBe(0)
+    expect(erdToUnit(50, [10, 10])).toBe(1)
+  })
+
+  it('baseline по умолчанию — первые 10 % записи ([0, 0] в параметрах)', () => {
+    const defaultBaseline = resolveBaselineSec([0, 0], times)
+    expect(defaultBaseline[0]).toBe(0)
+    expect(defaultBaseline[1]).toBeCloseTo(0.3, 9)
+    // Явный интервал остаётся своим (и порядок границ не важен)
+    expect(resolveBaselineSec([2, 1], times)).toEqual([1, 2])
   })
 })
 

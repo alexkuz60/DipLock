@@ -361,4 +361,23 @@ describe('панель раздела «Диполи»', () => {
     await screen.findByText(/Ожидаемое время ≈/)
     expect(screen.getByText(/свободный фит 5 отсч\./)).toBeInTheDocument()
   })
+
+  it('метод PSD переключается без запросов и не помечает дипольный результат устаревшим (N17)', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApiFetch()
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      params: { ...CALC_PARAM_DEFAULTS },
+    })
+    renderWithProviders(<DipolesPanel />)
+
+    await user.click(screen.getByRole('button', { name: 'Multitaper' }))
+
+    expect(useDipoleCalc.getState().params.psdMethod).toBe('multitaper')
+    // Метод уходит только в задачу спектра: диполи от него не считаются,
+    // и их результат не «устаревает»
+    expect(screen.queryByText('Параметры расчёта изменены — результат не пересчитан')).toBeNull()
+    const urls = fetchSpy.mock.calls.map(([input]) => String(input))
+    expect(urls.filter((url) => !url.includes('/meta'))).toEqual([])
+  })
 })

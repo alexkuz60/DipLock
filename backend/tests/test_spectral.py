@@ -265,3 +265,159 @@ def test_spectrum_reports_iaf_ratios_and_epoch_spread(tmp_path):
     alpha = bands["alpha"]
     assert alpha["q25_power_uv2"] <= alpha["median_power_uv2"] <= alpha["q75_power_uv2"]
     assert alpha["median_power_uv2"] == pytest.approx(alpha["power_uv2"], rel=0.5)
+
+
+def _pink_edf(tmp_path, seconds: float = 8.0):
+    """EDF: «розовый» фон (случайное блуждание, PSD ∝ 1/f²) + тон α 10 Гц.
+
+    Чистого тона мало для 1/f-разложения: фиту нужен апериодический фон, а не
+    одни нули вне пика. Синтетик похож на реальный спектр ЭЭГ.
+    """
+    from scipy.signal import lfilter
+
+    path = tmp_path / "pink.edf"
+    channels = list(settings.standard_channels[:8])
+    sfreq = 250.0
+    n = int(seconds * sfreq)
+    times = np.arange(n) / sfreq
+    rng = np.random.default_rng(7)
+    pink = lfilter([1.0], [1.0, -0.98], rng.standard_normal(n))
+    pink = pink / max(float(np.std(pink)), 1e-9)
+    tone = 2.0 * np.sin(2 * np.pi * 10 * times)
+    gain = 2.0 + np.arange(len(channels), dtype=float) * 0.3
+    data = (pink[None, :] + tone[None, :]) * gain[:, None]
+    write_minimal_edf(path, channels, data, sfreq)
+    return path
+
+
+def test_multitaper_method_reports_alpha_tone_on_short_epochs(tmp_path):
+    """N17: multitaper на коротких эпохах (250 мс) даёт тон в своём ритме.
+
+    Welch на эпохе 250 мс берёт окно не длиннее эпохи и разрешение ≈ 4 Гц —
+    α шириной в 5 Гц покрывается одним-двумя бинами. Multitaper считает ту же
+    эпоху целиком и ставит альфа-максимум туда, где он есть.
+    """
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+
+    result = compute_spectrum(
+        recording, settings,
+        SpectrumParams(filter_band=(1, 40), epoch_length_ms=250.0, psd_method="multitaper"),
+    )
+
+    assert result["psd_method"] == "multitaper"
+    # Окно анализа multitaper — вся эпоха: в подписи её длина, а не усечённый `n_fft`
+    assert result["n_fft"] > 250 * 250 / 1000 / 2  # больше половины эпохи, отсчётов
+    powers = {band["name"]: band["power_uv2"] for band in result["bands"]}
+    assert powers["alpha"] > powers["delta"]
+    assert powers["alpha"] > powers["beta"]
+    # IAF на сетке 250 мс (< 3 бинов в α) честно `None` — N16; центр здесь
+    # уточняет specparam (суббиново), а не аргмакс по грубой сетке
+    assert result["iaf_hz"] is None or abs(result["iaf_hz"] - 10.0) <= 2.0
+    assert result["peaks"], "specparam на тоне обязан найти пик"
+    assert abs(result["peaks"][0]["center_hz"] - 10.0) <= 2.0
+
+
+def test_spectrum_signature_follows_psd_method():
+    """Метод PSD — часть отпечатка: топокарта multitaper не отдаётся за Welch."""
+    channels = list(settings.standard_channels[:5])
+    welch = SpectrumParams(filter_band=(1, 40), epoch_length_ms=1000.0, psd_method="welch")
+    multitaper = SpectrumParams(
+        filter_band=(1, 40), epoch_length_ms=1000.0, psd_method="multitaper",
+    )
+
+    assert spectrum_signature(welch, settings, channels) != spectrum_signature(
+        multitaper, settings, channels
+    )
+    assert spectrum_signature(welch, settings, channels) == spectrum_signature(
+        SpectrumParams(filter_band=(1, 40), epoch_length_ms=1000.0), settings, channels
+    )
+
+
+def test_specparam_separates_aperiodic_slope_and_alpha_peak(tmp_path):
+    """specparam/FOOOF: фон 1/f и пик α 10 Гц разведены, кривая фона на сетке PSD."""
+    recording = _register(tmp_path, _pink_edf(tmp_path))
+
+    result = compute_spectrum(
+        recording, settings,
+        SpectrumParams(filter_band=(1, 40), epoch_length_ms=1000.0),
+    )
+
+    assert result["aperiodic_exponent"] is not None
+    assert 1.0 <= result["aperiodic_exponent"] <= 3.0, result["aperiodic_exponent"]
+    assert result["aperiodic_offset"] is not None
+    assert result["fit_r_squared"] is not None and result["fit_r_squared"] > 0.5
+    # Кривая фона — та же сетка, что и PSD: клиент рисует её поверх ломаной
+    assert len(result["aperiodic_fit_uv2"]) == len(result["freqs"])
+    assert all(value > 0 for value in result["aperiodic_fit_uv2"])
+    # Ведущий пик — α 10 Гц, пики упорядочены по убыванию высоты
+    assert result["peaks"], "на тоне фит обязан найти хотя бы один пик"
+    top = result["peaks"][0]
+    assert abs(top["center_hz"] - 10.0) <= 1.5
+    assert top["amplitude_db"] > 0
+    assert top["bandwidth_hz"] > 0
+    assert result["peaks"] == sorted(
+        result["peaks"], key=lambda peak: -peak["amplitude_db"]
+    )
+
+
+def test_specparam_failure_is_warning_not_error(tmp_path, monkeypatch):
+    """Отказ фита — предупреждение и null-поля, а не упавшая задача."""
+    import specparam
+
+    recording = _register(tmp_path, _pink_edf(tmp_path))
+
+    def _broken_fit(self, *args, **kwargs):
+        raise RuntimeError("fit exploded")
+
+    monkeypatch.setattr(specparam.SpectralModel, "fit", _broken_fit)
+
+    result = compute_spectrum(
+        recording, settings,
+        SpectrumParams(filter_band=(1, 40), epoch_length_ms=1000.0),
+    )
+
+    assert result["aperiodic_exponent"] is None
+    assert result["aperiodic_offset"] is None
+    assert result["aperiodic_fit_uv2"] == []
+    assert result["peaks"] == []
+    assert result["fit_r_squared"] is None
+    # Задача жива: мощности ритмов посчитаны, а фит честно помечен в warnings
+    assert any("1/f-разложение не сошлось" in text for text in result["warnings"])
+    assert result["bands"]
+
+
+def test_spectrum_job_rejects_unknown_psd_method(client, tmp_path):
+    """Неизвестный метод PSD — 400 с текстом для UI, а не фоновая ошибка."""
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+
+    response = client.post(
+        f"{_PREFIX}/recordings/{recording.recording_id}/spectrum",
+        data={"band_min": 1, "band_max": 40, "epoch_length_ms": 1000, "psd_method": "periodogram"},
+    )
+
+    assert response.status_code == 400
+    assert "psd_method" in response.json()["detail"]
+
+
+def test_topomap_etag_depends_on_psd_method(client, tmp_path):
+    """ETag топокарты знает метод: картинка другого расчёта не приходит с ним."""
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+    base = f"{_PREFIX}/recordings/{recording.recording_id}/spectrum/topomap/alpha.png"
+
+    welch = client.get(base, params={"band_min": 1, "band_max": 40, "epoch_length_ms": 1000})
+    multitaper = client.get(
+        base, params={
+            "band_min": 1, "band_max": 40, "epoch_length_ms": 1000, "psd_method": "multitaper",
+        },
+    )
+
+    assert welch.status_code == 200, welch.text
+    assert multitaper.status_code == 200, multitaper.text
+    assert welch.headers["etag"] != multitaper.headers["etag"]
+    # Повторный запрос своего метода — 304, а не пересчёт
+    again = client.get(
+        base,
+        params={"band_min": 1, "band_max": 40, "epoch_length_ms": 1000, "psd_method": "multitaper"},
+        headers={"If-None-Match": multitaper.headers["etag"]},
+    )
+    assert again.status_code == 304

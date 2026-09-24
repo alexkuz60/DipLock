@@ -80,7 +80,8 @@ peak-to-peak скользящим окном, flat-line оконным крит�
 | `notch_filter(method="spectrum_fit")` | есть (`mt_bandwidth`, `p_value`) | — | не используется (сейчас `method="fir"`) |
 | `autoreject` | — | отсутствует | отложено (`todo.md` п.4) |
 | `mne-icalabel` | — | отсутствует | кандидат после 2.1–2.3 |
-| `mne-connectivity`, `specparam` | — | отсутствуют | отложено (С5, 2.4) |
+| `mne-connectivity` | — | отсутствует | отложено (С5, после 2.7) |
+| `specparam` | 2.0.0rc7 | установлен (шаг 2.4) | 1/f + пики спектра (`services/spectral.py`) |
 | `scipy` | есть | есть | используется |
 
 ### 2.1. Что доступно пользователю сегодня (UI-инвентарь поиска артефактов)

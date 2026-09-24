@@ -20,7 +20,10 @@
   **continuous raw** до нарезки — как везде в проекте;
 * эпохи нарезаются без наложения и проходят reject-порог: эпохи с амплитудой
   выше порога в PSD не попадают, иначе спектр «съедали» бы артефакты;
-* PSD — Welch по эпохам, окно ``n_fft`` (не длиннее эпохи);
+* PSD — по эпохам, метод **на выбор** (N17): ``welch`` (окно ``n_fft``,
+  не длиннее эпохи) или ``multitaper`` (DPSS) — для коротких эпох 250–500 мс
+  Welch с ``n_fft ≤ 256`` даёт 1–2 окна на эпоху и разрешение 4 Гц при ширине
+  α в 5 Гц, multitaper тех же данных даёт сглаженную оценку низкой дисперсии;
 * мощность диапазона — **интеграл PSD по полосе** (trapezoid, мкВ²), усреднённый по
   каналам, в мкВ² (N15): физически сравнимая величина между диапазонами разной
   ширины, в отличие от среднего по бинам; диапазоны — из ``freq_bands``
@@ -29,7 +32,13 @@
 * дополнительно (N16): ``relative_power`` (доля диапазона в интеграле всего
   спектра), медиана и квартили мощности по эпохам (разброс = стационарность
   ритма), IAF (индивидуальная пиковая α-частота, параболическое уточнение) и
-  индексы θ/β и (θ+α)/β по интегральным мощностям.
+  индексы θ/β и (θ+α)/β по интегральным мощностям;
+* разложение 1/f + пики (specparam/FOOOF, N17-компаньон kimi3): апериодическая
+  компонента (offset, exponent) и гауссовые пики над ней считаются по
+  среднему спектру и отдаются вместе с кривой фона ``aperiodic_fit_uv2`` —
+  «альфа-пик 10.2 Гц на фоне наклона» информативнее голого максимума, потому
+  что на «розовом» фоне пики смещаются. Отказ фита не валит задачу: поля
+  становятся ``null``, а текст — в ``warnings``.
 
 Топокарта (честно о компромиссе)
 --------------------------------
@@ -77,6 +86,14 @@ logger = logging.getLogger(__name__)
 # чем нужно для диапазонов шириной 3–17 Гц), а коротким эпохам окно урезается.
 SPECTRUM_N_FFT = 256
 
+# Методы оценки PSD (N17): Welch — привычный, multitaper (DPSS) — для коротких
+# эпох, где Welch даёт 1–2 окна и грубую частотную сетку.
+SPECTRUM_PSD_METHODS: tuple[str, ...] = ("welch", "multitaper")
+
+# Ширина полосы сглаживания multitaper, Гц (DPSS). Не параметр формы: разумная
+# ширина — свойство оценки, а не предмет разбора эксперимента.
+SPECTRUM_MULTITAPER_BANDWIDTH_HZ = 4.0
+
 # Сторона квадратной топокарты, пикселей. 128 — картинка ~10 КБ: её рисует
 # `<img>` в разделе, а браузер кэширует по URL.
 TOPO_SIZE = 128
@@ -104,6 +121,9 @@ class SpectrumParams:
     reference: str = "average"
     reference_channels: list[str] | None = None
     n_fft: int = SPECTRUM_N_FFT
+    # Метод PSD (N17): welch | multitaper. Меняет сами числа, поэтому входит
+    # и в отпечаток кэша топокарт, и в результат задачи.
+    psd_method: str = "welch"
 
 
 def spectrum_signature(params: SpectrumParams, cfg: Settings, channels: Sequence[str]) -> str:
@@ -120,6 +140,9 @@ def spectrum_signature(params: SpectrumParams, cfg: Settings, channels: Sequence
         f"epoch={params.epoch_length_ms:g}",
         f"nfft={params.n_fft}",
         f"ref={params.reference}",
+        # Метод PSD меняет сами числа (N17): топокарта multitaper не имеет права
+        # отдаваться по подписи расчёта Welch — иначе картинка не своего метода.
+        f"method={params.psd_method}",
         ",".join(channels),
         ",".join(f"{name}:{cfg.freq_bands[name]}" for name in sorted(cfg.freq_bands)),
         # v2: мощность полосы — интеграл PSD (N15), а не среднее — топокарты
@@ -374,23 +397,133 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams)
 def _compute_psd(
     epochs: Any, cfg: Settings, params: SpectrumParams,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
-    """Welch PSD по эпохам: ``(freqs, psd, psd_mean, n_fft)`` в мкВ²/Гц.
+    """PSD по эпохам: ``(freqs, psd, psd_mean, n_fft)`` в мкВ²/Гц.
 
     Данные MNE приходят в вольтах, поэтому x1e12 даёт мкВ²/Гц без параметра
     ``units`` (он дрейфует между версиями MNE — см. правила в `AGENTS.md`).
-    Окно не длиннее эпохи: иначе короткие нарезки (250 мс) роняют `compute_psd`.
+    Метод оценки — из параметров (N17):
+
+    * ``welch`` — окно ``n_fft`` не длиннее эпохи (иначе короткие нарезки
+      250 мс роняют `compute_psd`);
+    * ``multitaper`` — DPSS на всей эпохе целиком: у коротких окон нет «второго
+      окна» для усреднения, а multitaper даёт сглаженную оценку низкой дисперсии.
+      Ширина полосы сглаживания не может быть меньше ``2·sfreq/n_times``:
+      иначе time-bandwidth product DPSS падает ниже единицы (один тейпер),
+      и оценка вырождается. ``n_fft`` в подписи результата для multitaper —
+      длина окна анализа (эпоха целиком), а не параметр окна Welch.
     """
     n_times = len(epochs.times)
+    sfreq = float(epochs.info["sfreq"])
     n_fft = int(min(max(4, params.n_fft), n_times))
     fmin = min(band[0] for band in cfg.freq_bands.values())
     fmax = max(band[1] for band in cfg.freq_bands.values())
 
-    spectrum = epochs.compute_psd(
-        method="welch", fmin=fmin, fmax=fmax, n_fft=n_fft, verbose=False,
-    )
+    if params.psd_method == "multitaper":
+        bandwidth = max(SPECTRUM_MULTITAPER_BANDWIDTH_HZ, 2.0 * sfreq / n_times)
+        spectrum = epochs.compute_psd(
+            method="multitaper", fmin=fmin, fmax=fmax, bandwidth=bandwidth, verbose=False,
+        )
+        window = n_times
+    elif params.psd_method == "welch":
+        spectrum = epochs.compute_psd(
+            method="welch", fmin=fmin, fmax=fmax, n_fft=n_fft, verbose=False,
+        )
+        window = n_fft
+    else:
+        raise SpectrumError(
+            f"Неизвестный метод PSD: {params.psd_method!r} — доступны {', '.join(SPECTRUM_PSD_METHODS)}"
+        )
     psd = spectrum.get_data() * 1e12  # (n_epochs, n_channels, n_freqs), мкВ²/Гц
     freqs = np.asarray(spectrum.freqs, dtype=float)
-    return freqs, psd, np.mean(psd, axis=0), n_fft
+    return freqs, psd, np.mean(psd, axis=0), window
+
+
+def _fit_specparam(
+    freqs: np.ndarray, psd_mean: np.ndarray,
+) -> tuple[dict[str, Any], list[str]]:
+    """Разложение 1/f + пики (specparam/FOOOF): ``(fit, warnings)``.
+
+    Подгоняется средний спектр записи (та же линия, что рисует UI): апериодика
+    ``offset − exponent·log10(f)`` в log10-пространстве мощности и гауссовые
+    пики над ней. Модель — fixed (без «колена»): полоса 1–40 Гц его не видит,
+    а лишняя свобода раскачивала бы exponent.
+
+    Контракт возврата — словарь под поля ``SpectrumResult`` (кривая фона — на
+    всей сетке ``freqs``, та же длина, что ``psd_mean_uv2``, чтобы клиент рисовал
+    её поверх PSD без досчётов). **Любой** сбой фита не валит задачу: возвращается
+    пустой fit и предупреждение — «не измерено» честнее, чем упавшая задача.
+    """
+    warnings: list[str] = []
+    empty: dict[str, Any] = {
+        "aperiodic_exponent": None,
+        "aperiodic_offset": None,
+        "aperiodic_fit_uv2": [],
+        "peaks": [],
+        "fit_r_squared": None,
+    }
+    mask = np.isfinite(psd_mean) & (psd_mean > 0) & (freqs > 0)
+    if int(mask.sum()) < 8:
+        warnings.append("1/f-разложение не посчитано: слишком мало положительных бинов спектра")
+        return empty, warnings
+    try:
+        from specparam import SpectralModel
+    except ImportError as exc:  # зависимости могли не собраться — это не 500 задачи
+        warnings.append(f"1/f-разложение недоступно: {exc}")
+        return empty, warnings
+
+    fit_freqs = freqs[mask]
+    fit_psd = psd_mean[mask]
+    try:
+        # API specparam 2.0 дрейфует (как у MNE): фиксируем его тестами,
+        # а всё, что мы читаем, — `fit` + `results.get_params(...)` (docs/rules/safety.md).
+        model = SpectralModel(
+            peak_width_limits=(1.5, 8.0), aperiodic_mode="fixed", verbose=False,
+        )
+        model.fit(fit_freqs, fit_psd)
+        aperiodic = np.asarray(model.results.get_params("aperiodic"), dtype=float)
+        offset, exponent = float(aperiodic[0]), float(aperiodic[1])
+        raw_peaks = np.asarray(model.results.get_params("peak"), dtype=float)
+    except Exception as exc:  # отказ фита любой природы = предупреждение, не 500
+        warnings.append(f"1/f-разложение не сошлось: {exc}")
+        return empty, warnings
+
+    # Кривая фона — сами по параметрам (offset, exponent): в log10-пространстве
+    # specparam это `offset − exponent·log10(f)`, и считать её без объекта модели
+    # надёжнее — меньше зависимостей от того, как пакет назовёт атрибуты.
+    positive = freqs > 0
+    background = np.zeros_like(freqs, dtype=float)
+    background[positive] = 10.0 ** (
+        offset - exponent * np.log10(np.maximum(freqs[positive], 1e-12))
+    )
+
+    peaks_out: list[dict[str, float]] = []
+    if raw_peaks.size:
+        peaks_2d = raw_peaks.reshape(-1, 3)
+        # Пики упорядочиваются по убыванию высоты (так их показывает UI)
+        for center_hz, height_log10, bandwidth_hz in peaks_2d[
+            np.argsort(-peaks_2d[:, 1])
+        ]:
+            peaks_out.append({
+                "center_hz": float(center_hz),
+                # Высота над фоном в log10-пространстве мощности → дБ (×10)
+                "amplitude_db": float(height_log10 * 10.0),
+                "bandwidth_hz": float(bandwidth_hz),
+            })
+
+    # GOF — как в FOOOF: R² между log10(PSD) и кривой модели
+    log_psd = np.log10(fit_psd)
+    log_fit = np.log10(np.maximum(background[mask], 1e-30))
+    ss_res = float(np.sum((log_psd - log_fit) ** 2))
+    ss_tot = float(np.sum((log_psd - float(np.mean(log_psd))) ** 2))
+    r_squared = (1.0 - ss_res / ss_tot) if ss_tot > 0 else None
+
+    return {
+        "aperiodic_exponent": exponent,
+        "aperiodic_offset": offset,
+        "aperiodic_fit_uv2": [float(value) for value in background],
+        "peaks": peaks_out,
+        "fit_r_squared": r_squared,
+    }, warnings
 
 
 def compute_spectrum(
@@ -418,7 +551,7 @@ def compute_spectrum(
 
     report(
         "spectrum",
-        message=f"Welch PSD по {len(epochs)} эпохам",
+        message=f"PSD ({params.psd_method}) по {len(epochs)} эпохам",
         epochs_done=0,
         epochs_total=len(epochs),
     )
@@ -426,7 +559,7 @@ def compute_spectrum(
         "spectrum", "psd", params_key=signature, epochs=len(epochs),
     ) as entry:
         freqs, psd, psd_mean, n_fft = _compute_psd(epochs, cfg, params)
-        entry.note = f"n_fft={n_fft}, epoch={params.epoch_length_ms:g}ms"
+        entry.note = f"method={params.psd_method}, n_fft={n_fft}, epoch={params.epoch_length_ms:g}ms"
     psd_ch_mean = np.mean(psd_mean, axis=0)
     band_powers = _band_powers(freqs, psd_mean, cfg.freq_bands)
     # N16: медиана/квартили мощности диапазона по эпохам (куб PSD уже посчитан
@@ -460,7 +593,19 @@ def compute_spectrum(
         if theta_p is not None and alpha_p is not None and beta_p else None
     )
 
-    warnings: list[str] = []
+    # 1/f + пики (specparam/FOOOF): фит дешёвый (curve_fit по ~40 бинам),
+    # поэтому считается в этой же задаче, а не отдельной.
+    report("specparam", message="Разложение 1/f и поиск пиков")
+    with journal.step(
+        "spectrum", "specparam", params_key=signature,
+    ) as entry:
+        specparam_fit, specparam_warnings = _fit_specparam(freqs, psd_ch_mean)
+        entry.note = (
+            f"peaks={len(specparam_fit['peaks'])}, "
+            f"exponent={specparam_fit['aperiodic_exponent']}"
+        )
+
+    warnings: list[str] = [*specparam_warnings]
     positions = channel_positions(channels)
     missed = [name for name in channels if name not in positions]
     if missed:
@@ -525,6 +670,7 @@ def compute_spectrum(
         "epoch_length_ms": params.epoch_length_ms,
         "n_epochs": len(epochs),
         "n_fft": n_fft,
+        "psd_method": params.psd_method,
         "filter_band_hz": list(params.filter_band) if params.filter_band else None,
         "notch_hz": params.notch_hz,
         "freqs": [float(value) for value in freqs],
@@ -533,6 +679,7 @@ def compute_spectrum(
         "iaf_hz": iaf_hz,
         "theta_beta_ratio": theta_beta_ratio,
         "theta_alpha_beta_ratio": theta_alpha_beta_ratio,
+        **specparam_fit,
         "topomap_version": signature,
         "warnings": warnings,
         "duration_sec_calc": round(time.perf_counter() - started, 3),

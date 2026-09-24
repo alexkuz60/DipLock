@@ -266,8 +266,20 @@ export function freqTicks(
   fmax: number,
   heightPx: number,
   targetCount = 5,
+  scale: FreqScale = 'lin',
 ): ValueTick[] {
   if (!(fmax > fmin)) return []
+  if (scale === 'log') {
+    const ticks: ValueTick[] = []
+    for (const value of logFreqTicks(fmin, fmax)) {
+      ticks.push({
+        value,
+        y: fmaxToY(value, fmin, fmax, heightPx, 'log'),
+        label: formatHzTick(value),
+      })
+    }
+    return ticks
+  }
   const step = niceStep(fmax - fmin, targetCount)
   const ticks: ValueTick[] = []
   // Первое деление — кратно шагу от 0 Гц: линейка читается как шкала, а не набор чисел
@@ -281,9 +293,50 @@ export function freqTicks(
   return ticks
 }
 
+/**
+ * Шкала частот спектрограммы (N18): `lin` — как раньше, `log` — логарифмическая.
+ *
+ * Лог-ось определена от 1 Гц: 0 Гц в логарифм не входит, а весь измеримый ЭЭГ-ритм
+ * лежит выше. Ось — **параметр просмотра**: он меняет картинку, а не числа задачи.
+ */
+export type FreqScale = 'lin' | 'log'
+
+/** Нижняя граница лог-оси, Гц: ниже — не логарифмируется. */
+export const LOG_FMIN_HZ = 1.0
+
+/**
+ * Деления лог-шкалы: «круглые» частоты 1, 2, 5 × 10^k внутри окна. Логарифмическая
+ * линейка не берёт равный шаг чисел — на ней равные расстояния дают десятичные
+ * ряды, иначе деления «съезжают» к верху.
+ */
+function logFreqTicks(fmin: number, fmax: number): number[] {
+  const low = Math.max(fmin, LOG_FMIN_HZ)
+  if (!(fmax > low)) return []
+  const ticks: number[] = []
+  for (let decade = LOG_FMIN_HZ; decade <= fmax * 1.001; decade *= 10) {
+    for (const factor of [1, 2, 5]) {
+      const value = decade * factor
+      if (value >= low - 1e-9 && value <= fmax + 1e-9) ticks.push(value)
+    }
+  }
+  return ticks
+}
+
 /** Пиксель по вертикали для частоты: 0 Гц — внизу, `fmax` — наверху. */
-export function fmaxToY(value: number, fmin: number, fmax: number, heightPx: number): number {
+export function fmaxToY(
+  value: number,
+  fmin: number,
+  fmax: number,
+  heightPx: number,
+  scale: FreqScale = 'lin',
+): number {
   if (!(fmax > fmin)) return heightPx
+  if (scale === 'log') {
+    const low = Math.max(fmin, LOG_FMIN_HZ)
+    if (value <= low) return heightPx
+    const span = Math.log(fmax) - Math.log(low) || 1
+    return heightPx * (1 - (Math.log(value) - Math.log(low)) / span)
+  }
   return heightPx - ((value - fmin) / (fmax - fmin)) * heightPx
 }
 
@@ -292,8 +345,19 @@ export function fmaxToY(value: number, fmin: number, fmax: number, heightPx: num
  * спектрограмме. Обратная функция обязана жить рядом с прямой — иначе маркер
  * частоты рисовался бы по одной шкале, а считался по другой.
  */
-export function yToFreq(yPx: number, fmin: number, fmax: number, heightPx: number): number {
+export function yToFreq(
+  yPx: number,
+  fmin: number,
+  fmax: number,
+  heightPx: number,
+  scale: FreqScale = 'lin',
+): number {
   if (!(fmax > fmin) || heightPx <= 0) return fmin
+  if (scale === 'log') {
+    const low = Math.max(fmin, LOG_FMIN_HZ)
+    const span = Math.log(fmax) - Math.log(low) || 1
+    return Math.exp(Math.log(low) + ((heightPx - yPx) / heightPx) * span)
+  }
   return fmin + ((heightPx - yPx) / heightPx) * (fmax - fmin)
 }
 

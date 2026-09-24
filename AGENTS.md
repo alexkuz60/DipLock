@@ -64,7 +64,7 @@ backend/app/
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
 │   ├── preprocess.py      # стадии предподготовки записи: filter/artifacts/epochs (2.7)
-│   ├── spectral.py        # спектр δ…γ (Welch) + топокарты PNG, кэш + ETag (3.4)
+│   ├── spectral.py        # спектр δ…γ (Welch/multitaper + 1/f-фит specparam) + топокарты PNG, кэш + ETag (3.4)
 │   ├── spectrogram.py     # спектрограмма канала: STFT → сетка дБ (DPS2), кэш + ETag (5)
 │   ├── channel_mix.py     # виртуальные каналы «ЭЭГ»: миксы групп 10-20 из паспорта записи (5+)
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)

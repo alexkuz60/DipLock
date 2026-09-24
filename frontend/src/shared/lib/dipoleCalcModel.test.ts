@@ -44,11 +44,19 @@ describe('домен расчёта диполей: формы, отпечатк
       epoch_length_ms: '1000',
       grid_mm: '7',
     })
-    // Спектр считается с той же полосой, но без шага сетки (он не нужен PSD)
+    // Спектр считается с той же полосой, но без шага сетки (он не нужен PSD);
+    // метод PSD уходит только спектру (N17)
     expect(formEntries(buildSpectrumForm(CALC_PARAM_DEFAULTS))).toEqual({
       band_min: '1',
       band_max: '40',
       epoch_length_ms: '1000',
+      psd_method: 'welch',
+    })
+    expect(formEntries(buildSpectrumForm({ ...CALC_PARAM_DEFAULTS, psdMethod: 'multitaper' }))).toEqual({
+      band_min: '1',
+      band_max: '40',
+      epoch_length_ms: '1000',
+      psd_method: 'multitaper',
     })
   })
 

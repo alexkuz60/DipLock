@@ -60,6 +60,7 @@ import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
+import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { SliceScrubber } from '@/shared/ui/SliceScrubber'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -82,6 +83,7 @@ export function DipolesPanel() {
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
   const setEpochLengthMs = useDipoleCalc((state) => state.setEpochLengthMs)
   const setGridMm = useDipoleCalc((state) => state.setGridMm)
+  const setPsdMethod = useDipoleCalc((state) => state.setPsdMethod)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const setFilterPreset = useDipoleCalc((state) => state.setFilterPreset)
   const setFilterBand = useDipoleCalc((state) => state.setFilterBand)
@@ -317,6 +319,24 @@ export function DipolesPanel() {
           disabled={epochLengths.length === 0}
           onChange={(value) => setEpochLengthMs(Number(value))}
           hint="Длины эпох задаёт сервер (список нарезки): правка помечает расчёт устаревшим, но ничего не запускает."
+        />
+        <SegmentedControl
+          label="Метод PSD"
+          value={calcParams.psdMethod}
+          options={[
+            {
+              value: 'welch',
+              label: 'Welch',
+              title: 'Привычная оценка окном n_fft: хороша для эпох длиннее секунды',
+            },
+            {
+              value: 'multitaper',
+              label: 'Multitaper',
+              title: 'DPSS на всей эпохе: для коротких эпох (250–500 мс) даёт честное разрешение',
+            },
+          ]}
+          onChange={setPsdMethod}
+          hint="Спектр: Welch для длинных эпох, multitaper — для коротких (N17). Уходит в задачу спектра, на диполи не влияет; правка ничего не запускает."
         />
         <NumberField
           label="Шаг сетки"

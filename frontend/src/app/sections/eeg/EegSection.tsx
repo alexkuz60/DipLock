@@ -548,6 +548,10 @@ function EegWorkspace({
             overview={overview}
             palette={params.palette}
             dbRangeDb={params.dbRangeDb}
+            freqScale={params.freqScale}
+            valueMode={params.valueMode}
+            baselineSec={params.baselineSec}
+            erdRangePct={params.erdRangePct}
             smoothMs={params.smoothMs}
             smoothBins={params.smoothBins}
             freqWindow={params.freqWindow}

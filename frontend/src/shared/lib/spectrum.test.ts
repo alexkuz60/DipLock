@@ -20,6 +20,7 @@ import {
   normalizeFreqWindow,
   psdPolyline,
   psdScale,
+  psdX,
   rangeSummary,
   spectrumMetrics,
   spectrumQueryOf,
@@ -33,6 +34,7 @@ const QUERY = {
   filterBandHz: [1, 40] as [number, number],
   notchHz: 50,
   epochLengthMs: 1000,
+  psdMethod: 'welch',
 }
 
 function band(overrides: Partial<SpectrumBandOut> = {}): SpectrumBandOut {
@@ -59,6 +61,7 @@ function spectrum(overrides: Partial<SpectrumResult> = {}): SpectrumResult {
     epoch_length_ms: 1000,
     n_epochs: 5,
     n_fft: 256,
+    psd_method: 'welch',
     filter_band_hz: [1, 40],
     notch_hz: 50,
     freqs: [1, 10, 40],
@@ -67,6 +70,11 @@ function spectrum(overrides: Partial<SpectrumResult> = {}): SpectrumResult {
     iaf_hz: 10.2,
     theta_beta_ratio: 0.78,
     theta_alpha_beta_ratio: 3.56,
+    aperiodic_exponent: 1.8,
+    aperiodic_offset: 0.2,
+    aperiodic_fit_uv2: [1.2, 0.3, 0.05],
+    peaks: [{ center_hz: 10.2, amplitude_db: 12.4, bandwidth_hz: 1.8 }],
+    fit_r_squared: 0.93,
     topomap_version: 'abc123',
     warnings: [],
     duration_sec_calc: 0.4,
@@ -83,10 +91,14 @@ describe('спектр по диапазонам', () => {
 
   it('собирает строку запроса топокарты из параметров расчёта', () => {
     expect(spectrumQueryString(QUERY)).toBe(
-      'band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000',
+      'band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000&psd_method=welch',
     )
     expect(spectrumQueryString({ ...QUERY, filterBandHz: null, notchHz: null })).toBe(
-      'epoch_length_ms=1000',
+      'epoch_length_ms=1000&psd_method=welch',
+    )
+    // Метод PSD меняет ETag топокарты (N17) — и обязан менять URL
+    expect(spectrumQueryString({ ...QUERY, psdMethod: 'multitaper' })).toContain(
+      'psd_method=multitaper',
     )
   })
 
@@ -94,7 +106,7 @@ describe('спектр по диапазонам', () => {
     const url = topomapUrl(spectrum(), band(), QUERY)
 
     expect(url).toBe(
-      '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000&v=abc123',
+      '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&notch_hz=50&epoch_length_ms=1000&psd_method=welch&v=abc123',
     )
     // Смена фильтра меняет URL — браузер не подставит картинку прошлого расчёта
     expect(topomapUrl(spectrum(), band(), { ...QUERY, filterBandHz: [4, 8] })).toContain(
@@ -159,6 +171,7 @@ describe('спектр по диапазонам', () => {
       filterBandHz: [4, 8],
       notchHz: 60,
       epochLengthMs: 500,
+      psdMethod: 'welch',
     })
     expect(spectrumQueryOf(spectrum({ filter_band_hz: null })).filterBandHz).toBeNull()
     // Битые/короткие массивы полосы не превращаются в «диапазон из одного числа»
@@ -171,10 +184,12 @@ describe('спектр по диапазонам', () => {
   })
 
   it('подписывает результат спектра параметрами своего расчёта', () => {
-    expect(spectrumSummary(spectrum())).toBe('Спектр: 1–40 Гц · эпоха 1000 мс · окно 256 · эпох 5')
+    expect(spectrumSummary(spectrum())).toBe(
+      'Спектр: 1–40 Гц · эпоха 1000 мс · Welch · окно 256 · эпох 5',
+    )
     // Без фильтра подпись честно это сообщает, а не «молчит» о полосе
     expect(spectrumSummary(spectrum({ filter_band_hz: null }))).toBe(
-      'Спектр: без фильтра · эпоха 1000 мс · окно 256 · эпох 5',
+      'Спектр: без фильтра · эпоха 1000 мс · Welch · окно 256 · эпох 5',
     )
   })
 
@@ -271,11 +286,47 @@ describe('окно частот FFT-графика (срез 3.5)', () => {
   })
 })
 
-test('spectrumMetrics форматирует IAF и θ/β-индексы, пропуская null (N16)', () => {
-  expect(spectrumMetrics(spectrum())).toEqual(['IAF 10.2 Гц', 'θ/β 0.78', '(θ+α)/β 3.56'])
+test('spectrumMetrics форматирует IAF, θ/β-индексы, 1/f и ведущий пик (N16, 2.4)', () => {
+  expect(spectrumMetrics(spectrum())).toEqual([
+    'IAF 10.2 Гц',
+    'θ/β 0.78',
+    '(θ+α)/β 3.56',
+    '1/f 1.80',
+    'пик 10.2 Гц',
+  ])
   expect(
     spectrumMetrics(
-      spectrum({ iaf_hz: null, theta_beta_ratio: null, theta_alpha_beta_ratio: null }),
+      spectrum({
+        iaf_hz: null,
+        theta_beta_ratio: null,
+        theta_alpha_beta_ratio: null,
+        aperiodic_exponent: null,
+        peaks: [],
+      }),
     ),
   ).toEqual([])
+})
+
+test('spectrumQueryOf берёт метод PSD из результата, а не из панели', () => {
+  expect(spectrumQueryOf(spectrum()).psdMethod).toBe('welch')
+  expect(spectrumQueryOf(spectrum({ psd_method: 'multitaper' })).psdMethod).toBe('multitaper')
+  // Результат задачи без поля (записан до этапа 2.4) читается как Welch
+  expect(spectrumQueryOf(spectrum({ psd_method: '' })).psdMethod).toBe('welch')
+})
+
+test('spectrumSummary называет метод расчёта спектра', () => {
+  expect(spectrumSummary(spectrum())).toContain('Welch')
+  expect(spectrumSummary(spectrum({ psd_method: 'multitaper' }))).toContain('multitaper')
+})
+
+test('psdX ставит маркер пика в ту же точку шкалы, что и ломаная PSD', () => {
+  const freqs = [1, 10, 40]
+  const power = [1, 100, 2]
+  const points = psdPolyline(freqs, power, 520, 160, 2, psdScale(power)).split(' ')
+  const xAt10 = (points[1] as string).split(',')[0]
+  // Маркер пика 10 Гц обязан встать в x второго бина ломаной (с точностью её формата)
+  expect(psdX(10, 1, 40, 520, 2).toFixed(2)).toBe(xAt10)
+  // Края шкалы: 1 Гц — у левого края, 40 Гц — у правого
+  expect(psdX(1, 1, 40, 520, 2)).toBeCloseTo(2, 6)
+  expect(psdX(40, 1, 40, 520, 2)).toBeCloseTo(518, 6)
 })

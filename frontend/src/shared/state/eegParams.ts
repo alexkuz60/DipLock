@@ -52,6 +52,7 @@ import {
   type SpectrogramGrid,
 } from '@/shared/lib/eegSpectrogram'
 import { DB_RANGE_LIMITS, normalizeAmplitudeUv } from '@/shared/lib/eegView'
+import type { FreqScale } from '@/shared/lib/eegView'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import type { ArtifactNavStep } from '@/shared/lib/viewerLayers'
 import { ARTIFACT_KINDS } from '@/shared/lib/artifacts'
@@ -102,6 +103,25 @@ export type EegParams = {
   palette: EegPaletteId
   /** Окно дБ палитры относительно потолка шкалы расчёта, дБ */
   dbRangeDb: [number, number]
+  /**
+   * Шкала частот спектрограммы (N18): `lin` — как раньше, `log` — логарифмическая
+   * от 1 Гц. Параметр **просмотра**: правка не запускает расчёт и не входит
+   * в отпечаток результата.
+   */
+  freqScale: FreqScale
+  /**
+   * Значения спектрограммы (N18): `db` — уровень, как считал сервер; `erd` —
+   * ERD/ERS в % относительно baseline-интервала. Тоже параметр просмотра:
+   * трансформация считается по уже полученной сетке, без задачи.
+   */
+  valueMode: 'db' | 'erd'
+  /**
+   * Baseline-интервал ERD/ERS, с. `[0, 0]` — «первые 10 % записи» (решается по
+   * сетке в момент отрисовки, см. `resolveBaselineSec`).
+   */
+  baselineSec: [number, number]
+  /** Окно палитры ERD/ERS, % (в режиме `db` не используется) */
+  erdRangePct: [number, number]
   /** Сглаживание по времени, мс (параметр просмотра) */
   smoothMs: number
   /** Сглаживание по частоте, корзин (параметр просмотра) */
@@ -129,6 +149,11 @@ export const EEG_PARAM_DEFAULTS: EegParams = {
   palette: 'viridis',
   // Окно дБ по умолчанию — 40 дБ над полом шкалы: шум отсекается, ритм виден
   dbRangeDb: [-40, 0],
+  freqScale: 'lin',
+  valueMode: 'db',
+  // [0, 0] — «первые 10 % записи»: дефолт не знает длительность заранее
+  baselineSec: [0, 0],
+  erdRangePct: [-100, 100],
   smoothMs: 0,
   smoothBins: 0,
   grid: true,
@@ -208,6 +233,10 @@ export const SMOOTH_MS_RANGE: [number, number] = [0, 2000]
 export const SMOOTH_BINS_RANGE: [number, number] = [0, 15]
 /** Границы доли верхней половины: у обеих половин должно остаться место */
 export const SPLIT_RATIO_RANGE: [number, number] = [0.15, 0.85]
+/** Границы baseline-интервала ERD/ERS, с */
+export const BASELINE_SEC_RANGE: [number, number] = [0, 3600]
+/** Границы окна палитры ERD/ERS, % */
+export const ERD_RANGE_PCT_RANGE: [number, number] = [-500, 500]
 
 
 /** Окно дБ: низ ниже верха, оба в границах шкалы. */
@@ -215,6 +244,13 @@ export function normalizeDbRange(range: [number, number]): [number, number] {
   const low = clamp(Math.min(range[0], range[1]), DB_RANGE_LIMITS)
   const high = clamp(Math.max(range[0], range[1]), DB_RANGE_LIMITS)
   return low === high ? [low - 5, high] : [low, high]
+}
+
+/** Окно палитры ERD/ERS, %: низ ниже верха (нулевое окно палитры бессмысленно). */
+export function normalizeErdRange(range: [number, number]): [number, number] {
+  const low = clamp(Math.min(range[0], range[1]), ERD_RANGE_PCT_RANGE)
+  const high = clamp(Math.max(range[0], range[1]), ERD_RANGE_PCT_RANGE)
+  return low === high ? [low - 10, high] : [low, high]
 }
 
 /** Индекс уровня зума: чужие значения из localStorage не «висят» вне списка. */
@@ -252,6 +288,13 @@ export function normalizeEegParams(params: EegParams): EegParams {
     windowCenterSec: Number.isFinite(params.windowCenterSec) ? params.windowCenterSec : 0,
     freqWindow: normalizeFreqWindow(params.freqWindow),
     dbRangeDb: normalizeDbRange(params.dbRangeDb ?? EEG_PARAM_DEFAULTS.dbRangeDb),
+    freqScale: params.freqScale === 'log' ? 'log' : 'lin',
+    valueMode: params.valueMode === 'erd' ? 'erd' : 'db',
+    baselineSec: [
+      clamp(params.baselineSec?.[0] ?? 0, BASELINE_SEC_RANGE),
+      clamp(params.baselineSec?.[1] ?? 0, BASELINE_SEC_RANGE),
+    ],
+    erdRangePct: normalizeErdRange(params.erdRangePct ?? EEG_PARAM_DEFAULTS.erdRangePct),
     smoothMs: clamp(params.smoothMs, SMOOTH_MS_RANGE),
     smoothBins: clamp(params.smoothBins, SMOOTH_BINS_RANGE),
     splitRatio: clamp(params.splitRatio, SPLIT_RATIO_RANGE),

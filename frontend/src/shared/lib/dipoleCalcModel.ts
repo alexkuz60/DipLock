@@ -90,6 +90,12 @@ export type CalcParams = {
   epochLengthMs: number
   /** Шаг объёмной сетки поиска диполей, мм */
   gridMm: number
+  /**
+   * Метод PSD спектра (N17): `welch` | `multitaper`. Уходит **только** в задачу
+   * спектра (`buildSpectrumForm`) — на диполи метод не влияет, поэтому в общий
+   * отпечаток расчёта (`calcSignature`) не входит.
+   */
+  psdMethod: 'welch' | 'multitaper'
 }
 
 export const CALC_PARAM_DEFAULTS: CalcParams = {
@@ -103,6 +109,9 @@ export const CALC_PARAM_DEFAULTS: CalcParams = {
   bandwidthHz: 0.5,
   epochLengthMs: 1000,
   gridMm: 7,
+  // Дефолт — Welch: привычный метод прежних расчётов. Для коротких эпох
+  // (250–500 мс) правильнее multitaper — переключатель стоит рядом с длиной эпохи.
+  psdMethod: 'welch',
 }
 
 /** Ограничения контролов панели (совпадают со схемой формы на сервере). */
@@ -325,6 +334,7 @@ export function buildSpectrumForm(params: CalcParams): FormData {
   }
   if (params.notchHz) form.set('notch_hz', String(params.notchHz))
   form.set('epoch_length_ms', String(params.epochLengthMs))
+  form.set('psd_method', params.psdMethod)
   return form
 }
 
@@ -406,5 +416,8 @@ export function normalizeCalcParams(params: CalcParams): CalcParams {
     bandwidthHz: clamp(params.bandwidthHz, BANDWIDTH_RANGE),
     epochLengthMs: Math.round(params.epochLengthMs),
     gridMm: clamp(params.gridMm, GRID_MM_RANGE),
+    // Из сохранённых параметров может придти всё что угодно, а метод обязан
+    // принадлежать списку: неизвестное — Welch, а не 400 при запуске задачи
+    psdMethod: params.psdMethod === 'multitaper' ? 'multitaper' : 'welch',
   }
 }

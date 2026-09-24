@@ -10,9 +10,14 @@
  *
  * Здесь живёт вся арифметика картинки: перевод дБ в 0..1 по окну отображения,
  * палитры (без внешних зависимостей), сглаживание скользящим средним
- * (параметр просмотра, не расчёта) и выбор колонок под ширину области.
- * Модуль чистый: canvas читает готовые числа, а не считает их сам.
+ * (параметр просмотра, не расчёта), выбор колонок под ширину области, шкала
+ * частот (линейная/логарифмическая, N18) и режим ERD/ERS (нормировка по
+ * baseline-интервалу, параметр просмотра).
+ * Модуль чистый: canvas читает готовые числа, а не считает их сам. Импорт здесь
+ * только типов и константы чистого соседа (`eegView`) — ни DOM, ни вычислений.
  */
+
+import { LOG_FMIN_HZ, type FreqScale } from './eegView'
 
 export const SPECTROGRAM_MAGIC = 'DPS2'
 
@@ -254,6 +259,92 @@ export function dbToUnit(db: number, range: [number, number], dbMax: number): nu
   return Math.min(1, Math.max(0, (db - low) / (high - low)))
 }
 
+/** Перевод значения ERD/ERS, % в 0..1 по окну отображения: 0 — низ, 1 — верх. */
+export function erdToUnit(percent: number, range: [number, number]): number {
+  const low = Math.min(range[0], range[1])
+  const high = Math.max(range[0], range[1])
+  if (!(high > low)) return percent >= high ? 1 : 0
+  return Math.min(1, Math.max(0, (percent - low) / (high - low)))
+}
+
+/** Опции режима ERD/ERS растра (параметры **просмотра**, в задачу не уходят). */
+export type RasterErdOptions = {
+  /** Baseline-интервал, с: отсчёт «100 % мощности» для каждой частоты */
+  baselineSec: [number, number]
+  /** Окно палитры в %, например [-100, 100] */
+  rangePct: [number, number]
+}
+
+/**
+ * ERD/ERS поверх сетки дБ (N18): `(P − P_ref)/P_ref × 100 %` для каждой ячейки.
+ *
+ * Мощность восстанавливается точно: сетка несёт уровень амплитуды в дБ, а
+ * мощность пропорциональна `10^(дБ/10)`. `P_ref(f)` — средняя мощность частоты
+ * по baseline-столбцам. Возврат `null` — интервал baseline не попал в сетку:
+ * показывать «нормированные» числа по пустому отсчёту нельзя, UI честно это
+ * пишет. Чистая функция — математика проверяется без canvas.
+ */
+export function erdErsPercent(
+  values: Float32Array,
+  nFreqs: number,
+  nTimes: number,
+  times: Float32Array,
+  baselineSec: [number, number],
+): Float32Array | null {
+  // Столбцы baseline — строго те, чьи центры попали в интервал: «зажим» к
+  // ближайшему столбцу (как у окна показа) здесь недопустим — отсчёт по
+  // столбцу вне интервала исказил бы все проценты.
+  const t0 = Math.min(baselineSec[0], baselineSec[1])
+  const t1 = Math.max(baselineSec[0], baselineSec[1])
+  let from = -1
+  let to = -1
+  for (let index = 0; index < nTimes; index++) {
+    const time = times[index] ?? 0
+    if (time < t0 - 1e-9 || time > t1 + 1e-9) continue
+    if (from < 0) from = index
+    to = index
+  }
+  const baselineColumns = from < 0 ? 0 : to - from + 1
+  if (nFreqs === 0 || nTimes === 0 || baselineColumns <= 0) return null
+
+  const out = new Float32Array(values.length)
+  for (let row = 0; row < nFreqs; row++) {
+    // P_ref: средняя мощность строки по baseline (дБ → мощность точно)
+    let reference = 0
+    for (let column = from; column <= to; column++) {
+      reference += 10 ** ((values[row * nTimes + column] as number) / 10)
+    }
+    reference /= baselineColumns
+    if (!(reference > 0)) {
+      out.fill(0, row * nTimes, (row + 1) * nTimes)
+      continue
+    }
+    for (let column = 0; column < nTimes; column++) {
+      const power = 10 ** ((values[row * nTimes + column] as number) / 10)
+      out[row * nTimes + column] = (power / reference - 1) * 100
+    }
+  }
+  return out
+}
+
+/**
+ * Конкретный baseline-интервал по умолчанию: `[0, 0]` в параметрах просмотра
+ * значит «первые 10 % записи». Длительность известна только по сетке задачи,
+ * поэтому дефолт решается здесь, а не в сторе.
+ */
+export function resolveBaselineSec(
+  baselineSec: [number, number],
+  times: Float32Array,
+): [number, number] {
+  const low = Math.min(baselineSec[0], baselineSec[1])
+  const high = Math.max(baselineSec[0], baselineSec[1])
+  if (low > 0 || high > 0) return [low, high]
+  if (times.length === 0) return [0, 0]
+  const start = times[0] as number
+  const end = times[times.length - 1] as number
+  return [start, start + (end - start) * 0.1]
+}
+
 /**
  * Готовый растр спектрограммы: RGBA-буфер **в разрешении данных**.
  *
@@ -284,7 +375,10 @@ export type SpectrogramRaster = {
  * Формулы выбора ячейки — те же, что были в цикле по пикселям холста (`yToFreq`
  * по вертикали, линейная доля окна по горизонтали): изменилось только **число**
  * вычислений, а не картинка. Частота строки считается по обратной к `fmaxToY`
- * шкале прямо здесь, чтобы модуль оставался листом без DOM и без импортов.
+ * шкале (линейной или логарифмической, N18) прямо здесь.
+ *
+ * `erd` включает режим ERD/ERS (N18): значения переводятся в % по baseline и
+ * нормируются окном `%` (`rangePct`), а не окном дБ — это параметры просмотра.
  */
 export function spectrogramRaster(
   grid: SpectrogramGrid,
@@ -294,6 +388,8 @@ export function spectrogramRaster(
   lut: Uint8ClampedArray,
   maxColumns: number,
   maxRows: number,
+  freqScale: FreqScale = 'lin',
+  erd: RasterErdOptions | null = null,
 ): SpectrogramRaster {
   const { from, to } = timeIndexRange(grid.times, shownWindow)
   const visibleColumns = Math.max(1, to - from + 1)
@@ -304,9 +400,34 @@ export function spectrogramRaster(
 
   const low = Math.min(freqWindow[0], freqWindow[1])
   const high = Math.max(freqWindow[0], freqWindow[1])
+  // Лог-ось определена от 1 Гц (как `fmaxToY` в eegView): 0 Гц не логарифмируется
+  const logMode = freqScale === 'log' && high > Math.max(low, LOG_FMIN_HZ)
+  const logLow = Math.max(low, LOG_FMIN_HZ)
   const span = Math.max(1e-6, shownWindow.t1 - shownWindow.t0)
   const firstTime = grid.times[from] ?? 0
   const topFreq = Math.max(1e-6, grid.freqs[grid.nFreqs - 1] as number)
+
+  // Значения: дБ как есть или ERD/ERS % по baseline (тогда окно палитры — %)
+  const values =
+    erd !== null
+      ? erdErsPercent(
+          grid.values,
+          grid.nFreqs,
+          grid.nTimes,
+          grid.times,
+          erd.baselineSec,
+        )
+      : null
+  const unitOf =
+    erd !== null && values !== null
+      ? (row: number, column: number) =>
+          erdToUnit(values[row * grid.nTimes + column] as number, erd.rangePct)
+      : (row: number, column: number) =>
+          dbToUnit(
+            grid.values[row * grid.nTimes + column] ?? grid.dbMin,
+            dbRangeDb,
+            grid.dbMax,
+          )
 
   // Столбцы — один раз на растр, а не на каждый пиксель экрана
   const columnOf = new Int32Array(columns)
@@ -320,17 +441,19 @@ export function spectrogramRaster(
   }
 
   for (let y = 0; y < rows; y++) {
-    // Частота пиксельной строки: `fmin` внизу, потолок окна сверху (обратная к `fmaxToY`)
-    const frequency = low + ((rows - y - 0.5) / rows) * (high - low)
+    // Частота пиксельной строки: `fmin` внизу, потолок окна сверху (обратная к
+    // `fmaxToY` своей шкалы)
+    const ratio = (rows - y - 0.5) / rows
+    const frequency = logMode
+      ? Math.exp(Math.log(logLow) + ratio * (Math.log(high) - Math.log(logLow)))
+      : low + ratio * (high - low)
     const rowIndex = Math.min(
       grid.nFreqs - 1,
       Math.max(0, Math.round((frequency / topFreq) * (grid.nFreqs - 1))),
     )
-    const rowOffset = rowIndex * grid.nTimes
     const target = y * columns * 4
     for (let x = 0; x < columns; x++) {
-      const value = grid.values[rowOffset + (columnOf[x] as number)] ?? grid.dbMin
-      const colour = Math.round(dbToUnit(value, dbRangeDb, grid.dbMax) * 255) * 3
+      const colour = Math.round(unitOf(rowIndex, columnOf[x] as number) * 255) * 3
       const at = target + x * 4
       rgba[at] = lut[colour] as number
       rgba[at + 1] = lut[colour + 1] as number

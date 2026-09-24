@@ -9,6 +9,11 @@
   `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`,
   `ICA(random_state=…)` → `ICA(rng=…)` (сигнатура 1.13 принимает оба, первый deprecated).
   Проверяйте актуальный API через тесты.
+- specparam (1/f + пики спектра, шаг 2.4) дрейфует так же: пакет переименован из FOOOF,
+  стабильного 2.0 нет (в venv — `2.0.0rc7`), API результата — `results.get_params('aperiodic'|'peak')`,
+  а не атрибуты `*_params_` из FOOOF 1.x. В коде используется минимум API (`SpectralModel.fit` +
+  `get_params`), кривая фона считается по параметрам сама — всё зафиксировано
+  `tests/test_spectral.py`; отказ фита глотается в `warnings`, а не роняет задачу.
 - ICA: `method='fastica'` требует `scikit-learn` — без него `ica.fit` падает `ImportError`
   (N8: ошибка глоталась в warning, ветка была мертва всегда). `find_bads_eog`/`compute_proj_eog`
   без EOG-каналов кидают `RuntimeError: No EOG channel(s) found` — прокси-фолбэк

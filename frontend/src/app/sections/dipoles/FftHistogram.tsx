@@ -28,6 +28,7 @@ import {
   normalizeFreqWindow,
   psdPolyline,
   psdScale,
+  psdX,
   spectrumWithinWindow,
   type FreqWindow,
 } from '@/shared/lib/spectrum'
@@ -77,7 +78,32 @@ export function FftHistogram({
     2,
     psdScale(spectrum.psd_mean_uv2),
   )
+  // Кривая апериодического фона (specparam): тот же масштаб, что и у PSD,
+  // поэтому пики читаются как «высота над фоном», а не над осью.
+  const background = spectrumWithinWindow(
+    spectrum.freqs,
+    spectrum.aperiodic_fit_uv2,
+    appliedWindow,
+  )
+  const backgroundLine =
+    spectrum.aperiodic_fit_uv2.length === spectrum.freqs.length && shown.freqs.length >= 2
+      ? psdPolyline(
+          background.freqs,
+          background.power,
+          CHART_WIDTH,
+          CHART_HEIGHT,
+          2,
+          psdScale(spectrum.psd_mean_uv2),
+        )
+      : ''
+  // Пики над фоном: вертикальные метки ровно над своим центром (та же шкала x)
   const [fMin, fMax] = window
+  const shownPeaks =
+    shown.freqs.length >= 2
+      ? spectrum.peaks.filter(
+          (peak) => peak.center_hz >= fMin - 1e-9 && peak.center_hz <= fMax + 1e-9,
+        )
+      : []
   const barWidth = bars.length > 0 ? (CHART_WIDTH - 40) / bars.length : 0
 
   return (
@@ -200,6 +226,47 @@ export function FftHistogram({
           />
         ) : null}
 
+        {/* Фон 1/f (specparam): пунктир в том же масштабе, что и PSD */}
+        {backgroundLine ? (
+          <polyline
+            data-testid="fft-aperiodic-line"
+            points={backgroundLine}
+            fill="none"
+            stroke="var(--color-fg-2)"
+            strokeWidth={1.2}
+            strokeDasharray="4 3"
+          />
+        ) : null}
+
+        {/* Пики над фоном: вертикальная метка центра + подпись частоты */}
+        {shownPeaks.map((peak, index) => {
+          const x = psdX(peak.center_hz, fMin, fMax, CHART_WIDTH)
+          return (
+            <g key={`peak-${peak.center_hz}-${index}`} data-testid={`fft-peak-${index}`}>
+              <line
+                x1={x}
+                y1={0}
+                x2={x}
+                y2={CHART_HEIGHT}
+                stroke="var(--color-accent)"
+                strokeWidth={1}
+                strokeDasharray="2 3"
+                strokeOpacity={0.7}
+              />
+              <text
+                x={x}
+                y={12}
+                textAnchor="middle"
+                fontSize={10}
+                fill="var(--color-fg-1)"
+                className="tnum"
+              >
+                {peak.center_hz.toFixed(1)}
+              </text>
+            </g>
+          )
+        })}
+
         {/* Ось частот: границы и подпись единиц */}
         <line
           x1={0}
@@ -225,7 +292,8 @@ export function FftHistogram({
       </svg>
       <p className="text-sm text-fg-2" data-testid="fft-window-label">
         {freqWindowLabel(appliedWindow, full)}. Полосы — средняя мощность диапазона, синяя линия —
-        PSD по частотам (логарифмическая шкала: иначе альфа-пик «съедает» график). «—» означает, что
+        PSD по частотам (логарифмическая шкала: иначе альфа-пик «съедает» график), пунктир — фон
+        1/f, вертикальные метки — пики над ним (specparam). «—» означает, что
         частоты диапазона не попали в полосу фильтра, а не нулевую мощность.
       </p>
       {hasWindow && shown.freqs.length < 2 ? (

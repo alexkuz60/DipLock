@@ -19,7 +19,7 @@ from app.schemas.analysis import PreprocessStage
 from app.services.artifact_cleaner import CLEAN_METHODS
 from app.services.dipole_scanner import DipoleRefineParams, DipoleScanParams
 from app.services.preprocess import PreprocessParams
-from app.services.spectral import SpectrumParams
+from app.services.spectral import SPECTRUM_PSD_METHODS, SpectrumParams
 from app.services.spectrogram import SpectrogramParams
 from app.services.spectrogram import validate_params as _validate_spectrogram_params
 
@@ -146,9 +146,15 @@ def spectrum_params(
     reference: str,
     reference_channels: str | None,
     epoch_length_ms: float,
+    psd_method: str = "welch",
 ) -> SpectrumParams:
-    """Параметры расчёта спектра по диапазонам (Welch PSD)."""
+    """Параметры расчёта спектра по диапазонам (Welch или multitaper PSD)."""
     require_epoch_length(epoch_length_ms)
+    if psd_method not in SPECTRUM_PSD_METHODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"psd_method должен быть одним из {list(SPECTRUM_PSD_METHODS)}",
+        )
 
     return SpectrumParams(
         filter_band=parse_filter_band(band_min, band_max),
@@ -156,6 +162,7 @@ def spectrum_params(
         epoch_length_ms=epoch_length_ms,
         reference=reference,
         reference_channels=parse_reference_channels(reference_channels),
+        psd_method=psd_method,
     )
 
 

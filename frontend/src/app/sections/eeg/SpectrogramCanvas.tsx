@@ -30,6 +30,7 @@ import type { TimeWindow } from '@/shared/lib/viewerMath'
 import type { ArtifactZone } from '@/shared/lib/viewerLayers'
 import {
   paletteLut,
+  resolveBaselineSec,
   smoothSpectrogram,
   spectrogramRaster,
   type EegPaletteId,
@@ -48,6 +49,7 @@ import {
   timeInWindow,
   windowFrame,
   yToFreq,
+  type FreqScale,
 } from '@/shared/lib/eegView'
 import { perfCount, perfSpan } from '@/shared/lib/perf'
 import {
@@ -75,6 +77,14 @@ export type SpectrogramCanvasProps = {
   palette: EegPaletteId
   /** Окно дБ отображения относительно потолка шкалы расчёта */
   dbRangeDb: [number, number]
+  /** Шкала частот: линейная или логарифмическая (N18, параметр просмотра) */
+  freqScale: FreqScale
+  /** Режим значений: дБ или ERD/ERS % от baseline (N18, параметр просмотра) */
+  valueMode: 'db' | 'erd'
+  /** Baseline-интервал ERD/ERS, с ([0, 0] — «первые 10 % записи») */
+  baselineSec: [number, number]
+  /** Окно палитры ERD/ERS, % (в режиме дБ не используется) */
+  erdRangePct: [number, number]
   smoothMs: number
   smoothBins: number
   /** Видимое окно частот, Гц (null — вся сетка) */
@@ -116,6 +126,12 @@ type RasterInputs = {
   fmax: number
   dbLow: number
   dbHigh: number
+  freqScale: FreqScale
+  valueMode: 'db' | 'erd'
+  baselineLow: number
+  baselineHigh: number
+  erdLow: number
+  erdHigh: number
   maxColumns: number
   maxRows: number
 }
@@ -131,6 +147,12 @@ function sameRasterInputs(left: RasterInputs, right: RasterInputs): boolean {
     left.fmax === right.fmax &&
     left.dbLow === right.dbLow &&
     left.dbHigh === right.dbHigh &&
+    left.freqScale === right.freqScale &&
+    left.valueMode === right.valueMode &&
+    left.baselineLow === right.baselineLow &&
+    left.baselineHigh === right.baselineHigh &&
+    left.erdLow === right.erdLow &&
+    left.erdHigh === right.erdHigh &&
     left.maxColumns === right.maxColumns &&
     left.maxRows === right.maxRows
   )
@@ -142,6 +164,10 @@ export function SpectrogramCanvas({
   overview,
   palette,
   dbRangeDb,
+  freqScale,
+  valueMode,
+  baselineSec,
+  erdRangePct,
   smoothMs,
   smoothBins,
   freqWindow,
@@ -199,7 +225,7 @@ export function SpectrogramCanvas({
     const fmax = shownFreq ? shownFreq[1] : 1
 
     drawLeftLabel(ctx, [overview ? 'Обзор записи' : 'Окно трека', 'Гц ↓'], height, theme)
-    drawValueAxis(ctx, freqTicks(fmin, fmax, height), width, theme, 'Гц')
+    drawValueAxis(ctx, freqTicks(fmin, fmax, height, 5, freqScale), width, theme, 'Гц')
 
     if (!smooth || smooth.nTimes === 0) {
       drawEmptyMessage(ctx, 'Спектрограмма не рассчитана', width, height, theme)
@@ -216,6 +242,8 @@ export function SpectrogramCanvas({
     const scale = canvasScale()
     const maxColumns = Math.max(1, Math.round(plotWidth * scale))
     const maxRows = Math.max(1, Math.round(height * scale))
+    // Baseline ERD/ERS: [0, 0] — «первые 10 % записи» (решается по сетке задачи)
+    const baseline = resolveBaselineSec(baselineSec, smooth.times)
     const inputs: RasterInputs = {
       smooth,
       palette,
@@ -225,6 +253,12 @@ export function SpectrogramCanvas({
       fmax,
       dbLow: dbRangeDb[0],
       dbHigh: dbRangeDb[1],
+      freqScale,
+      valueMode,
+      baselineLow: baseline[0],
+      baselineHigh: baseline[1],
+      erdLow: erdRangePct[0],
+      erdHigh: erdRangePct[1],
       maxColumns,
       maxRows,
     }
@@ -237,7 +271,19 @@ export function SpectrogramCanvas({
     } else {
       perfCount('eeg.raster.rebuild')
       raster = perfSpan('eeg.raster.build', () =>
-        spectrogramRaster(smooth, shownWindow, [fmin, fmax], dbRangeDb, lut, maxColumns, maxRows),
+        spectrogramRaster(
+          smooth,
+          shownWindow,
+          [fmin, fmax],
+          dbRangeDb,
+          lut,
+          maxColumns,
+          maxRows,
+          freqScale,
+          valueMode === 'erd'
+            ? { baselineSec: baseline, rangePct: erdRangePct }
+            : null,
+        ),
       )
       rasterRef.current = { inputs, raster }
     }
@@ -250,7 +296,13 @@ export function SpectrogramCanvas({
     drawArtifactZones(ctx, zones, shownWindow, width, height, theme)
 
     if (lines) {
-      drawGridLines(ctx, freqTicks(fmin, fmax, height).map((tick) => tick.y), left, right, theme)
+      drawGridLines(
+        ctx,
+        freqTicks(fmin, fmax, height, 5, freqScale).map((tick) => tick.y),
+        left,
+        right,
+        theme,
+      )
     }
     // Рамка видимой части записи: в «обзоре» половина шире окна трека, и без рамки
     // не видно, какой отрезок открыт вверху. Когда окна совпадают, рамки нет —
@@ -264,7 +316,7 @@ export function SpectrogramCanvas({
       // Частота — по той же шкале, что нарисована: `fmaxToY` обратна `yToFreq`
       drawFreqMarker(
         ctx,
-        fmaxToY(markerHz, fmin, fmax, height),
+        fmaxToY(markerHz, fmin, fmax, height, freqScale),
         `${formatHzTick(markerHz)} Гц`,
         width,
         theme,
@@ -277,6 +329,10 @@ export function SpectrogramCanvas({
     shownFreq,
     overview,
     dbRangeDb,
+    freqScale,
+    valueMode,
+    baselineSec,
+    erdRangePct,
     palette,
     lines,
     zones,
@@ -335,7 +391,9 @@ export function SpectrogramCanvas({
     // Частота — по той же шкале, что нарисована (`yToFreq` — обратная к `fmaxToY`);
     // без сетки маркера нет, но курсор по времени поставить можно
     const freqHz =
-      fmin !== null && fmax !== null ? Math.round(yToFreq(yPx, fmin, fmax, height) * 10) / 10 : null
+      fmin !== null && fmax !== null
+        ? Math.round(yToFreq(yPx, fmin, fmax, height, freqScale) * 10) / 10
+        : null
     onPick(plotTimeAtX(xPx, shownWindow, width), freqHz)
   }
 

@@ -63,6 +63,23 @@ describe('состояние раздела «ЭЭГ»', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('нормализует новые параметры просмотра (N18): шкала, режим, baseline, окно %', () => {
+    const params = normalizeEegParams({
+      ...EEG_PARAM_DEFAULTS,
+      // Мусор из localStorage прежней версии: неизвестное падает в дефолты
+      freqScale: 'sqrt',
+      valueMode: 'power',
+      baselineSec: [-5, 99999],
+      erdRangePct: [10, 10],
+    } as unknown as EegParams)
+
+    expect(params.freqScale).toBe('lin')
+    expect(params.valueMode).toBe('db')
+    expect(params.baselineSec).toEqual([0, 3600])
+    // Равное окно % не делит на ноль: низ уходит вниз на шаг окна
+    expect(params.erdRangePct).toEqual([0, 10])
+  })
+
   it('не обесценивает результат правкой просмотра, но реагирует на расчёт', () => {
     // Параметры, которыми результат фикстуры реально посчитан: окно 1000 мс
     const params: EegParams = {
@@ -73,13 +90,18 @@ describe('состояние раздела «ЭЭГ»', () => {
     const result = spectrogramResultFixture()
     expect(eegResultMatchesParams(result, params)).toBe(true)
 
-    // Зум, шкала, палитра, окно дБ, сглаживание, разделитель и окно частот
+    // Зум, шкала, палитра, окно дБ, сглаживание, разделитель и окно частот;
+    // N18: шкала частот, режим ERD/ERS и baseline — тоже просмотр
     const viewed: EegParams = {
       ...params,
       timeLevel: 3,
       amplitudeUv: 200,
       palette: 'gray',
       dbRangeDb: [-20, 0],
+      freqScale: 'log',
+      valueMode: 'erd',
+      baselineSec: [0, 2],
+      erdRangePct: [-50, 50],
       smoothMs: 500,
       smoothBins: 7,
       splitRatio: 0.7,

@@ -611,11 +611,23 @@ class SpectrumBandOut(BaseModel):
     )
 
 
+class SpectrumPeakOut(BaseModel):
+    """Гауссов пик над апериодическим фоном (specparam/FOOOF, шаг 2.4).
+
+    ``amplitude_db`` — высота пика над фоном в дБ (10·log10 мощности),
+    ``bandwidth_hz`` — ширина пика (FWHM гауссиана в log-пространстве).
+    """
+
+    center_hz: float = Field(description="Центровая частота пика, Гц")
+    amplitude_db: float = Field(description="Высота над фоном, дБ")
+    bandwidth_hz: float = Field(description="Ширина пика, Гц")
+
+
 class SpectrumResult(BaseModel):
     """Результат задачи спектра записи (``kind=spectrum``).
 
-    PSD считается по эпохам записи (Welch) и отдаётся **числами** — UI сам
-    рисует гистограмму по диапазонам. Топокарты — только картинки (PNG),
+    PSD считается по эпохам записи (Welch или multitaper) и отдаётся **числами** —
+    UI сам рисует гистограмму по диапазонам. Топокарты — только картинки (PNG),
     пиксели UI не считает: то же правило, что для срезов МРТ (срез 3.2).
     """
 
@@ -627,7 +639,13 @@ class SpectrumResult(BaseModel):
     sfreq: float
     epoch_length_ms: float
     n_epochs: int = Field(description="Сколько эпох попало в PSD")
-    n_fft: int = Field(description="Длина окна Welch, отсчётов")
+    n_fft: int = Field(
+        description="Длина окна Welch, отсчётов; для multitaper — длина окна анализа (эпоха)"
+    )
+    psd_method: str = Field(
+        default="welch",
+        description="Метод PSD (N17): welch | multitaper",
+    )
     filter_band_hz: list[float] | None = Field(
         default=None, description="Полоса фильтра, на которой считался спектр; None — без фильтра"
     )
@@ -646,6 +664,26 @@ class SpectrumResult(BaseModel):
     theta_alpha_beta_ratio: float | None = Field(
         default=None,
         description="Индекс (θ+α)/β по интегральным мощностям (N16); None — диапазоны не измерены",
+    )
+    aperiodic_exponent: float | None = Field(
+        default=None,
+        description="Наклон апериодической 1/f-компоненты (specparam); None — фит не сошёлся",
+    )
+    aperiodic_offset: float | None = Field(
+        default=None,
+        description="Смещение апериодической 1/f-компоненты в log10(мкВ²/Гц); None — фит не сошёлся",
+    )
+    aperiodic_fit_uv2: list[float] = Field(
+        default_factory=list,
+        description="Кривая фона на сетке `freqs`, мкВ²/Гц (рисуется поверх PSD)",
+    )
+    peaks: list[SpectrumPeakOut] = Field(
+        default_factory=list,
+        description="Гауссовые пики над фоном, по убыванию высоты (specparam)",
+    )
+    fit_r_squared: float | None = Field(
+        default=None,
+        description="Качество 1/f-фита, R² в log-пространстве; None — фит не сошёлся",
     )
     topomap_version: str = Field(description="Версия топокарт (в URL — против «залипания» кэша)")
     warnings: list[str] = Field(default_factory=list)

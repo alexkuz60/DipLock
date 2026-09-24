@@ -30,6 +30,8 @@ export type SpectrumQuery = {
   filterBandHz: [number, number] | null
   notchHz: number | null
   epochLengthMs: number
+  /** Метод PSD (N17): `welch` | `multitaper` — входит в URL/ETag топокарт */
+  psdMethod: string
 }
 
 /** Русские подписи ритмов; неизвестный ключ показывается как есть (не «теряется»). */
@@ -58,6 +60,7 @@ export function spectrumQueryString(query: SpectrumQuery): string {
   }
   if (query.notchHz) parts.push(`notch_hz=${query.notchHz}`)
   parts.push(`epoch_length_ms=${query.epochLengthMs}`)
+  parts.push(`psd_method=${query.psdMethod}`)
   return parts.join('&')
 }
 
@@ -88,6 +91,9 @@ export function spectrumQueryOf(result: SpectrumResult): SpectrumQuery {
     filterBandHz: band && band.length === 2 ? [band[0], band[1]] : null,
     notchHz: result.notch_hz,
     epochLengthMs: result.epoch_length_ms,
+    // `?? 'welch'` — для результатов задач, записанных до появления поля
+    // (файлы `results_dir/jobs/*.json`): тогда методом был Welch.
+    psdMethod: result.psd_method || 'welch',
   }
 }
 
@@ -171,8 +177,6 @@ export function psdPolyline(
   if (freqs.length < 2 || freqs.length !== power.length) return ''
   const fMin = freqs[0]
   const fMax = freqs[freqs.length - 1]
-  const span = fMax - fMin || 1
-  const innerWidth = Math.max(1, width - padding * 2)
   const innerHeight = Math.max(1, height - padding * 2)
   // Логарифм: 0 и отрицательные значения после центрирования сигнала возможны
   const scaled = power.map((value) => Math.log10(1 + Math.max(0, value)))
@@ -180,11 +184,26 @@ export function psdPolyline(
 
   return freqs
     .map((freq, index) => {
-      const x = padding + ((freq - fMin) / span) * innerWidth
+      const x = psdX(freq, fMin, fMax, width, padding)
       const y = padding + innerHeight * (1 - scaled[index] / maxLog)
       return `${x.toFixed(2)},${y.toFixed(2)}`
     })
     .join(' ')
+}
+
+/**
+ * X-координата частоты на графике PSD: та же шкала, что и у ломаной (`psdPolyline`),
+ * поэтому маркер пика (specparam) встаёт ровно над своим бином, а не «примерно».
+ */
+export function psdX(
+  freq: number,
+  fMin: number,
+  fMax: number,
+  width: number,
+  padding = 2,
+): number {
+  const span = fMax - fMin || 1
+  return padding + ((freq - fMin) / span) * Math.max(1, width - padding * 2)
 }
 
 /** Подпись параметров расчёта для панели: полоса, длина эпохи, шаг сетки. */
@@ -278,13 +297,15 @@ export function bandInFreqWindow(
  * текущих настроек панели (после их правки расчёт остаётся прежним).
  */
 export function spectrumSummary(result: SpectrumResult): string {
-  const { filterBandHz, epochLengthMs } = spectrumQueryOf(result)
-  return `Спектр: ${rangeSummary({ filterBandHz, epochLengthMs })} · окно ${result.n_fft} · эпох ${result.n_epochs}`
+  const { filterBandHz, epochLengthMs, psdMethod } = spectrumQueryOf(result)
+  const method = psdMethod === 'multitaper' ? 'multitaper' : 'Welch'
+  return `Спектр: ${rangeSummary({ filterBandHz, epochLengthMs })} · ${method} · окно ${result.n_fft} · эпох ${result.n_epochs}`
 }
 
 /**
- * Интерпретируемые метрики спектра (N16): IAF и θ/β-индексы одной строкой.
- * Неизмеренные значения (`null`) пропускаются — строка никогда не покажет «null».
+ * Интерпретируемые метрики спектра (N16 + 1/f): IAF, θ/β-индексы, наклон
+ * апериодического фона и ведущий пик над ним. Неизмеренные значения (`null`)
+ * пропускаются — строка никогда не покажет «null».
  */
 export function spectrumMetrics(result: SpectrumResult): string[] {
   const metrics: string[] = []
@@ -296,6 +317,13 @@ export function spectrumMetrics(result: SpectrumResult): string[] {
   }
   if (result.theta_alpha_beta_ratio !== null && Number.isFinite(result.theta_alpha_beta_ratio)) {
     metrics.push(`(θ+α)/β ${result.theta_alpha_beta_ratio.toFixed(2)}`)
+  }
+  if (result.aperiodic_exponent !== null && Number.isFinite(result.aperiodic_exponent)) {
+    metrics.push(`1/f ${result.aperiodic_exponent.toFixed(2)}`)
+  }
+  const top = result.peaks[0]
+  if (top && Number.isFinite(top.center_hz)) {
+    metrics.push(`пик ${top.center_hz.toFixed(1)} Гц`)
   }
   return metrics
 }

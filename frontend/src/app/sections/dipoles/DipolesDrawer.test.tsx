@@ -47,7 +47,7 @@ describe('выдвижная панель раздела «Диполи»', () =
 
     const alpha = screen.getByAltText('Топокарта α — альфа (8–13 Гц)')
     expect(alpha.getAttribute('src')).toBe(
-      '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&epoch_length_ms=1000&v=spec1234abcd',
+      '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&epoch_length_ms=1000&psd_method=welch&v=spec1234abcd',
     )
     // Мощность подписана рядом с картинкой; неизмеренная — «—», а не «0.00»
     expect(screen.getByText(/8–13 Гц · 12.50 мкВ² · 55 %/)).toBeInTheDocument()
@@ -95,8 +95,28 @@ describe('выдвижная панель раздела «Диполи»', () =
     expect(screen.getByTestId('fft-psd-line')).toBeInTheDocument()
     // Подпись — параметры именно этого расчёта (полоса,эпоха, окно, эпохи)
     expect(
-      screen.getByText('Спектр: 1–40 Гц · эпоха 1000 мс · окно 250 · эпох 4'),
+      screen.getByText('Спектр: 1–40 Гц · эпоха 1000 мс · Welch · окно 250 · эпох 4'),
     ).toBeInTheDocument()
+  })
+
+  it('FFT: фон 1/f пунктиром и маркеры пиков над ним (specparam)', () => {
+    useDipoleCalc.setState({ view: 'fft', spectrum: spectrumResultFixture() })
+    renderWithProviders(<DipolesDrawer />)
+
+    const background = screen.getByTestId('fft-aperiodic-line')
+    expect(background).toBeInTheDocument()
+    // Фон рисуется той же сеткой частот, что и PSD
+    expect((background.getAttribute('points') ?? '').split(' ').filter(Boolean)).toHaveLength(7)
+    // Пик α 10.2 Гц из фикстуры — вертикальная метка с подписью центра
+    const peak = screen.getByTestId('fft-peak-0')
+    expect(peak).toHaveTextContent('10.2')
+    // Пики схлопываются в null-поля — фон и метки не рисуются («не измерено»)
+    useDipoleCalc.setState({
+      spectrum: spectrumResultFixture({ peaks: [], aperiodic_fit_uv2: [] }),
+    })
+    renderWithProviders(<DipolesDrawer />)
+    expect(screen.queryByTestId('fft-aperiodic-line')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('fft-peak-0')).not.toBeInTheDocument()
   })
 
   /**

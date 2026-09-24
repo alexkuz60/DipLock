@@ -29,7 +29,9 @@ import { channelLabel, channelOptions, isMixChannel, resolveChannel } from '@/sh
 import { AMPLITUDE_UV_PER_DIV } from '@/shared/lib/eegView'
 import { BAND_LABELS } from '@/shared/lib/spectrum'
 import {
+  BASELINE_SEC_RANGE,
   EEG_PARAM_DEFAULTS,
+  ERD_RANGE_PCT_RANGE,
   SPECTROGRAM_FMAX_RANGE_HZ,
   SPECTROGRAM_OVERLAP_RANGE_PCT,
   SPECTROGRAM_OVERLAP_STEP_PCT,
@@ -141,7 +143,7 @@ export function EegPanel() {
 
       <Panel
         title="Спектрограмма"
-        hint="Параметры окна STFT уходят в задачу; палитра, окно дБ и сглаживание — только просмотр."
+        hint="Параметры окна STFT уходят в задачу; палитра, окно дБ/ERD, шкала частот и сглаживание — только просмотр."
       >
         <NumberField
           label="Окно STFT"
@@ -180,25 +182,106 @@ export function EegPanel() {
           options={EEG_PALETTES.map((item) => ({ value: item.id, label: item.label }))}
           onChange={(value) => setParams({ palette: value })}
         />
-        <NumberField
-          label="Окно дБ: низ"
-          value={params.dbRangeDb[0]}
-          min={-80}
-          max={0}
-          step={DB_RANGE_STEP}
-          unit="дБ"
-          onChange={(value) => setParams({ dbRangeDb: [value, params.dbRangeDb[1]] })}
-          hint="Отсчёт от потолка шкалы расчёта: всё, что ниже, показывается полом палитры."
+        <SegmentedControl
+          label="Шкала частот"
+          value={params.freqScale}
+          options={[
+            {
+              value: 'lin',
+              label: 'Линейная',
+              title: 'Равные Гц — равные расстояния, как было',
+            },
+            {
+              value: 'log',
+              label: 'Логарифмическая',
+              title: 'Равные расстояния — десятичные ряды (1, 2, 5, 10…), ось от 1 Гц',
+            },
+          ]}
+          onChange={(value) => setParams({ freqScale: value })}
+          hint="Ось частот картинки (N18): правка ничего не запускает и не меняет числа задачи."
         />
-        <NumberField
-          label="Окно дБ: верх"
-          value={params.dbRangeDb[1]}
-          min={-60}
-          max={20}
-          step={DB_RANGE_STEP}
-          unit="дБ"
-          onChange={(value) => setParams({ dbRangeDb: [params.dbRangeDb[0], value] })}
+        <SegmentedControl
+          label="Значения"
+          value={params.valueMode}
+          options={[
+            {
+              value: 'db',
+              label: 'дБ',
+              title: 'Уровень амплитуды, как считал сервер',
+            },
+            {
+              value: 'erd',
+              label: 'ERD/ERS %',
+              title: 'Изменение мощности относительно baseline: минус — подавление (ERD), плюс — усиление (ERS)',
+            },
+          ]}
+          onChange={(value) => setParams({ valueMode: value })}
+          hint="ERD/ERS (N18) считается поверх уже полученной сетки дБ — ни одного запроса. Отсчёт — от мощности baseline-интервала каждой частоты."
         />
+        {params.valueMode === 'erd' ? (
+          <>
+            <NumberField
+              label="Baseline от"
+              value={params.baselineSec[0]}
+              min={BASELINE_SEC_RANGE[0]}
+              max={BASELINE_SEC_RANGE[1]}
+              step={0.5}
+              unit="с"
+              onChange={(value) => setParams({ baselineSec: [value, params.baselineSec[1]] })}
+              hint="Отсчёт «100 % мощности». Обе границы 0 — «первые 10 % записи» (по данным задачи)."
+            />
+            <NumberField
+              label="Baseline до"
+              value={params.baselineSec[1]}
+              min={BASELINE_SEC_RANGE[0]}
+              max={BASELINE_SEC_RANGE[1]}
+              step={0.5}
+              unit="с"
+              onChange={(value) => setParams({ baselineSec: [params.baselineSec[0], value] })}
+            />
+            <NumberField
+              label="Окно палитры от"
+              value={params.erdRangePct[0]}
+              min={ERD_RANGE_PCT_RANGE[0]}
+              max={ERD_RANGE_PCT_RANGE[1]}
+              step={10}
+              unit="%"
+              onChange={(value) => setParams({ erdRangePct: [value, params.erdRangePct[1]] })}
+              hint="В режиме ERD/ERS палитра растягивается по процентам, а не по дБ."
+            />
+            <NumberField
+              label="Окно палитры до"
+              value={params.erdRangePct[1]}
+              min={ERD_RANGE_PCT_RANGE[0]}
+              max={ERD_RANGE_PCT_RANGE[1]}
+              step={10}
+              unit="%"
+              onChange={(value) => setParams({ erdRangePct: [params.erdRangePct[0], value] })}
+            />
+          </>
+        ) : (
+          <>
+            <NumberField
+              label="Окно дБ: низ"
+              value={params.dbRangeDb[0]}
+              min={-80}
+              max={0}
+              step={DB_RANGE_STEP}
+              unit="дБ"
+              onChange={(value) => setParams({ dbRangeDb: [value, params.dbRangeDb[1]] })}
+              hint="Отсчёт от потолка шкалы расчёта: всё, что ниже, показывается полом палитры."
+            />
+            <NumberField
+              label="Окно дБ: верх"
+              value={params.dbRangeDb[1]}
+              min={-60}
+              max={20}
+              step={DB_RANGE_STEP}
+              unit="дБ"
+              onChange={(value) => setParams({ dbRangeDb: [params.dbRangeDb[0], value] })}
+            />
+          </>
+        )}
         <NumberField
           label="Сглаживание времени"
           value={params.smoothMs}

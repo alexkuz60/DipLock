@@ -40,7 +40,7 @@
 | 4 | `GET /recordings/{id}/signals` | пирамида огибающей ×1…×16 (контейнер `DPS1`, ETag) |
 | 5 | `POST /recordings/{id}/preprocess` | стадия предподготовки: `filter` / `artifacts` / `epochs` |
 | 6 | `GET /recordings/{id}/preprocess/{job_id}` | результат стадии |
-| 7 | `POST /recordings/{id}/spectrum` | спектр δ…γ (Welch PSD) |
+| 7 | `POST /recordings/{id}/spectrum` | спектр δ…γ (Welch или multitaper PSD, `psd_method`; 1/f + пики specparam) |
 | 8 | `GET /recordings/{id}/spectrum/{job_id}` | результат спектра |
 | 9 | `GET /recordings/{id}/spectrum/topomap/{band}.png` | топокарта диапазона (PNG, ETag) |
 | 10 | `POST /recordings/{id}/dipoles` | быстрый расчёт диполей (перебор сетки; одна точка на эпоху) |

@@ -361,7 +361,7 @@ async def get_preprocess_result(recording_id: str, job_id: str) -> PreprocessRes
 
 @router.post(
     "/recordings/{recording_id}/spectrum", status_code=202, response_model=JobCreated,
-    summary="Запустить расчёт спектра по диапазонам (Welch PSD)",
+    summary="Запустить расчёт спектра по диапазонам (Welch или multitaper PSD)",
 )
 async def create_spectrum_job(
     recording_id: str,
@@ -371,6 +371,7 @@ async def create_spectrum_job(
     reference: str = Form("average", description="average | custom"),
     reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     epoch_length_ms: float = Form(2000.0, description="Длина эпохи для PSD"),
+    psd_method: str = Form("welch", description="Метод PSD: welch | multitaper (N17)"),
 ) -> JobCreated:
     """Спектр записи по ритмам δ…γ — фоновой задачей (202 + ``job_id``).
 
@@ -385,6 +386,7 @@ async def create_spectrum_job(
         notch_hz=notch_hz,
         reference=reference, reference_channels=reference_channels,
         epoch_length_ms=epoch_length_ms,
+        psd_method=psd_method,
     )
     return submit_recording_job(
         "spectrum", recording, params, meta={"epoch_length_ms": epoch_length_ms},
@@ -414,23 +416,26 @@ async def get_spectrum_topomap(
     band_max: float | None = Query(None, description="Полоса фильтра, верхняя граница, Гц"),
     notch_hz: float | None = Query(None, description="Сетевой фильтр, Гц"),
     epoch_length_ms: float = Query(2000.0, description="Длина эпохи для PSD"),
+    psd_method: str = Query("welch", description="Метод PSD: welch | multitaper (входит в ETag)"),
     if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """PNG топокарты ритма в раскладке скальпа; вне круга голова прозрачна.
 
-    Параметры фильтра и эпохи входят в ETag: картинка соответствует **своему**
-    расчёту, и смена фильтра не отдаёт старую. Кэш — дисковый, поэтому повторный
-    запрос не пересчитывает PSD, а промах кэша пересчитывает (как пирамида
-    сигналов, 2.5). Неизвестный диапазон — 400, чужая запись — 404.
+    Параметры фильтра, эпохи и метода PSD входят в ETag: картинка соответствует
+    **своему** расчёту, и смена фильтра или метода не отдаёт старую. Кэш —
+    дисковый, поэтому повторный запрос не пересчитывает PSD, а промах кэша
+    пересчитывает (как пирамида сигналов, 2.5). Неизвестный диапазон — 400,
+    чужая запись — 404.
     """
     recording = require_recording(recording_id)
     # Референс в query топокарты не передаётся (контракт URL среза 3.4): берём
-    # значение по умолчанию, как раньше; полоса, notch и эпоха — из параметров.
+    # значение по умолчанию, как раньше; полоса, notch, эпоха и метод — из параметров.
     params = spectrum_params(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz,
         reference="average", reference_channels=None,
         epoch_length_ms=epoch_length_ms,
+        psd_method=psd_method,
     )
     try:
         data, version = await asyncio.to_thread(

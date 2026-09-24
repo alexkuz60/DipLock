@@ -180,12 +180,24 @@ def test_preprocess_params_bounds_notch_harmonics_and_ica_components():
 def test_spectrum_params_carry_band_notch_and_epoch_length():
     params = spectrum_params(
         band_min=4.0, band_max=8.0, notch_hz=50.0, reference="average",
-        reference_channels=None, epoch_length_ms=1000.0,
+        reference_channels=None, epoch_length_ms=1000.0, psd_method="multitaper",
     )
 
     assert params.filter_band == (4.0, 8.0)
     assert params.notch_hz == 50.0
     assert params.epoch_length_ms == 1000.0
+    assert params.psd_method == "multitaper"
+
+
+def test_spectrum_params_rejects_unknown_psd_method():
+    with pytest.raises(HTTPException) as err:
+        spectrum_params(
+            band_min=None, band_max=None, notch_hz=None, reference="average",
+            reference_channels=None, epoch_length_ms=1000.0, psd_method="periodogram",
+        )
+
+    assert err.value.status_code == 400
+    assert "psd_method" in err.value.detail
 
 
 def test_dipole_scan_params_keep_grid_step():

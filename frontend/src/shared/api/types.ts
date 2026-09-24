@@ -185,6 +185,15 @@ export type SpectrumBandOut = {
  * Результат расчёта спектра (`GET /recordings/{id}/spectrum/{job}`).
  * Числа рисует UI (гистограмма), топокарты приходят картинками с сервера.
  */
+export type SpectrumPeakOut = {
+  /** Центровая частота гауссова пика, Гц (specparam) */
+  center_hz: number
+  /** Высота пика над апериодическим фоном, дБ */
+  amplitude_db: number
+  /** Ширина пика, Гц */
+  bandwidth_hz: number
+}
+
 export type SpectrumResult = {
   recording_id: string
   channels: string[]
@@ -193,7 +202,10 @@ export type SpectrumResult = {
   sfreq: number
   epoch_length_ms: number
   n_epochs: number
+  /** Длина окна Welch, отсчётов; для multitaper — длина окна анализа (эпоха) */
   n_fft: number
+  /** Метод PSD (N17): `welch` | `multitaper` — входит в URL/ETag топокарт */
+  psd_method: string
   filter_band_hz: number[] | null
   notch_hz: number | null
   /** Порог reject эпох: входит в URL картинки топокарты (и в её ETag) */
@@ -206,6 +218,16 @@ export type SpectrumResult = {
   theta_beta_ratio: number | null
   /** Индекс (θ+α)/β (N16); `null` — диапазоны не измерены */
   theta_alpha_beta_ratio: number | null
+  /** Наклон апериодической 1/f-компоненты (specparam); `null` — фит не сошёлся */
+  aperiodic_exponent: number | null
+  /** Смещение апериодики в log10(мкВ²/Гц); `null` — фит не сошёлся */
+  aperiodic_offset: number | null
+  /** Кривая фона на сетке `freqs`, мкВ²/Гц (рисуется поверх PSD); пусто — фита нет */
+  aperiodic_fit_uv2: number[]
+  /** Гауссовые пики над фоном, по убыванию высоты (specparam) */
+  peaks: SpectrumPeakOut[]
+  /** Качество 1/f-фита, R² в log-пространстве; `null` — фит не сошёлся */
+  fit_r_squared: number | null
   /** Версия топокарт: уходит в URL (`?v=`) против «залипания» кэша браузера */
   topomap_version: string
   warnings: string[]
