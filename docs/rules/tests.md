@@ -70,7 +70,9 @@ cd frontend && npm run test                                    # Vitest (jsdom)
 
 Тесты быстрые (без сети): синтетический ЭЭГ (`backend/tests/conftest.py`) + `TestClient`; ветки с
 реальными данными (`~/mne_data`, `data/edf/test.edf`) помечаются маркером `integration` и скипаются
-без них. Покрывают: контракт API и Pydantic-схемы, job-API и прогресс, кэш поверхности (ETag/304),
+без них. **Сборка UI в git не живёт** (`.gitignore`: `backend/app/static/ui/`), в backend-джобе CI её
+нет — тесты, которым нужен бандл (`test_ui_index_is_not_heuristically_cached`), несут `skipif` по
+`app/static/ui/index.html`, иначе в CI падают на 404 `/ui/` (случай 24.09.2026). Покрывают: контракт API и Pydantic-схемы, job-API и прогресс, кэш поверхности (ETag/304),
 санитизацию и дедуп загрузок (sha256, сайдкар, 200/201), сигналы записи (формат `DPS1`, ETag/304, уровни, кэш), стадии предподготовки
 (`POST /recordings/{id}/preprocess`: 202 + задача, `result_url`, 400/404, зоны с каналами, отброшенные
 эпохи), config, bandpass_filter,

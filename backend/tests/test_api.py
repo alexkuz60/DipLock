@@ -1,6 +1,9 @@
 """Тесты REST API: служебные эндпоинты и валидация /analyze."""
 import io
 from datetime import datetime
+from pathlib import Path
+
+import pytest
 
 from app.utils.versions import code_freshness
 
@@ -54,6 +57,13 @@ def test_docs_available(client):
     assert client.get("/docs").status_code == 200
 
 
+# Сборка UI в git не живёт (`.gitignore`: `backend/app/static/ui/`): в CI backend-джобе
+# её нет, поэтому тест отдачи index.html работает только при локально собранном бандле
+# (та же дисциплина, что у маркера `integration` без ~/mne_data).
+_UI_INDEX = Path(__file__).resolve().parents[1] / "app" / "static" / "ui" / "index.html"
+
+
+@pytest.mark.skipif(not _UI_INDEX.is_file(), reason="UI-бандл не собран (нужен npm run build)")
 def test_ui_index_is_not_heuristically_cached(client):
     """index.html отдаётся с no-cache: эвристика браузера держала старый бандл
 
