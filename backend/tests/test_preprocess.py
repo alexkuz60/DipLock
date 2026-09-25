@@ -120,7 +120,12 @@ def test_filter_stage_reports_band_notch_and_reference(tmp_path, edf_file):
     assert result["channels"] == list(settings.standard_channels[:5])
     assert result["sfreq"] == pytest.approx(250.0)
     assert result["duration_sec"] == pytest.approx(4.0, abs=0.1)
-    assert result["warnings"] == []
+    # Паспорт фильтра (N11/N12): широкая полоса — FIR с явным ядром и краевым
+    # буфером, о котором честно предупреждаем (эпохи у краёв — BAD_edge)
+    assert result["filter_method"] == "fir"
+    assert result["filter_length_sec"] and result["filter_length_sec"] > 0
+    assert result["edge_buffer_sec"] == pytest.approx(result["filter_length_sec"] / 2)
+    assert any("Переходный процесс FIR" in warning for warning in result["warnings"])
     # Прогресс: чтение → готово (промежуточных этапов у стадии фильтра нет)
     assert stages == ["load_edf", "done"]
     assert result["duration_sec_calc"] >= 0

@@ -58,7 +58,7 @@ def run_analysis(
     строится: клиент получает ссылку на кэшируемый ассет (F6).
     """
     from app.services.artifact_detector import detect_artifacts
-    from app.services.bandpass_filter import apply_band_filter, compute_band_powers
+    from app.services.bandpass_filter import apply_band_filter, band_bounds, compute_band_powers
     from app.services.dipole_fitter import (
         fit_dipoles_for_epochs,
         fit_summary,
@@ -111,6 +111,10 @@ def run_analysis(
         epochs = segment_epochs(
             raw, annotations,
             epoch_length_ms=epoch_length_ms,
+            filter_band=band_bounds(
+                freq_band, custom_min_freq, custom_max_freq, single_freq,
+                bandwidth_hz=settings.default_single_freq_bandwidth_hz,
+            ),
         )
         entry.epochs = int(len(epochs.drop_log) if hasattr(epochs, "drop_log") else len(epochs))
     # len(epochs.events) — все созданные эпохи, len(epochs) — прошедшие reject

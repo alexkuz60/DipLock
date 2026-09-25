@@ -48,7 +48,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 29 роутов (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 32 роута (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -60,6 +60,7 @@ backend/app/
 ├── services/          # КАЖДЫЙ модуль = один шаг пайплайна
 │   ├── edf_loader.py  # read_raw_edf → pick/montage/reference/filter
 │   ├── artifact_detector.py, artifact_cleaner.py, epoch_segmenter.py, bandpass_filter.py
+│   ├── filter_design.py # дизайн фильтра: FIR/IIR, переходные полосы, буферы края, АЧХ (2.5)
 │   ├── dipole_fitter.py     # точный фитинг (эксперим.): mne.fit_dipole по эпохам, цена в /meta
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
@@ -140,6 +141,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `concept.md`, `docs/data-blocks.md` | зачем проект (миссия, критерии метода, способности) и кирпичики данных (структура до БД) |
 | `docs/rules/edf-viewer.md` | вьюер треков: интерактив, разметка эпох, оверлеи |
 | `docs/rules/artifacts.md` | артефакты: каталог 11 видов, правило BAD_, числа QC, MNE-only-очистка |
+| `docs/rules/filters.md` | фильтры: FIR/IIR и переходные полосы (N11), краевой буфер BAD_edge (N12), гармоники notch (N13), АЧХ и подпись «треки без фильтра» (N14) |
 | `docs/rules/dipoles.md` | раздел «Диполи»: проекции, быстрый расчёт, воспроизведение, таблица, формы фильтров |
 | `docs/rules/atlas-mri.md` | срез МРТ, анатомические структуры и поля Бродмана |
 | `docs/rules/eeg.md` | раздел «ЭЭГ»: трек канала и спектрограмма |
@@ -148,7 +150,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (709 Vitest / 425 pytest), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (737 Vitest / 453 pytest), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |

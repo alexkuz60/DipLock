@@ -4,9 +4,39 @@ import mne
 import numpy as np
 
 from app.core.config import settings
+from app.services.filter_design import band_filter_kwargs
 
 # Фильтровать можно как эпохи, так и continuous raw (рекомендуется raw — см. routes).
 type FilterTarget = mne.Epochs | mne.io.BaseRaw
+
+
+def band_bounds(
+    band_name: str = "all",
+    custom_min: float | None = None,
+    custom_max: float | None = None,
+    single_freq: float | None = None,
+    bandwidth_hz: float = 0.5,
+) -> tuple[float, float] | None:
+    """Границы полосы (fmin, fmax) из формы; ``None`` — фильтр не применяется.
+
+    Вынесены из ``apply_band_filter``, чтобы вызывающий мог передать полосу в
+    ``segment_epochs`` (краевой буфер переходного процесса, N12) без повторного
+    разбора параметров. Порядок веток — как в ``apply_band_filter``:
+    ``single_freq`` важнее имени диапазона («all» + одиночная частота — это
+    узкая полоса вокруг частоты, а не «без фильтра»).
+    """
+    if single_freq is not None:
+        half = bandwidth_hz / 2
+        return single_freq - half, single_freq + half
+    if band_name == "all":
+        return None
+    if band_name == "custom":
+        if custom_min is None or custom_max is None:
+            raise ValueError("custom_min и custom_max обязательны для 'custom'")
+        return custom_min, custom_max
+    if band_name in settings.freq_bands:
+        return settings.freq_bands[band_name]
+    raise ValueError(f"Неизвестный диапазон: {band_name}")
 
 
 def apply_band_filter(
@@ -25,32 +55,19 @@ def apply_band_filter(
     - single_freq: одиночная частота (напр. 7.83 Гц) → narrow bandpass
       bandwidth_hz центрируется на ней (7.58 — 8.08)
 
-    Для коротких эпох (< длины FIR-фильтра) фильтрация даёт искажения —
-    поэтому в пайплайне фильтр применяется к raw ДО нарезки.
+    Метод выбирается по ширине полосы (``filter_design``): узкая (≤
+    ``Settings.filter_iir_max_width_hz``) — IIR Butterworth zero-phase, широкая
+    — FIR с явными переходными полосами (N11). Для коротких эпох (< длины
+    FIR-фильтра) фильтрация даёт искажения — поэтому в пайплайне фильтр
+    применяется к raw ДО нарезки.
     """
-    standard_bands = settings.freq_bands  # DRY: единый словарь из config.py
-
-    if single_freq is not None:
-        fmin = single_freq - bandwidth_hz / 2
-        fmax = single_freq + bandwidth_hz / 2
-        return epochs.copy().filter(
-            fmin, fmax, fir_design="firwin", verbose=False
-        )
-
-    if band_name == "all":
+    bounds = band_bounds(band_name, custom_min, custom_max, single_freq, bandwidth_hz)
+    if bounds is None:
         return epochs
-
-    if band_name == "custom":
-        if custom_min is None or custom_max is None:
-            raise ValueError("custom_min и custom_max обязательны для 'custom'")
-        fmin, fmax = custom_min, custom_max
-    elif band_name in standard_bands:
-        fmin, fmax = standard_bands[band_name]
-    else:
-        raise ValueError(f"Неизвестный диапазон: {band_name}")
-
+    fmin, fmax = bounds
     return epochs.copy().filter(
-        fmin, fmax, fir_design="firwin", verbose=False
+        fmin, fmax, verbose=False,
+        **band_filter_kwargs(fmin, fmax, float(epochs.info["sfreq"])),
     )
 
 

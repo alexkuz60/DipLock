@@ -221,6 +221,20 @@ export type QcSummary = {
   recordStatusReasons: string[]
 }
 
+/**
+ * Паспорт фильтра из результата стадии `filter` (шаг 2.5, N11/N12): метод,
+ * длина FIR-ядра и краевой буфер. Нужен подписи вьюера (N14: «треки без
+ * фильтра») и блоку «Фильтр и референс» — цена фильтрации видна числом.
+ */
+export type FilterDesign = {
+  /** none | fir | iir */
+  method: string
+  /** Длина FIR-ядра, с (null для IIR и без фильтра) */
+  lengthSec: number | null
+  /** Краевой буфер записи ±, с (эпохи у краёв — BAD_edge) */
+  edgeBufferSec: number
+}
+
 export type EdfRecordingState = {
   /** Паспорт загруженной записи (null — не загружена) */
   recording: RecordingMeta | null
@@ -267,6 +281,11 @@ export type EdfRecordingState = {
   artifactTypes: ArtifactTypes | null
   /** Отчёт очистки стадии filter (ICA/SSP/интерполяция, метрика до/после) */
   cleanReport: CleanReport | null
+  /**
+   * Паспорт фильтра стадии `filter` (шаг 2.5): метод FIR/IIR, длина ядра и
+   * краевой буфер — подпись вьюера (N14) и блок «Фильтр и референс».
+   */
+  filterDesign: FilterDesign | null
   /** Пороги статуса иконок из результата стадии (конфиг сервера) */
   /** Пороги статуса иконок каналов (доля зон + SNR, из конфига сервера) */
   channelQcThresholds: { warn: number; bad: number; snrWarn: number; snrBad: number }
@@ -347,6 +366,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   qcSummary: null,
   artifactTypes: null,
   cleanReport: null,
+  filterDesign: null,
   channelQcThresholds: { warn: 0.05, bad: 0.2, snrWarn: 10, snrBad: 5 },
   passport: { ...EMPTY_PASSPORT },
   fileDialogRequest: 0,
@@ -372,6 +392,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       // читались бы как результат детектора (ручная проверка, 19.09.2026).
       layers: null,
       artifactTypes: null,
+      // Паспорт фильтра относится к результату прежней записи
+      filterDesign: null,
       // Задачи прежней записи не переносим на новую
       stageJobs: {},
       // Ручные пометки эпох относятся к конкретной записи — начинаем с чистых
@@ -528,6 +550,15 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
             }
           : get().qcSummary
       const cleanReport = result.stage === 'filter' ? result.clean : get().cleanReport
+      // Паспорт фильтра (шаг 2.5): метод/ядро/краевой буфер — подпись вьюера (N14)
+      const filterDesign =
+        result.stage === 'filter'
+          ? {
+              method: result.filter_method,
+              lengthSec: result.filter_length_sec,
+              edgeBufferSec: result.edge_buffer_sec,
+            }
+          : get().filterDesign
       // Счётчики типов (`artifact_types`): у `ica_eog` — число EOG-компонент
       // (зоны ICA контракт больше не отдаёт — фидбэк 24.09.2026)
       const artifactTypes =
@@ -539,6 +570,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         channelQcThresholds,
         qcSummary,
         cleanReport,
+        filterDesign,
         artifactTypes,
         stageJobs: {
           ...state.stageJobs,
@@ -600,6 +632,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       qcSummary: null,
       artifactTypes: null,
       cleanReport: null,
+      filterDesign: null,
       passport: { ...EMPTY_PASSPORT },
     })
     // Выбор каналов и результат предподготовки привязаны к записи

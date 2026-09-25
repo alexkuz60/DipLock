@@ -39,7 +39,8 @@ from app.services.artifact_detector import (
     qc_summary,
     record_qc_status,
 )
-from app.services.epoch_segmenter import segment_epochs
+from app.services.epoch_segmenter import EDGE_DESC, segment_epochs
+from app.services.filter_design import design_filter
 from app.services.prepared_signal import prepared_raw_report
 from app.services.recordings import Recording
 
@@ -240,12 +241,25 @@ def run_preprocess(
         band = list(params.filter_band) if params.filter_band is not None else None
         if band is None:
             warnings.append("Полоса пропускания не задана — сигнал без band-pass фильтра")
+        # Паспорт фильтра (N11/N12): метод, длина FIR-ядра и краевой буфер — UI
+        # показывает их рядом с формой и в подписи «треки без фильтра» (N14).
+        l_freq, h_freq = params.filter_band or (None, None)
+        design = design_filter(l_freq, h_freq, float(raw.info["sfreq"]))
         base.update({
             "band_hz": band,
             "notch_hz": params.notch_hz,
             "reference": params.reference,
+            "filter_method": design.method,
+            "filter_length_sec": design.filter_length_sec,
+            "edge_buffer_sec": design.edge_buffer_sec,
             "clean": clean_report or None,
         })
+        if design.edge_buffer_sec > 0 and design.filter_length_sec is not None:
+            warnings.append(
+                f"Переходный процесс FIR-фильтра: ±{design.edge_buffer_sec:.2f} с "
+                f"у краёв записи (длина ядра {design.filter_length_sec:.2f} с) — "
+                "эпохи в этих зонах отбрасываются (BAD_edge)"
+            )
         warnings.extend(clean_report.get("warnings", []))
         if params.clean_method == "ssp":
             warnings.append(
@@ -329,6 +343,7 @@ def run_preprocess(
         epochs = segment_epochs(
             raw, annotations,
             epoch_length_ms=params.epoch_length_ms,
+            filter_band=params.filter_band,
         )
     except ValueError as exc:
         raise PreprocessError(str(exc)) from exc
@@ -353,6 +368,14 @@ def run_preprocess(
         warnings.append(
             f"Отброшено эпох: {len(rejected)} из {len(epochs.drop_log)} "
             f"(аннотации BAD_ от детекторов артефактов)"
+        )
+    # Краевой буфер фильтра (N12) — отдельная видимая причина: пользователь
+    # должен понимать, что «края пустые» — честный отказ, а не потеря данных.
+    edge_dropped = sum(1 for log in epochs.drop_log if EDGE_DESC in log)
+    if edge_dropped:
+        warnings.append(
+            f"Краевой буфер фильтра: {edge_dropped} эпох у краёв записи "
+            f"отброшены ({EDGE_DESC} — переходный процесс FIR)"
         )
     progress("done", 1.0, message=f"Эпох: {len(epochs)} из {len(epochs.drop_log)}")
     base["duration_sec_calc"] = round(time.perf_counter() - started, 3)

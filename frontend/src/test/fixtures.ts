@@ -6,6 +6,7 @@ import type {
   DipoleScanPoint,
   DipoleRefineResult,
   DipoleScanResult,
+  FilterResponse,
   InitStatus,
   JobStatus,
   MetaResponse,
@@ -281,6 +282,9 @@ export function preprocessResultFixture(
     band_hz: stage === 'filter' ? [1, 40] : null,
     notch_hz: stage === 'filter' ? 50 : null,
     reference: 'average',
+    filter_method: stage === 'filter' ? 'fir' : 'none',
+    filter_length_sec: stage === 'filter' ? 3.302 : null,
+    edge_buffer_sec: stage === 'filter' ? 1.651 : 0,
     sfreq: recordingFixture.sfreq,
     duration_sec: recordingFixture.duration_sec,
     good_data_percent: 100,
@@ -334,6 +338,36 @@ export function preprocessResultFixture(
         : [],
     warnings: [],
     duration_sec_calc: 0.4,
+    ...overrides,
+  }
+}
+
+/**
+ * АЧХ применяемого фильтра (шаг 2.5): полоса 1–40 Гц @500 Гц, ядро 1651 тап.
+ * Числа совпадают с расчётом `services/filter_design.py` на текущей версии MNE.
+ */
+export function filterResponseFixture(
+  overrides: Partial<FilterResponse> = {},
+): FilterResponse {
+  const freqs: number[] = []
+  const gains: number[] = []
+  for (let f = 0; f <= 250; f += 0.5) {
+    freqs.push(f)
+    const inBand = f >= 1 && f <= 40
+    const atNotch = Math.abs(f - 50) < 1
+    gains.push(inBand ? 0 : atNotch ? -60 : f < 1 || f > 60 ? -60 : -3)
+  }
+  return {
+    freqs_hz: freqs,
+    gain_db: gains,
+    method: 'fir',
+    band_hz: [1, 40],
+    l_trans_bandwidth_hz: 1,
+    h_trans_bandwidth_hz: 10,
+    filter_length_sec: 3.302,
+    edge_buffer_sec: 1.651,
+    notch_freqs: [50],
+    sfreq: 500,
     ...overrides,
   }
 }

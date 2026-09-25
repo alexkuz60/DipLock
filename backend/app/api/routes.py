@@ -41,6 +41,7 @@ from app.api.assets import (
 from app.api.params import (
     dipole_refine_params,
     dipole_scan_params,
+    parse_filter_band,
     preprocess_params,
     spectrogram_params,
     spectrum_params,
@@ -68,6 +69,7 @@ from app.schemas.analysis import (
     ContoursRef,
     DipoleRefineResult,
     DipoleScanResult,
+    FilterResponseOut,
     JobCreated,
     JobStatus,
     MetaResponse,
@@ -92,6 +94,7 @@ from app.services.atlas_contours import (
     contours_ref as contour_ref,
 )
 from app.services.channel_mix import mixes_for
+from app.services.filter_design import filter_response
 from app.services.job_manager import job_manager, noop_progress
 from app.services.mri_slices import (
     mri_meta,
@@ -904,6 +907,68 @@ async def get_brain_surface_legacy(
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
     return asset_response(data, version)
+
+
+@router.get(
+    "/filter-response",
+    response_model=FilterResponseOut,
+    summary="АЧХ применяемого фильтра (полоса + notch с гармониками)",
+)
+async def get_filter_response(
+    band_min: float | None = Query(None, description="Нижняя граница полосы, Гц"),
+    band_max: float | None = Query(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Query(None, description="Частота notch, Гц (50/60)"),
+    notch_harmonics: int = Query(
+        0, description="Гармоники notch (100/150/200/240 Гц), 0–4",
+    ),
+    sfreq: float = Query(500.0, description="Частота дискретизации, Гц"),
+) -> FilterResponseOut:
+    """АЧХ фильтра, который применяет предподготовка: лёгкий синхронный расчёт.
+
+    Не задача (job): ~10–50 мс без ETag — параметры уже в query. Кривая считается
+    тем же конвейером, что и сигнал (``services/filter_design.py``): единичный
+    импульс проходит ``raw.filter`` + ``raw.notch_filter`` (с гармониками — N13),
+    поэтому совпадает с фактической обработкой: 0 дБ в полосе пропускания, провалы
+    notch. UI показывает график в блоке «Фильтр и референс», свёрнутым по
+    умолчанию — правка параметров без кнопок не делает запросов (правило UI).
+    """
+    band = parse_filter_band(band_min, band_max)
+    if not 0 <= notch_harmonics <= 4:
+        raise HTTPException(
+            status_code=400, detail="notch_harmonics — целое 0…4 (гармоники 50/60 Гц)",
+        )
+    if band is None and not notch_hz:
+        raise HTTPException(
+            status_code=400,
+            detail="Задайте полосу (band_min/band_max) и/или notch_hz — иначе АЧХ нечего показывать",
+        )
+    if not 50.0 <= sfreq <= 2000.0:
+        raise HTTPException(status_code=400, detail="sfreq — от 50 до 2000 Гц")
+    if notch_hz is not None and not 0.0 < notch_hz < sfreq / 2.0:
+        raise HTTPException(
+            status_code=400, detail="notch_hz должен быть в пределах (0, Nyquist)",
+        )
+    response = await asyncio.to_thread(
+        filter_response,
+        l_freq=band[0] if band else None,
+        h_freq=band[1] if band else None,
+        notch_hz=notch_hz,
+        notch_harmonics=notch_harmonics,
+        sfreq=sfreq,
+    )
+    design = response.design
+    return FilterResponseOut(
+        freqs_hz=[float(value) for value in response.freqs_hz],
+        gain_db=[float(value) for value in response.gain_db],
+        method=design.method,
+        band_hz=list(response.band_hz) if response.band_hz else None,
+        l_trans_bandwidth_hz=design.l_trans_bandwidth,
+        h_trans_bandwidth_hz=design.h_trans_bandwidth,
+        filter_length_sec=design.filter_length_sec,
+        edge_buffer_sec=design.edge_buffer_sec,
+        notch_freqs=[float(value) for value in response.notch_freqs],
+        sfreq=sfreq,
+    )
 
 
 @router.get("/meta", response_model=MetaResponse, summary="Версии, окружение и параметры")

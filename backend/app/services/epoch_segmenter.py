@@ -11,6 +11,42 @@ import numpy as np
 
 from app.core.config import settings
 from app.services.artifact_detector import BAD_PREFIX
+from app.services.filter_design import design_filter
+
+# Причина отбраковки эпох, попавших в краевой буфер переходного процесса
+# фильтра (N12): та же механика BAD_-аннотаций, отдельный тип для UI.
+EDGE_DESC = f"{BAD_PREFIX}edge"
+
+
+def edge_annotations(
+    raw: mne.io.BaseRaw,
+    filter_band: tuple[float, float] | None,
+) -> mne.Annotations:
+    """Аннотации ``BAD_edge`` у краёв записи (переходный процесс фильтра, N12).
+
+    Zero-phase фильтр искажает начало и конец записи на половину длины ядра
+    (``filter_design.edge_buffer_sec``). Нарезка честно отбрасывает эпохи в этих
+    интервалах: в покрытии и штриховке UI видна причина ``BAD_edge``, а не
+    молчаливое «эпоха пропала». У IIR-полосы буфер равен нулю (короткое ядро) —
+    аннотаций нет. Если переходный процесс длиннее половины записи, помечается
+    вся запись: честное «запись короче ядра фильтра» лучше, чем тихая выдача
+    искажённых краёв за чистые.
+    """
+    if filter_band is None:
+        return mne.Annotations([], [], [])
+    l_freq, h_freq = filter_band
+    design = design_filter(l_freq, h_freq, float(raw.info["sfreq"]))
+    buffer_sec = design.edge_buffer_sec
+    if buffer_sec <= 0.0:
+        return mne.Annotations([], [], [])
+    duration_sec = float(raw.n_times) / float(raw.info["sfreq"])
+    if buffer_sec * 2.0 >= duration_sec:
+        return mne.Annotations([0.0], [duration_sec], [EDGE_DESC])
+    return mne.Annotations(
+        [0.0, duration_sec - buffer_sec],
+        [buffer_sec, buffer_sec],
+        [EDGE_DESC, EDGE_DESC],
+    )
 
 
 def make_epoch_events(raw: mne.io.BaseRaw, epoch_length_ms: float) -> np.ndarray:
@@ -29,6 +65,7 @@ def segment_epochs(
     raw: mne.io.BaseRaw,
     artifact_annotations: mne.Annotations,
     epoch_length_ms: float = 2000.0,
+    filter_band: tuple[float, float] | None = None,
 ) -> mne.Epochs:
     """Разбивает сессию на эпохи без наложения (non-overlapping).
 
@@ -39,12 +76,26 @@ def segment_epochs(
     отбрасывается **всё**, ошибка перечисляет покрытие ``BAD_`` по типам —
     иначе «кто занял запись» приходится выяснять по слоям вьюера вручную
     (фидбэк 24.09.2026).
+
+    ``filter_band`` — полоса фильтра, которой подвергали continuous raw до
+    нарезки: края записи помечаются ``BAD_edge`` (переходный процесс zero-phase
+    фильтра, N12, см. ``edge_annotations``). Без полосы поведение прежнее.
     """
     valid_lengths = settings.epoch_lengths_ms  # DRY: единый список из config.py
     if epoch_length_ms not in valid_lengths:
         raise ValueError(f"Длина эпохи {epoch_length_ms} мс не в списке: {valid_lengths}")
 
-    raw.set_annotations(artifact_annotations)
+    # Аннотации краёв (N12) складываются с артефактными ДО нарезки: эпохи,
+    # попавшие в переходный процесс фильтра, отбрасываются с причиной BAD_edge.
+    edge = edge_annotations(raw, filter_band)
+    annotations = mne.Annotations(
+        onset=[float(v) for v in artifact_annotations.onset]
+        + [float(v) for v in edge.onset],
+        duration=[float(v) for v in artifact_annotations.duration]
+        + [float(v) for v in edge.duration],
+        description=list(artifact_annotations.description) + list(edge.description),
+    )
+    raw.set_annotations(annotations)
     epoch_length_sec = epoch_length_ms / 1000.0
 
     # События без overlap
@@ -66,8 +117,8 @@ def segment_epochs(
     if len(epochs) == 0:
         duration_sec = float(raw.times[-1]) if raw.n_times else 0.0
         raise ValueError(
-            "Все эпохи отброшены аннотациями BAD_ (детекторы артефактов). "
-            f"Покрытие: {bad_coverage_text(artifact_annotations, duration_sec)}. "
+            "Все эпохи отброшены аннотациями BAD_ (детекторы артефактов и краевой "
+            f"буфер фильтра). Покрытие: {bad_coverage_text(annotations, duration_sec)}. "
             "Проверьте пороги детекции, фильтр и референс."
         )
 

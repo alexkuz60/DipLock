@@ -30,6 +30,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.core.config import Settings
+from app.services.filter_design import band_filter_kwargs, harmonic_frequencies
 
 logger = logging.getLogger(__name__)
 
@@ -148,13 +149,11 @@ def apply_cleaning(
     report = CleanReport(method=spec.method)
     report.amplitude_p95_uv_before = amplitude_p95_uv(raw.get_data())
 
-    # 1. Гармоники сетевого фильтра (50 → 100/150/200 Гц)
+    # 1. Гармоники сетевого фильтра (50 → 100/150/200 Гц, N13)
     if spec.notch_harmonics > 0 and notch_hz:
-        nyquist = float(raw.info["sfreq"]) / 2.0
-        freqs = [
-            notch_hz * k for k in range(2, 2 + spec.notch_harmonics)
-            if notch_hz * k < nyquist - 1.0
-        ]
+        freqs = harmonic_frequencies(
+            notch_hz, spec.notch_harmonics, float(raw.info["sfreq"]),
+        )
         if freqs:
             try:
                 raw.notch_filter(freqs, verbose=False)
@@ -201,7 +200,10 @@ def fit_ica(raw: mne.io.BaseRaw, n_components: int) -> mne.preprocessing.ICA:
     fit_raw = (
         raw
         if raw.info["highpass"] >= 1.0
-        else raw.copy().filter(1.0, None, fir_design="firwin", verbose=False)
+        else raw.copy().filter(
+            1.0, None, verbose=False,
+            **band_filter_kwargs(1.0, None, float(raw.info["sfreq"])),
+        )
     )
     ica = mne.preprocessing.ICA(n_components=n_components, rng=42, max_iter="auto")
     ica.fit(fit_raw, verbose=False)

@@ -9,6 +9,7 @@ import type {
   ContourSlice,
   DipoleRefineResult,
   DipoleScanResult,
+  FilterResponse,
   InitStatus,
   JobCreated,
   JobStatus,
@@ -150,6 +151,31 @@ export const api = {
   /** История задач (новые — в конце). */
   jobs: (limit = 20, signal?: AbortSignal) =>
     request<JobStatus[]>(`${API_PREFIX}/jobs?limit=${limit}`, { signal }),
+
+  /**
+   * АЧХ применяемого фильтра (шаг 2.5, N11–N14): лёгкий расчёт без задачи.
+   * Запрос делается только при явном раскрытии блока «АЧХ» — правка параметров
+   * не запускает обработку и не шлёт запросов (правило UI).
+   */
+  filterResponse: (
+    params: {
+      band: [number, number] | null
+      notchHz: number | null
+      notchHarmonics: number
+    },
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams()
+    if (params.band) {
+      query.set('band_min', String(params.band[0]))
+      query.set('band_max', String(params.band[1]))
+    }
+    if (params.notchHz) query.set('notch_hz', String(params.notchHz))
+    if (params.notchHarmonics > 0) {
+      query.set('notch_harmonics', String(params.notchHarmonics))
+    }
+    return request<FilterResponse>(`${API_PREFIX}/filter-response?${query}`, { signal })
+  },
 
   /** Паспорт загруженной записи (метаданные, без обработки). */
   recording: (recordingId: string, signal?: AbortSignal) =>

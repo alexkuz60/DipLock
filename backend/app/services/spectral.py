@@ -386,6 +386,7 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: SpectrumParams)
             epochs = segment_epochs(
                 raw,
                 mne.Annotations([], [], []),
+                filter_band=params.filter_band,
                 epoch_length_ms=params.epoch_length_ms,
             )
             entry.epochs = len(epochs.drop_log)

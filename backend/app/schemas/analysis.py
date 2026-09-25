@@ -203,6 +203,41 @@ class CleanReportOut(BaseModel):
     )
 
 
+class FilterResponseOut(BaseModel):
+    """АЧХ применяемого фильтра (`GET /filter-response`, шаг 2.5, N11–N14).
+
+    Кривая — фактический отклик живого конвейера
+    (`services/filter_design.filter_response`): единичный импульс проходит те же
+    `raw.filter` + `raw.notch_filter` (с гармониками — N13), поэтому график
+    показывает ровно то, что получает расчёт, а не «приблизительно по формулам».
+    """
+
+    freqs_hz: list[float] = Field(description="Сетка частот, Гц (0…Nyquist)")
+    gain_db: list[float] = Field(
+        description="Усиление фильтра, дБ (0 — полоса пропускания)",
+    )
+    method: str = Field(description="Метод полосового фильтра: none | fir | iir")
+    band_hz: list[float] | None = Field(
+        default=None, description="Полоса пропускания [l, h], Гц; None — только notch",
+    )
+    l_trans_bandwidth_hz: float | None = Field(
+        default=None, description="Нижняя переходная полоса FIR, Гц (N11, явное число)",
+    )
+    h_trans_bandwidth_hz: float | None = Field(
+        default=None, description="Верхняя переходная полоса FIR, Гц",
+    )
+    filter_length_sec: float | None = Field(
+        default=None, description="Длина FIR-ядра, с (None для IIR и без полосы)",
+    )
+    edge_buffer_sec: float = Field(
+        default=0.0, description="Краевой буфер записи ±, с (N12, эпохи у краёв — BAD_edge)",
+    )
+    notch_freqs: list[float] = Field(
+        default_factory=list, description="Частоты notch с гармониками (N13)",
+    )
+    sfreq: float = Field(description="Частота дискретизации расчёта, Гц")
+
+
 class PreprocessResult(BaseModel):
     """Результат задачи предподготовки записи (стадия ``preprocess``).
 
@@ -224,6 +259,18 @@ class PreprocessResult(BaseModel):
     )
     notch_hz: float | None = Field(default=None, description="Частота notch-фильтра, Гц (None — выключен)")
     reference: str = Field(default="average", description="Референс: average | custom")
+    # Паспорт фильтра (шаг 2.5, N11/N12): метод и цена фильтрации — UI показывает
+    # их в блоке «Фильтр и референс» и в подписи вьюера (N14 — треки без фильтра)
+    filter_method: str = Field(
+        default="none", description="Метод полосового фильтра: none | fir | iir",
+    )
+    filter_length_sec: float | None = Field(
+        default=None, description="Длина FIR-ядра, с (None для IIR и без фильтра)",
+    )
+    edge_buffer_sec: float = Field(
+        default=0.0,
+        description="Краевой буфер записи ±, с (эпохи у краёв — BAD_edge, N12)",
+    )
     sfreq: float = 0.0
     duration_sec: float = 0.0
 

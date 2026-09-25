@@ -120,6 +120,12 @@ export type PreprocessResult = {
   band_hz: number[] | null
   notch_hz: number | null
   reference: string
+  /** Метод полосового фильтра: none | fir | iir (шаг 2.5, N11) */
+  filter_method: string
+  /** Длина FIR-ядра, с (null для IIR и без фильтра) */
+  filter_length_sec: number | null
+  /** Краевой буфер записи ±, с (эпохи у краёв — BAD_edge, N12) */
+  edge_buffer_sec: number
   sfreq: number
   duration_sec: number
   artifacts: ArtifactZoneOut[]
@@ -161,6 +167,34 @@ export type PreprocessResult = {
   /** Порог reject-фильтра амплитуды, мкВ (строка причины в UI) */
   warnings: string[]
   duration_sec_calc: number
+}
+
+/**
+ * АЧХ применяемого фильтра (`GET /filter-response`, шаг 2.5, N11–N14).
+ * Кривая — фактический отклик живого конвейера (импульс через те же
+ * `raw.filter` + `raw.notch_filter`), а не приближение по формулам.
+ */
+export type FilterResponse = {
+  /** Сетка частот, Гц (0…Nyquist) */
+  freqs_hz: number[]
+  /** Усиление фильтра, дБ (0 — полоса пропускания) */
+  gain_db: number[]
+  /** Метод полосового фильтра: none | fir | iir */
+  method: 'none' | 'fir' | 'iir'
+  /** Полоса пропускания [l, h], Гц; null — только notch */
+  band_hz: number[] | null
+  /** Нижняя переходная полоса FIR, Гц (N11, явное число) */
+  l_trans_bandwidth_hz: number | null
+  /** Верхняя переходная полоса FIR, Гц */
+  h_trans_bandwidth_hz: number | null
+  /** Длина FIR-ядра, с (null для IIR и без полосы) */
+  filter_length_sec: number | null
+  /** Краевой буфер записи ±, с (N12, эпохи у краёв — BAD_edge) */
+  edge_buffer_sec: number
+  /** Частоты notch с гармониками (N13) */
+  notch_freqs: number[]
+  /** Частота дискретизации расчёта, Гц */
+  sfreq: number
 }
 
 /** Мощность одного ритма (срез 3.4): интеграл PSD + ссылка на топокарту */

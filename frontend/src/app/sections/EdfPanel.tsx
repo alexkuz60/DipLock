@@ -29,9 +29,10 @@ import {
   type FilterPresetId,
   type ReferenceMode,
 } from '@/shared/state/edfParams'
-import { useEdfRecording } from '@/shared/state/edfRecording'
+import { filterBandOf, useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
+import { FilterResponse } from '@/shared/ui/FilterResponse'
 import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
@@ -73,6 +74,8 @@ export function EdfPanel() {
   /** Числа QC и отчёт очистки приходят результатами стадий (этапы «числа QC» и 4) */
   const qcSummary = useEdfRecording((state) => state.qcSummary)
   const cleanReport = useEdfRecording((state) => state.cleanReport)
+  /** Паспорт фильтра стадии filter (шаг 2.5): метод/ядро/буфер краёв (N11/N12) */
+  const filterDesign = useEdfRecording((state) => state.filterDesign)
   const clearEpochMarks = useEdfRecording((state) => state.clearEpochMarks)
   const recalc = useEdfRecalcStatus()
 
@@ -229,6 +232,22 @@ export function EdfPanel() {
               : ''}
           </p>
         ) : null}
+        {filterDesign ? (
+          <p className="mt-1 text-sm text-fg-2" data-testid="filter-passport">
+            Фильтр расчёта:{' '}
+            {filterDesign.method === 'none'
+              ? 'без полосового фильтра'
+              : filterDesign.method === 'fir'
+                ? `FIR, ядро ${filterDesign.lengthSec?.toFixed(2) ?? '?'} с, краевой буфер ±${filterDesign.edgeBufferSec.toFixed(2)} с (эпохи у краёв — BAD_edge)`
+                : 'IIR (узкая полоса, zero-phase) — края записи не режутся'}
+            {' — применяется только в расчётах; треки вьюера остаются исходными.'}
+          </p>
+        ) : null}
+        <FilterResponse
+          band={filterBandOf(params)}
+          notchHz={params.notchHz ? params.notchHz : null}
+          notchHarmonics={params.notchHarmonics}
+        />
       </Panel>
 
       <Panel title="Пороги артефактов" hint="Значения по умолчанию — из backend/.env.">

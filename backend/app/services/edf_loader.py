@@ -6,6 +6,7 @@ import mne
 import numpy as np
 
 from app.services.artifact_detector import find_dead_channels
+from app.services.filter_design import band_filter_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -153,11 +154,16 @@ def load_edf(
         refs = [ch for ch in (reference_channels or []) if ch in raw.ch_names]
         raw.set_eeg_reference(refs if refs else "average", projection=False)
     # Полосовой фильтр — только если заданы границы; нарезка эпох и артефакты
-    # идут после, чтобы FIR-фильтр работал на continuous-сигнале.
+    # идут после, чтобы фильтр работал на continuous-сигнале. Метод FIR/IIR и
+    # явные переходные полосы — из `filter_design` (N11): одинаково с
+    # `apply_band_filter` и с `/filter-response` (АЧХ показывает ровно это).
     if l_freq is not None or h_freq is not None:
-        raw.filter(l_freq, h_freq, fir_design="firwin")
+        raw.filter(
+            l_freq, h_freq,
+            **band_filter_kwargs(l_freq, h_freq, float(raw.info["sfreq"])),
+        )
     if notch_hz:
-        raw.notch_filter(notch_hz, fir_design="firwin")
+        raw.notch_filter(notch_hz)
     # Даунсэмплинг до 500 Гц только если запись чаще (экономия памяти/времени)
     if raw.info["sfreq"] > 500.0:
         raw.resample(500.0)

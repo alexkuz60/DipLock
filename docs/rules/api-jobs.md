@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **29 роутов**, префикс `/api/v1` из `settings.api_prefix`.
+- `backend/app/api/routes.py` — **32 роута**, префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
   - `api/params.py` — формы → параметры сервисов и проверки с текстом для UI (400);
@@ -30,7 +30,7 @@
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/types.ts`.
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (29 в `routes.py`)
+## Инвентарь эндпоинтов (32 в `routes.py`)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -50,18 +50,19 @@
 | 14 | `GET /recordings/{id}/spectrogram/{job_id}/grid.bin` | сетка дБ (float32, контейнер `DPS2`, ETag) |
 | 15 | `POST /recordings/{id}/dipole_refine` | точное уточнение одной эпохи (BEM fit_dipole, F19) |
 | 16 | `GET /recordings/{id}/dipole_refine/{job_id}` | результат уточнения («было/стало») |
-| 15 | `POST /jobs` | анализ фоновой задачей (legacy, с прогрессом) |
-| 16 | `GET /jobs` | история задач |
-| 17 | `GET /jobs/{job_id}` | состояние задачи |
-| 18 | `GET /jobs/{job_id}/result` | результат завершённой задачи |
-| 19 | `GET /surface` | меш fsaverage (кэш + ETag) |
-| 20–21 | `GET /surface/brodmann`, `/surface/brodmann/{area_name}` | индексы вершин полей Бродмана |
-| 22–23 | `GET /surface/mri`, `/surface/mri/slice/{plane}/{mm}.png` | метаданные срезов и срез картинкой (ETag) |
-| 24–25 | `GET /surface/contours`, `/surface/contours/{plane}/{mm}` | метаданные и контуры структур/полей (ETag) |
-| 26 | `GET /brodmann-labels` | имена доступных полей Бродмана |
-| 27 | `GET /brain-surface` | устаревший алиас `/surface` |
-| 28 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты |
-| 29 | `GET /journal` | журнал шагов: последние замеры (`limit` 1–2000, фильтр `pipeline`) |
+| 17 | `POST /jobs` | анализ фоновой задачей (legacy, с прогрессом) |
+| 18 | `GET /jobs` | история задач |
+| 19 | `GET /jobs/{job_id}` | состояние задачи |
+| 20 | `GET /jobs/{job_id}/result` | результат завершённой задачи |
+| 21 | `GET /surface` | меш fsaverage (кэш + ETag) |
+| 22–23 | `GET /surface/brodmann`, `/surface/brodmann/{area_name}` | индексы вершин полей Бродмана |
+| 24–25 | `GET /surface/mri`, `/surface/mri/slice/{plane}/{mm}.png` | метаданные срезов и срез картинкой (ETag) |
+| 26–27 | `GET /surface/contours`, `/surface/contours/{plane}/{mm}` | метаданные и контуры структур/полей (ETag) |
+| 28 | `GET /brodmann-labels` | имена доступных полей Бродмана |
+| 29 | `GET /brain-surface` | устаревший алиас `/surface` |
+| 30 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты |
+| 31 | `GET /journal` | журнал шагов: последние замеры (`limit` 1–2000, фильтр `pipeline`) |
+| 32 | `GET /filter-response` | АЧХ применяемого фильтра (полоса + notch с гармониками; шаг 2.5, лёгкий расчёт без задачи и ETag) |
 
 **Чего в API нет осознанно:** листинга и удаления записей. «Закрыть запись» — **клиентское**
 действие (сброс состояния UI), файл остаётся на диске и сносится TTL-обходом реестра;

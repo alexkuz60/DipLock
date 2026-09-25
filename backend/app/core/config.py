@@ -224,6 +224,10 @@ class Settings(BaseSettings):
         "gamma": (30, 40),
     }
     default_single_freq_bandwidth_hz: float = 0.5  # для одиночной частоты
+    # Шаг 2.5 (N11–N14, kimi3): полоса уже этой ширины фильтруется IIR
+    # (Butterworth, zero-phase) — FIR-ядро с переходной полосой ≥ 2 Гц узкую
+    # «одиночную частоту» (7.83 ± 0.25 Гц) не выделяет честно.
+    filter_iir_max_width_hz: float = 1.0
 
     # 10-20 каналы
     standard_channels: list[str] = [

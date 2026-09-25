@@ -72,6 +72,7 @@ import {
 import { ExportActions } from './ExportActions'
 import { EPOCH_RULER_HEIGHT, EpochRuler, TimeRuler } from './TrackRulers'
 import { TrackRow } from './TrackRow'
+import { ViewerSignalCaption } from './ViewerSignalCaption'
 
 export type TrackStackProps = {
   signal: SignalFrame
@@ -96,6 +97,8 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const channelQc = useEdfRecording((state) => state.channelQc)
   const qcThresholds = useEdfRecording((state) => state.channelQcThresholds)
   const artifactTypes = useEdfRecording((state) => state.artifactTypes)
+  /** Паспорт фильтра стадии «Фильтр и референс» (подпись N14: треки без фильтра) */
+  const filterDesign = useEdfRecording((state) => state.filterDesign)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -603,6 +606,7 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         <span data-testid="signal-source">
           {signal.level > 0 ? `огибающая, ${pointsPerChannel} т/канал` : 'полный сигнал'}
         </span>
+        <ViewerSignalCaption filterDesign={filterDesign} />
         {layers ? (
           <StatusPill
             tone="neutral"

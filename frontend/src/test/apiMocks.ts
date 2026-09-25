@@ -6,6 +6,7 @@ import {
   calcJobFixture,
   dipoleRefineResultFixture,
   dipoleScanResultFixture,
+  filterResponseFixture,
   initStatusFixture,
   metaFixture,
   preprocessJobFixture,
@@ -20,6 +21,7 @@ import type {
   ContourSlice,
   DipoleRefineResult,
   DipoleScanResult,
+  FilterResponse,
   InitStatus,
   JobStatus,
   MetaResponse,
@@ -118,6 +120,8 @@ export type MockApiOptions = {
   spectrogramResult?: SpectrogramResult
   /** Статус задачи спектрограммы (поллинг) */
   spectrogramJob?: JobStatus
+  /** АЧХ фильтра (`GET /filter-response`, шаг 2.5) */
+  filterResponse?: FilterResponse
   /** Смоделировать отказ запуска расчёта (404 записи) */
   calcStartFails?: boolean
   /**
@@ -243,6 +247,9 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         structures: onSlice ? options.contours.structures : [],
         areas: onSlice ? options.contours.areas : [],
       })
+    }
+    if (url.includes('/filter-response')) {
+      return jsonResponse(options.filterResponse ?? filterResponseFixture())
     }
     if (url.includes('/meta')) {
       return jsonResponse(options.meta ?? metaFixture)
