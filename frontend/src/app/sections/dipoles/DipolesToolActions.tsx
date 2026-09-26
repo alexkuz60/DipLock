@@ -51,6 +51,7 @@ import { api } from '@/shared/api/client'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { canPlayback, playbackSummary, PLAYBACK_SPEEDS } from '@/shared/lib/playback'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { IconButton } from '@/shared/ui/IconButton'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { Tooltip } from '@/shared/ui/Tooltip'
@@ -71,35 +72,39 @@ const PLAY_TOOLTIP =
   'интерполируются между соседними эпохами (отображение, а не измерение). ' +
   '×1 — реальное время записи. Клавиша Space.'
 
-/** Прогресс задачи расчёта: полоса + подпись «этап · эпохи · проценты». */
+/** Прогресс задачи расчёта: полоса + подпись «этап · эпохи · проценты» + отмена (3.2). */
 export function CalcProgress({ className }: { className?: string }) {
   const job = useDipoleCalc((state) => state.job)
+  const cancelCalculation = useDipoleCalc((state) => state.cancelCalculation)
   if (job === null || job.status !== 'running') return null
 
   return (
-    <Tooltip label={calcJobSummary(job)}>
-      <div className={cx('flex items-center gap-2', className)}>
-        <div
-          role="progressbar"
-          aria-label="Прогресс расчёта диполей"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(job.progress * 100)}
-          className="h-2 w-28 overflow-hidden rounded-full bg-bg-3"
-        >
-          <span
-            data-testid="calc-progress-fill"
-            className="block h-full rounded-full bg-accent transition-[width]"
-            style={{ width: `${Math.round(job.progress * 100)}%` }}
-          />
+    <div className={cx('flex items-center gap-1', className)}>
+      <Tooltip label={calcJobSummary(job)}>
+        <div className="flex items-center gap-2">
+          <div
+            role="progressbar"
+            aria-label="Прогресс расчёта диполей"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(job.progress * 100)}
+            className="h-2 w-28 overflow-hidden rounded-full bg-bg-3"
+          >
+            <span
+              data-testid="calc-progress-fill"
+              className="block h-full rounded-full bg-accent transition-[width]"
+              style={{ width: `${Math.round(job.progress * 100)}%` }}
+            />
+          </div>
+          <span className="tnum hidden text-sm text-fg-2 xl:inline">
+            {job.epochsTotal > 0
+              ? `эпох ${job.epochsDone}/${job.epochsTotal}`
+              : `${Math.round(job.progress * 100)} %`}
+          </span>
         </div>
-        <span className="tnum hidden text-sm text-fg-2 xl:inline">
-          {job.epochsTotal > 0
-            ? `эпох ${job.epochsDone}/${job.epochsTotal}`
-            : `${Math.round(job.progress * 100)} %`}
-        </span>
-      </div>
-    </Tooltip>
+      </Tooltip>
+      <CancelJobButton onCancel={cancelCalculation} />
+    </div>
   )
 }
 

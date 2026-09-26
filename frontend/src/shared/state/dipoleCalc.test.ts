@@ -531,3 +531,66 @@ describe('кадр воспроизведения в состоянии расч
     expect(raw).toContain('"refineHalfwinMs":10')
   })
 })
+
+describe('отмена расчёта (3.2)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetState()
+    useDipoleCalc.setState({
+      job: {
+        status: 'running',
+        progress: 0.5,
+        message: 'Поиск по сетке',
+        stage: 'scan',
+        epochsDone: 2,
+        epochsTotal: 4,
+        error: null,
+        jobId: 'job-c1',
+      },
+      spectrumJob: {
+        status: 'running',
+        progress: 0.2,
+        message: 'Welch PSD',
+        stage: 'spectrum',
+        epochsDone: 0,
+        epochsTotal: 0,
+        error: null,
+        jobId: 'job-s1',
+      },
+    })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('cancelCalculation: DELETE быстрому расчёту + локальный cancelled, спектр не тронут', () => {
+    const cancelSpy = vi
+      .spyOn(api, 'jobCancel')
+      .mockResolvedValue({ ...jobFixture, status: 'cancelled' })
+
+    useDipoleCalc.getState().cancelCalculation()
+
+    expect(cancelSpy).toHaveBeenCalledWith('job-c1')
+    expect(useDipoleCalc.getState().job?.status).toBe('cancelled')
+    expect(useDipoleCalc.getState().spectrumJob?.status).toBe('running')
+  })
+
+  it('cancelSpectrum: DELETE спектру + локальный cancelled, расчёт не тронут', () => {
+    const cancelSpy = vi
+      .spyOn(api, 'jobCancel')
+      .mockResolvedValue({ ...jobFixture, status: 'cancelled' })
+
+    useDipoleCalc.getState().cancelSpectrum()
+
+    expect(cancelSpy).toHaveBeenCalledWith('job-s1')
+    expect(useDipoleCalc.getState().spectrumJob?.status).toBe('cancelled')
+    expect(useDipoleCalc.getState().job?.status).toBe('running')
+  })
+
+  it('без id задачи отмена не шлёт запрос — нечего останавливать', () => {
+    const cancelSpy = vi.spyOn(api, 'jobCancel').mockResolvedValue(jobFixture)
+    useDipoleCalc.setState({ job: { ...useDipoleCalc.getState().job!, jobId: null } })
+
+    useDipoleCalc.getState().cancelCalculation()
+
+    expect(cancelSpy).not.toHaveBeenCalled()
+  })
+})

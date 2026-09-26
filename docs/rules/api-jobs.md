@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **32 роута**, префикс `/api/v1` из `settings.api_prefix`.
+- `backend/app/api/routes.py` — **35 роутов**, префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
   - `api/params.py` — формы → параметры сервисов и проверки с текстом для UI (400);
@@ -25,12 +25,12 @@
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
-  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **36 HTTP-путей**.
+  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **40 HTTP-путей** (35 в `routes.py` + 5 уровня приложения).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/types.ts`.
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (34 в `routes.py`)
+## Инвентарь эндпоинтов (35 в `routes.py`)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -53,18 +53,19 @@
 | 17 | `POST /jobs` | анализ фоновой задачей (legacy, с прогрессом) |
 | 18 | `GET /jobs` | история задач |
 | 19 | `GET /jobs/{job_id}` | состояние задачи |
-| 20 | `GET /jobs/{job_id}/result` | результат завершённой задачи |
-| 21 | `GET /surface` | меш fsaverage (кэш + ETag) |
+| 20 | `DELETE /jobs/{job_id}` | отмена задачи (3.2): 404 — не найдена, 409 — уже завершена, иначе 200 со статусом `cancelled` |
+| 21 | `GET /jobs/{job_id}/result` | результат завершённой задачи |
+| 22 | `GET /surface` | меш fsaverage (кэш + ETag) |
 | 22–23 | `GET /surface/brodmann`, `/surface/brodmann/{area_name}` | индексы вершин полей Бродмана |
 | 24–25 | `GET /surface/mri`, `/surface/mri/slice/{plane}/{mm}.png` | метаданные срезов и срез картинкой (ETag) |
 | 26–27 | `GET /surface/contours`, `/surface/contours/{plane}/{mm}` | метаданные и контуры структур/полей (ETag) |
-| 28 | `GET /brodmann-labels` | имена доступных полей Бродмана |
-| 29 | `GET /brain-surface` | устаревший алиас `/surface` |
-| 30 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты |
-| 31 | `GET /journal` | журнал шагов: последние замеры (`limit` 1–2000, фильтр `pipeline`) |
-| 32 | `GET /filter-response` | АЧХ применяемого фильтра (полоса + notch с гармониками; шаг 2.5, лёгкий расчёт без задачи и ETag) |
-| 33 | `POST /recordings/{id}/evoked` | ERP-усреднение по событиям (шаг 2.7: стимул → эпоха → усреднение) |
-| 34 | `GET /recordings/{id}/evoked/{job_id}` | результат ERP: усреднённая волна [канал][время] + `n_used`/`n_total` |
+| 29 | `GET /brodmann-labels` | имена доступных полей Бродмана |
+| 30 | `GET /brain-surface` | устаревший алиас `/surface` |
+| 31 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты |
+| 32 | `GET /journal` | журнал шагов: последние замеры (`limit` 1–2000, фильтр `pipeline`) |
+| 33 | `GET /filter-response` | АЧХ применяемого фильтра (полоса + notch с гармониками; шаг 2.5, лёгкий расчёт без задачи и ETag) |
+| 34 | `POST /recordings/{id}/evoked` | ERP-усреднение по событиям (шаг 2.7: стимул → эпоха → усреднение) |
+| 35 | `GET /recordings/{id}/evoked/{job_id}` | результат ERP: усреднённая волна [канал][время] + `n_used`/`n_total` |
 
 **Чего в API нет осознанно:** листинга и удаления записей. «Закрыть запись» — **клиентское**
 действие (сброс состояния UI), файл остаётся на диске и сносится TTL-обходом реестра;
@@ -136,4 +137,14 @@
    `epoch_records` (`services/epoch_segmenter.py`), а не подставляйте `epochs.events`: в MNE это
    уже отфильтрованный список.
 
+12. **Отмена задачи — кооперативная (3.2).** `DELETE /jobs/{id}` лишь ставит флаг:
+    воркер-поток узнаёт об отмене на ближайшем тике `set_progress` (бросает
+    `JobCancelledError` из `services/job_manager.py`) и задача становится `cancelled`;
+    если воркер успел дойти до конца — его результат отбрасывается. Задача в очереди
+    отменяется сразу и воркер не запускается; файл задачи хранит `cancelled` как любой
+    статус (переживает рестарт). Тексты разбора отдельные (правило 6): результат
+    отменённой задачи — 409 «Задача отменена — запустите расчёт заново», `DELETE`
+    завершённой — 409 «уже завершена», повторный `DELETE` отменённой — 200. Клиент
+    читает `cancelled` как отмену (`JobCancelledError` в `shared/lib/jobPolling.ts`),
+    а не ошибку, и локальный статус ставит сам (`cancelRemoteJob`).
 

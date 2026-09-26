@@ -23,6 +23,7 @@ import { uploadRecording } from '@/shared/api/upload'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
 import { makeDemoSignal } from '@/shared/lib/demoSignal'
 import {
+  cancelRemoteJob,
   createRunToken,
   isCancelled,
   JobFailedError,
@@ -235,7 +236,7 @@ export const EMPTY_PASSPORT: SessionPassport = {
  * ошибка. UI показывает его на кнопке стадии — обработка идёт по кнопке.
  */
 export type StageJob = {
-  status: 'running' | 'succeeded' | 'failed'
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled'
   progress: number
   message: string
   /** Этап пайплайна от сервера (load_edf / artifacts / epochs / done) */
@@ -243,6 +244,8 @@ export type StageJob = {
   error: string | null
   /** Хвост traceback при провале задачи (N31): показывается разворотом в панели */
   errorTraceback: string | null
+  /** id задачи на сервере — для отмены (3.2); null до первого опроса */
+  jobId?: string | null
 }
 
 /** Команды навигации по окну вьюера из тулс-хедера (срез 2.9) */
@@ -282,12 +285,14 @@ export type FilterDesign = {
  * усреднённой волны и ошибка. Живёт при записи и сбрасывается вместе с ней.
  */
 export type EvokedJob = {
-  status: 'idle' | 'running' | 'succeeded' | 'failed'
+  status: 'idle' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   progress: number
   message: string
   error: string | null
   errorTraceback: string | null
   result: EvokedResult | null
+  /** id задачи на сервере — для отмены (3.2); null до первого опроса */
+  jobId?: string | null
 }
 
 const EMPTY_EVOKED_JOB: EvokedJob = {
@@ -395,11 +400,18 @@ export type EdfRecordingState = {
    */
   runStage: (stage: RecalcStage) => Promise<void>
   /**
+   * Отмена идущей стадии (3.2): DELETE на сервере + локальный статус
+   * `cancelled` (полоса прогресса скрывается, поллинг прекращается).
+   */
+  cancelStage: (stage: RecalcStage) => void
+  /**
    * Запустить ERP-усреднение по событиям (шаг 2.7): 202 + задача → поллинг →
    * усреднённая волна в блок «ERP». Правка параметров ничего не запускает —
    * расчёт стартует только кнопкой (правило UI).
    */
   startEvoked: () => Promise<void>
+  /** Отмена идущего ERP-усреднения (3.2): DELETE на сервере + локальный статус */
+  cancelEvoked: () => void
   /** Правка паспорта сессии (данные для БД, файл не трогаем) */
   setPassport: (patch: Partial<SessionPassport>) => void
   /** Запросить открытие диалога выбора EDF (тулс-хедер → рабочая область) */
@@ -545,6 +557,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         ...state.stageJobs,
         [stage]: {
           status: 'running',
+          jobId: null,
           progress: 0,
           message: '',
           stage: 'queued',
@@ -576,12 +589,20 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         recording.recording_id,
         buildPreprocessForm(stage, params),
       )
+      // id задачи — сразу после 202: отмена работает и до первого опроса (3.2)
+      const startedJob = get().stageJobs[stage]
+      if (startedJob) {
+        set((state) => ({
+          stageJobs: { ...state.stageJobs, [stage]: { ...startedJob, jobId: created.job_id } },
+        }))
+      }
       await waitForJob(created.job_id, isCurrent, (status) => {
         set((state) => ({
           stageJobs: {
             ...state.stageJobs,
             [stage]: {
               status: 'running',
+              jobId: status.job_id,
               progress: status.progress,
               message: status.message,
               stage: status.stage,
@@ -681,7 +702,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     const isCurrent = () => evokedRunToken.isCurrent(token)
     set({
       evoked: {
-        status: 'running', progress: 0, message: '',
+        status: 'running', progress: 0, message: '', jobId: null,
         error: null, errorTraceback: null, result: null,
       },
     })
@@ -696,10 +717,13 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     }
     try {
       const created = await api.evoked.start(recording.recording_id, buildEvokedForm(params))
+      // id задачи — сразу после 202: отмена работает и до первого опроса (3.2)
+      set({ evoked: { ...get().evoked, jobId: created.job_id } })
       await waitForJob(created.job_id, isCurrent, (status) => {
         set({
           evoked: {
             status: 'running', progress: status.progress, message: status.message,
+            jobId: status.job_id,
             error: null, errorTraceback: null, result: null,
           },
         })
@@ -720,6 +744,22 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         error instanceof JobFailedError ? error.traceback : null,
       )
     }
+  },
+
+  cancelStage: (stage) => {
+    const job = get().stageJobs[stage]
+    if (!job || job.status !== 'running' || !job.jobId) return
+    cancelRemoteJob(job.jobId, stageRunToken)
+    set((state) => ({
+      stageJobs: { ...state.stageJobs, [stage]: { ...job, status: 'cancelled' } },
+    }))
+  },
+
+  cancelEvoked: () => {
+    const job = get().evoked
+    if (job.status !== 'running' || !job.jobId) return
+    cancelRemoteJob(job.jobId, evokedRunToken)
+    set({ evoked: { ...job, status: 'cancelled' } })
   },
 
   requestFileDialog: () => set((state) => ({ fileDialogRequest: state.fileDialogRequest + 1 })),

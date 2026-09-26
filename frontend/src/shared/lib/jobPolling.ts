@@ -18,9 +18,9 @@
  * 3. **Ошибку объясняет сервер** (`JobFailedError`): UI показывает текст FastAPI,
  *    а не «задача завершилась ошибкой».
  *
- * Отмены «на лету» здесь нет осознанно: актуальность определяет токен, а он
- * проверяется до запроса, после него и после паузы — этого достаточно, потому
- * что состояние раздела меняет только пользователь.
+ * Отмена серверной задачи (3.2) — `cancelRemoteJob`: тот же токен (поллинг
+ * перестаёт ждать) плюс `DELETE /jobs/{id}` — сервер останавливает воркер на
+ * ближайшем тике прогресса, а статус `cancelled` читается как «отменено».
  */
 import { api } from '@/shared/api/client'
 import type { JobStatus } from '@/shared/api/types'
@@ -110,9 +110,25 @@ export async function waitForJob(
     if (!isCurrent()) throw new JobCancelledError()
     onTick(status)
     if (status.status === 'succeeded') return status
+    // Отменена (3.2): ни «ждём дальше», ни ошибка — ожидание прекращается
+    if (status.status === 'cancelled') throw new JobCancelledError()
     if (status.status === 'failed') {
       throw new JobFailedError(status.error ?? 'Задача завершилась ошибкой', status.error_traceback)
     }
     await delay(pollMs)
   }
+}
+
+/**
+ * Отмена серверной задачи (3.2): сдвигает токен (поллинг перестаёт ждать) и
+ * шлёт `DELETE /jobs/{id}`.
+ *
+ * Сетевая ошибка намеренно глушится: задача могла успеть завершиться (409) или
+ * уже быть отменённой — для пользователя это не различимо. Локальное состояние
+ * раздела (статус `cancelled`, чтобы полоса прогресса скрылась) обновляет
+ * вызывающий стор — здесь только сервер и токен.
+ */
+export function cancelRemoteJob(jobId: string, token: RunToken): void {
+  token.cancel()
+  void api.jobCancel(jobId).catch(() => undefined)
 }

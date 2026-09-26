@@ -8,7 +8,8 @@
  * отпечаток `eegSignature` их не содержит. Равенство отпечатков результата и
  * параметров решает, показывать ли «параметры расчёта изменены».
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { api } from '@/shared/api/client'
 import { mockApiFetch } from '@/test/apiMocks'
 import { recordingFixture, spectrogramJobFixture, spectrogramResultFixture } from '@/test/fixtures'
 import {
@@ -252,6 +253,47 @@ describe('нормализация сохранённых параметров',
     // Полоса приводится к порядку, сетевой фильтр — к ближайшему из 50/60 Гц
     expect(restored.filter.filterBandHz).toEqual([8, 13])
     expect(restored.filter.notchHz).toBe(50)
+  })
+})
+
+describe('отмена спектрограммы (3.2)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetState()
+    useEegParams.setState({
+      job: {
+        status: 'running',
+        progress: 0.4,
+        message: 'STFT по окнам',
+        stage: 'spectrum',
+        epochsDone: 4,
+        epochsTotal: 10,
+        error: null,
+        jobId: 'job-77',
+      },
+    })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('cancelSpectrogram: DELETE на сервере + локальный статус cancelled', () => {
+    const cancelSpy = vi
+      .spyOn(api, 'jobCancel')
+      .mockResolvedValue({ ...spectrogramJobFixture, status: 'cancelled' })
+
+    useEegParams.getState().cancelSpectrogram()
+
+    expect(cancelSpy).toHaveBeenCalledWith('job-77')
+    expect(useEegParams.getState().job?.status).toBe('cancelled')
+  })
+
+  it('без id задачи (ответ 202 ещё не пришёл) отмена не шлёт запрос', () => {
+    const cancelSpy = vi.spyOn(api, 'jobCancel').mockResolvedValue(spectrogramJobFixture)
+    useEegParams.setState({ job: { ...useEegParams.getState().job!, jobId: null } })
+
+    useEegParams.getState().cancelSpectrogram()
+
+    expect(cancelSpy).not.toHaveBeenCalled()
+    expect(useEegParams.getState().job?.status).toBe('running')
   })
 })
 

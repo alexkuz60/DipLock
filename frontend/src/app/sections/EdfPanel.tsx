@@ -33,6 +33,7 @@ import {
 } from '@/shared/state/edfParams'
 import { filterBandOf, useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
+import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { EvokedChart } from '@/shared/ui/EvokedChart'
 import { FilterResponse } from '@/shared/ui/FilterResponse'
@@ -107,6 +108,7 @@ export function EdfPanel() {
   /** Задача ERP (шаг 2.7): считает только кнопка, правка параметров — нет */
   const evoked = useEdfRecording((state) => state.evoked)
   const startEvoked = useEdfRecording((state) => state.startEvoked)
+  const cancelEvoked = useEdfRecording((state) => state.cancelEvoked)
 
   /** События записи (N2/2.7): источник селектов нарезки и ERP */
   const eventOptions = Object.entries(recording?.event_counts ?? {}).map(
@@ -464,10 +466,13 @@ export function EdfPanel() {
           {evoked.status === 'running' ? 'Считаем…' : 'Усреднить (ERP)'}
         </Button>
         {evoked.status === 'running' ? (
-          <StatusPill tone="accent">
-            Прогресс: {Math.round(evoked.progress * 100)} %
-            {evoked.message ? ` — ${evoked.message}` : ''}
-          </StatusPill>
+          <>
+            <StatusPill tone="accent">
+              Прогресс: {Math.round(evoked.progress * 100)} %
+              {evoked.message ? ` — ${evoked.message}` : ''}
+            </StatusPill>
+            <CancelJobButton onCancel={cancelEvoked} />
+          </>
         ) : null}
         {evoked.error ? (
           <p className="text-sm text-danger" data-testid="evoked-error">

@@ -67,7 +67,7 @@ import {
   type CalcView,
   type PlaybackState,
 } from '@/shared/lib/dipoleCalcModel'
-import { createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
+import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import { canPlayback, clampEpochIndex, normalizePlaybackSpeed } from '@/shared/lib/playback'
 import type { DipoleRefineResult, DipoleScanResult, SpectrumResult } from '@/shared/api/types'
@@ -165,6 +165,10 @@ export type DipoleCalcState = {
   runCalculation: (recordingId: string | null) => Promise<void>
   /** Расчёт спектра по кнопке: числа PSD + топокарты диапазонов */
   runSpectrum: (recordingId: string | null) => Promise<void>
+  /** Отмена идущего быстрого расчёта (3.2): DELETE на сервере + локальный статус */
+  cancelCalculation: () => void
+  /** Отмена идущего расчёта спектра (3.2) */
+  cancelSpectrum: () => void
   /**
    * Точное уточнение эпохи (BEM fit_dipole): параметры нарезки берутся из
    * **результата** быстрого расчёта (`buildRefineForm`), а не из формы панели.
@@ -358,6 +362,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         })
         try {
           const created = await api.dipoles.start(recordingId, buildDipoleForm(params))
+          // id задачи — сразу после 202: отмена работает и до первого опроса (3.2)
+          set({ job: { ...(get().job ?? runningJob()), jobId: created.job_id } })
           await waitForJob(created.job_id, isCurrent, (status) =>
             set({ job: calcJobFromStatus(status) }),
           )
@@ -397,6 +403,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         set({ spectrumJob: runningJob(), spectrumError: null })
         try {
           const created = await api.spectrum.start(recordingId, buildSpectrumForm(params))
+          // id задачи — сразу после 202: отмена работает и до первого опроса (3.2)
+          set({ spectrumJob: { ...(get().spectrumJob ?? runningJob()), jobId: created.job_id } })
           await waitForJob(created.job_id, isCurrent, (status) =>
             set({ spectrumJob: calcJobFromStatus(status) }),
           )
@@ -451,6 +459,20 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             refiningEpoch: null,
           })
         }
+      },
+
+      cancelCalculation: () => {
+        const job = get().job
+        if (job === null || job.status !== 'running' || !job.jobId) return
+        cancelRemoteJob(job.jobId, calcRunToken)
+        set({ job: { ...job, status: 'cancelled' } })
+      },
+
+      cancelSpectrum: () => {
+        const job = get().spectrumJob
+        if (job === null || job.status !== 'running' || !job.jobId) return
+        cancelRemoteJob(job.jobId, calcRunToken)
+        set({ spectrumJob: { ...job, status: 'cancelled' } })
       },
 
       reset: () => {

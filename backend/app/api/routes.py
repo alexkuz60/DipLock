@@ -778,6 +778,26 @@ async def get_job(job_id: str) -> JobStatus:
     return job_status(job)
 
 
+@router.delete("/jobs/{job_id}", response_model=JobStatus, summary="Отменить задачу")
+async def cancel_job(job_id: str) -> JobStatus:
+    """Кооперативная отмена (3.2): воркер останавливается на ближайшем тике прогресса.
+
+    Воркер-поток не прерывается силой — он сам узнаёт об отмене и задача
+    становится ``cancelled`` (результат отменённой не публикуется). 404 —
+    задачи нет; 409 — уже завершена (успех/ошибка), отменять нечего; уже
+    отменённая — 200 с её статусом: повторный DELETE идемпотентен.
+    """
+    job = job_manager.cancel(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Задача {job_id} не найдена")
+    if job.status in ("succeeded", "failed"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Задача уже завершена (статус «{job.status}») — отменять нечего",
+        )
+    return job_status(job)
+
+
 @router.get(
     "/jobs/{job_id}/result", response_model=AnalyzeResponse,
     summary="Результат завершённой задачи",

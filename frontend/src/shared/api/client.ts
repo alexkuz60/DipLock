@@ -151,6 +151,10 @@ export const api = {
   job: (jobId: string, signal?: AbortSignal) =>
     request<JobStatus>(`${API_PREFIX}/jobs/${jobId}`, { signal }),
 
+  /** Отмена задачи (3.2): 200 — принята/уже отменена, 409 — завершена, 404 — нет. */
+  jobCancel: (jobId: string, signal?: AbortSignal) =>
+    request<JobStatus>(`${API_PREFIX}/jobs/${jobId}`, { method: 'DELETE', signal }),
+
   /** Результат завершённой задачи. */
   jobResult: (jobId: string, signal?: AbortSignal) =>
     request<AnalyzeResponse>(`${API_PREFIX}/jobs/${jobId}/result`, { signal }),

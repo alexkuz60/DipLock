@@ -582,3 +582,53 @@ describe('событийный режим и ERP (N2/2.7)', () => {
     expect(reconcileEventId('STIM/5', {})).toEqual({ eventId: '' })
   })
 })
+
+describe('отмена задач (3.2)', () => {
+  beforeEach(() => {
+    useEdfRecording.setState({
+      stageJobs: {
+        artifacts: {
+          status: 'running',
+          jobId: 'job-st-1',
+          progress: 0.4,
+          message: 'Детекция артефактов',
+          stage: 'artifacts',
+          error: null,
+          errorTraceback: null,
+        },
+      },
+      evoked: {
+        status: 'running',
+        jobId: 'job-ev-1',
+        progress: 0.3,
+        message: 'Усреднение',
+        error: null,
+        errorTraceback: null,
+        result: null,
+      },
+    })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('cancelStage: DELETE стадии + локальный статус cancelled', () => {
+    const cancelSpy = vi
+      .spyOn(api, 'jobCancel')
+      .mockResolvedValue({ ...preprocessJobFixture, status: 'cancelled' })
+
+    useEdfRecording.getState().cancelStage('artifacts')
+
+    expect(cancelSpy).toHaveBeenCalledWith('job-st-1')
+    expect(useEdfRecording.getState().stageJobs.artifacts?.status).toBe('cancelled')
+  })
+
+  it('cancelEvoked: DELETE ERP-задачи + локальный статус cancelled', () => {
+    const cancelSpy = vi
+      .spyOn(api, 'jobCancel')
+      .mockResolvedValue({ ...preprocessJobFixture, status: 'cancelled' })
+
+    useEdfRecording.getState().cancelEvoked()
+
+    expect(cancelSpy).toHaveBeenCalledWith('job-ev-1')
+    expect(useEdfRecording.getState().evoked.status).toBe('cancelled')
+  })
+})

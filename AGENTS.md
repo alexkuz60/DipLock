@@ -48,7 +48,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 32 роута (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 35 роутов (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -111,9 +111,9 @@ docs/ui.md             # спецификация UI и дорожная кар�
   `prepared_signal.py`, версии ассетов — `asset_versions.py`, результат задачи — `job_store.py`,
   сироты — `orphans.py`; инварианты — `docs/rules/data-and-caches.md`.
 - **Frontend**: новый раздел UI = запись в `frontend/src/app/sections/registry.ts` + компонент в
-  `routes.tsx`; тексты — на русском; ожидание задач — общее (`shared/lib/jobPolling.ts`), адреса —
+  `routes.tsx`; тексты — на русском; ожидание и отмена задач — общие (`shared/lib/jobPolling.ts`), адреса —
   парами (`recordingJob(kind)`); контролы — из `shared/ui/` (`FieldRow`, `SegmentedControl`,
-  `SelectField`, `NumberField`, `CheckboxRow`, `StatusPill`).
+  `SelectField`, `NumberField`, `CheckboxRow`, `StatusPill`, `CancelJobButton`).
 - **Frontend-ловушки:** `className` ссылки рейла обязан быть строкой, а правка параметра **не**
   запускает расчёт (считает только кнопка) — `docs/rules/frontend-state.md`.
   **Правки UI видны на :8000/ui/ только после `npm run build`** — иначе раздаётся прошлый бандл и
@@ -151,7 +151,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (776 Vitest / 493 pytest), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (789 Vitest / 500 pytest), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |

@@ -120,32 +120,42 @@ export const THRESHOLD_NAM_RANGE: [number, number] = [0, 1000]
 
 /** Состояние одной фоновой задачи раздела: прогресс по этапам и эпохам. */
 export type CalcJob = {
-  status: 'running' | 'succeeded' | 'failed'
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled'
   progress: number
   message: string
   stage: string
   epochsDone: number
   epochsTotal: number
   error: string | null
+  /** id задачи на сервере — для отмены (3.2); null до первого опроса */
+  jobId?: string | null
 }
 
 /** Задача из ответа сервера в состояние панели (одно место на обе задачи). */
 export function calcJobFromStatus(job: JobStatus): CalcJob {
   return {
     status:
-      job.status === 'succeeded' ? 'succeeded' : job.status === 'failed' ? 'failed' : 'running',
+      job.status === 'succeeded'
+        ? 'succeeded'
+        : job.status === 'failed'
+          ? 'failed'
+          : job.status === 'cancelled'
+            ? 'cancelled'
+            : 'running',
     progress: job.progress,
     message: job.message,
     stage: job.stage,
     epochsDone: job.epochs_done,
     epochsTotal: job.epochs_total,
     error: job.status === 'failed' ? (job.error ?? 'Задача завершилась ошибкой') : null,
+    jobId: job.job_id,
   }
 }
 
 /** Подпись хода задачи: этап, прогресс и «N из M эпох», когда они есть. */
 export function calcJobSummary(job: CalcJob | null): string {
   if (job === null) return 'Расчёт не запускался'
+  if (job.status === 'cancelled') return 'Отменена'
   if (job.status === 'failed') return `Ошибка: ${job.error ?? 'задача завершилась ошибкой'}`
   const parts = [job.message || job.stage]
   if (job.epochsTotal > 0) parts.push(`эпох ${job.epochsDone} из ${job.epochsTotal}`)

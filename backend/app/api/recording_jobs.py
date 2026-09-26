@@ -160,6 +160,11 @@ def _require_finished(job: Any) -> None:
     """
     if job.status == "failed":
         raise HTTPException(status_code=409, detail=f"Задача завершилась ошибкой: {job.error}")
+    if job.status == "cancelled":
+        # Отдельный текст (правило 6 в docs/rules/api-jobs.md): «ждём» здесь врало бы
+        raise HTTPException(
+            status_code=409, detail="Задача отменена — запустите расчёт заново",
+        )
     if job.status == "succeeded" and job.result is None:
         raise HTTPException(
             status_code=409,

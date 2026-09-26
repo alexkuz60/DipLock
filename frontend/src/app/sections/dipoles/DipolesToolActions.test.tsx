@@ -8,11 +8,12 @@
  */
 import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { api } from '@/shared/api/client'
 import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
-import { calcJobFixture, dipoleScanResultFixture, recordingFixture } from '@/test/fixtures'
+import { calcJobFixture, dipoleScanResultFixture, jobFixture, recordingFixture } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { DipolesToolHeaderActions } from './DipolesToolActions'
@@ -101,6 +102,35 @@ describe('тулс-хедер раздела «Диполи»', () => {
     expect(bar).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText('эпох 2/4')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Расчёт…' })).toBeDisabled()
+  })
+
+  it('кнопка «Отменить» рядом с прогрессом шлёт DELETE и прячет полосу (3.2)', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({
+      job: {
+        status: 'running',
+        progress: 0.5,
+        message: 'Диполи: 2 из 4',
+        stage: 'scan',
+        epochsDone: 2,
+        epochsTotal: 4,
+        error: null,
+        jobId: 'job-d1',
+      },
+    })
+    const cancelSpy = vi
+      .spyOn(api, 'jobCancel')
+      .mockResolvedValue({ ...jobFixture, status: 'cancelled' })
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    await user.click(screen.getByRole('button', { name: /Отменить/ }))
+
+    expect(cancelSpy).toHaveBeenCalledWith('job-d1')
+    expect(useDipoleCalc.getState().job?.status).toBe('cancelled')
+    expect(
+      screen.queryByRole('progressbar', { name: 'Прогресс расчёта диполей' }),
+    ).toBeNull()
   })
 
   it('порог «КД ≥» меняет состояние отображения и не делает запросов', async () => {

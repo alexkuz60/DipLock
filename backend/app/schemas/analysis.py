@@ -4,11 +4,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-# Статусы фоновой задачи
-JobState = Literal["queued", "running", "succeeded", "failed"]
+# Статусы фоновой задачи; cancelled — отмена из UI (3.2)
+JobState = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 # Тот же набор значениями: нужен там, где состояние приходит извне типа
 # (восстановление задачи из файла `job_store`) и его надо сузить обратно к Literal.
-JOB_STATES: tuple[JobState, ...] = ("queued", "running", "succeeded", "failed")
+JOB_STATES: tuple[JobState, ...] = ("queued", "running", "succeeded", "failed", "cancelled")
 
 
 class TrajectoryPoint(BaseModel):

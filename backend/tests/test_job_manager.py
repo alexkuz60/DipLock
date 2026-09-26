@@ -1,9 +1,9 @@
-"""Тесты менеджера фоновых задач (F7): прогресс, ошибки, семафор, история."""
+"""Тесты менеджера фоновых задач (F7): прогресс, ошибки, семафор, история, отмена (3.2)."""
 import asyncio
 import threading
 import time
 
-from app.services.job_manager import STAGE_TITLES, JobManager
+from app.services.job_manager import STAGE_TITLES, Job, JobManager
 
 
 def test_job_success_reports_stages_and_result():
@@ -160,3 +160,107 @@ def test_stage_titles_cover_pipeline_stages():
     from app.services.job_manager import PIPELINE_STAGES
 
     assert set(PIPELINE_STAGES) <= set(STAGE_TITLES)
+
+
+# ---------- отмена (3.2) ----------
+
+
+def test_cancel_queued_task_skips_worker():
+    """Отмена из очереди: слот занят только проверкой, воркер не запускается."""
+
+    async def _run():
+        manager = JobManager(max_concurrent=1, history_limit=5)
+        release = threading.Event()
+        started = threading.Event()
+        ran: list[str] = []
+
+        def blocker(progress):
+            started.set()
+            release.wait(timeout=5)
+            return {"session_id": "first"}
+
+        def second_worker(progress):
+            ran.append("ran")
+            return {"session_id": "second"}
+
+        first = manager.submit("analyze", None, blocker)
+        assert await asyncio.to_thread(started.wait, 5), "воркер не стартовал"
+        second = manager.submit("analyze", None, second_worker)
+
+        assert manager.cancel(second.job_id) is second
+        # Отмена в очереди видна сразу — не через тик прогресса
+        assert second.status == "cancelled"
+
+        release.set()
+        await first.task
+        await second.task
+
+        assert second.status == "cancelled"
+        assert second.result is None
+        assert second.finished_at is not None
+        assert ran == []
+        # Семафор не «протёк»: следующая задача после отменённой выполняется
+        third = manager.submit("analyze", None, lambda progress: {"session_id": "third"})
+        await third.task
+        assert third.status == "succeeded"
+
+    asyncio.run(_run())
+
+
+def test_cancel_running_task_interrupts_on_progress_tick():
+    """Отмена идущей задачи: воркер обрывается на ближайшем тике прогресса."""
+
+    async def _run():
+        manager = JobManager(max_concurrent=1, history_limit=5)
+
+        first_tick = threading.Event()
+
+        def worker(progress):
+            first_tick.set()
+            for i in range(1000):
+                progress("scan", (i + 1) / 1000, "перебор сетки")
+                time.sleep(0.005)
+            return {"points": ["не должно дойти"]}
+
+        job = manager.submit("dipoles", None, worker)
+        # Первый тик прогресса гарантирует running (mark_started предшествует потоку)
+        assert await asyncio.to_thread(first_tick.wait, 5), "воркер не стартовал"
+
+        assert manager.cancel(job.job_id) is job
+        await job.task
+
+        assert job.status == "cancelled"
+        assert job.result is None
+        assert job.message == "Отменена"
+        assert job.cancel_requested is True
+        # Слот освобождён отменённой задачей
+        follow = manager.submit("analyze", None, lambda progress: {"ok": True})
+        await follow.task
+        assert follow.status == "succeeded"
+
+    asyncio.run(_run())
+
+
+def test_cancel_finished_task_is_rejected():
+    """Завершённую задачу отменить нельзя: False, статус и результат не меняются."""
+    ok = Job(job_id="j-ok", kind="analyze")
+    ok.finish({"session_id": "s"})
+    assert ok.request_cancel() is False
+    assert ok.status == "succeeded"
+    assert ok.result == {"session_id": "s"}
+
+    bad = Job(job_id="j-bad", kind="analyze")
+    bad.fail(ValueError("нет"))
+    assert bad.request_cancel() is False
+    assert bad.status == "failed"
+
+
+def test_cancelled_status_restores_from_record():
+    """Файл задачи с cancelled поднимается в том же статусе (A8 + 3.2)."""
+    job = Job(job_id="j-c", kind="spectrum")
+    job.request_cancel()
+
+    restored = Job.from_record(job.to_record())
+
+    assert restored.status == "cancelled"
+    assert restored.message == "Отменена"

@@ -1,12 +1,15 @@
-"""Тесты задач записи (A1, этап 3): запуск, статус, результат.
+"""Тесты задач записи (A1, этап 3): запуск, статус, результат, отмена (3.2).
 
 Из этих функций собираются пять эндпоинтов ``/recordings/{id}/{kind}``. Поэтому
 проверяются три вещи: адрес результата у задачи записи (он рядом с записью, а не
 в ``/jobs/{id}/result``), разбор чужого/незавершённого результата (404/409) и
-запуск через общий помощник с воркером из ``WORKERS``.
+запуск через общий помощник с воркером из ``WORKERS``. Плюс ``DELETE /jobs/{id}``:
+404/409 разбора и реальная остановка бегущего воркера.
 """
 import os
 import shutil
+import threading
+import time
 
 import numpy as np
 import pytest
@@ -198,3 +201,77 @@ def test_preprocess_job_rejects_unknown_recording(client):
 
     assert created.status_code == 404
     assert "nope" in created.json()["detail"]
+
+
+# ---------- отмена задачи (3.2) ----------
+
+
+def test_cancel_endpoint_reports_unknown_job(client):
+    """DELETE неизвестной задачи — 404 с текстом для UI."""
+    resp = client.delete(f"{_PREFIX}/jobs/nope")
+
+    assert resp.status_code == 404
+    assert "nope" in resp.json()["detail"]
+
+
+def test_cancel_endpoint_rejects_finished_job(client):
+    """Завершённую задачу отменить нельзя — 409, статус не изменился."""
+    job = _stored_job(result={"method": "fast_grid"})
+
+    resp = client.delete(f"{_PREFIX}/jobs/{job.job_id}")
+
+    assert resp.status_code == 409
+    assert "отменять нечего" in resp.json()["detail"]
+    assert job.status == "succeeded"
+
+
+def test_cancel_endpoint_stops_running_job(client, tmp_path, monkeypatch):
+    """DELETE останавливает воркер на тике прогресса: cancelled, результата нет."""
+    edf_path = tmp_path / "rec-cancel.edf"
+    channels = list(settings.standard_channels[:4])
+    sfreq = 250.0
+    times = np.arange(int(2 * sfreq)) / sfreq
+    data = np.stack([np.sin(2 * np.pi * 10 * times) * 20 for _ in channels])
+    write_minimal_edf(edf_path, channels, data, sfreq)
+    recording = _register(tmp_path, edf_path, "rec-cancel")
+
+    release = threading.Event()
+
+    def slow_worker(progress, rec, params):
+        for i in range(1000):
+            progress(params.stage, (i + 1) / 1000, "расчёт")
+            if release.wait(timeout=0.01):
+                break
+        return {"recording_id": rec.recording_id, "stage": params.stage}
+
+    monkeypatch.setitem(recording_jobs.WORKERS, "preprocess", slow_worker)
+
+    created = client.post(
+        f"{_PREFIX}/recordings/{recording.recording_id}/preprocess",
+        data={"stage": "filter", "band_min": 8, "band_max": 13, "epoch_length_ms": 2000},
+    )
+    assert created.status_code == 202, created.text
+    job_id = created.json()["job_id"]
+
+    try:
+        accepted = client.delete(f"{_PREFIX}/jobs/{job_id}")
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["job_id"] == job_id
+
+        status: dict = {}
+        for _ in range(300):
+            status = client.get(f"{_PREFIX}/jobs/{job_id}").json()
+            if status["status"] == "cancelled":
+                break
+            time.sleep(0.01)
+        assert status["status"] == "cancelled", status
+        assert status["result_url"] is None
+
+        # Результат отменённой задачи не отдаётся (отдельный текст, правило 6)
+        result = client.get(
+            f"{_PREFIX}/recordings/{recording.recording_id}/preprocess/{job_id}",
+        )
+        assert result.status_code == 409
+        assert "отменена" in result.json()["detail"]
+    finally:
+        release.set()

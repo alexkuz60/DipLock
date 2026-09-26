@@ -230,6 +230,40 @@ describe('тулс-хедер раздела EDF', () => {
     ).toHaveAttribute('aria-valuenow', '1')
     expect(preprocessCalls().length).toBeGreaterThan(0)
   })
+
+  it('кнопка стадии во время задачи отменяет её, а не блокируется (3.2)', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderSection()
+
+    act(() => {
+      useEdfRecording.setState({
+        recording: recordingFixture,
+        stageJobs: {
+          artifacts: {
+            status: 'running',
+            jobId: 'job-stage-1',
+            progress: 0.3,
+            message: 'Детекция артефактов',
+            stage: 'artifacts',
+            error: null,
+            errorTraceback: null,
+          },
+        },
+      })
+    })
+
+    // Во время задачи кнопка не заблокирована — она стала кнопкой отмены
+    await user.click(screen.getByRole('button', { name: 'Отменить: Поиск артефактов' }))
+
+    expect(useEdfRecording.getState().stageJobs.artifacts?.status).toBe('cancelled')
+    const deleteCalls = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes('/jobs/job-stage-1') &&
+        (init as RequestInit | undefined)?.method === 'DELETE',
+    )
+    expect(deleteCalls).toHaveLength(1)
+  })
 })
 
 describe('кнопка «Нарезка эпох» в событийном режиме (N2/2.7)', () => {

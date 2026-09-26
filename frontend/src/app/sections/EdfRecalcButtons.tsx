@@ -34,6 +34,7 @@ export function EdfRecalcButton({ stage }: { stage: RecalcStage }) {
   const recording = useEdfRecording((store) => store.recording)
   const job = useEdfRecording((store) => store.stageJobs[stage])
   const runStage = useEdfRecording((store) => store.runStage)
+  const cancelStage = useEdfRecording((store) => store.cancelStage)
   const Icon = STAGE_ICONS[stage]
   const label = RECALC_STAGE_LABELS[stage]
   const running = job?.status === 'running'
@@ -58,9 +59,9 @@ export function EdfRecalcButton({ stage }: { stage: RecalcStage }) {
         ? 'результат ещё не получен'
         : 'результат актуален'
   const tooltip = running
-    ? `Пересчёт: ${label} — идёт (${Math.round((job?.progress ?? 0) * 100)}%${
+    ? `Отменить пересчёт: ${label} — идёт (${Math.round((job?.progress ?? 0) * 100)}%${
         job?.message ? `, ${job.message}` : ''
-      })`
+      }), нажатие остановит задачу на сервере`
     : job?.status === 'failed'
       ? `Пересчитать: ${label} — прошлый запуск завершился ошибкой: ${job.error}. ${reason}`
       : recording === null
@@ -70,11 +71,15 @@ export function EdfRecalcButton({ stage }: { stage: RecalcStage }) {
   return (
     <span className="relative inline-flex">
       <IconButton
-        disabled={recording === null || running || eventMissing}
+        disabled={recording === null || eventMissing}
         tooltip={tooltip}
-        label={`Пересчитать: ${label}`}
+        label={running ? `Отменить: ${label}` : `Пересчитать: ${label}`}
         active={state === 'ready'}
-        onClick={() => void runStage(stage)}
+        onClick={() => {
+          // Кнопка стадии во время задачи — отмена (3.2), а не блокировка
+          if (running) cancelStage(stage)
+          else void runStage(stage)
+        }}
         icon={
           running ? (
             <Loader2 className="size-5 animate-spin" aria-hidden />

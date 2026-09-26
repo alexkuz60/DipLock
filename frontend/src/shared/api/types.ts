@@ -6,7 +6,7 @@
  * (`openapi-typescript`), см. `docs/ui.md`.
  */
 
-export type JobState = 'queued' | 'running' | 'succeeded' | 'failed'
+export type JobState = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
 export type TrajectoryPoint = {
   time_ms: number

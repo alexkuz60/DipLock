@@ -32,7 +32,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api, apiErrorText } from '@/shared/api/client'
 import type { SpectrogramResult } from '@/shared/api/types'
-import { createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
+import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
 import {
   BANDWIDTH_RANGE,
   SINGLE_FREQ_RANGE,
@@ -392,6 +392,8 @@ export type EegState = {
   toggleNavMode: (kind: ArtifactKind) => void
   /** Запуск расчёта: **единственное** место, где уходит задача */
   runSpectrogram: (recordingId: string | null, channel: string | null) => Promise<void>
+  /** Отмена идущей задачи спектрограммы (3.2): DELETE на сервере + локальный статус */
+  cancelSpectrogram: () => void
   /** Сброс результата (новая запись / закрытие записи): параметры просмотра остаются */
   reset: () => void
 }
@@ -518,6 +520,8 @@ export const useEegParams = create<EegState>()(
         try {
           const form = buildSpectrogramForm(params, channel)
           const created = await api.spectrogram.start(recordingId, form)
+          // id задачи — сразу после 202: отмена работает и до первого опроса (3.2)
+          set({ job: { ...(get().job ?? runningJob()), jobId: created.job_id } })
           await waitForJob(created.job_id, isCurrent, (status) =>
             set({ job: calcJobFromStatus(status) }),
           )
@@ -543,6 +547,13 @@ export const useEegParams = create<EegState>()(
             error: apiErrorText(failure),
           })
         }
+      },
+
+      cancelSpectrogram: () => {
+        const job = get().job
+        if (job === null || job.status !== 'running' || !job.jobId) return
+        cancelRemoteJob(job.jobId, eegRunToken)
+        set({ job: { ...job, status: 'cancelled' } })
       },
 
       reset: () => {

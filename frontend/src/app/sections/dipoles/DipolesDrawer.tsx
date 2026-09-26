@@ -29,6 +29,7 @@ import {
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { spectrumMetrics, spectrumQueryOf, spectrumSummary } from '@/shared/lib/spectrum'
+import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { IconButton } from '@/shared/ui/IconButton'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -52,6 +53,7 @@ export function DipolesDrawer() {
   const spectrumJob = useDipoleCalc((state) => state.spectrumJob)
   const spectrumError = useDipoleCalc((state) => state.spectrumError)
   const runSpectrum = useDipoleCalc((state) => state.runSpectrum)
+  const cancelSpectrum = useDipoleCalc((state) => state.cancelSpectrum)
   const setView = useDipoleCalc((state) => state.setView)
   const fftRangeHz = useDipoleCalc((state) => state.fftRangeHz)
   const setFftRange = useDipoleCalc((state) => state.setFftRange)
@@ -108,9 +110,12 @@ export function DipolesDrawer() {
       </div>
 
       {running ? (
-        <LoadingBlock
-          label={`Спектр: ${spectrumJob?.message || spectrumJob?.stage} — ${Math.round((spectrumJob?.progress ?? 0) * 100)} %`}
-        />
+        <div className="flex items-center gap-2">
+          <LoadingBlock
+            label={`Спектр: ${spectrumJob?.message || spectrumJob?.stage} — ${Math.round((spectrumJob?.progress ?? 0) * 100)} %`}
+          />
+          <CancelJobButton onCancel={cancelSpectrum} />
+        </div>
       ) : spectrumError && spectrum === null ? (
         <ErrorBlock title="Спектр не рассчитан" message={spectrumError} />
       ) : spectrum === null ? (

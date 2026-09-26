@@ -13,6 +13,7 @@ import {
   JOB_POLL_MS,
   JobCancelledError,
   JobFailedError,
+  cancelRemoteJob,
   createRunToken,
   isCancelled,
   waitForJob,
@@ -155,5 +156,31 @@ describe('поллинг задачи', () => {
 
     token.cancel()
     expect(token.isCurrent(second)).toBe(false)
+  })
+
+  it('отменённая на сервере задача прекращает ожидание как отмена, а не ошибка (3.2)', async () => {
+    const jobSpy = vi.spyOn(api, 'job').mockResolvedValue(jobStatus({ status: 'cancelled' }))
+
+    const failure = await waitForJob('job-1', () => true, () => {}, NO_PAUSE).catch(
+      (error: unknown) => error,
+    )
+
+    expect(jobSpy).toHaveBeenCalledTimes(1)
+    expect(failure).toBeInstanceOf(JobCancelledError)
+    expect(isCancelled(failure)).toBe(true)
+  })
+
+  it('cancelRemoteJob: сдвигает токен и шлёт DELETE задаче (3.2)', () => {
+    const cancelSpy = vi
+      .spyOn(api, 'jobCancel')
+      .mockResolvedValue(jobStatus({ status: 'cancelled' }))
+    const token = createRunToken()
+    const attempt = token.next()
+
+    cancelRemoteJob('job-9', token)
+
+    // Токен сдвинут — поллинг перестаёт ждать; DELETE ушёл с id задачи
+    expect(token.isCurrent(attempt)).toBe(false)
+    expect(cancelSpy).toHaveBeenCalledWith('job-9')
   })
 })

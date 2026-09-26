@@ -84,6 +84,15 @@ STAGE_TITLES: dict[str, str] = {
 }
 
 
+class JobCancelledError(Exception):
+    """Задача отменена пользователем (3.2).
+
+    Не ошибка: текст пользователю не показывается, поллинг трактует её как
+    «отменено» (`shared/lib/jobPolling.ts`). Бросается воркер-потоком из
+    ``Job.set_progress`` — так отмена доходит до ``_execute``.
+    """
+
+
 @dataclass
 class Job:
     """Состояние одной фоновой задачи."""
@@ -110,6 +119,11 @@ class Job:
     # лучше, чем плавающая дробь 0.42 — UI рисует по ним прогресс-бар задачи.
     epochs_done: int = 0
     epochs_total: int = 0
+    # Отмена (3.2): воркер-поток остановить нельзя — он идёт в
+    # asyncio.to_thread, поэтому отмена кооперативная: флаг читает тик
+    # прогресса (set_progress, бросает JobCancelledError) и _execute — до
+    # запуска воркера и после его возврата (результат отброшен).
+    cancel_requested: bool = field(default=False, repr=False)
     task: asyncio.Task | None = field(default=None, repr=False)
     restored: bool = False
     """true — задача поднята с диска (``job_store``), а не исполнялась этим процессом."""
@@ -134,6 +148,11 @@ class Job:
         воркеры с пакетной обработкой (спектр, перебор сетки) сообщают его, чтобы
         UI показывал прогресс по эпохам, а не только по этапам.
         """
+        # Кооперативная отмена (3.2): тик прогресса — место, где воркер-поток
+        # узнаёт об отмене; исключение выводит его наружу, а _execute
+        # превращает в статус cancelled, а не failed.
+        if self.cancel_requested:
+            raise JobCancelledError(f"Задача {self.job_id} отменена")
         self.stage = stage
         if epochs_total is not None:
             self.epochs_total = max(0, int(epochs_total))
@@ -161,6 +180,28 @@ class Job:
             self.set_progress(stage, progress, message, epochs_done, epochs_total)
 
         return _cb
+
+    def request_cancel(self) -> bool:
+        """Просит отменить задачу (3.2): True — отмена принята.
+
+        Идёт ли воркер, остановить нельзя (``asyncio.to_thread``) — флаг читает
+        ближайший тик прогресса. Задача в очереди отменяется сразу: слот
+        семафора она займёт только на проверку ``_execute``, воркер не
+        запускается. Завершённая задача не «отменяется» — False.
+        """
+        if self.status in ("succeeded", "failed", "cancelled"):
+            return False
+        self.cancel_requested = True
+        if self.status == "queued":
+            self.mark_cancelled()
+        return True
+
+    def mark_cancelled(self) -> None:
+        """Итог отмены: ``cancelled``, результат не публикуется (повтор безопасен)."""
+        self.status = "cancelled"
+        if self.finished_at is None:
+            self.finished_at = datetime.utcnow()
+        self.message = "Отменена"
 
     def finish(self, result: dict[str, Any]) -> None:
         """Успешное завершение: фиксируем результат и прогресс 1.0."""
@@ -338,26 +379,47 @@ class JobManager:
     ) -> Job:
         """Ждёт свободный слот, выполняет воркер в потоке, фиксирует итог."""
         async with self._semaphore:
-            job.mark_started()
-            try:
-                # Шаги пайплайна помечаются `job_id` (журнал шагов, этап 5):
-                # `to_thread` копирует контекст, поэтому воркер и сервисы видят
-                # его без передачи параметров.
-                with journal.job_scope(job.job_id):
-                    result = await asyncio.to_thread(fn, job.progress_cb(), *args, **kwargs)
-                job.finish(result)
-                logger.info(
-                    "Задача %s (%s) выполнена за %.1f с", job.job_id, job.kind, job.elapsed_sec or 0.0,
-                )
-            except Exception as exc:
-                job.fail(exc)
-                logger.exception("Задача %s (%s) завершилась ошибкой", job.job_id, job.kind)
+            if job.cancel_requested or job.status == "cancelled":
+                # Отмена в очереди: слот занят только проверкой, воркер не запускается
+                job.mark_cancelled()
+                logger.info("Задача %s (%s) отменена до запуска", job.job_id, job.kind)
             else:
-                if on_success is not None:
-                    try:
-                        await on_success(job, result)
-                    except Exception:
-                        logger.exception("Постобработка задачи %s не выполнена", job.job_id)
+                job.mark_started()
+                # Заглушка типа: в ветках отмены/ошибки результат не читается
+                result: dict[str, Any] = {}
+                try:
+                    # Шаги пайплайна помечаются `job_id` (журнал шагов, этап 5):
+                    # `to_thread` копирует контекст, поэтому воркер и сервисы видят
+                    # его без передачи параметров.
+                    with journal.job_scope(job.job_id):
+                        result = await asyncio.to_thread(fn, job.progress_cb(), *args, **kwargs)
+                except JobCancelledError:
+                    job.mark_cancelled()
+                    logger.info("Задача %s (%s) отменена пользователем", job.job_id, job.kind)
+                except Exception as exc:
+                    job.fail(exc)
+                    logger.exception("Задача %s (%s) завершилась ошибкой", job.job_id, job.kind)
+                else:
+                    if job.cancel_requested:
+                        # Отмена пришла после последнего тика: воркер успел
+                        # дойти до конца, но результат отменённой задачи не
+                        # публикуется — и не должен (3.2)
+                        job.mark_cancelled()
+                        logger.info(
+                            "Задача %s (%s) отменена — результат отброшен",
+                            job.job_id, job.kind,
+                        )
+                    else:
+                        job.finish(result)
+                        logger.info(
+                            "Задача %s (%s) выполнена за %.1f с",
+                            job.job_id, job.kind, job.elapsed_sec or 0.0,
+                        )
+                        if on_success is not None:
+                            try:
+                                await on_success(job, result)
+                            except Exception:
+                                logger.exception("Постобработка задачи %s не выполнена", job.job_id)
         # Итог задачи (успех или ошибка) — на диск: иначе после рестарта процесса
         # история и результат теряются (A8). Запись в потоке (результат бывает на
         # мегабайты, а это event-loop) и **после** освобождения слота семафора:
@@ -369,6 +431,18 @@ class JobManager:
     def get(self, job_id: str) -> Job | None:
         """Задача по id (или None)."""
         return self._jobs.get(job_id)
+
+    def cancel(self, job_id: str) -> Job | None:
+        """Просит отменить задачу (3.2); None — неизвестный id.
+
+        Возвращает задачу с любым текущим статусом: «уже завершена» (409) —
+        решение роута, менеджеру важен только факт, что задача известна.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            return None
+        job.request_cancel()
+        return job
 
     def list_jobs(self, limit: int | None = None) -> list[Job]:
         """Задачи в порядке создания (новые — в конце), последние ``limit`` штук."""
