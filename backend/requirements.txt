@@ -4,7 +4,10 @@ mne>=1.7.0
 numpy>=2.0.0
 scipy>=1.14.0
 nibabel>=5.0.0
-sqlalchemy>=2.0.0
+# SQLAlchemy asyncio-слой (движок создаётся на импорте в app/models/db.py) требует
+# greenlet — без него ImportError при старте и при сборе тестов БД. Голый `sqlalchemy`
+# greenlet не тянет, поэтому заявляем extra (случай 26.09.2026, как F3 с aiosqlite).
+sqlalchemy[asyncio]>=2.0.0
 asyncpg>=0.29.0
 # Асинхронный драйвер SQLite: локальный DATABASE_URL=sqlite+aiosqlite://… (движок
 # создаётся на импорте в app/models/db.py) — без него падает ModuleNotFoundError (F3).

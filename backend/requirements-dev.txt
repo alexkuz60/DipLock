@@ -9,6 +9,10 @@ httpx>=0.27.0
 # runtime-зависимость объявлена и в requirements.txt (т.к. приложение само
 # создаёт sqlite+aiosqlite-движок) — дубль здесь осознанный (F3).
 aiosqlite>=0.20.0
+# greenlet для sqlalchemy.ext.asyncio: runtime-зависимость заявлена в requirements.txt
+# как `sqlalchemy[asyncio]` — дубль здесь осознанный, чтобы чистое окружение CI не
+# полагалось на транзитивные зависимости локального venv (F3, случай 26.09.2026).
+greenlet>=3.0.0
 # Линтер и проверка типов: те же входы гоняет CI (.github/workflows/ci.yml),
 # конфигурация — backend/pyproject.toml, правила — docs/rules/tests.md.
 ruff>=0.9.0
