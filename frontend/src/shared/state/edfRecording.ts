@@ -863,15 +863,43 @@ export async function startUpload(file: File): Promise<void> {
     const meta = await uploadRecording(file, (ratio) =>
       useEdfRecording.getState().setUploadProgress(ratio),
     )
-    useEdfRecording.getState().finishUpload(meta)
-    useEdfParams.getState().setAvailableChannels(meta.channels)
-    // Событие нарезки/ERP (N2/2.7) принадлежит записи: сверяем выбор с событиями
-    // новой записи, иначе «Нарезка эпохи» в событийном режиме уходила бы в 400
-    useEdfParams
-      .getState()
-      .setParams(reconcileEventId(useEdfParams.getState().params.eventId, meta.event_counts ?? {}))
-    useEdfParams.getState().clearApplied()
+    applyRecordingMeta(meta)
   } catch (error) {
     useEdfRecording.getState().failUpload(apiErrorText(error))
+  }
+}
+
+/**
+ * Паспорт записи → общее состояние: общий хвост загрузки и открытия по ссылке
+ * (3.2б). Запись в реестр, каналы и событие нарезки — в параметры EDF, снимки
+ * стадий чистятся.
+ */
+function applyRecordingMeta(meta: RecordingMeta): void {
+  useEdfRecording.getState().finishUpload(meta)
+  useEdfParams.getState().setAvailableChannels(meta.channels)
+  // Событие нарезки/ERP (N2/2.7) принадлежит записи: сверяем выбор с событиями
+  // новой записи, иначе «Нарезка эпохи» в событийном режиме уходила бы в 400
+  useEdfParams
+    .getState()
+    .setParams(reconcileEventId(useEdfParams.getState().params.eventId, meta.event_counts ?? {}))
+  useEdfParams.getState().clearApplied()
+}
+
+/**
+ * Открыть запись по id из ссылки (3.2б, N33): паспорт из реестра просмотра —
+ * те же слои состояния, что и при загрузке. Ушедшая по TTL запись даёт
+ * понятный текст в `uploadError`, а не тихий пустой экран.
+ */
+export async function openRecordingById(recordingId: string): Promise<void> {
+  if (useEdfRecording.getState().recording?.recording_id === recordingId) return
+  useEdfRecording.getState().beginUpload()
+  try {
+    const meta = await api.recording(recordingId)
+    applyRecordingMeta(meta)
+  } catch (error) {
+    useEdfRecording.getState().failUpload(
+      `Запись ${recordingId} из ссылки не открыта на сервере (файл удалён по TTL?): ` +
+        apiErrorText(error),
+    )
   }
 }

@@ -13,6 +13,7 @@ import {
   buildPreprocessForm,
   filterBandOf,
   layersFromResult,
+  openRecordingById,
   reconcileEventId,
   useEdfRecording,
   validateEdfFile,
@@ -630,5 +631,48 @@ describe('отмена задач (3.2)', () => {
 
     expect(cancelSpy).toHaveBeenCalledWith('job-ev-1')
     expect(useEdfRecording.getState().evoked.status).toBe('cancelled')
+  })
+})
+
+describe('открытие записи по ссылке (3.2б)', () => {
+  beforeEach(() => {
+    useEdfRecording.setState({
+      recording: null,
+      uploadProgress: null,
+      uploadError: null,
+      demo: null,
+    })
+    useEdfParams.setState({ availableChannels: [] })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('паспорт из реестра: запись и каналы в общее состояние', async () => {
+    const metaSpy = vi.spyOn(api, 'recording').mockResolvedValue(recordingFixture)
+
+    await openRecordingById(recordingFixture.recording_id)
+
+    expect(metaSpy).toHaveBeenCalledWith('rec-1')
+    expect(useEdfRecording.getState().recording?.recording_id).toBe('rec-1')
+    expect(useEdfRecording.getState().uploadError).toBeNull()
+    expect(useEdfParams.getState().availableChannels).toEqual(recordingFixture.channels)
+  })
+
+  it('та же запись уже открыта — без запроса (идемпотентно)', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const metaSpy = vi.spyOn(api, 'recording').mockResolvedValue(recordingFixture)
+
+    await openRecordingById(recordingFixture.recording_id)
+
+    expect(metaSpy).not.toHaveBeenCalled()
+  })
+
+  it('запись ушла с сервера — понятный uploadError, состояние не тронуто', async () => {
+    vi.spyOn(api, 'recording').mockRejectedValue(new Error('Запись rec-gone не найдена'))
+
+    await openRecordingById('rec-gone')
+
+    expect(useEdfRecording.getState().recording).toBeNull()
+    expect(useEdfRecording.getState().uploadError).toContain('rec-gone')
+    expect(useEdfRecording.getState().uploadProgress).toBeNull()
   })
 })

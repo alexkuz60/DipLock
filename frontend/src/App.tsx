@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { SECTION_ROUTES } from '@/app/sections/registry'
 import { SectionRoute } from '@/app/sections/routes'
+import { UrlSync } from '@/app/UrlSync'
 import { TooltipProvider } from '@/shared/ui/Tooltip'
 
 const queryClient = new QueryClient({
@@ -22,6 +23,8 @@ export function App() {
       <TooltipProvider>
         {/* basename соответствует base '/ui/' в vite.config.ts (dev и prod) */}
         <BrowserRouter basename="/ui">
+          {/* Зеркало общих параметров URL ↔ сторы (3.2б): вне Routes, живёт при любой секции */}
+          <UrlSync />
           <Routes>
             {SECTION_ROUTES.map(({ path, id }) => (
               <Route key={path} path={path} element={<SectionRoute id={id} />} />
