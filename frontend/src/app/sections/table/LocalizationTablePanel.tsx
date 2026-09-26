@@ -15,6 +15,8 @@
 import { RotateCcw } from 'lucide-react'
 import {
   TABLE_COLUMNS,
+  filtersActive,
+  filtersSummary,
   hiddenColumnCount,
   sortDirectionLabel,
   tableRows,
@@ -25,6 +27,7 @@ import { useEdfRecording } from '@/shared/state/edfRecording'
 import { TABLE_SORT_OPTIONS, useTableParams } from '@/shared/state/tableParams'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
+import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -35,6 +38,9 @@ export function LocalizationTablePanel() {
   const setSortDirection = useTableParams((state) => state.setSortDirection)
   const setColumnVisible = useTableParams((state) => state.setColumnVisible)
   const showAllColumns = useTableParams((state) => state.showAllColumns)
+  const filters = useTableParams((state) => state.params.filters)
+  const setMinGofPct = useTableParams((state) => state.setMinGofPct)
+  const setMaxRivPct = useTableParams((state) => state.setMaxRivPct)
 
   const recording = useEdfRecording((state) => state.recording)
   const result = useDipoleCalc((state) => state.result)
@@ -48,7 +54,7 @@ export function LocalizationTablePanel() {
     <>
       <Panel
         title="Сортировка"
-        hint="Пока единственный ключ — номер эпохи: строки идут по порядку нарезки, направление переключается здесь. Сортировка по MNI, амплитуде и GOF появится вместе с фильтрами."
+        hint="Единственный ключ — номер эпохи (требование задачи): строки идут по порядку нарезки, направление переключается здесь."
       >
         <SegmentedControl
           label="Порядок эпох"
@@ -57,6 +63,62 @@ export function LocalizationTablePanel() {
           onChange={setSortDirection}
           hint={`Сейчас: ${sortDirectionLabel(sortDirection)}`}
         />
+      </Panel>
+
+      <Panel
+        title="Фильтр доверия (GOF/RIV)"
+        hint="Пороги скрывают строки, но не удаляют их из результата. GOF между полосами не сравним (узкая полоса завышает R²) — кросс-полосной фильтр доверия это RIV (2.6/N23)."
+      >
+        <CheckboxRow
+          label="Фильтровать по GOF снизу"
+          hint="Показать только строки с GOF не ниже порога"
+          checked={filters.minGofPct !== null}
+          onChange={(checked) => setMinGofPct(checked ? (filters.minGofPct ?? 80) : null)}
+        />
+        <NumberField
+          label="Минимальный GOF"
+          value={filters.minGofPct ?? 80}
+          onChange={setMinGofPct}
+          min={0}
+          max={100}
+          step={1}
+          unit="%"
+          disabled={filters.minGofPct === null}
+          hint="Нижний порог GOF, %"
+        />
+        <CheckboxRow
+          label="Фильтровать по RIV сверху"
+          hint="Показать только строки с RIV не выше порога (сравним между полосами)"
+          checked={filters.maxRivPct !== null}
+          onChange={(checked) => setMaxRivPct(checked ? (filters.maxRivPct ?? 10) : null)}
+        />
+        <NumberField
+          label="Максимальный RIV"
+          value={filters.maxRivPct ?? 10}
+          onChange={setMaxRivPct}
+          min={0}
+          max={100}
+          step={1}
+          unit="%"
+          disabled={filters.maxRivPct === null}
+          hint="Верхний порог RIV, %: меньше — лучше"
+        />
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <StatusPill tone={filtersActive(filters) ? 'accent' : 'neutral'}>
+            {filtersSummary(filters)}
+          </StatusPill>
+          <Button
+            icon={<RotateCcw className="size-4" />}
+            disabled={!filtersActive(filters)}
+            onClick={() => {
+              setMinGofPct(null)
+              setMaxRivPct(null)
+            }}
+            title="Снять оба порога: показать все строки результата"
+          >
+            Снять пороги
+          </Button>
+        </div>
       </Panel>
 
       <Panel
@@ -90,7 +152,7 @@ export function LocalizationTablePanel() {
 
       <Panel
         title="Результат расчёта"
-        hint="Таблица читает результат задачи раздела «Диполи» — здесь он показан справкой. Фильтры по GOF/амплитуде/BA, экспорт выборки и сохранение в БД — следующий срез."
+        hint="Таблица читает результат задачи раздела «Диполи» — здесь он показан справкой. Фильтры по амплитуде/BA, экспорт выборки и сохранение в БД — следующий срез."
       >
         <div className="mb-2 flex flex-wrap gap-2">
           <StatusPill tone={recording ? 'ok' : 'neutral'}>

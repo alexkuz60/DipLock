@@ -14,6 +14,18 @@ export type TrajectoryPoint = {
   ori_head: number[]
   amplitude_nam: number
   gof: number
+  /**
+   * Доля отбелённой невязки (in-band ковариация шума), 2.6/N23: кросс-полосной
+   * фильтр доверия. GOF между полосами не сравним (узкая полоса завышает R²),
+   * RIV — сравним. `null` — не посчитан
+   */
+  riv: number | null
+  /** Радиус доверительной области позиции, мм (2.6/N23); `null` — не оценён */
+  ci_mm: number | null
+  /** χ² фита (`mne.Dipole.khi2`), если считался */
+  khi2: number | null
+  /** Число степеней свободы фита (`mne.Dipole.nfree`) */
+  nfree: number | null
   mni_coords: number[] | null
   anatomical_structure: string | null
   /** Расстояние от точки до ближайшей структуры, мм (шаг 1.4); `null` — координат/атласа нет */
@@ -44,6 +56,10 @@ export type BestFitDipole = {
   mni_z: number | null
   amplitude_nam: number | null
   gof: number | null
+  /** Доля отбелённой невязки (in-band ковариация шума), 2.6/N23 */
+  riv: number | null
+  /** Радиус доверительной области позиции, мм (2.6/N23) */
+  ci_mm: number | null
   anatomical_roi: string | null
   brodmann_area: string | null
 }
@@ -280,6 +296,17 @@ export type DipoleScanPoint = {
   moment: number[]
   amplitude_nam: number
   gof: number
+  /**
+   * Доля отбелённой невязки (in-band ковариация шума), 2.6/N23: кросс-полосной
+   * фильтр доверия. GOF между полосами не сравним (узкая полоса завышает R²),
+   * RIV — сравним. `null` — не посчитан
+   */
+  riv: number | null
+  /**
+   * Радиус доверительной области позиции, мм (2.6/N23): «плато» сетки (узлы в
+   * пределах ΔGOF от лучшего); `null` — не оценён
+   */
+  ci_mm: number | null
   brodmann_area: string | null
   /**
    * Анатомическая структура по MNI-координате (атлас `aparc+aseg` — тот же, что

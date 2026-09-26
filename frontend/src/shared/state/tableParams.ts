@@ -15,9 +15,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
+  TABLE_FILTERS_DEFAULT,
   defaultColumnVisibility,
   type TableColumnKey,
   type TableColumnVisibility,
+  type TableFilters,
   type TableSortDirection,
 } from '@/shared/lib/tableRows'
 
@@ -38,11 +40,14 @@ export const TABLE_SORT_OPTIONS: { value: TableSortDirection; label: string; tit
 export type TableParams = {
   sortDirection: TableSortDirection
   columnVisibility: TableColumnVisibility
+  /** Пороги фильтра доверия GOF/RIV (2.6/N23); `null` — порог не задан */
+  filters: TableFilters
 }
 
 export const TABLE_PARAM_DEFAULTS: TableParams = {
   sortDirection: 'asc',
   columnVisibility: defaultColumnVisibility(),
+  filters: { ...TABLE_FILTERS_DEFAULT },
 }
 
 export type TableParamsState = {
@@ -51,7 +56,11 @@ export type TableParamsState = {
   setColumnVisible: (key: TableColumnKey, visible: boolean) => void
   /** Показать все колонки (быстрый возврат после скрытия) */
   showAllColumns: () => void
-  /** Вернуть параметры по умолчанию (сортировка и все колонки) */
+  /** Порог GOF снизу, % (`null` — снять порог) */
+  setMinGofPct: (value: number | null) => void
+  /** Порог RIV сверху, % (`null` — снять порог) */
+  setMaxRivPct: (value: number | null) => void
+  /** Вернуть параметры по умолчанию (сортировка, колонки и пороги) */
   reset: () => void
 }
 
@@ -74,13 +83,29 @@ export const useTableParams = create<TableParamsState>()(
       showAllColumns: () =>
         set((state) => ({ params: { ...state.params, columnVisibility: defaultColumnVisibility() } })),
 
+      setMinGofPct: (value) =>
+        set((state) => ({
+          params: { ...state.params, filters: { ...state.params.filters, minGofPct: value } },
+        })),
+
+      setMaxRivPct: (value) =>
+        set((state) => ({
+          params: { ...state.params, filters: { ...state.params.filters, maxRivPct: value } },
+        })),
+
       reset: () =>
-        set({ params: { ...TABLE_PARAM_DEFAULTS, columnVisibility: defaultColumnVisibility() } }),
+        set({
+          params: {
+            ...TABLE_PARAM_DEFAULTS,
+            columnVisibility: defaultColumnVisibility(),
+            filters: { ...TABLE_FILTERS_DEFAULT },
+          },
+        }),
     }),
     {
       name: 'diplock.table',
-      // Порядок строк и состав колонок — настройки просмотра: их переживает
-      // перезагрузка страницы, а результат задачи — нет (он в `dipoleCalc`).
+      // Порядок строк, состав колонок и пороги — настройки просмотра: их
+      // переживает перезагрузка страницы, а результат задачи — нет (он в `dipoleCalc`).
       partialize: (state) => ({ params: state.params }),
       merge: (persisted, current) => {
         const stored = (persisted ?? {}) as { params?: Partial<TableParams> }
@@ -95,6 +120,12 @@ export const useTableParams = create<TableParamsState>()(
             columnVisibility: {
               ...current.params.columnVisibility,
               ...(storedParams.columnVisibility ?? {}),
+            },
+            // Пороги добираются по ключам: `null` (порог снят) — тоже значение,
+            // и оно не должно перетираться дефолтом
+            filters: {
+              ...current.params.filters,
+              ...(storedParams.filters ?? {}),
             },
           },
         }

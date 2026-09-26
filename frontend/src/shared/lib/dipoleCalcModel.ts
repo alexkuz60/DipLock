@@ -302,12 +302,16 @@ export function refineTooltip(refined: DipoleRefineResult): string {
     refined.grid_gof_bem !== null
       ? `, тот же узел на BEM: ${(refined.grid_gof_bem * 100).toFixed(1)} %`
       : ''
+  const riv =
+    refined.point.riv !== null && Number.isFinite(refined.point.riv)
+      ? `, RIV ${(refined.point.riv * 100).toFixed(1)} %`
+      : ', RIV не посчитан'
   const head = refined.free_fit
     ? 'Уточнено точным профилем'
     : 'Свободный фит не выполнен — показана оценка узла сетки на BEM'
   return (
     `${head} (окно ${refined.window_ms.map((v) => v.toFixed(0)).join('…')} мс, ` +
-    `±${refined.halfwin_ms.toFixed(0)} мс): GOF ${(refined.point.gof * 100).toFixed(1)} %, ${coords}, ` +
+    `±${refined.halfwin_ms.toFixed(0)} мс): GOF ${(refined.point.gof * 100).toFixed(1)} %${riv}, ${coords}, ` +
     `сдвиг от узла сетки ${refined.shift_mm.toFixed(1)} мм. ` +
     `Было — сетка: GOF ${(refined.fast_gof * 100).toFixed(1)} %${gridBem}.`
   )

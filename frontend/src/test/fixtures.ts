@@ -531,6 +531,9 @@ function dipolePoint(
     moment: [0, 1, 0],
     amplitude_nam: amplitudeNaM,
     gof: 0.91,
+    // RIV/CI (2.6/N23): типовые значения фикстуры; тесты перекрывают их явно
+    riv: 0.12,
+    ci_mm: 7.0,
     brodmann_area: 'BA17-lh',
     anatomical_structure: 'таламус (слева)',
     structure_distance_mm: 0.4,

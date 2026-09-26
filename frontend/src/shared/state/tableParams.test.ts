@@ -29,7 +29,9 @@ describe('настройки таблицы локализации', () => {
 
     expect(params.sortDirection).toBe('asc')
     expect(Object.values(params.columnVisibility).every(Boolean)).toBe(true)
-    expect(Object.keys(params.columnVisibility)).toHaveLength(10)
+    expect(Object.keys(params.columnVisibility)).toHaveLength(12)
+    // Пороги фильтра по умолчанию сняты: показаны все точки результата
+    expect(params.filters).toEqual({ minGofPct: null, maxRivPct: null })
   })
 
   it('переключает направление сортировки', () => {
@@ -60,6 +62,23 @@ describe('настройки таблицы локализации', () => {
 
     useTableParams.getState().reset()
     expect(useTableParams.getState().params).toEqual(TABLE_PARAM_DEFAULTS)
+  })
+
+  it('пороги фильтра доверия ставятся и снимаются (2.6/N23)', () => {
+    const store = useTableParams.getState()
+
+    store.setMinGofPct(80)
+    expect(useTableParams.getState().params.filters).toEqual({ minGofPct: 80, maxRivPct: null })
+
+    store.setMaxRivPct(10)
+    expect(useTableParams.getState().params.filters).toEqual({ minGofPct: 80, maxRivPct: 10 })
+
+    // `null` — порог снят, а не «0 %»: это значение переживает персист
+    store.setMaxRivPct(null)
+    expect(useTableParams.getState().params.filters).toEqual({ minGofPct: 80, maxRivPct: null })
+
+    useTableParams.getState().reset()
+    expect(useTableParams.getState().params.filters).toEqual(TABLE_PARAM_DEFAULTS.filters)
   })
 
   it('правка настроек таблицы не трогает результат и параметры расчёта', () => {

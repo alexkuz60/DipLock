@@ -23,6 +23,32 @@ class FakeDipole:
         self.gof = np.array([80.0, 95.0])
 
 
+class FakeDipoleWithStats(FakeDipole):
+    """Двойник с расширенной распаковкой `fit_dipole` (2.6/N23).
+
+    `conf`/`khi2`/`nfree` MNE считает всегда, а `mne.fit_dipole` отдаёт ещё и
+    кортеж с невязкой: всё это раньше отбрасывалось, а из него берутся RIV/CI.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Доверительные границы по осям диполя, метры (как у MNE `dip.conf`)
+        self.conf = {
+            "depth": np.array([0.0, 0.0]),
+            "long": np.array([0.004, 0.002]),   # 4 мм / 2 мм
+            "trans": np.array([0.006, 0.003]),  # 6 мм / 3 мм
+        }
+        self.khi2 = np.array([1.2, 0.7])
+        self.nfree = np.array([33, 33])
+
+
+class FakeResidual:
+    """Двойник невязки `fit_dipole` (Evoked): только ``data`` как у настоящего."""
+
+    def __init__(self, data: np.ndarray) -> None:
+        self.data = data
+
+
 def _patch_fit(monkeypatch, result_factory, calls=None, kwargs_seen=None):
     """Изолирует фитинг от FSAverage/BEM и подменяет ``mne.fit_dipole``."""
 
@@ -67,6 +93,37 @@ def test_fit_dipoles_accepts_bare_dipole_too(epochs_alpha, monkeypatch):
     result = dipole_fitter.fit_dipoles_for_epochs(epochs_alpha, settings, freq_bands={})
 
     assert all(r["n_time_points"] == 2 for r in result)
+
+
+def test_fit_dipoles_unpacks_conf_khi2_and_residual(epochs_alpha, monkeypatch):
+    """2.6/N23: расширенная распаковка `fit_dipole` → RIV/CI в точках траектории.
+
+    `dip.conf`/`khi2`/`nfree` и невязка из кортежа раньше отбрасывались; теперь
+    из них считаются RIV (доля отбелённой невязки) и радиус доверительной
+    области позиции (максимум границ MNE по осям диполя, мм).
+    """
+    n_ch = len(epochs_alpha.ch_names)
+    residual = FakeResidual(np.full((n_ch, 2), 1e-7))
+
+    def factory(evoked):
+        return FakeDipoleWithStats(), residual
+
+    _patch_fit(monkeypatch, factory)
+    result = dipole_fitter.fit_dipoles_for_epochs(epochs_alpha, settings, freq_bands={})
+
+    for r in result:
+        for idx, point in enumerate(r["trajectory"]):
+            assert point["khi2"] is not None and point["nfree"] == 33
+            # CI: max(long, trans, depth=0) в мм — 6 мм для точки 0, 3 мм для точки 1
+            assert point["ci_mm"] == pytest.approx(6.0 if idx == 0 else 3.0)
+        # RIV — доля отбелённой невязки: конечна и неотрицательна
+        assert all(
+            p["riv"] is not None and np.isfinite(p["riv"]) and p["riv"] >= 0.0
+            for p in r["trajectory"]
+        )
+    # Лучшая точка тащит RIV/CI в `best_fit` (таблица локализации)
+    assert result[0]["best_fit"]["riv"] is not None
+    assert result[0]["best_fit"]["ci_mm"] == pytest.approx(3.0)
 
 
 def test_fit_dipoles_reports_progress_per_epoch(epochs_alpha, monkeypatch):

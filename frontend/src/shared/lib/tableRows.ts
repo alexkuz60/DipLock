@@ -48,6 +48,8 @@ export type TableColumnKey =
   | 'structure'
   | 'amplitude'
   | 'gof'
+  | 'riv'
+  | 'ci'
   | 'area'
 
 export type TableColumn = {
@@ -94,7 +96,27 @@ export const TABLE_COLUMNS: TableColumn[] = [
     numeric: true,
     width: 'w-28',
   },
-  { key: 'gof', label: 'GOF, %', hint: 'Goodness of fit: доля объяснённой дисперсии поля', numeric: true, width: 'w-24' },
+  {
+    key: 'gof',
+    label: 'GOF, %',
+    hint: 'Goodness of fit: доля объяснённой дисперсии поля. GOF не сравним между полосами — узкая полоса завышает R²; для сравнения полос используйте RIV',
+    numeric: true,
+    width: 'w-24',
+  },
+  {
+    key: 'riv',
+    label: 'RIV, %',
+    hint: 'Доля отбелённой невязки (in-band ковариация шума): кросс-полосной фильтр доверия — меньше, лучше; сравнима между полосами, в отличие от GOF (2.6/N23)',
+    numeric: true,
+    width: 'w-24',
+  },
+  {
+    key: 'ci',
+    label: 'CI, мм',
+    hint: 'Радиус доверительной области позиции, мм (2.6/N23): «плато» сетки — узлы в пределах ΔGOF от лучшего; не уже половины шага сетки',
+    numeric: true,
+    width: 'w-24',
+  },
   {
     key: 'hemisphere',
     label: 'Полушарие',
@@ -146,6 +168,16 @@ export type LocalizationRow = {
   mni: [number, number, number] | null
   amplitudeNaM: number
   gof: number
+  /**
+   * Доля отбелённой невязки (in-band ковариация шума), 2.6/N23.
+   * `null` — не посчитан (нет ковариации шума): в ячейке «—».
+   */
+  riv: number | null
+  /**
+   * Радиус доверительной области позиции, мм (2.6/N23): «плато» сетки.
+   * `null` — не оценён: в ячейке «—».
+   */
+  ciMm: number | null
   /** Поле Бродмана (`null` — не определено) */
   area: string | null
   /**
@@ -177,6 +209,10 @@ export function localizationRows(result: DipoleScanResult): LocalizationRow[] {
     mni: mniOf(point.mni_coords),
     amplitudeNaM: point.amplitude_nam,
     gof: point.gof,
+    // RIV/CI (2.6/N23): приходят готовыми от сервера; `null` — не посчитано,
+    // здесь ничего не достраивается (принцип: «—» вместо выдуманного числа).
+    riv: point.riv ?? null,
+    ciMm: point.ci_mm ?? null,
     // Метки нормализуются здесь (одно место): `unknown` сервера и пустые строки
     // становятся `null` — в ячейке «—», в подсказке строки их просто нет.
     area: atlasLabel(point.brodmann_area),
@@ -190,6 +226,52 @@ export function localizationRows(result: DipoleScanResult): LocalizationRow[] {
 /** Точки без MNI: их не наводят на проекции (срез 3.4), но в таблице они есть. */
 export function missingMniCount(rows: LocalizationRow[]): number {
   return rows.filter((row) => row.mni === null).length
+}
+
+/**
+ * Пороги фильтра таблицы (2.6/N23): GOF снизу, RIV сверху.
+ *
+ * `null` — порог не задан. Это **фильтр доверия**, а не сортировка: скрытые
+ * строки остаются в результате (и в счётчике «всего»), показывается только
+ * «сколько прошло пороги». Порог «КД ≥» из раздела «Диполи» сюда не входит:
+ * он — параметр отображения проекций и таблицу не фильтрует.
+ */
+export type TableFilters = {
+  minGofPct: number | null
+  maxRivPct: number | null
+}
+
+/** Пороги по умолчанию: без фильтра — показаны все точки результата. */
+export const TABLE_FILTERS_DEFAULT: TableFilters = { minGofPct: null, maxRivPct: null }
+
+/** Сколько строк прошло пороги GOF/RIV (без порогов — все). */
+export function filterRows(rows: LocalizationRow[], filters: TableFilters): LocalizationRow[] {
+  return rows.filter((row) => {
+    if (filters.minGofPct !== null) {
+      // Без GOF порог не пройден: «неизмерено» ≠ «хорошо»
+      if (!Number.isFinite(row.gof) || row.gof * 100 < filters.minGofPct) return false
+    }
+    if (filters.maxRivPct !== null) {
+      // Без RIV порог тоже не пройден: кросс-полосному фильтру нечего предъявить
+      if (row.riv === null || !Number.isFinite(row.riv) || row.riv * 100 > filters.maxRivPct) {
+        return false
+      }
+    }
+    return true
+  })
+}
+
+/** Активен ли хоть один порог (панель показывает это подписью). */
+export function filtersActive(filters: TableFilters): boolean {
+  return filters.minGofPct !== null || filters.maxRivPct !== null
+}
+
+/** Подпись активных порогов: «GOF ≥ 80 % · RIV ≤ 10 %» или «без порогов». */
+export function filtersSummary(filters: TableFilters): string {
+  const parts: string[] = []
+  if (filters.minGofPct !== null) parts.push(`GOF ≥ ${filters.minGofPct} %`)
+  if (filters.maxRivPct !== null) parts.push(`RIV ≤ ${filters.maxRivPct} %`)
+  return parts.length > 0 ? parts.join(' · ') : 'без порогов'
 }
 
 /** Сортировка по номеру эпохи; `asc` — от ранних к поздним. */
@@ -233,6 +315,11 @@ export function cellText(row: LocalizationRow, key: TableColumnKey): string {
       return Number.isFinite(row.amplitudeNaM) ? row.amplitudeNaM.toFixed(1) : EM_DASH
     case 'gof':
       return Number.isFinite(row.gof) ? (row.gof * 100).toFixed(1) : EM_DASH
+    case 'riv':
+      // RIV — тоже доля, показывается процентом как GOF (сравнимы визуально)
+      return row.riv !== null && Number.isFinite(row.riv) ? (row.riv * 100).toFixed(1) : EM_DASH
+    case 'ci':
+      return row.ciMm !== null && Number.isFinite(row.ciMm) ? row.ciMm.toFixed(1) : EM_DASH
     case 'area':
       // Вне мозга ближайшее поле — выдуманная атрибуция: прочерк вместо метки узла
       if (row.outsideBrain) return EM_DASH
@@ -274,7 +361,15 @@ export function rowTooltip(row: LocalizationRow): string {
     '',
   )
   const suffix = anatomy ? `, ${anatomy}` : ''
-  return `Эпоха ${row.epochIndex + 1}, пик ${(row.timeMs / 1000).toFixed(3)} с: ${coords}${suffix}, ${row.amplitudeNaM.toFixed(1)} нАм, GOF ${(row.gof * 100).toFixed(1)} %`
+  const riv =
+    row.riv !== null && Number.isFinite(row.riv)
+      ? `, RIV ${(row.riv * 100).toFixed(1)} %`
+      : ', RIV не посчитан'
+  const ci =
+    row.ciMm !== null && Number.isFinite(row.ciMm)
+      ? `, CI ${row.ciMm.toFixed(1)} мм`
+      : ', CI не оценён'
+  return `Эпоха ${row.epochIndex + 1}, пик ${(row.timeMs / 1000).toFixed(3)} с: ${coords}${suffix}, ${row.amplitudeNaM.toFixed(1)} нАм, GOF ${(row.gof * 100).toFixed(1)} %${riv}${ci}`
 }
 
 /** Подпись сортировки для статуса раздела: направление всегда названо словами. */

@@ -25,6 +25,8 @@ function scanPoint(epochIndex: number, overrides: Partial<DipoleScanPoint> = {})
     moment: [0, 1, 0],
     amplitude_nam: 60,
     gof: 0.91,
+    riv: 0.12,
+    ci_mm: 7.0,
     brodmann_area: 'BA17-lh',
     anatomical_structure: 'таламус (слева)',
     structure_distance_mm: 0.4,

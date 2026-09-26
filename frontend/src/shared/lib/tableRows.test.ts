@@ -8,8 +8,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   EM_DASH,
+  TABLE_FILTERS_DEFAULT,
   cellText,
   defaultColumnVisibility,
+  filterRows,
+  filtersActive,
+  filtersSummary,
   hiddenColumnCount,
   hemisphereLabel,
   hemisphereOf,
@@ -34,6 +38,8 @@ function point(overrides: Partial<DipoleScanPoint> = {}): DipoleScanPoint {
     moment: [0, 1, 0],
     amplitude_nam: 60,
     gof: 0.91,
+    riv: 0.12,
+    ci_mm: 7.0,
     brodmann_area: 'BA17-lh',
     anatomical_structure: 'таламус (слева)',
     structure_distance_mm: 0.4,
@@ -100,12 +106,53 @@ describe('строки таблицы локализации', () => {
     expect(cellText(rows[0], 'time')).toBe('0.120')
     expect(cellText(rows[0], 'amplitude')).toBe('60.0')
     expect(cellText(rows[0], 'gof')).toBe('91.0')
+    expect(cellText(rows[0], 'riv')).toBe('12.0')
+    expect(cellText(rows[0], 'ci')).toBe('7.0')
     expect(cellText(rows[0], 'area')).toBe('BA17-lh')
 
     // Точка без MNI: ни нулей, ни пустых ячеек — честный прочерк
     expect(cellText(noMni, 'x')).toBe(EM_DASH)
     expect(cellText(noMni, 'hemisphere')).toBe(EM_DASH)
     expect(rowTooltip(noMni)).toContain('MNI нет (fsaverage недоступен)')
+  })
+
+  it('RIV/CI без значений — прочерк, а не ноль (2.6/N23)', () => {
+    // `null` приходит из API: RIV не посчитан (нет ковариации шума), CI не оценён
+    const rows = localizationRows(
+      dipoleScanResultFixture({ points: [point({ riv: null, ci_mm: null })] }),
+    )
+
+    expect(cellText(rows[0], 'riv')).toBe(EM_DASH)
+    expect(cellText(rows[0], 'ci')).toBe(EM_DASH)
+    expect(rowTooltip(rows[0])).toContain('RIV не посчитан')
+    expect(rowTooltip(rows[0])).toContain('CI не оценён')
+  })
+
+  it('фильтр доверия GOF/RIV скрывает строки, но не выкидывает их из результата', () => {
+    const points = [
+      point({ epoch_index: 0, gof: 0.95, riv: 0.05 }), // проходит оба порога
+      point({ epoch_index: 1, gof: 0.6, riv: 0.05 }), // валится по GOF
+      point({ epoch_index: 2, gof: 0.95, riv: 0.4 }), // валится по RIV
+      point({ epoch_index: 3, gof: 0.95, riv: null }), // RIV не посчитан — порогу нечего предъявить
+    ]
+    const rows = localizationRows(dipoleScanResultFixture({ points }))
+
+    expect(filterRows(rows, TABLE_FILTERS_DEFAULT)).toHaveLength(4)
+    expect(filtersActive(TABLE_FILTERS_DEFAULT)).toBe(false)
+
+    const gofOnly = filterRows(rows, { minGofPct: 80, maxRivPct: null })
+    expect(gofOnly.map((row) => row.epochIndex)).toEqual([0, 2, 3])
+
+    const rivOnly = filterRows(rows, { minGofPct: null, maxRivPct: 10 })
+    // Без RIV порог не пройден: «неизмерено» ≠ «хорошо»
+    expect(rivOnly.map((row) => row.epochIndex)).toEqual([0, 1])
+
+    const both = filterRows(rows, { minGofPct: 80, maxRivPct: 10 })
+    expect(both.map((row) => row.epochIndex)).toEqual([0])
+
+    expect(filtersActive({ minGofPct: 80, maxRivPct: null })).toBe(true)
+    expect(filtersSummary({ minGofPct: 80, maxRivPct: 10 })).toBe('GOF ≥ 80 % · RIV ≤ 10 %')
+    expect(filtersSummary(TABLE_FILTERS_DEFAULT)).toBe('без порогов')
   })
 
   it('прочерк и для нечисловых значений — NaN не должен выглядеть как ноль', () => {
@@ -156,6 +203,8 @@ describe('строки таблицы локализации', () => {
       'z',
       'amplitude',
       'gof',
+      'riv',
+      'ci',
       'hemisphere',
       'structure',
       'area',

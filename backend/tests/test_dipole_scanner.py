@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 
 from app.core.config import settings
+from app.services.dipole_fitter import inband_whitener
 from app.services.dipole_scanner import (
     GRID_CENTER_MM,
     GRID_RADIUS_MM,
@@ -110,13 +111,16 @@ def test_scan_point_fast_matches_scan_point():
     rng = np.random.default_rng(7)
     for _ in range(10):
         signal = rng.normal(size=electrodes.shape[0]) * 20e-6
-        pos_ref, dir_ref, amp_ref, gof_ref = scan_point(electrodes, signal, grid)
-        pos_new, dir_new, amp_new, gof_new = scan_point_fast(kernel, signal)
+        ref = scan_point(electrodes, signal, grid)
+        new = scan_point_fast(kernel, signal)
         # Лучший узел обязан совпасть в точности — это и есть ответ перебора
-        assert np.array_equal(pos_new, pos_ref)
-        assert np.isclose(gof_new, gof_ref, atol=1e-9)
-        assert np.isclose(amp_new, amp_ref, rtol=1e-9)
-        assert np.allclose(dir_new, dir_ref, atol=1e-9)
+        assert np.array_equal(new.position_m, ref.position_m)
+        assert np.isclose(new.gof, ref.gof, atol=1e-9)
+        assert np.isclose(new.amplitude_am, ref.amplitude_am, rtol=1e-9)
+        assert np.allclose(new.direction, ref.direction, atol=1e-9)
+        # Метрики доверия (2.6/N23) тоже обязаны совпасть: один перебор
+        assert new.riv == ref.riv
+        assert np.isclose(new.ci_mm, ref.ci_mm, atol=1e-9)
 
 
 def test_scan_kernel_is_cached():
@@ -187,13 +191,39 @@ def test_scan_point_recovers_synthetic_dipole():
     gain, _ = _leadfield(electrodes, true_position.reshape(1, 3))
     signal = (gain[:, 0, :] @ true_moment) * 1e-6  # вольты, как из EDF
 
-    position, moment, amplitude, gof = scan_point(electrodes, signal, grid)
+    fit = scan_point(electrodes, signal, grid)
 
     step_m = GRID_STEP_MM / 1000.0
-    assert np.linalg.norm(position - true_position) <= 1.5 * step_m
-    assert gof > 0.95
-    assert amplitude > 0
-    assert float(np.dot(moment, true_moment)) > 0.9
+    assert np.linalg.norm(fit.position_m - true_position) <= 1.5 * step_m
+    assert fit.gof > 0.95
+    assert fit.amplitude_am > 0
+    assert float(np.dot(fit.direction, true_moment)) > 0.9
+    # CI (2.6/N23) зажат снизу разрешением сетки и не шире её радиуса
+    assert GRID_STEP_MM / 2.0 <= fit.ci_mm <= GRID_RADIUS_MM
+
+
+def test_scan_fit_reports_riv_only_with_whitener():
+    """RIV (2.6/N23) считается только с ковариацией шума: без неё — `None`.
+
+    Невязка без шумовой нормировки — это просто 1 − GOF, второго числа не
+    нужно; `None` в таблице честнее выдуманного дубля.
+    """
+    electrodes = _electrodes()
+    grid = candidate_grid()
+    true_position = np.array([0.0, 0.0, 0.05])
+    true_moment = np.array([0.0, 1.0, 0.0])
+    gain, _ = _leadfield(electrodes, true_position.reshape(1, 3))
+    signal = (gain[:, 0, :] @ true_moment) * 1e-6
+
+    fit_plain = scan_point(electrodes, signal, grid)
+    assert fit_plain.riv is None, "без отбеливателя RIV не считается"
+
+    whitener = inband_whitener(np.repeat(signal.reshape(-1, 1), 8, axis=1))
+    fit_whitened = scan_point(electrodes, signal, grid, whitener=whitener)
+    assert fit_whitened.riv is not None
+    assert fit_whitened.riv >= 0.0
+    # Чистый синтетический сигнал: невязка почти нулевая
+    assert fit_whitened.riv < 0.05
 
 
 def test_scan_point_rejects_bad_input():

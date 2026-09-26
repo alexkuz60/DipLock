@@ -166,6 +166,9 @@ def run_analysis(
             "mni_x": mni[0], "mni_y": mni[1], "mni_z": mni[2],
             "amplitude_nam": best.get("amplitude_nam"),
             "gof": best.get("gof"),
+            # RIV/CI (2.6/N23): кросс-полосной фильтр доверия в таблице
+            "riv": best.get("riv"),
+            "ci_mm": best.get("ci_mm"),
             "anatomical_roi": best.get("anatomical_structure"),
             "brodmann_area": best.get("brodmann_area"),
         })

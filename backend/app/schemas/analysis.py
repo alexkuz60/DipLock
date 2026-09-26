@@ -19,6 +19,26 @@ class TrajectoryPoint(BaseModel):
     ori_head: list[float] = Field(description="Ориентация диполя (единичный вектор)")
     amplitude_nam: float = Field(description="Амплитуда, нАм")
     gof: float = Field(description="Goodness of fit, 0..1")
+    riv: float | None = Field(
+        default=None,
+        description=(
+            "Доля отбелённой невязки (residual variance), in-band ковариация шума: "
+            "кросс-полосной фильтр доверия (2.6/N23). GOF между полосами не сравним "
+            "(узкая полоса завышает R²), RIV — сравним. `null` — не посчитан"
+        ),
+    )
+    ci_mm: float | None = Field(
+        default=None,
+        description=(
+            "Радиус доверительной области позиции, мм (2.6/N23): `null` — не оценён"
+        ),
+    )
+    khi2: float | None = Field(
+        default=None, description="χ² фита (`mne.Dipole.khi2`), если считался",
+    )
+    nfree: int | None = Field(
+        default=None, description="Число степеней свободы фита (`mne.Dipole.nfree`)",
+    )
     mni_coords: list[float] | None = Field(default=None, description="Координаты MNI, мм")
     anatomical_structure: str | None = Field(
         default=None,
@@ -74,6 +94,13 @@ class BestFitDipole(BaseModel):
     mni_z: float | None = None
     amplitude_nam: float | None = None
     gof: float | None = None
+    riv: float | None = Field(
+        default=None,
+        description="Доля отбелённой невязки (in-band ковариация шума), 2.6/N23",
+    )
+    ci_mm: float | None = Field(
+        default=None, description="Радиус доверительной области позиции, мм (2.6/N23)",
+    )
     anatomical_roi: str | None = None
     brodmann_area: str | None = None
 
@@ -756,6 +783,21 @@ class DipoleScanPointOut(BaseModel):
     moment: list[float] = Field(description="Единичный вектор момента диполя (направление)")
     amplitude_nam: float = Field(description="Амплитуда момента, нА·м")
     gof: float = Field(description="Goodness of fit, 0..1")
+    riv: float | None = Field(
+        default=None,
+        description=(
+            "Доля отбелённой невязки (in-band ковариация шума), 2.6/N23: "
+            "кросс-полосной фильтр доверия. GOF между полосами не сравним "
+            "(узкая полоса завышает R²), RIV — сравним. `null` — не посчитан"
+        ),
+    )
+    ci_mm: float | None = Field(
+        default=None,
+        description=(
+            "Радиус доверительной области позиции, мм (2.6/N23): «плато» сетки "
+            "(узлы в пределах ΔGOF от лучшего); `null` — не оценён"
+        ),
+    )
     anatomical_structure: str | None = Field(
         default=None,
         description=(

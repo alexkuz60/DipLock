@@ -25,6 +25,9 @@
 import { useCallback, useMemo } from 'react'
 import { Table2 } from 'lucide-react'
 import {
+  filterRows,
+  filtersActive,
+  filtersSummary,
   hiddenColumnCount,
   missingMniCount,
   sortDirectionLabel,
@@ -59,16 +62,21 @@ export function LocalizationTableSection() {
 
   const sortDirection = useTableParams((state) => state.params.sortDirection)
   const columnVisibility = useTableParams((state) => state.params.columnVisibility)
+  const filters = useTableParams((state) => state.params.filters)
 
   // Строки — чистая функция от результата и настроек таблицы: ни запросов, ни
-  // мутаций состояния, правка сортировки/колонок просто перерисовывает таблицу.
-  const rows = useMemo(
+  // мутаций состояния, правка сортировки/колонок/порогов просто перерисовывает
+  // таблицу. Фильтр GOF/RIV (2.6/N23) — **фильтр доверия**: он скрывает строки,
+  // но не удаляет их из результата (счётчики ниже честно показывают «из всех»).
+  const allRows = useMemo(
     () => (result ? tableRows(result, sortDirection) : []),
     [result, sortDirection],
   )
+  const rows = useMemo(() => filterRows(allRows, filters), [allRows, filters])
   const columns = useMemo(() => visibleColumns(columnVisibility), [columnVisibility])
-  const missingMni = missingMniCount(rows)
+  const missingMni = missingMniCount(allRows)
   const hiddenColumns = hiddenColumnCount(columnVisibility)
+  const hiddenByFilter = allRows.length - rows.length
   const stale = result !== null && !resultMatchesParams(result, calcParams)
 
   // Ячейка «Уточнение»: «Уточнить…» → «Уточняю…» → «стало» (BEM GOF + сдвиг).
@@ -140,7 +148,7 @@ export function LocalizationTableSection() {
     )
   }
 
-  if (rows.length === 0) {
+  if (allRows.length === 0) {
     return (
       <Placeholder
         icon={<Table2 className="size-12" />}
@@ -165,8 +173,13 @@ export function LocalizationTableSection() {
         <StatusPill tone={stale ? 'warn' : 'ok'}>
           {stale
             ? 'Параметры расчёта изменены — результат не пересчитан'
-            : `Строк: ${rows.length} · расчёт актуален`}
+            : `Строк: ${rows.length}${hiddenByFilter > 0 ? ` из ${allRows.length}` : ''} · расчёт актуален`}
         </StatusPill>
+        {filtersActive(filters) ? (
+          <StatusPill tone="accent" title="Фильтр доверия GOF/RIV: скрытые строки остаются в результате">
+            {`Пороги: ${filtersSummary(filters)}${hiddenByFilter > 0 ? ` · скрыто ${hiddenByFilter}` : ''}`}
+          </StatusPill>
+        ) : null}
         <StatusPill tone="accent" title={`Метод расчёта: ${result.method}`}>
           {`Быстрый режим, сетка ${result.grid_mm} мм`}
         </StatusPill>
@@ -195,19 +208,26 @@ export function LocalizationTableSection() {
       {refineError ? (
         <StatusPill tone="danger">{`Ошибка уточнения: ${refineError}`}</StatusPill>
       ) : null}
-      <LocalizationTable
-        rows={rows}
-        columns={columns}
-        renderRowAction={renderRowAction}
-        selectedRowId={selectedPointId}
-        onRowClick={(row) => toggleSelectedPoint(row.id)}
-      />
+      {rows.length === 0 ? (
+        <StatusPill tone="warn">
+          {`Пороги ${filtersSummary(filters)} скрыли все ${allRows.length} строк: снимите их в панели справа`}
+        </StatusPill>
+      ) : (
+        <LocalizationTable
+          rows={rows}
+          columns={columns}
+          renderRowAction={renderRowAction}
+          selectedRowId={selectedPointId}
+          onRowClick={(row) => toggleSelectedPoint(row.id)}
+        />
+      )}
 
       <p className="text-sm text-fg-2">
         Таблица читает результат задачи раздела «Диполи» и ничего не запрашивает: расчёт запускается
         только кнопкой в шапке того раздела. Порядок строк задаёт панель справа (пока единственный
-        ключ — номер эпохи). Фильтры, переход к диполю по клику и сохранение выборки в БД —
-        следующий срез: сейчас показаны все точки результата, включая те, что без MNI.
+        ключ — номер эпохи). Фильтр GOF/RIV — фильтр доверия: он скрывает строки, но не удаляет их
+        из результата. Переход к диполю по клику и сохранение выборки в БД — следующий срез:
+        сейчас показаны все точки результата, включая те, что без MNI.
       </p>
 
       {result.warnings.length ? (

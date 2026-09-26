@@ -48,7 +48,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, NamedTuple
 
 import mne
 import numpy as np
@@ -56,7 +56,15 @@ import numpy as np
 from app.core.config import Settings
 from app.services import journal
 from app.services.asset_versions import BRODMANN_METHOD
-from app.services.dipole_fitter import _get_bem, _get_covariance, attribution_fields
+from app.services.dipole_fitter import (
+    _get_bem,
+    _get_covariance,
+    attribution_fields,
+    conf_ci_mm,
+    epochs_whitener,
+    point_riv,
+    whitened_riv,
+)
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
@@ -82,6 +90,12 @@ MIN_SENSOR_DISTANCE_MM = 5.0
 
 # Проводимость головы, См/м (однородная сфера: стандартное приближение).
 HEAD_CONDUCTIVITY_S_M = 0.3
+
+# «Плато» сетки для доверительной области (2.6/N23): узлы, чей GOF не хуже
+# лучшего более чем на эту долю, считаются неразличимыми по качеству, и их
+# разброс — оценка неопределённости позиции. Порог — параметр оценки, а не
+# статистический доверительный уровень: он не притворяется p-value.
+CI_PLATEAU_DGOF = 0.02
 
 # Коэффициент потенциала точечного диполя в проводящей среде: Φ = (m·r)/(4πσr³)
 _FOUR_PI = 4.0 * np.pi
@@ -194,13 +208,35 @@ def _scan_kernel(
     return _build_kernel(positions_m, candidate_grid(grid_step_mm), min_distance_m)
 
 
+class ScanFit(NamedTuple):
+    """Ответ перебора сетки: лучший узел + метрики доверия (2.6/N23).
+
+    ``riv`` — доля отбелённой невязки (`None` — без ковариации шума не
+    считалась); ``ci_mm`` — радиус «плато» сетки, зажатый снизу разрешением
+    перебора (полшага сетки: точнее ячейки своей сетки перебор позицию не
+    определяет).
+    """
+
+    position_m: np.ndarray
+    direction: np.ndarray
+    amplitude_am: float
+    gof: float
+    riv: float | None
+    ci_mm: float
+
+
 def _fit_best_node(
-    kernel: _ScanKernel, signal: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, float, float]:
+    kernel: _ScanKernel, signal: np.ndarray, whitener: np.ndarray | None = None,
+) -> ScanFit:
     """Линейный МНК по всем узлам для одного (уже центрированного) отсчёта.
 
     Общее ядро `scan_point` и `scan_point_fast`: Gᵀd, момент через
     предрасчитанную обращённую граммиану, невязка, выбор лучшего узла.
+
+    ``whitener`` — ``W = C^{-1/2}`` по in-band ковариации шума
+    (`dipole_fitter.epochs_whitener`): с ним считается RIV — кросс-полосной
+    фильтр доверия. Без него RIV не считается (`None`): невязка без шумовой
+    нормировки — это просто 1 − GOF, второго числа не нужно.
     """
     total = float(np.sum(signal ** 2))
     moment = np.einsum(
@@ -208,7 +244,8 @@ def _fit_best_node(
         np.einsum("iqj,i->qj", kernel.gain_centered, signal),
     )
     predicted = np.einsum("iqj,qj->qi", kernel.gain_centered, moment)
-    residual = np.sum((predicted - signal[None, :]) ** 2, axis=1)
+    deviation = predicted - signal[None, :]
+    residual = np.sum(deviation ** 2, axis=1)
 
     gof = 1.0 - residual / total if total > 0 else np.zeros_like(residual)
     amplitude = np.linalg.norm(moment, axis=1)
@@ -223,24 +260,53 @@ def _fit_best_node(
     norm = float(np.linalg.norm(direction))
     if norm == 0:
         raise DipoleScanError("Сигнал в пике GFP вырожден: момент нулевой")
-    return kernel.grid_m[best], direction / norm, norm, float(gof[best])
+
+    riv = (
+        whitened_riv(deviation[best], signal, whitener)
+        if whitener is not None else None
+    )
+
+    # CI (2.6/N23): «плато» сетки — узлы, чей GOF не хуже лучшего более чем на
+    # CI_PLATEAU_DGOF. Их разброс — оценка неопределённости позиции; снизу она
+    # зажата полшага сетки — перебор не определяет позицию точнее своей ячейки.
+    plateau = valid & (gof >= gof[best] - CI_PLATEAU_DGOF)
+    spread_mm = float(
+        np.max(np.linalg.norm(kernel.grid_m[plateau] - kernel.grid_m[best], axis=1))
+    ) * 1000.0
+    ci_mm = max(spread_mm, _grid_step_mm(kernel.grid_m) / 2.0)
+
+    return ScanFit(
+        kernel.grid_m[best], direction / norm, norm, float(gof[best]), riv, ci_mm,
+    )
+
+
+def _grid_step_mm(grid_m: np.ndarray) -> float:
+    """Шаг узловой сетки, мм (минимальный шаг вдоль оси узлов).
+
+    Нужен для разрешающей способности CI: позиция на сетке неопределённа в
+    пределах своей ячейки, каким бы узким ни было «плато» GOF.
+    """
+    coords = np.unique(np.round(grid_m[:, 0] * 1000.0, 6))
+    if coords.size < 2:
+        return 0.0
+    return float(np.min(np.diff(coords)))
 
 
 def scan_point_fast(
-    kernel: _ScanKernel, data_v: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, float, float]:
+    kernel: _ScanKernel, data_v: np.ndarray, whitener: np.ndarray | None = None,
+) -> ScanFit:
     """То же, что `scan_point`, но с предрасчитанным ядром сетки (N20).
 
     Используется в цикле по эпохам: ядро строится один раз на запись через
     `_scan_kernel`, а здесь остаётся только центрирование вектора сигнала
-    (average reference) и сам МНК.
+    (average reference) и сам МНК. `whitener` — см. `_fit_best_node` (RIV).
     """
     signal = np.asarray(data_v, dtype=float)
     if signal.size != kernel.gain_centered.shape[0]:
         raise DipoleScanError(
             f"Каналов в данных {signal.size}, а в ядре {kernel.gain_centered.shape[0]}"
         )
-    return _fit_best_node(kernel, signal - float(np.mean(signal)))
+    return _fit_best_node(kernel, signal - float(np.mean(signal)), whitener)
 
 
 def scan_point(
@@ -248,13 +314,15 @@ def scan_point(
     data_v: np.ndarray,
     grid_m: np.ndarray,
     min_distance_m: float = MIN_SENSOR_DISTANCE_MM / 1000.0,
-) -> tuple[np.ndarray, np.ndarray, float, float]:
+    whitener: np.ndarray | None = None,
+) -> ScanFit:
     """Локализует один отсчёт: перебор узлов сетки + линейный МНК по моменту.
 
     Одноразовый вход (ядро строится на каждый вызов) — для тестов и
     одиночных точек; цикл по эпохам должен идти через `scan_point_fast`.
-    Возвращает позицию лучшего узла (м), единичное направление момента,
-    амплитуду (А·м) и GOF лучшего узла.
+    Возвращает `ScanFit`: позицию лучшего узла (м), единичное направление
+    момента, амплитуду (А·м), GOF лучшего узла и метрики доверия (RIV/CI,
+    2.6/N23). `whitener` — см. `_fit_best_node`.
     """
     signal = np.asarray(data_v, dtype=float)
     if signal.size != positions_m.shape[0]:
@@ -263,7 +331,7 @@ def scan_point(
         )
     signal = signal - float(np.mean(signal))
     return _fit_best_node(
-        _build_kernel(positions_m, grid_m, min_distance_m), signal,
+        _build_kernel(positions_m, grid_m, min_distance_m), signal, whitener,
     )
 
 
@@ -428,18 +496,21 @@ def compute_dipole_scan(
         MIN_SENSOR_DISTANCE_MM / 1000.0,
     )
     localize_ms = 0.0
+    # RIV (2.6/N23): отбеливатель по in-band ковариации шума — один на запись
+    # (полоса у всех эпох одна). `None` — данных мало, RIV остаётся пустым.
+    whitener = epochs_whitener(data)
     for epoch_index in range(n_epochs):
         sample = peak_index[epoch_index]
         try:
-            position_m, moment, amplitude_am, gof = scan_point_fast(
-                kernel, data[epoch_index, :, sample],
+            fit = scan_point_fast(
+                kernel, data[epoch_index, :, sample], whitener,
             )
         except DipoleScanError as exc:
             warnings.append(f"Эпоха {epoch_index + 1}: {exc}")
             continue
 
         locate_started = time.perf_counter()
-        mni_coords = _localize_point(position_m, cfg)
+        mni_coords = _localize_point(fit.position_m, cfg)
         # Атрибуция читается здесь же (шаг 1.4): первое обращение собирает объёмы
         # (≈1 с на test.edf — видно строкой `asset-contours`), и это время
         # принадлежит локализации, а не перебору сетки.
@@ -450,11 +521,15 @@ def compute_dipole_scan(
         points.append({
             "epoch_index": epoch_index,
             "time_ms": float(times[sample] * 1000.0),
-            "head_coords": [float(value * 1000.0) for value in position_m],
+            "head_coords": [float(value * 1000.0) for value in fit.position_m],
             "mni_coords": mni_coords,
-            "moment": [float(value) for value in moment],
-            "amplitude_nam": float(amplitude_am * 1e9),
-            "gof": float(gof),
+            "moment": [float(value) for value in fit.direction],
+            "amplitude_nam": float(fit.amplitude_am * 1e9),
+            "gof": float(fit.gof),
+            # RIV/CI (2.6/N23): кросс-полосной фильтр доверия. GOF между
+            # полосами не сравним (узкая полоса завышает R²) — сравним RIV.
+            "riv": fit.riv,
+            "ci_mm": fit.ci_mm,
             **attribution,
         })
         report(
@@ -547,12 +622,16 @@ def _refine_point_payload(
     amplitude_am: float,
     gof: float,
     time_ms: float,
+    riv: float | None = None,
+    ci_mm: float | None = None,
 ) -> dict[str, Any]:
     """Точка уточнения в схеме быстрого расчёта (``DipoleScanPointOut``).
 
     Локализация — те же функции, что у быстрого расчёта (`_localize_point`,
     `attribution_fields`), поэтому структура и поле Бродмана в «было/стало»
-    читаются одним атласом, а не вторым, «своим».
+    читаются одним атласом, а не вторым, «своим». RIV/CI (2.6/N23) приходят
+    готовыми: у свободного фита — из `mne.fit_dipole`, у узла сетки — из
+    перебора.
     """
     mni_coords = _localize_point(position_m, cfg)
     return {
@@ -563,6 +642,8 @@ def _refine_point_payload(
         "moment": [float(value) for value in moment],
         "amplitude_nam": float(amplitude_am * 1e9),
         "gof": gof,
+        "riv": riv,
+        "ci_mm": ci_mm,
         **attribution_fields(cfg, mni_coords),
     }
 
@@ -613,13 +694,17 @@ def refine_dipole_point(
     times = epochs.times
     gfp = np.sqrt(np.mean(data ** 2, axis=1))  # (n_epochs, n_times)
     sample = int(np.argmax(gfp[params.epoch_index]))
+    # RIV (2.6/N23): отбеливатель по in-band ковариации шума — общий для
+    # быстрого узла и обоих BEM-фитов ниже (одна нарезка — одна полоса).
+    whitener = epochs_whitener(data)
     kernel = _scan_kernel(
         np.ascontiguousarray(positions_m, dtype=float).tobytes(),
         positions_m.shape, scan.grid_mm, MIN_SENSOR_DISTANCE_MM / 1000.0,
     )
-    fast_pos_m, _fast_dir, _fast_amp, fast_gof = scan_point_fast(
-        kernel, data[params.epoch_index, :, sample],
+    fast_fit = scan_point_fast(
+        kernel, data[params.epoch_index, :, sample], whitener,
     )
+    fast_pos_m, fast_gof = fast_fit.position_m, fast_fit.gof
 
     report("refine", 0.3, message=f"Точный фитинг эпохи {params.epoch_index + 1} (BEM)")
     try:
@@ -675,10 +760,16 @@ def refine_dipole_point(
             # MNE отдаёт Dipole.gof в процентах (dipole.py: * 100) — нормализуем
             # на границе сервиса: контракт проекта везде — доля 0..1.
             grid_gof_bem = float(dip_fixed.gof[fixed_index]) / 100.0
+            # RIV (2.6/N23) — из невязки фиксированного фита; CI у него MNE не
+            # считает (`_fit_dipole_fixed` отдаёт `conf = None`) — остаётся `None`.
             grid_point = _refine_point_payload(
                 cfg, params.epoch_index, fast_pos_m, dip_fixed.ori[fixed_index],
                 float(dip_fixed.amplitude[fixed_index]), grid_gof_bem,
                 float(dip_fixed.times[fixed_index] * 1000.0),
+                riv=point_riv(
+                    out_fixed[1] if isinstance(out_fixed, tuple) else None,
+                    evoked.data, fixed_index, whitener,
+                ),
             )
         except Exception as exc:  # метрика сравнения опциональна
             warnings.append(f"Оценка узла сетки на BEM не посчитана: {exc}")
@@ -706,11 +797,18 @@ def refine_dipole_point(
                 raise DipoleScanError("fit_dipole не дал ни одной точки в окне пика GFP")
             best = int(np.argmax(dip.gof))
             refined_pos_m = np.asarray(dip.pos[best], dtype=float)
+            # RIV/CI (2.6/N23): невязка свободного фита + доверительные границы
+            # `dip.conf` (точный профиль умеет считать и то, и другое).
             free_point = _refine_point_payload(
                 cfg, params.epoch_index, refined_pos_m, dip.ori[best],
                 float(dip.amplitude[best]),
                 float(dip.gof[best]) / 100.0,  # MNE отдаёт проценты — см. выше
                 float(dip.times[best] * 1000.0),
+                riv=point_riv(
+                    out[1] if isinstance(out, tuple) else None,
+                    evoked.data, best, whitener,
+                ),
+                ci_mm=conf_ci_mm(getattr(dip, "conf", None) or {}, best),
             )
             shift_mm = float(np.linalg.norm(refined_pos_m - fast_pos_m) * 1000.0)
         except Exception as exc:
