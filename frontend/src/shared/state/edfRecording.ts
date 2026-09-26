@@ -15,6 +15,7 @@ import type {
   ArtifactTypes,
   ChannelQc,
   CleanReport,
+  EvokedResult,
   PreprocessResult,
   RecordingMeta,
 } from '@/shared/api/types'
@@ -67,6 +68,12 @@ export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024
  */
 const stageRunToken = createRunToken()
 
+/**
+ * Токен запуска задачи ERP: та же механика отмены, что у стадий, — закрытие
+ * записи или повторный запуск делают ответы прежней задачи неактуальными.
+ */
+const evokedRunToken = createRunToken()
+
 /** Полоса фильтра из пресета панели: `null` — пресет «Без фильтра» */
 export function filterBandOf(params: EdfParams): [number, number] | null {
   const preset = FILTER_PRESETS.find((item) => item.value === params.filterPreset)
@@ -113,6 +120,31 @@ export function buildPreprocessForm(stage: RecalcStage, params: EdfParams): Form
   }
   if (stage === 'epochs') {
     form.set('epoch_length_ms', String(params.epochLengthMs))
+    // Событийный режим нарезки (N2/2.7): окна вокруг событий записи (ERP)
+    form.set('epoch_mode', params.epochMode)
+    if (params.epochMode === 'events') {
+      form.set('event_id', params.eventId)
+      form.set('epoch_pre_ms', String(params.epochPreMs))
+      form.set('epoch_post_ms', String(params.epochPostMs))
+    }
+  }
+  return form
+}
+
+/**
+ * Форма задачи ERP (`POST …/evoked`, шаг 2.7): та же подготовка/отбраковка,
+ * что у стадии «Нарезка эпох» (числа согласованы со штриховкой вьюера), плюс
+ * окно события и baseline. Baseline «−200…0 мс» отправляется только когда
+ * pre-окно его вмещает (иначе сервер ответил бы 400 «вне эпохи»).
+ */
+export function buildEvokedForm(params: EdfParams): FormData {
+  const form = buildPreprocessForm('epochs', params)
+  form.set('event_id', params.eventId)
+  form.set('epoch_pre_ms', String(params.epochPreMs))
+  form.set('epoch_post_ms', String(params.epochPostMs))
+  if (params.erpBaseline === 'minus200' && params.epochPreMs >= 200) {
+    form.set('baseline_start_ms', '-200')
+    form.set('baseline_end_ms', '0')
   }
   return form
 }
@@ -134,6 +166,10 @@ export function layersFromResult(
           rejectedEpochs: [],
           rejectChannels: {},
           epochLengthMs: null,
+          epochStartsSec: null,
+          eventId: null,
+          epochPreMs: null,
+          epochPostMs: null,
           source: 'result',
         }
   const next: EdfViewerLayers = { ...base, source: 'result' }
@@ -159,6 +195,12 @@ export function layersFromResult(
     // Индексы отброшенных эпох имеют смысл только вместе с длиной нарезки, в
     // которой они получены: вьюер строит по ней свою сетку (срез 2.10).
     next.epochLengthMs = result.epoch_length_ms > 0 ? result.epoch_length_ms : null
+    // Событийный режим (N2/2.7): явные начала окон + описание события — сетка
+    // нерегулярная, и индексы живут в порядке событий, а не регулярных ячеек.
+    next.epochStartsSec = result.epoch_starts_sec
+    next.eventId = result.event_id
+    next.epochPreMs = result.epoch_mode === 'events' ? result.epoch_pre_ms : null
+    next.epochPostMs = result.epoch_mode === 'events' ? result.epoch_post_ms : null
   }
   return next
 }
@@ -235,6 +277,28 @@ export type FilterDesign = {
   edgeBufferSec: number
 }
 
+/**
+ * Задача ERP-усреднения (шаг 2.7, блок «ERP» панели): прогресс, результат
+ * усреднённой волны и ошибка. Живёт при записи и сбрасывается вместе с ней.
+ */
+export type EvokedJob = {
+  status: 'idle' | 'running' | 'succeeded' | 'failed'
+  progress: number
+  message: string
+  error: string | null
+  errorTraceback: string | null
+  result: EvokedResult | null
+}
+
+const EMPTY_EVOKED_JOB: EvokedJob = {
+  status: 'idle',
+  progress: 0,
+  message: '',
+  error: null,
+  errorTraceback: null,
+  result: null,
+}
+
 export type EdfRecordingState = {
   /** Паспорт загруженной записи (null — не загружена) */
   recording: RecordingMeta | null
@@ -295,6 +359,8 @@ export type EdfRecordingState = {
    * «результат соответствует параметрам», а это — «задача сейчас идёт».
    */
   stageJobs: Partial<Record<RecalcStage, StageJob>>
+  /** Задача ERP-усреднения по событиям (шаг 2.7): блок «ERP» панели */
+  evoked: EvokedJob
   /** Метаданные сессии для БД (в файл не пишутся) */
   passport: SessionPassport
   /**
@@ -328,6 +394,12 @@ export type EdfRecordingState = {
    * поллинг прогресса → результат в слои вьюера + снимок параметров стадии.
    */
   runStage: (stage: RecalcStage) => Promise<void>
+  /**
+   * Запустить ERP-усреднение по событиям (шаг 2.7): 202 + задача → поллинг →
+   * усреднённая волна в блок «ERP». Правка параметров ничего не запускает —
+   * расчёт стартует только кнопкой (правило UI).
+   */
+  startEvoked: () => Promise<void>
   /** Правка паспорта сессии (данные для БД, файл не трогаем) */
   setPassport: (patch: Partial<SessionPassport>) => void
   /** Запросить открытие диалога выбора EDF (тулс-хедер → рабочая область) */
@@ -362,6 +434,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   layers: null,
   epochMarks: [],
   stageJobs: {},
+  evoked: { ...EMPTY_EVOKED_JOB },
   channelQc: null,
   qcSummary: null,
   artifactTypes: null,
@@ -396,6 +469,8 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       filterDesign: null,
       // Задачи прежней записи не переносим на новую
       stageJobs: {},
+      // ERP принадлежит записи: волна прежней записи к новой отношения не имеет
+      evoked: { ...EMPTY_EVOKED_JOB },
       // Ручные пометки эпох относятся к конкретной записи — начинаем с чистых
       epochMarks: [],
       // Паспорт принадлежит сессии: новая запись — чистый паспорт
@@ -597,6 +672,56 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     }
   },
 
+  startEvoked: async () => {
+    const { recording } = get()
+    const params = useEdfParams.getState().params
+    // Событийный режим требует выбранного события (кнопка в UI и так disabled)
+    if (!recording || params.epochMode !== 'events' || !params.eventId) return
+    const token = evokedRunToken.next()
+    const isCurrent = () => evokedRunToken.isCurrent(token)
+    set({
+      evoked: {
+        status: 'running', progress: 0, message: '',
+        error: null, errorTraceback: null, result: null,
+      },
+    })
+    const fail = (message: string, traceback: string | null = null) => {
+      if (!isCurrent()) return
+      set({
+        evoked: {
+          status: 'failed', progress: 0, message: '',
+          error: message, errorTraceback: traceback, result: null,
+        },
+      })
+    }
+    try {
+      const created = await api.evoked.start(recording.recording_id, buildEvokedForm(params))
+      await waitForJob(created.job_id, isCurrent, (status) => {
+        set({
+          evoked: {
+            status: 'running', progress: status.progress, message: status.message,
+            error: null, errorTraceback: null, result: null,
+          },
+        })
+      })
+      if (!isCurrent()) return
+      const result = await api.evoked.result(recording.recording_id, created.job_id)
+      if (!isCurrent()) return
+      set({
+        evoked: {
+          status: 'succeeded', progress: 1, message: '',
+          error: null, errorTraceback: null, result,
+        },
+      })
+    } catch (error) {
+      if (isCancelled(error) || !isCurrent()) return
+      fail(
+        apiErrorText(error),
+        error instanceof JobFailedError ? error.traceback : null,
+      )
+    }
+  },
+
   requestFileDialog: () => set((state) => ({ fileDialogRequest: state.fileDialogRequest + 1 })),
 
   requestNav: (command) =>
@@ -614,6 +739,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   closeRecording: () => {
     // Отменяем поллинг: ответы прежних стадий не должны трогать новое состояние
     stageRunToken.cancel()
+    evokedRunToken.cancel()
     set({
       recording: null,
       uploadProgress: null,
@@ -628,6 +754,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       artifactNav: null,
       epochMarks: [],
       stageJobs: {},
+      evoked: { ...EMPTY_EVOKED_JOB },
       channelQc: null,
       qcSummary: null,
       artifactTypes: null,
@@ -657,6 +784,22 @@ export function validateEdfFile(file: File): string | null {
 }
 
 /**
+ * Сверяет событие нарезки/ERP с событиями **новой** записи (N2/2.7): описание из
+ * прежней записи в новой может отсутствовать (или записи вовсе без событий) —
+ * выбор остаётся прежним только если событие есть, иначе берётся первое событие
+ * новой записи либо выбор чистится. Без сверки «Нарезка эпохи» в событийном
+ * режиме уходила бы в 400 «требует event_id»/«не найдены».
+ */
+export function reconcileEventId(
+  eventId: string,
+  eventCounts: Record<string, number>,
+): { eventId: string } {
+  return {
+    eventId: eventCounts[eventId] ? eventId : (Object.keys(eventCounts)[0] ?? ''),
+  }
+}
+
+/**
  * Приём файла из любого места UI (drag & drop, кнопка зоны загрузки, кнопка
  * тулс-хедера): сначала локальная проверка, затем загрузка на сервер.
  */
@@ -682,6 +825,11 @@ export async function startUpload(file: File): Promise<void> {
     )
     useEdfRecording.getState().finishUpload(meta)
     useEdfParams.getState().setAvailableChannels(meta.channels)
+    // Событие нарезки/ERP (N2/2.7) принадлежит записи: сверяем выбор с событиями
+    // новой записи, иначе «Нарезка эпохи» в событийном режиме уходила бы в 400
+    useEdfParams
+      .getState()
+      .setParams(reconcileEventId(useEdfParams.getState().params.eventId, meta.event_counts ?? {}))
     useEdfParams.getState().clearApplied()
   } catch (error) {
     useEdfRecording.getState().failUpload(apiErrorText(error))

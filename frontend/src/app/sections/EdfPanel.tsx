@@ -26,12 +26,15 @@ import {
   useEdfParamsValue,
   useEdfRecalcStatus,
   type AmplitudeMode,
+  type EpochMode,
+  type ErpBaselineMode,
   type FilterPresetId,
   type ReferenceMode,
 } from '@/shared/state/edfParams'
 import { filterBandOf, useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
+import { EvokedChart } from '@/shared/ui/EvokedChart'
 import { FilterResponse } from '@/shared/ui/FilterResponse'
 import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
@@ -56,6 +59,29 @@ const NOTCH_OPTIONS = [
   { value: '60', label: '60 Гц (США)' },
 ]
 
+const EPOCH_MODES: { value: EpochMode; label: string; title: string }[] = [
+  {
+    value: 'fixed',
+    label: 'Фиксированные',
+    title: 'Эпохи равной длины без наложения (прежний режим нарезки)',
+  },
+  {
+    value: 'events',
+    label: 'По событиям',
+    title:
+      'Окна вокруг событий записи (аннотации EDF+ и маркеры стим-каналов) — нарезка для ERP',
+  },
+]
+
+const ERP_BASELINE_MODES: { value: ErpBaselineMode; label: string; title: string }[] = [
+  { value: 'none', label: 'Без коррекции', title: 'Усреднение без baseline-коррекции' },
+  {
+    value: 'minus200',
+    label: '−200…0 мс',
+    title: 'Вычитание среднего по окну −200…0 мс до события (нужно pre-окно ≥ 200 мс)',
+  },
+]
+
 /** Пояснение к кнопкам расчёта: обработка не запускается сама по себе */
 const RECALC_HINT =
   'Расчёт запускается только кнопками шапки раздела — правка параметров ничего не пересчитывает. Каждая кнопка считает одну стадию на сервере и заменяет её слой в треках результатом.'
@@ -78,6 +104,14 @@ export function EdfPanel() {
   const filterDesign = useEdfRecording((state) => state.filterDesign)
   const clearEpochMarks = useEdfRecording((state) => state.clearEpochMarks)
   const recalc = useEdfRecalcStatus()
+  /** Задача ERP (шаг 2.7): считает только кнопка, правка параметров — нет */
+  const evoked = useEdfRecording((state) => state.evoked)
+  const startEvoked = useEdfRecording((state) => state.startEvoked)
+
+  /** События записи (N2/2.7): источник селектов нарезки и ERP */
+  const eventOptions = Object.entries(recording?.event_counts ?? {}).map(
+    ([description, count]) => ({ value: description, label: `${description} — ${count}` }),
+  )
 
   const meta = useQuery({
     queryKey: ['meta'],
@@ -92,6 +126,11 @@ export function EdfPanel() {
     ? availableChannels
     : (meta.data?.standard_channels ?? [])
   const epochLengths = meta.data?.epoch_lengths_ms ?? []
+  /** Канал графика ERP: свой выбор, иначе первый видимый канал */
+  const erpChannel = params.erpChannel || params.visibleChannels[0] || channels[0] || ''
+  const channelOptions = channels.map((name) => ({ value: name, label: name }))
+  /** ERP требует событийный режим и выбранное событие (иначе кнопка disabled) */
+  const canRunErp = Boolean(recording) && params.epochMode === 'events' && params.eventId !== ''
   const epochOptions = (epochLengths.length ? epochLengths : [params.epochLengthMs]).map((value) => ({
     value: String(value),
     label: `${value} мс`,
@@ -296,17 +335,74 @@ export function EdfPanel() {
       </Panel>
 
       <Panel title="Эпохи" hint={epochsHint}>
-        <SelectField
-          label="Длина эпохи"
-          value={String(params.epochLengthMs)}
-          options={epochOptions}
-          disabled={epochLengths.length === 0}
-          onChange={(value) => setParams({ epochLengthMs: Number(value) })}
-          hint={
-            epochLengths.length === 0
-              ? 'Список длин придёт из /meta после ответа сервера.'
-              : undefined
+        <SegmentedControl
+          label="Режим нарезки"
+          value={params.epochMode}
+          options={EPOCH_MODES}
+          onChange={(value) =>
+            // Событие подставляем сразу при включении режима (N2/2.7): пустой выбор
+            // давал 400 «требует event_id» при нажатии «Нарезка эпохи»
+            setParams(
+              value === 'events' && !params.eventId && eventOptions.length > 0
+                ? { epochMode: value, eventId: eventOptions[0]!.value }
+                : { epochMode: value },
+            )
           }
+        />
+        {params.epochMode === 'events' ? (
+          <>
+            <SelectField
+              label="Событие"
+              value={params.eventId}
+              options={eventOptions}
+              disabled={eventOptions.length === 0}
+              onChange={(value) => setParams({ eventId: value })}
+              hint={
+                eventOptions.length === 0
+                  ? 'В записи нет событий: EDF+-аннотаций и маркеров стим-каналов не найдено.'
+                  : 'Описание события из паспорта записи — вокруг его моментов режутся эпохи.'
+              }
+            />
+            <NumberField
+              label="До события"
+              value={params.epochPreMs}
+              min={0}
+              max={10000}
+              step={50}
+              unit="мс"
+              hint="Пре-стимульное окно (tmin = −pre/1000 с); для ERP обычно 100–200 мс."
+              onChange={(value) => setParams({ epochPreMs: value })}
+            />
+            <NumberField
+              label="После события"
+              value={params.epochPostMs}
+              min={100}
+              max={10000}
+              step={50}
+              unit="мс"
+              hint="Пост-стимульное окно (tmax = +post/1000 с); для ERP обычно 500–1000 мс."
+              onChange={(value) => setParams({ epochPostMs: value })}
+            />
+          </>
+        ) : (
+          <SelectField
+            label="Длина эпохи"
+            value={String(params.epochLengthMs)}
+            options={epochOptions}
+            disabled={epochLengths.length === 0}
+            onChange={(value) => setParams({ epochLengthMs: Number(value) })}
+            hint={
+              epochLengths.length === 0
+                ? 'Список длин придёт из /meta после ответа сервера.'
+                : undefined
+            }
+          />
+        )}
+        <CheckboxRow
+          label="Маркеры событий"
+          checked={params.eventsLayer}
+          hint="Слой событий записи (аннотации EDF+ и маркеры стим-каналов) поверх треков: линии с тултипом «описание, время»."
+          onChange={(checked) => setParams({ eventsLayer: checked })}
         />
         <CheckboxRow
           label="Маркеры границ эпох"
@@ -331,6 +427,77 @@ export function EdfPanel() {
             Снять
           </Button>
         </div>
+      </Panel>
+
+      <Panel
+        title="ERP (усреднение по событиям)"
+        hint="Стимул → эпоха → усреднение: волна по каналам вокруг момента события (шаг 2.7). Считает только кнопка; событие и окно — из блока «Эпохи» (режим «По событиям»)."
+      >
+        <SegmentedControl
+          label="Baseline"
+          value={params.erpBaseline}
+          options={ERP_BASELINE_MODES}
+          onChange={(value) => setParams({ erpBaseline: value })}
+          hint={
+            params.erpBaseline === 'minus200' && params.epochPreMs < 200
+              ? 'Pre-окно меньше 200 мс: baseline не влезает в эпоху и будет пропущен.'
+              : undefined
+          }
+        />
+        <SelectField
+          label="Канал графика"
+          value={erpChannel}
+          options={channelOptions}
+          onChange={(value) => setParams({ erpChannel: value })}
+          hint="Какой канал усреднённой волны показать графиком (остальные — в ответе задачи)."
+        />
+        <Button
+          variant="primary"
+          disabled={!canRunErp || evoked.status === 'running'}
+          title={
+            canRunErp
+              ? 'Рассчитать усреднённую ERP-волну по выбранному событию'
+              : 'Включите режим «По событиям» и выберите событие в блоке «Эпохи»'
+          }
+          onClick={() => void startEvoked()}
+        >
+          {evoked.status === 'running' ? 'Считаем…' : 'Усреднить (ERP)'}
+        </Button>
+        {evoked.status === 'running' ? (
+          <StatusPill tone="accent">
+            Прогресс: {Math.round(evoked.progress * 100)} %
+            {evoked.message ? ` — ${evoked.message}` : ''}
+          </StatusPill>
+        ) : null}
+        {evoked.error ? (
+          <p className="text-sm text-danger" data-testid="evoked-error">
+            {evoked.error}
+          </p>
+        ) : null}
+        {evoked.result ? (
+          <div data-testid="evoked-result">
+            <StatusPill tone={evoked.result.n_used > 0 ? 'ok' : 'warn'}>
+              Событий в среднем: {evoked.result.n_used} из {evoked.result.n_total}
+            </StatusPill>
+            <EvokedChart result={evoked.result} channel={erpChannel} />
+            <p className="text-xs text-fg-2">
+              {evoked.result.event_id}: окно −{Math.round(-evoked.result.tmin * 1000)}/
+              {Math.round(evoked.result.tmax * 1000)} мс от события
+              {evoked.result.baseline
+                ? `, baseline ${Math.round(evoked.result.baseline[0] * 1000)}…${Math.round(evoked.result.baseline[1] * 1000)} мс`
+                : ', без baseline'}
+              {evoked.result.rejected_epochs.length
+                ? `, отброшено событий: ${evoked.result.rejected_epochs.length}`
+                : ''}
+              . Ось: мс от события (0 — стимул), мкВ.
+            </p>
+            {evoked.result.warnings.map((warning) => (
+              <p key={warning} className="text-xs text-warn">
+                {warning}
+              </p>
+            ))}
+          </div>
+        ) : null}
       </Panel>
 
       <Panel

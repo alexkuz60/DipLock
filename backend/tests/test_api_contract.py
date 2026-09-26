@@ -180,6 +180,7 @@ def test_openapi_documents_response_schemas(client):
         "ArtifactThresholds", "PreprocessResult", "ArtifactZoneOut",
         "PipelineInfo", "SurfaceRef", "SurfaceOut",
         "BrodmannAreaOut", "BrodmannLabelsOut", "JobCreated", "JobStatus", "MetaResponse",
+        "RecordingEvent", "EvokedResult",
     ):
         assert name in schemas, f"в OpenAPI нет схемы {name}"
 

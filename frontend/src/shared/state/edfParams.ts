@@ -43,6 +43,15 @@ export type NavMode = 'window' | 'artifact'
 /** Метод артефактуальной очистки (стадия «Фильтр и референс», MNE-only) */
 export type CleanMethod = 'none' | 'ica' | 'ssp'
 
+/**
+ * Режим нарезки эпох (N2/2.7): `fixed` — фиксированная длина (прежний),
+ * `events` — окна вокруг событий записи (аннотации EDF+/маркеры, ERP).
+ */
+export type EpochMode = 'fixed' | 'events'
+
+/** Baseline ERP-усреднения: «без коррекции» либо окно −200…0 мс от события */
+export type ErpBaselineMode = 'none' | 'minus200'
+
 export const CLEAN_METHOD_OPTIONS: { value: CleanMethod; label: string; title: string }[] = [
   { value: 'none', label: 'Нет', title: 'Без артефактуальной очистки' },
   { value: 'ica', label: 'ICA', title: 'ICA: удаление EOG/ECG-компонент (ica.apply), отчёт — сколько удалено' },
@@ -116,6 +125,20 @@ export type EdfParams = {
   /** Число компонент ICA (0 — auto, MNE выберет сам) */
   icaNComponents: number
   epochLengthMs: number
+  /** Режим нарезки эпох: фиксированная длина или окна вокруг событий (N2/2.7) */
+  epochMode: EpochMode
+  /** Описание события нарезки/ERP (режим events); '' — не выбрано */
+  eventId: string
+  /** Окно до события, мс (режим events; tmin = −pre/1000) */
+  epochPreMs: number
+  /** Окно после события, мс (режим events; tmax = +post/1000) */
+  epochPostMs: number
+  /** Слой событий записи во вьюере (отрисовка — расчёт не устаревает) */
+  eventsLayer: boolean
+  /** Канал графика ERP (просмотр результата); '' — первый видимый */
+  erpChannel: string
+  /** Baseline ERP-усреднения */
+  erpBaseline: ErpBaselineMode
   edfUnits: EdfUnits
   artifactVisibility: Record<ArtifactKind, boolean>
   epochBoundaries: boolean
@@ -147,6 +170,14 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   cleanMethod: 'none',
   icaNComponents: 0,
   epochLengthMs: 2000,
+  // Событийный режим (N2/2.7): окна вокруг событий записи, ERP
+  epochMode: 'fixed',
+  eventId: '',
+  epochPreMs: 200,
+  epochPostMs: 800,
+  eventsLayer: true,
+  erpChannel: '',
+  erpBaseline: 'minus200',
   edfUnits: 'auto',
   artifactVisibility: {
     zscore_outlier: true,
@@ -215,9 +246,13 @@ export const STAGE_PARAM_KEYS: Record<RecalcStage, (keyof EdfParams)[]> = {
   ],
   artifacts: ['zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs', 'runIca'],
   // Пороги детекции — тоже вход нарезки: стадия «эпохи» пересчитывает детекцию
-  // для BAD_-пометок, и правка порога обязана помечать устаревшими обе стадии
+  // для BAD_-пометок, и правка порога обязана помечать устаревшими обе стадии.
+  // Режим «по событиям» и его окно — параметры этой же стадии (N2/2.7):
+  // `eventsLayer`/`erpChannel`/`erpBaseline` сюда не входят — это отрисовка и
+  // параметры отдельной задачи ERP, нарезку они не устаревляют.
   epochs: [
-    'epochLengthMs', 'zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs', 'runIca',
+    'epochLengthMs', 'epochMode', 'eventId', 'epochPreMs', 'epochPostMs',
+    'zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs', 'runIca',
   ],
 }
 

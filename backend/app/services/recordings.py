@@ -32,6 +32,7 @@ from typing import Any
 import mne
 
 from app.core.config import Settings, settings
+from app.services.edf_events import EVENTS_CAP, attach_stim_annotations, record_events
 from app.services.edf_loader import looks_unscaled, normalize_channel_name
 
 logger = logging.getLogger(__name__)
@@ -163,9 +164,11 @@ def read_recording_meta(path: str, cfg: Settings, filename: str) -> dict[str, An
     """Читает паспорт EDF: заголовок + короткое окно данных для оценки масштаба.
 
     Обработки (фильтры, монтаж, референс, артефакты) здесь нет — только то, что
-    нужно карточке записи и вьюеру треков.
+    нужно карточке записи и вьюеру треков. События записи (аннотации EDF+ и
+    маркеры стим-каналов, N2) сюда тоже входят: вьюеру слой маркеров нужен до
+    какой-либо задачи, а сайдкар переживает рестарт процесса.
     """
-    kwargs: dict[str, Any] = {"preload": False, "stim_channel": False}
+    kwargs: dict[str, Any] = {"preload": False, "stim_channel": "auto"}
     if cfg.edf_units:
         kwargs["units"] = cfg.edf_units
     try:
@@ -176,6 +179,11 @@ def read_recording_meta(path: str, cfg: Settings, filename: str) -> dict[str, An
     sfreq = float(raw.info["sfreq"])
     if sfreq <= 0 or raw.n_times == 0:
         raise ValueError("Файл не содержит данных (sfreq или длина записи равны нулю)")
+
+    # Стим-каналы → аннотации STIM/<код> и удаление из записи (N2): дальше
+    # паспорт считает только ЭЭГ-каналы, а события собираются из аннотаций.
+    stim_channels = attach_stim_annotations(raw)
+    events, event_counts = record_events(raw)
 
     # Масштаб единиц оцениваем по короткому окну (preload=False: читается не
     # весь файл). Явный EDF_UNITS отключает авто-детект.
@@ -200,6 +208,16 @@ def read_recording_meta(path: str, cfg: Settings, filename: str) -> dict[str, An
         warnings.append(
             f"Ни один канал не соответствует монтажу 10-20 (в файле: {original[:8]})"
         )
+    if stim_channels:
+        warnings.append(
+            f"Маркеры стим-каналов ({', '.join(stim_channels)}) приведены к событиям "
+            f"STIM/*: {sum(event_counts.values())} шт."
+        )
+    if len(events) < sum(event_counts.values()):
+        warnings.append(
+            f"Событий в паспорте показано {len(events)} из {sum(event_counts.values())} "
+            f"(лимит {EVENTS_CAP})"
+        )
 
     return {
         "recording_id": "",  # проставляет реестр
@@ -211,9 +229,33 @@ def read_recording_meta(path: str, cfg: Settings, filename: str) -> dict[str, An
         "duration_sec": round(raw.n_times / sfreq, 2),
         "units_autoscaled": units_autoscaled,
         "edf_units": cfg.edf_units,
+        "events": events,
+        "event_counts": event_counts,
         "warnings": warnings,
         "created_at": datetime.utcnow(),
     }
+
+
+def ensure_record_events(recording: Recording, cfg: Settings) -> None:
+    """Дочитывает события в паспорт старых сайдкаров (без ключа ``events``).
+
+    Сайдкары, записанные до шага 2.7, событий не несут: чтение EDF+ TAL и
+    стим-каналов стоит дёшево (заголовок + аннотации), поэтому паспорт
+    дополняется лениво — при первом обращении ``GET /recordings/{id}`` — и
+    переписывается в сайдкар, чтобы не читать файл при каждом запросе.
+    """
+    if "events" in recording.meta:
+        return
+    try:
+        meta = read_recording_meta(recording.path, cfg, recording.filename)
+    except ValueError:
+        logger.warning("Не удалось дочитать события записи %s", recording.recording_id, exc_info=True)
+        recording.meta["events"] = []
+        recording.meta["event_counts"] = {}
+        return
+    recording.meta["events"] = meta["events"]
+    recording.meta["event_counts"] = meta["event_counts"]
+    write_sidecar(recording)
 
 
 def _drop_signal_cache(recording_id: str) -> None:

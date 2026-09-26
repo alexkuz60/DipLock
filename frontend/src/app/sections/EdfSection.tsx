@@ -17,11 +17,12 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { FileUp, FlaskConical, X } from 'lucide-react'
-import { useEffect, useRef, useState, type DragEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent, type RefObject } from 'react'
 import { api } from '@/shared/api/client'
 import type { RecordingMeta } from '@/shared/api/types'
 import { DEMO_CHANNELS } from '@/shared/lib/demoSignal'
 import { selectFrame, resolveSignalLevel } from '@/shared/lib/signalFrame'
+import { eventMarks } from '@/shared/lib/viewerLayers'
 import { acceptEdfFile, useEdfRecording } from '@/shared/state/edfRecording'
 import { TIME_LEVELS, useEdfParams } from '@/shared/state/edfParams'
 import { Button } from '@/shared/ui/Button'
@@ -159,6 +160,8 @@ function RecordingTracks({
   const signalsError = useEdfRecording((state) => state.signalsError)
   const loadSignals = useEdfRecording((state) => state.loadSignals)
   const layers = useEdfRecording((state) => state.layers)
+  // События записи (N2/2.7) — из паспорта: слой живёт до всякой обработки
+  const events = useMemo(() => eventMarks(recording.events ?? []), [recording])
   const levelIndex = useEdfParams((state) => state.params.timeLevel)
   const level = resolveSignalLevel(TIME_LEVELS[levelIndex] ?? 1, levels)
   const baseLevel = resolveSignalLevel(levels[0] ?? 1, levels)
@@ -195,7 +198,7 @@ function RecordingTracks({
               onRetry={() => void loadSignals(level)}
             />
           ) : null}
-          <TrackStack signal={frame} layers={layers ?? undefined} />
+          <TrackStack signal={frame} layers={layers ?? undefined} events={events} />
           <p className="tnum px-2 pb-1 text-xs text-fg-2">
             {pending > 0 && !loaded
               ? `Уровень ×${level} догружается — пока показывается ${frame.level > 0 ? `уровень ×${frame.level}` : 'полный сигнал'}`

@@ -462,3 +462,131 @@ def test_epochs_stage_returns_reject_channels_without_amplitude_reject(tmp_path,
     assert result["rejected_epochs"] == [5]
     assert result["rejected_epoch_channels"] == [{"index": 5, "channels": []}]
     assert "reject_threshold_uv" not in result
+
+
+# ---------- событийный режим нарезки (N2, шаг 2.7) ----------
+
+
+@pytest.fixture
+def tal_edf(tmp_path):
+    """EDF+ 4 с с аннотациями STIM/5 в 1.0 и 3.0 с (нарезка по событиям/ERP)."""
+    path = tmp_path / "tal.edf"
+    sfreq = 250.0
+    t = np.arange(int(4 * sfreq)) / sfreq
+    data = np.vstack([
+        np.sin(2 * np.pi * (6 + i) * t) * 20 for i in range(5)
+    ])
+    write_minimal_edf(
+        path, list(settings.standard_channels[:5]), data, sfreq,
+        annotations=[(1.0, 0.0, "STIM/5"), (3.0, 0.0, "STIM/5")],
+    )
+    return path
+
+
+def test_epochs_stage_events_mode_returns_irregular_grid(tmp_path, tal_edf):
+    """Стадия «эпохи» в режиме events: окна вокруг событий и нерегулярная сетка.
+
+    ``epoch_starts_sec`` — начала окон (onset + tmin), индексы отброшенных идут
+    в порядке событий: вьюер раскладывает их по этой сетке, а не по длине эпохи.
+    """
+    recording = _register(tmp_path, tal_edf)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(
+            stage="epochs",
+            epoch_mode="events", event_id="STIM/5",
+            epoch_pre_ms=100.0, epoch_post_ms=400.0,
+        ),
+        progress=lambda *_, **__: None,
+    )
+
+    assert result["epoch_mode"] == "events"
+    assert result["event_id"] == "STIM/5"
+    assert result["epoch_pre_ms"] == 100.0
+    assert result["epoch_post_ms"] == 400.0
+    assert result["epoch_length_ms"] == 500.0  # pre + post
+    assert result["epoch_starts_sec"] == [0.9, 2.9]
+    assert result["n_epochs_total"] == 2
+    assert result["n_epochs_used"] == 2
+    assert result["rejected_epochs"] == []
+
+
+def test_epochs_stage_fixed_mode_has_no_grid(tmp_path, edf_file):
+    """Фиксированный режим прежний: сетка регулярная, явных начал нет."""
+    recording = _register(tmp_path, edf_file)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="epochs", epoch_length_ms=1000.0),
+        progress=lambda *_, **__: None,
+    )
+
+    assert result["epoch_mode"] == "fixed"
+    assert result["event_id"] is None
+    assert result["epoch_starts_sec"] is None
+    assert result["epoch_length_ms"] == 1000.0
+
+
+def test_epochs_stage_unknown_event_is_preprocess_error(tmp_path, tal_edf):
+    """Неизвестное событие — ошибка стадии с перечнем доступных, а не 500."""
+    from app.services.preprocess import PreprocessError
+
+    recording = _register(tmp_path, tal_edf)
+    with pytest.raises(PreprocessError, match="STIM/9"):
+        run_preprocess(
+            recording, settings,
+            PreprocessParams(
+                stage="epochs", epoch_mode="events", event_id="STIM/9",
+                epoch_pre_ms=100.0, epoch_post_ms=400.0,
+            ),
+            progress=lambda *_, **__: None,
+        )
+
+
+def test_preprocess_params_event_mode_validation():
+    """Валидация событийного режима: 400 с текстом для UI (правило 8 api-jobs)."""
+    from fastapi import HTTPException
+
+    from app.api.params import preprocess_params
+
+    def call(**kwargs):
+        base = dict(
+            stage="epochs", band_min=None, band_max=None, notch_hz=None,
+            reference="average", reference_channels=None,
+            z_threshold=5.0, pp_threshold_uv=100.0, flat_line_uv=1.0,
+            flat_line_ms=200.0, run_ica=False, epoch_length_ms=2000.0,
+        )
+        base.update(kwargs)
+        return preprocess_params(**base)
+
+    # Неизвестный режим
+    with pytest.raises(HTTPException) as excinfo:
+        call(epoch_mode="bogus")
+    assert excinfo.value.status_code == 400
+    # events без описания события
+    with pytest.raises(HTTPException) as excinfo:
+        call(epoch_mode="events", event_id=" ")
+    assert excinfo.value.status_code == 400
+    assert "event_id" in str(excinfo.value.detail)
+    # Окно после события меньше 100 мс
+    with pytest.raises(HTTPException) as excinfo:
+        call(epoch_mode="events", event_id="STIM/5", epoch_post_ms=50.0)
+    assert excinfo.value.status_code == 400
+    # Окно длиннее 10 с
+    with pytest.raises(HTTPException) as excinfo:
+        call(
+            epoch_mode="events", event_id="STIM/5",
+            epoch_pre_ms=5000.0, epoch_post_ms=6000.0,
+        )
+    assert excinfo.value.status_code == 400
+    # Корректный событийный режим проходит
+    params = call(
+        epoch_mode="events", event_id="STIM/5",
+        epoch_pre_ms=200.0, epoch_post_ms=800.0,
+    )
+    assert params.epoch_mode == "events"
+    assert params.event_id == "STIM/5"
+    # Стадия фильтра событийные поля не валидирует (не её параметры)
+    filter_params = call(stage="filter", epoch_mode="bogus", event_id=None)
+    assert filter_params.stage == "filter"

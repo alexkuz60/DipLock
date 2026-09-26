@@ -27,6 +27,19 @@ export type ArtifactZone = {
   channels: string[]
 }
 
+/**
+ * Событие записи (N2/2.7): аннотация EDF+ или маркер стим-канала, приведённые
+ * к слою вьюера. `BAD_`-аннотации событиями не считаются (это отбраковка).
+ */
+export type EventMark = {
+  onsetSec: number
+  durationSec: number
+  /** Описание события: «STIM/5», «Sound/On» … */
+  description: string
+  /** Источник: аннотация EDF+ или маркер стим-канала */
+  source: 'annotation' | 'stim'
+}
+
 /** Ручной вердикт эпохи: блокировка пользователя или снятие блокировки алгоритма. */
 export type EpochManualVerdict = 'blocked' | 'allowed'
 
@@ -77,6 +90,17 @@ export type EdfViewerLayers = {
   /** Каналы-виновники отбраковки по индексам эпох (рамки в треках, причины) */
   rejectChannels: Record<number, string[]>
   epochLengthMs: number | null
+  /**
+   * Явные начала окон эпох, с (событийный режим, N2/2.7): сетка нерегулярная —
+   * события записи идут неравномерно, и индексы `rejectedEpochs` живут в их
+   * порядке. `null`/нет — регулярная сетка по `epochLengthMs`.
+   */
+  epochStartsSec?: number[] | null
+  /** Описание события нарезки (режим events); `null` — фиксированный режим */
+  eventId?: string | null
+  /** Окно до/после события нарезки, мс (режим events; для пилюли расхождения) */
+  epochPreMs?: number | null
+  epochPostMs?: number | null
   /** Откуда слои: фикстура разработки или результат задачи (срез 2.7) */
   source: 'demo' | 'result'
 }
@@ -244,18 +268,28 @@ export function buildEpochCells(
   rejected: readonly number[] = [],
   marks: readonly EpochMark[] = [],
   rejectChannels: Readonly<Record<number, string[]>> = {},
+  startsSec: readonly number[] | null = null,
 ): EpochCell[] {
   const lengthSec = Math.max(MIN_EPOCH_SEC, epochLengthMs / 1000)
   const totalSec = Math.max(0, durationSec)
-  // -1e-9: 30 с / 2 с не должно давать 16-ю эпоху из-за погрешности float
-  const total = Math.max(0, Math.ceil(totalSec / lengthSec - 1e-9))
   const rejectedSet = new Set(rejected)
-  const count = Math.min(total, MAX_EPOCH_CELLS)
+
+  // Событийный режим (N2/2.7): окна стоят на явных началах — события записи
+  // идут неравномерно, и регулярная сетка «уехала» бы от их моментов.
+  const starts =
+    startsSec !== null
+      ? startsSec
+      : // -1e-9: 30 с / 2 с не должно давать 16-ю эпоху из-за погрешности float
+        Array.from(
+          { length: Math.max(0, Math.ceil(totalSec / lengthSec - 1e-9)) },
+          (_unused, index) => index * lengthSec,
+        )
+  const count = Math.min(starts.length, MAX_EPOCH_CELLS)
 
   const cells: EpochCell[] = []
   for (let index = 0; index < count; index++) {
-    const onsetSec = index * lengthSec
-    const durationSecCell = Math.min(lengthSec, totalSec - onsetSec)
+    const onsetSec = starts[index] as number
+    const durationSecCell = Math.min(lengthSec, Math.max(0, totalSec - onsetSec))
     const interval = { onsetSec, durationSec: durationSecCell }
     const isRejected = rejectedSet.has(index)
     cells.push({
@@ -267,6 +301,21 @@ export function buildEpochCells(
     })
   }
   return cells
+}
+
+/**
+ * События паспорта записи → слой вьюера (N2/2.7): те же интервалы и описания,
+ * `BAD_` сюда не попадают (сервер их событиями не считает).
+ */
+export function eventMarks(
+  events: readonly { onset: number; duration: number; description: string; source: 'annotation' | 'stim' }[],
+): EventMark[] {
+  return events.map((event) => ({
+    onsetSec: event.onset,
+    durationSec: event.duration,
+    description: event.description,
+    source: event.source,
+  }))
 }
 
 /**
@@ -454,6 +503,10 @@ export function demoLayers(
     rejectedEpochs,
     rejectChannels,
     epochLengthMs: null,
+    epochStartsSec: null,
+    eventId: null,
+    epochPreMs: null,
+    epochPostMs: null,
     source: 'demo',
   }
 }

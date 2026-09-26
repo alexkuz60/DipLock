@@ -61,6 +61,44 @@ def make_epoch_events(raw: mne.io.BaseRaw, epoch_length_ms: float) -> np.ndarray
     )
 
 
+def merged_annotations(
+    raw: mne.io.BaseRaw,
+    artifact_annotations: mne.Annotations,
+    filter_band: tuple[float, float] | None,
+) -> mne.Annotations:
+    """Аннотации файла ∪ артефактные ∪ краевые — **объединение, не перетирание** (N2).
+
+    Аннотации файла (EDF+ TAL + маркеры ``STIM/*``, см. `services/edf_events.py`)
+    лежат в ``raw.annotations`` с чтения; до шага 2.7 нарезка их перетирала и
+    события не доезжали ни до нарезки, ни до вьюера. Теперь файловые ``BAD_``
+    роняют эпохи наравне с нашими детекторами (правило N6), а стимульные
+    описания на ``BAD_`` не начинаются и нарезку не трогают.
+    """
+    base = raw.annotations
+    edge = edge_annotations(raw, filter_band)
+    return mne.Annotations(
+        onset=[float(v) for v in base.onset]
+        + [float(v) for v in artifact_annotations.onset]
+        + [float(v) for v in edge.onset],
+        duration=[float(v) for v in base.duration]
+        + [float(v) for v in artifact_annotations.duration]
+        + [float(v) for v in edge.duration],
+        description=list(base.description)
+        + list(artifact_annotations.description)
+        + list(edge.description),
+    )
+
+
+def _raise_all_dropped(annotations: mne.Annotations, raw: mne.io.BaseRaw) -> None:
+    """Ошибка «все эпохи отброшены» с покрытием BAD_ по типам (фидбэк 24.09.2026)."""
+    duration_sec = float(raw.times[-1]) if raw.n_times else 0.0
+    raise ValueError(
+        "Все эпохи отброшены аннотациями BAD_ (детекторы артефактов и краевой "
+        f"буфер фильтра). Покрытие: {bad_coverage_text(annotations, duration_sec)}. "
+        "Проверьте пороги детекции, фильтр и референс."
+    )
+
+
 def segment_epochs(
     raw: mne.io.BaseRaw,
     artifact_annotations: mne.Annotations,
@@ -85,16 +123,9 @@ def segment_epochs(
     if epoch_length_ms not in valid_lengths:
         raise ValueError(f"Длина эпохи {epoch_length_ms} мс не в списке: {valid_lengths}")
 
-    # Аннотации краёв (N12) складываются с артефактными ДО нарезки: эпохи,
-    # попавшие в переходный процесс фильтра, отбрасываются с причиной BAD_edge.
-    edge = edge_annotations(raw, filter_band)
-    annotations = mne.Annotations(
-        onset=[float(v) for v in artifact_annotations.onset]
-        + [float(v) for v in edge.onset],
-        duration=[float(v) for v in artifact_annotations.duration]
-        + [float(v) for v in edge.duration],
-        description=list(artifact_annotations.description) + list(edge.description),
-    )
+    # Аннотации файла (N2) + краевые (N12) складываются с артефактными ДО нарезки:
+    # эпохи, попавшие в переходный процесс фильтра, отбрасываются с причиной BAD_edge.
+    annotations = merged_annotations(raw, artifact_annotations, filter_band)
     raw.set_annotations(annotations)
     epoch_length_sec = epoch_length_ms / 1000.0
 
@@ -115,14 +146,66 @@ def segment_epochs(
     )
 
     if len(epochs) == 0:
-        duration_sec = float(raw.times[-1]) if raw.n_times else 0.0
-        raise ValueError(
-            "Все эпохи отброшены аннотациями BAD_ (детекторы артефактов и краевой "
-            f"буфер фильтра). Покрытие: {bad_coverage_text(annotations, duration_sec)}. "
-            "Проверьте пороги детекции, фильтр и референс."
-        )
+        _raise_all_dropped(annotations, raw)
 
     return epochs
+
+
+def segment_epochs_events(
+    raw: mne.io.BaseRaw,
+    artifact_annotations: mne.Annotations,
+    event_id: str,
+    tmin: float,
+    tmax: float,
+    filter_band: tuple[float, float] | None = None,
+) -> tuple[mne.Epochs, np.ndarray]:
+    """Нарезка по событиям (ERP): окна ``[tmin, tmax]`` вокруг моментов события.
+
+    События берутся из аннотаций записи (файловые EDF+ и маркеры ``STIM/*``,
+    N2) по описанию ``event_id``; ``BAD_``-аннотации событиями не считаются
+    (регэксп MNE их пропускает) и вдобавок роняют эпохи через reject —
+    отбраковка та же, что в фиксированной нарезке.
+
+    Возвращает ``(epochs, events)``: полный список событий нужен и для
+    ``drop_log``-записей БД (``epoch_records``), и для нерегулярной сетки
+    вьюера (``epoch_starts_sec`` в результате стадии). ``tmin`` обычно
+    отрицателен (pre-стимульное окно ERP), эпохи у краёв записи MNE помечает
+    ``TOO_SHORT`` и исключает.
+    """
+    if not event_id or not event_id.strip():
+        raise ValueError(
+            "Событийный режим требует описание события (event_id): "
+            "выберите событие в блоке «Эпохи» панели"
+        )
+    if tmax <= tmin:
+        raise ValueError(f"Окно эпохи некорректно: tmin={tmin:.3f} с ≥ tmax={tmax:.3f} с")
+
+    annotations = merged_annotations(raw, artifact_annotations, filter_band)
+    raw.set_annotations(annotations)
+
+    available = sorted({
+        str(desc) for desc in raw.annotations.description
+        if not str(desc).startswith(BAD_PREFIX)
+    })
+    if event_id not in available:
+        listing = ", ".join(f"«{desc}»" for desc in available) or "нет"
+        raise ValueError(
+            f"События «{event_id}» не найдены в записи. Доступные события: {listing}."
+        )
+
+    events, _ids = mne.events_from_annotations(
+        raw, event_id={event_id: 1}, verbose=False,
+    )
+
+    epochs = mne.Epochs(
+        raw, events, tmin=tmin, tmax=tmax,
+        baseline=None,
+        reject=None,
+        preload=True, verbose=False,
+    )
+    if len(epochs) == 0:
+        _raise_all_dropped(annotations, raw)
+    return epochs, events
 
 
 def bad_coverage_text(

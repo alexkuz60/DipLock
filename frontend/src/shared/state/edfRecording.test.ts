@@ -9,9 +9,11 @@ import { deferred } from '@/test/deferred'
 import {
   EMPTY_PASSPORT,
   acceptEdfFile,
+  buildEvokedForm,
   buildPreprocessForm,
   filterBandOf,
   layersFromResult,
+  reconcileEventId,
   useEdfRecording,
   validateEdfFile,
 } from '@/shared/state/edfRecording'
@@ -23,6 +25,7 @@ import {
 } from '@/shared/state/edfParams'
 import { mockApiFetch } from '@/test/apiMocks'
 import {
+  evokedResultFixture,
   preprocessJobFixture,
   preprocessResultFixture,
   recordingFixture,
@@ -461,5 +464,121 @@ describe('запуск стадии по кнопке (срез 2.7)', () => {
     expect(useEdfRecording.getState().recording).toBeNull()
     expect(useEdfRecording.getState().stageJobs).toEqual({})
     expect(useEdfRecording.getState().layers).toBeNull()
+  })
+})
+
+describe('событийный режим и ERP (N2/2.7)', () => {
+  it('buildPreprocessForm: событийный режим шлёт событие и окно (только стадия epochs)', () => {
+    const params = {
+      ...EDF_PARAM_DEFAULTS,
+      epochMode: 'events' as const,
+      eventId: 'STIM/5',
+      epochPreMs: 150,
+      epochPostMs: 650,
+    }
+    const epochs = buildPreprocessForm('epochs', params)
+    expect(epochs.get('epoch_mode')).toBe('events')
+    expect(epochs.get('event_id')).toBe('STIM/5')
+    expect(epochs.get('epoch_pre_ms')).toBe('150')
+    expect(epochs.get('epoch_post_ms')).toBe('650')
+
+    // Фиксированный режим событийных полей не шлёт
+    const fixed = buildPreprocessForm('epochs', EDF_PARAM_DEFAULTS)
+    expect(fixed.get('epoch_mode')).toBe('fixed')
+    expect(fixed.get('event_id')).toBeNull()
+  })
+
+  it('buildEvokedForm: baseline −200…0 уходит только когда pre-окно его вмещает', () => {
+    const params = {
+      ...EDF_PARAM_DEFAULTS,
+      epochMode: 'events' as const,
+      eventId: 'STIM/5',
+      epochPreMs: 200,
+      epochPostMs: 800,
+      erpBaseline: 'minus200' as const,
+    }
+    const form = buildEvokedForm(params)
+    expect(form.get('event_id')).toBe('STIM/5')
+    expect(form.get('epoch_pre_ms')).toBe('200')
+    expect(form.get('baseline_start_ms')).toBe('-200')
+    expect(form.get('baseline_end_ms')).toBe('0')
+
+    // pre-окно 100 мс: baseline −200…0 в эпоху не влезает — и не отправляется
+    const narrow = buildEvokedForm({ ...params, epochPreMs: 100 })
+    expect(narrow.get('baseline_start_ms')).toBeNull()
+    // «Без коррекции» — baseline не уходит
+    const none = buildEvokedForm({ ...params, erpBaseline: 'none' })
+    expect(none.get('baseline_start_ms')).toBeNull()
+  })
+
+  it('layersFromResult: событийная нарезка приносит нерегулярную сетку и событие', () => {
+    const result = layersFromResult(
+      preprocessResultFixture('epochs', {
+        epoch_mode: 'events',
+        event_id: 'STIM/5',
+        epoch_pre_ms: 200,
+        epoch_post_ms: 800,
+        epoch_starts_sec: [0.8, 2.8],
+      }),
+      null,
+    )
+
+    expect(result.epochStartsSec).toEqual([0.8, 2.8])
+    expect(result.eventId).toBe('STIM/5')
+    expect(result.epochPreMs).toBe(200)
+    expect(result.epochPostMs).toBe(800)
+  })
+
+  it('startEvoked: задача → усреднённая волна в блок ERP', async () => {
+    mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useEdfParams.getState().setParams({ epochMode: 'events', eventId: 'STIM/5' })
+
+    await useEdfRecording.getState().startEvoked()
+
+    const { evoked } = useEdfRecording.getState()
+    expect(evoked.status).toBe('succeeded')
+    expect(evoked.result?.event_id).toBe('STIM/5')
+    expect(evoked.result?.n_used).toBe(2)
+  })
+
+  it('startEvoked: у каждого результата свои параметры (волна из фикстуры соответствует событию)', async () => {
+    mockApiFetch({ evokedResult: evokedResultFixture({ event_id: 'Sound/On', n_total: 3, n_used: 1 }) })
+    useEdfRecording.setState({ recording: recordingFixture })
+    useEdfParams.getState().setParams({ epochMode: 'events', eventId: 'Sound/On' })
+
+    await useEdfRecording.getState().startEvoked()
+
+    const { evoked } = useEdfRecording.getState()
+    expect(evoked.result?.event_id).toBe('Sound/On')
+    expect(evoked.result?.n_used).toBe(1)
+  })
+
+  it('startEvoked без события не шлёт запрос', async () => {
+    const fetchMock = mockApiFetch()
+    // Состояние задачи живёт при записи: на «чистой» записи оно — idle
+    useEdfRecording.setState({
+      recording: recordingFixture,
+      evoked: {
+        status: 'idle', progress: 0, message: '',
+        error: null, errorTraceback: null, result: null,
+      },
+    })
+    useEdfParams.getState().setParams({ epochMode: 'fixed' })
+
+    await useEdfRecording.getState().startEvoked()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(useEdfRecording.getState().evoked.status).toBe('idle')
+  })
+
+  it('reconcileEventId: событие живёт только внутри своей записи', () => {
+    const counts = recordingFixture.event_counts
+    // Событие прежней записи есть и в новой — выбор остаётся
+    expect(reconcileEventId('Sound/On', counts)).toEqual({ eventId: 'Sound/On' })
+    // Описания из прежней записи в новой нет — берём первое событие новой
+    expect(reconcileEventId('Нет/Такого', counts)).toEqual({ eventId: 'STIM/5' })
+    // Запись без событий чистит выбор: кнопка стадии честно блокируется
+    expect(reconcileEventId('STIM/5', {})).toEqual({ eventId: '' })
   })
 })

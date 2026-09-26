@@ -175,6 +175,19 @@ export type PreprocessResult = {
   /** Отчёт очистки (стадия filter, когда заданы опции очистки) */
   clean: CleanReport | null
   epoch_length_ms: number
+  /** Режим нарезки (N2/2.7): fixed — фиксированная длина, events — по событиям */
+  epoch_mode: 'fixed' | 'events'
+  /** Описание события нарезки (режим events); null — фиксированный режим */
+  event_id: string | null
+  /** Окно до события, мс (режим events); вместе с post задаёт длину эпохи */
+  epoch_pre_ms: number
+  /** Окно после события, мс (режим events) */
+  epoch_post_ms: number
+  /**
+   * Начала окон эпох от начала записи, с (событийный режим: сетка нерегулярная).
+   * `null` — регулярная сетка по `epoch_length_ms`.
+   */
+  epoch_starts_sec: number[] | null
   n_epochs_total: number
   n_epochs_used: number
   rejected_epochs: number[]
@@ -401,6 +414,21 @@ export type RecordingMix = {
   channels: string[]
 }
 
+/**
+ * Событие записи: аннотация EDF+ или маркер стим-канала (N2, шаг 2.7).
+ * Оба источника сведены к аннотациям: у стим-канала описание `STIM/<код>`.
+ */
+export type RecordingEvent = {
+  /** Время события от начала записи, с */
+  onset: number
+  /** Длительность, с (0 — точечное событие/маркер) */
+  duration: number
+  /** Описание события: «STIM/5», «Sound/On» … */
+  description: string
+  /** Источник: аннотация EDF+ или маркер стим-канала */
+  source: 'annotation' | 'stim'
+}
+
 /** Паспорт загруженной для просмотра записи (срез 2.2, без обработки) */
 export type RecordingMeta = {
   recording_id: string
@@ -429,6 +457,14 @@ export type RecordingMeta = {
    * Заполняется только ответом `POST /recordings` (дедуп по sha256 содержимого)
    */
   deduplicated: boolean
+  /**
+   * События записи (аннотации EDF+ и маркеры стим-каналов, N2) по возрастанию
+   * времени; `BAD_` не входят (это отбраковка, а не события). Лимит — cap
+   * паспорта, полное число — в `event_counts`.
+   */
+  events: RecordingEvent[]
+  /** Число событий по описаниям (селекты нарезки/ERP) */
+  event_counts: Record<string, number>
 }
 
 export type PipelineInfo = {
@@ -454,6 +490,37 @@ export type SurfaceRef = {
   version: string
   url: string
   brodmann_url: string
+}
+
+/**
+ * Результат задачи ERP-усреднения (`GET /recordings/{id}/evoked/{job}`, шаг 2.7).
+ * Усреднённая волна по каналам вокруг момента события: стимул → эпоха →
+ * усреднение. Данные — в µV, ось времени — секунды от события (`t=0`).
+ */
+export type EvokedResult = {
+  recording_id: string
+  /** Описание события, по которому усредняли */
+  event_id: string
+  /** Начало окна эпохи от события, с (обычно < 0) */
+  tmin: number
+  /** Конец окна эпохи от события, с */
+  tmax: number
+  sfreq: number
+  /** Ось времени, с от события (t=0 — момент события) */
+  times: number[]
+  channels: string[]
+  /** Усреднённая волна [канал][время], µV */
+  data_uv: number[][]
+  /** Окно baseline-коррекции [start, end], с от события; null — без коррекции */
+  baseline: [number, number] | null
+  /** Всего событий выбранного описания в записи */
+  n_total: number
+  /** Вошло в усреднение (после отбраковки BAD_) */
+  n_used: number
+  /** Индексы событий, отброшенных BAD_, в порядке событий */
+  rejected_epochs: number[]
+  warnings: string[]
+  duration_sec_calc: number
 }
 
 export type AnalyzeResponse = {

@@ -1120,3 +1120,42 @@ describe('оверлеи развёрнутого трека (срез 5)', () =
   })
 })
 
+describe('слой событий записи (N2/2.7)', () => {
+  beforeEach(() => {
+    uplotCharts().length = 0
+    localStorage.clear()
+    useEdfRecording.setState({
+      channelQc: null,
+      channelQcThresholds: { warn: 0.05, bad: 0.2, snrWarn: 10, snrBad: 5 },
+    })
+  })
+
+  const events = [
+    { onsetSec: 3, durationSec: 0, description: 'STIM/5', source: 'stim' as const },
+    { onsetSec: 7, durationSec: 0.5, description: 'Sound/On', source: 'annotation' as const },
+  ]
+
+  it('рисует линии событий с тултипом «описание, интервал»', () => {
+    paramsState({ visibleChannels: ['F3'], eventsLayer: true })
+    renderWithProviders(<TrackStack signal={frameFixture()} events={events} />)
+
+    expect(screen.getByTestId('event-line-0')).toBeInTheDocument()
+    expect(screen.getByTestId('event-line-1')).toBeInTheDocument()
+    expect(screen.getByTestId('event-line-0')).toHaveAttribute('title', expect.stringContaining('STIM/5'))
+  })
+
+  it('тумблер «Маркеры событий» выключает слой (отрисовка, расчёт не трогает)', () => {
+    paramsState({ visibleChannels: ['F3'], eventsLayer: false })
+    renderWithProviders(<TrackStack signal={frameFixture()} events={events} />)
+
+    expect(screen.queryByTestId('event-line-0')).not.toBeInTheDocument()
+  })
+
+  it('без событий слой молчит даже при включённом тумблере', () => {
+    paramsState({ visibleChannels: ['F3'], eventsLayer: true })
+    renderWithProviders(<TrackStack signal={frameFixture()} events={[]} />)
+
+    expect(screen.queryByTestId('event-line-0')).not.toBeInTheDocument()
+  })
+})
+

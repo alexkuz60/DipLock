@@ -41,6 +41,7 @@ from app.api.assets import (
 from app.api.params import (
     dipole_refine_params,
     dipole_scan_params,
+    evoked_params,
     parse_filter_band,
     preprocess_params,
     spectrogram_params,
@@ -69,6 +70,7 @@ from app.schemas.analysis import (
     ContoursRef,
     DipoleRefineResult,
     DipoleScanResult,
+    EvokedResult,
     FilterResponseOut,
     JobCreated,
     JobStatus,
@@ -109,7 +111,7 @@ from app.services.recording_signals import (
     SignalBuildError,
     build_signal_blob,
 )
-from app.services.recordings import Recording, recording_registry
+from app.services.recordings import Recording, ensure_record_events, recording_registry
 from app.services.spectral import cached_topomap
 from app.services.spectrogram import (
     cached_grid as cached_spectrogram_grid,
@@ -141,7 +143,11 @@ def _meta_out(recording: Recording, deduplicated: bool = False) -> RecordingMeta
     ``mixes`` — виртуальные каналы раздела «ЭЭГ»: состав считается по каналам
     записи в `services/channel_mix.py`, чтобы правила монтажа 10-20 жили в одном
     месте, а UI только показывал готовый список.
+
+    ``ensure_record_events`` дополняет события старых сайдкаров (N2/2.7):
+    паспорт, записанный до шага, ключа ``events`` не имеет.
     """
+    ensure_record_events(recording, settings)
     return RecordingMeta(
         **recording.meta,
         # dict из чистого сервиса → элемент контракта: валидацию типа делает Pydantic
@@ -319,6 +325,10 @@ async def create_preprocess_job(
     flat_line_ms: float = Form(200.0),
     run_ica: bool = Form(False, description="ICA-ветка детекции (тяжёлая — по умолчанию выключена)"),
     epoch_length_ms: float = Form(2000.0),
+    epoch_mode: str = Form("fixed", description="Режим нарезки: fixed | events (по событиям, N2)"),
+    event_id: str | None = Form(None, description="Описание события нарезки (режим events)"),
+    epoch_pre_ms: float = Form(200.0, description="Окно до события, мс (режим events)"),
+    epoch_post_ms: float = Form(800.0, description="Окно после события, мс (режим events)"),
     notch_harmonics: int = Form(0, description="Гармоники notch (100/150/200 Гц), 0–4"),
     bad_channels: str | None = Form(None, description="Плохие каналы через запятую"),
     interpolate_bads: bool = Form(False, description="Интерполировать bad-каналы (до ICA/SSP)"),
@@ -345,6 +355,10 @@ async def create_preprocess_job(
         flat_line_uv=flat_line_uv, flat_line_ms=flat_line_ms,
         run_ica=run_ica,
         epoch_length_ms=epoch_length_ms,
+        epoch_mode=epoch_mode,
+        event_id=event_id,
+        epoch_pre_ms=epoch_pre_ms,
+        epoch_post_ms=epoch_post_ms,
         notch_harmonics=notch_harmonics, bad_channels=bad_channels,
         interpolate_bads=interpolate_bads,
         clean_method=clean_method, ica_n_components=ica_n_components,
@@ -360,6 +374,70 @@ async def get_preprocess_result(recording_id: str, job_id: str) -> PreprocessRes
     """Результат стадии. 409 — задача идёт или упала; 404 — чужой/неизвестный job."""
     job = recording_job_result(recording_id, job_id, "preprocess")
     return PreprocessResult(**job.result)
+
+
+@router.post(
+    "/recordings/{recording_id}/evoked", status_code=202, response_model=JobCreated,
+    summary="Запустить ERP-усреднение по событиям (стимул → эпоха → усреднение)",
+)
+async def create_evoked_job(
+    recording_id: str,
+    event_id: str = Form(..., description="Описание события из паспорта записи"),
+    epoch_pre_ms: float = Form(200.0, description="Окно до события, мс"),
+    epoch_post_ms: float = Form(800.0, description="Окно после события, мс"),
+    baseline_start_ms: float | None = Form(
+        None, description="Baseline: начало, мс от события (пара с end; пусто — без коррекции)"
+    ),
+    baseline_end_ms: float | None = Form(None, description="Baseline: конец, мс от события"),
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
+    z_threshold: float = Form(5.0),
+    pp_threshold_uv: float = Form(100.0),
+    flat_line_uv: float = Form(5.0),
+    flat_line_ms: float = Form(200.0),
+    run_ica: bool = Form(False, description="ICA-ветка детекции (тяжёлая — по умолчанию выключена)"),
+    notch_harmonics: int = Form(0, description="Гармоники notch (100/150/200 Гц), 0–4"),
+    bad_channels: str | None = Form(None, description="Плохие каналы через запятую"),
+    interpolate_bads: bool = Form(False, description="Интерполировать bad-каналы (до ICA/SSP)"),
+    clean_method: str = Form("none", description="Очистка артефактов: none | ica | ssp"),
+    ica_n_components: int = Form(0, description="Компонент ICA (0 — auto)"),
+) -> JobCreated:
+    """ERP-усреднение по событиям записи **по кнопке** (шаг 2.7).
+
+    Форма повторяет форму стадии «Нарезка эпох» (те же пороги отбраковки —
+    числа согласованы со штриховкой вьюера) плюс окно события и baseline.
+    Задача возвращается сразу (202 + ``job_id``): прогресс — в ``GET /jobs/{id}``,
+    результат — в ``GET /recordings/{id}/evoked/{job_id}``.
+    """
+    recording = require_recording(recording_id)
+    params = evoked_params(
+        event_id=event_id,
+        epoch_pre_ms=epoch_pre_ms, epoch_post_ms=epoch_post_ms,
+        baseline_start_ms=baseline_start_ms, baseline_end_ms=baseline_end_ms,
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz,
+        reference=reference, reference_channels=reference_channels,
+        z_threshold=z_threshold, pp_threshold_uv=pp_threshold_uv,
+        flat_line_uv=flat_line_uv, flat_line_ms=flat_line_ms,
+        run_ica=run_ica,
+        notch_harmonics=notch_harmonics, bad_channels=bad_channels,
+        interpolate_bads=interpolate_bads,
+        clean_method=clean_method, ica_n_components=ica_n_components,
+    )
+    return submit_recording_job("evoked", recording, params, meta={"event_id": event_id})
+
+
+@router.get(
+    "/recordings/{recording_id}/evoked/{job_id}", response_model=EvokedResult,
+    summary="Результат ERP-усреднения по событиям",
+)
+async def get_evoked_result(recording_id: str, job_id: str) -> EvokedResult:
+    """Результат задачи ERP. 409 — задача идёт или упала; 404 — чужой/неизвестный job."""
+    job = recording_job_result(recording_id, job_id, "evoked")
+    return EvokedResult(**job.result)
 
 
 @router.post(

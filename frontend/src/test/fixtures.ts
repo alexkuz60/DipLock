@@ -6,6 +6,7 @@ import type {
   DipoleScanPoint,
   DipoleRefineResult,
   DipoleScanResult,
+  EvokedResult,
   FilterResponse,
   InitStatus,
   JobStatus,
@@ -221,6 +222,13 @@ export const recordingFixture: RecordingMeta = {
   duration_sec: 30,
   units_autoscaled: false,
   edf_units: null,
+  // События записи (N2/2.7): маркер стим-канала и длительная аннотация файла
+  events: [
+    { onset: 2, duration: 0, description: 'STIM/5', source: 'stim' },
+    { onset: 6, duration: 0.5, description: 'Sound/On', source: 'annotation' },
+    { onset: 12, duration: 0, description: 'STIM/5', source: 'stim' },
+  ],
+  event_counts: { 'STIM/5': 2, 'Sound/On': 1 },
   warnings: [],
   created_at: '2026-09-13T09:00:00',
   deduplicated: false,
@@ -326,6 +334,12 @@ export function preprocessResultFixture(
     qc_warn_share: 0.05,
     qc_bad_share: 0.2,
     epoch_length_ms: stage === 'epochs' ? 2000 : 0,
+    // Событийный режим (N2/2.7): фикстура по умолчанию — фиксированная нарезка
+    epoch_mode: 'fixed',
+    event_id: null,
+    epoch_pre_ms: 0,
+    epoch_post_ms: 0,
+    epoch_starts_sec: null,
     n_epochs_total: stage === 'epochs' ? 15 : 0,
     n_epochs_used: stage === 'epochs' ? 13 : 0,
     rejected_epochs: stage === 'epochs' ? [2, 7] : [],
@@ -338,6 +352,36 @@ export function preprocessResultFixture(
         : [],
     warnings: [],
     duration_sec_calc: 0.4,
+    ...overrides,
+  }
+}
+
+/**
+ * Результат задачи ERP (шаг 2.7): усреднённая волна по событию STIM/5.
+ * Синтетика — синус ~20 мкВ от момента события, ось −200…800 мс.
+ */
+export function evokedResultFixture(overrides: Partial<EvokedResult> = {}): EvokedResult {
+  const times = Array.from({ length: 51 }, (_unused, index) => Math.round((-0.2 + index * 0.02) * 1000) / 1000)
+  return {
+    recording_id: recordingFixture.recording_id,
+    event_id: 'STIM/5',
+    tmin: -0.2,
+    tmax: 0.8,
+    sfreq: 50,
+    times,
+    channels: [...recordingFixture.channels],
+    data_uv: recordingFixture.channels.map((_channel, channelIndex) =>
+      times.map(
+        (timeSec) =>
+          Math.round(Math.sin((timeSec + 0.2) * 10 + channelIndex) * 20 * 1000) / 1000,
+      ),
+    ),
+    baseline: null,
+    n_total: 2,
+    n_used: 2,
+    rejected_epochs: [],
+    warnings: [],
+    duration_sec_calc: 0.3,
     ...overrides,
   }
 }

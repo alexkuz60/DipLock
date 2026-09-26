@@ -39,7 +39,11 @@ from app.services.artifact_detector import (
     qc_summary,
     record_qc_status,
 )
-from app.services.epoch_segmenter import EDGE_DESC, segment_epochs
+from app.services.epoch_segmenter import (
+    EDGE_DESC,
+    segment_epochs,
+    segment_epochs_events,
+)
 from app.services.filter_design import design_filter
 from app.services.prepared_signal import prepared_raw_report
 from app.services.recordings import Recording
@@ -81,6 +85,11 @@ class PreprocessParams:
     run_ica: bool = False
     # Стадия `epochs`
     epoch_length_ms: float = 2000.0
+    # Событийный режим нарезки (N2, шаг 2.7): окна вокруг событий записи (ERP)
+    epoch_mode: str = "fixed"  # fixed | events
+    event_id: str | None = None  # описание события (режим events)
+    epoch_pre_ms: float = 200.0  # окно до события, мс (tmin = −pre/1000)
+    epoch_post_ms: float = 800.0  # окно после события, мс (tmax = +post/1000)
 
 
 def _reject_channels(log: tuple[str, ...] | list[str], ch_names: list[str]) -> list[str]:
@@ -196,7 +205,13 @@ def _params_note(params: PreprocessParams, extra: str = "") -> str:
         if params.run_ica:
             parts.append("ica=1")
     if params.stage == "epochs":
-        parts.append(f"epoch={params.epoch_length_ms:g}ms")
+        if params.epoch_mode == "events":
+            parts.append(
+                f"epoch=events:{params.event_id}:"
+                f"{params.epoch_pre_ms:g}+{params.epoch_post_ms:g}ms"
+            )
+        else:
+            parts.append(f"epoch={params.epoch_length_ms:g}ms")
     if extra:
         parts.append(extra)
     return ", ".join(parts)
@@ -335,23 +350,48 @@ def run_preprocess(
         _journal(extra=f"artifacts={stats['total']}")
         return base
 
-    # Стадия `epochs`: нарезка. Отброшенные эпохи (по аннотациям BAD_ от наших
-    # детекторов) нужны UI для штриховки, поэтому вместо одного числа отдаём
-    # индексы (порядок событий).
-    progress("epochs", message=f"Нарезка эпох по {params.epoch_length_ms:.0f} мс")
-    try:
-        epochs = segment_epochs(
-            raw, annotations,
-            epoch_length_ms=params.epoch_length_ms,
-            filter_band=params.filter_band,
-        )
-    except ValueError as exc:
-        raise PreprocessError(str(exc)) from exc
+    # Стадия `epochs`: нарезка (фиксированная или по событиям, N2/2.7). Отброшенные
+    # эпохи (по аннотациям BAD_ от наших детекторов) нужны UI для штриховки,
+    # поэтому вместо одного числа отдаём индексы (порядок событий).
+    if params.epoch_mode == "events":
+        tmin = -params.epoch_pre_ms / 1000.0
+        tmax = params.epoch_post_ms / 1000.0
+        progress("epochs", message=f"Нарезка по событиям «{params.event_id}»")
+        try:
+            epochs, events = segment_epochs_events(
+                raw, annotations,
+                event_id=params.event_id or "",
+                tmin=tmin, tmax=tmax,
+                filter_band=params.filter_band,
+            )
+        except ValueError as exc:
+            raise PreprocessError(str(exc)) from exc
+        # Нерегулярная сетка вьюера: начала окон эпох (события могут идти неравномерно)
+        sfreq = float(raw.info["sfreq"]) or 1.0
+        epoch_starts_sec = [round(float(sample) / sfreq + tmin, 4) for sample in events[:, 0]]
+        epoch_length_ms = params.epoch_pre_ms + params.epoch_post_ms
+    else:
+        progress("epochs", message=f"Нарезка эпох по {params.epoch_length_ms:.0f} мс")
+        try:
+            epochs = segment_epochs(
+                raw, annotations,
+                epoch_length_ms=params.epoch_length_ms,
+                filter_band=params.filter_band,
+            )
+        except ValueError as exc:
+            raise PreprocessError(str(exc)) from exc
+        epoch_starts_sec = None  # регулярная сетка: вьюер считает её из длины эпохи
+        epoch_length_ms = params.epoch_length_ms
 
     rejected = [index for index, log in enumerate(epochs.drop_log) if log]
     ch_names = list(raw.ch_names)
     base.update({
-        "epoch_length_ms": params.epoch_length_ms,
+        "epoch_length_ms": epoch_length_ms,
+        "epoch_mode": params.epoch_mode,
+        "event_id": params.event_id if params.epoch_mode == "events" else None,
+        "epoch_pre_ms": params.epoch_pre_ms if params.epoch_mode == "events" else 0.0,
+        "epoch_post_ms": params.epoch_post_ms if params.epoch_mode == "events" else 0.0,
+        "epoch_starts_sec": epoch_starts_sec,
         "n_epochs_total": len(epochs.drop_log),
         "n_epochs_used": len(epochs),
         "rejected_epochs": rejected,

@@ -57,6 +57,7 @@ import {
   visibleZones,
   zonesForChannel,
   type EdfViewerLayers,
+  type EventMark,
 } from '@/shared/lib/viewerLayers'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue, type ArtifactKind } from '@/shared/state/edfParams'
 import { channelQcStatus, channelQcTooltip } from '@/shared/lib/channelQc'
@@ -66,6 +67,7 @@ import { StatusPill } from '@/shared/ui/StatusPill'
 import {
   ArtifactZoneLayer,
   EpochLayer,
+  EventLayer,
   LayersLegend,
   SelectedZoneCard,
 } from './TrackLayers'
@@ -83,10 +85,16 @@ export type TrackStackProps = {
    * фикстуру **только демо-кадру** — так он остаётся самостоятельным для отладки.
    */
   layers?: EdfViewerLayers | null
+  /**
+   * События записи (N2/2.7): аннотации EDF+ и маркеры стим-каналов из паспорта.
+   * Слой информационный и живёт до всякой обработки — события приходят с
+   * загрузкой файла, а не результатом стадий.
+   */
+  events?: readonly EventMark[]
 }
 
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */
-export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
+export function TrackStack({ signal, layers: layersProp, events = [] }: TrackStackProps) {
   const params = useEdfParamsValue()
   const navigate = useNavigate()
   const toggleArtifactVisibility = useEdfParams((state) => state.toggleArtifactVisibility)
@@ -187,6 +195,8 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         layers?.rejectedEpochs ?? [],
         epochMarks,
         layers?.rejectChannels ?? {},
+        // Событийная нарезка (N2/2.7): нерегулярная сетка по явным началам окон
+        layers?.source === 'result' ? (layers.epochStartsSec ?? null) : null,
       ),
     [signal.durationSec, epochLengthMs, layers, epochMarks],
   )
@@ -202,11 +212,17 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
   const manualMarkCount = epochMarks.length
   /** Есть ли правки, видимые в текущей сетке: от этого зависит рендер слоёв */
   const hasManualEdit = useMemo(() => epochs.some((cell) => cell.manual !== null), [epochs])
-  /** Сетка результата не совпадает с длиной эпохи в панели — разметка не пересчитана */
+  /** Сетка результата не совпадает с параметрами панели — разметка не пересчитана */
   const staleEpochGrid =
     layers?.source === 'result' &&
-    layers.epochLengthMs !== null &&
-    layers.epochLengthMs !== params.epochLengthMs
+    (layers.epochStartsSec
+      ? // Событийный режим: сверяем описание события и окно (длина здесь — их сумма)
+        params.epochMode !== 'events' ||
+        params.eventId !== layers.eventId ||
+        params.epochPreMs !== layers.epochPreMs ||
+        params.epochPostMs !== layers.epochPostMs
+      : layers.epochLengthMs !== null &&
+        (params.epochMode !== 'fixed' || layers.epochLengthMs !== params.epochLengthMs))
   const selectedZone = useMemo(
     () => visibleZoneList.find((zone) => zone.id === selectedZoneId) ?? null,
     [visibleZoneList, selectedZoneId],
@@ -216,12 +232,15 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
    * живая сетка эпох и ручные пометки — они считаются из параметров и от расчёта
    * не зависят.
    */
+  /** Слой событий записи (N2/2.7): видим по тумблеру панели (отрисовка) */
+  const showEventLines = params.eventsLayer && events.length > 0
   const showLayers =
     layers !== null ||
     (params.epochBoundaries && epochs.length > 1) ||
     // Ручная пометка эпохи — решение пользователя: она видна всегда, даже если
     // штриховку и границы он выключил
-    hasManualEdit
+    hasManualEdit ||
+    showEventLines
   /**
    * Легенда типов артефактов — там, где есть источник зон: результат задачи или
    * фикстура демо-режима. До первого расчёта у записи зон нет, и легенда с
@@ -622,9 +641,15 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
         {staleEpochGrid ? (
           <StatusPill
             tone="warn"
-            title={`Разметка эпох построена по нарезке результата — ${layers.epochLengthMs} мс; в панели выбрано ${params.epochLengthMs} мс. Нажмите «Нарезка эпох» в шапке, чтобы пересчитать и разложить эпохи заново.`}
+            title={
+              layers?.epochStartsSec
+                ? `Разметка эпох построена по событиям «${layers.eventId}» (окно −${layers.epochPreMs}/${layers.epochPostMs} мс от события); параметры панели не совпадают. Нажмите «Нарезка эпох» в шапке, чтобы пересчитать и разложить эпохи заново.`
+                : `Разметка эпох построена по нарезке результата — ${layers?.epochLengthMs} мс; в панели выбрано ${params.epochLengthMs} мс. Нажмите «Нарезка эпох» в шапке, чтобы пересчитать и разложить эпохи заново.`
+            }
           >
-            разметка эпох: {layers.epochLengthMs} мс
+            {layers?.epochStartsSec
+              ? `разметка: по событиям «${layers.eventId}»`
+              : `разметка эпох: ${layers?.epochLengthMs} мс`}
           </StatusPill>
         ) : null}
         {manualMarkCount > 0 ? (
@@ -753,6 +778,14 @@ export function TrackStack({ signal, layers: layersProp }: TrackStackProps) {
                 showBoundaries={params.epochBoundaries}
                 showHatch={params.droppedEpochsHatched}
               />
+              {/*
+                События записи (N2/2.7) — поверх штриховки эпох, но под зонами
+                артефактов: моменты аннотаций/маркеров файла, слой информационный
+                (без кликов).
+              */}
+              {showEventLines ? (
+                <EventLayer events={events} geometry={geometry} />
+              ) : null}
               {/*
                 Зоны артефактов — поверх всех треков, но пока трек не развёрнут: при
                 развороте их рисует строка канала — только его зоны (п. 4 среза).

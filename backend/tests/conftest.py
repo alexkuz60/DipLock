@@ -91,64 +91,109 @@ def epochs_alpha() -> mne.Epochs:
     )
 
 
-def write_minimal_edf(path, ch_names, data_uv, sfreq, record_sec=1.0):
-    """Минимальный корректный EDF для тестов загрузки (без edfio).
+def write_minimal_edf(path, ch_names, data_uv, sfreq, record_sec=1.0, annotations=None):
+    """Минимальный корректный EDF (или EDF+ при ``annotations``) без edfio.
 
     Данные в мкВ, little-endian int16, записи по ``record_sec`` секунд.
     Формат: фиксированная ширина полей заголовка (256 байт + 256 на канал).
+
+    ``annotations`` — список ``(onset_sec, duration_sec, description)``: файл
+    пишется как EDF+ с каналом ``EDF Annotations`` (TAL). Стим-каналы
+    (``status``/``trigger`` — правило MNE) пишутся с точным целочисленным
+    масштабом (физ 0..32767 = цифровые 0..32767), иначе квантование int16
+    портит коды триггеров при ``find_events``.
     """
-    ns = len(ch_names)
+    has_tal = annotations is not None
+    ns = len(ch_names) + (1 if has_tal else 0)
     n_times = data_uv.shape[1]
     samps_per_record = round(sfreq * record_sec)
     n_records = int(np.ceil(n_times / samps_per_record))
     pad = n_records * samps_per_record - n_times
     if pad:
         data_uv = np.pad(data_uv, ((0, 0), (0, pad)))
-
-    phys_min, phys_max = float(data_uv.min()) - 1, float(data_uv.max()) + 1
-    dig_min, dig_max = -32768, 32767
+    data_min = float(data_uv.min()) - 1
+    data_max = float(data_uv.max()) + 1
 
     def field(text, width):
         return str(text).ljust(width)[:width]
 
+    def is_stim(name):
+        return name.strip().lower() in ("status", "trigger")
+
     header_bytes = 256 + ns * 256
+    annot_samps = 60  # двухбайтовых сэмплов TAL на запись (120 байт)
     parts = [
         field("0", 8), field("Synthetic DipLock", 80), field("Test recording", 80),
         field("01.01.85", 8), field("00.00.00", 8), field(header_bytes, 8),
-        field("", 44), field(n_records, 8), field(record_sec, 8), field(ns, 4),
+        field("EDF+C" if has_tal else "", 44),
+        field(n_records, 8), field(record_sec, 8), field(ns, 4),
     ]
+    labels = list(ch_names) + (["EDF Annotations"] if has_tal else [])
+    for name in labels:
+        parts.append(field(name, 16))
     for i in range(ns):
-        parts.append(field(ch_names[i], 16))
+        last = has_tal and i == ns - 1
+        parts.append(field("" if last else "AgAgCl", 80))
+    for i in range(ns):
+        last = has_tal and i == ns - 1
+        parts.append(field("" if last else "uV", 8))
+    for i, name in enumerate(labels):
+        last = has_tal and i == ns - 1
+        if last:
+            parts.append(field(-1, 8))
+        elif is_stim(name):
+            parts.append(field(0, 8))
+        else:
+            parts.append(field(data_min, 8))
+    for i, name in enumerate(labels):
+        last = has_tal and i == ns - 1
+        if last:
+            parts.append(field(1, 8))
+        elif is_stim(name):
+            parts.append(field(32767, 8))
+        else:
+            parts.append(field(data_max, 8))
     for _ in range(ns):
-        parts.append(field("AgAgCl", 80))  # трансдьюсер
+        parts.append(field(0, 8))  # dig_min: 0 у стим-канала (точные коды), 0 у остальных
     for _ in range(ns):
-        parts.append(field("uV", 8))
-    for _ in range(ns):
-        parts.append(field(phys_min, 8))
-    for _ in range(ns):
-        parts.append(field(phys_max, 8))
-    for _ in range(ns):
-        parts.append(field(dig_min, 8))
-    for _ in range(ns):
-        parts.append(field(dig_max, 8))
+        parts.append(field(32767, 8))  # dig_max
     for _ in range(ns):
         parts.append(field("", 80))  # prefiltering
-    for _ in range(ns):
-        parts.append(field(samps_per_record, 8))
+    for i in range(ns):
+        last = has_tal and i == ns - 1
+        parts.append(field(annot_samps if last else samps_per_record, 8))
     for _ in range(ns):
         parts.append(field("", 32))
     header = "".join(parts).encode("latin-1")
     assert len(header) == header_bytes, (len(header), header_bytes)
 
-    scale = (phys_max - phys_min) / (dig_max - dig_min)
-    digital = np.rint((data_uv - phys_min) / scale + dig_min).astype("<i2")
+    digital = np.zeros(data_uv.shape, dtype="<i2")
+    for ch, name in enumerate(ch_names):
+        if is_stim(name):
+            # Физ 0..32767 = цифровые 0..32767: масштаб 1:1, коды триггеров точны
+            digital[ch] = np.rint(data_uv[ch]).astype("<i2")
+        else:
+            scale = (data_max - data_min) / 32767
+            digital[ch] = np.rint((data_uv[ch] - data_min) / scale).astype("<i2")
+
+    # TAL (EDF+): разделитель длительности — \x15, описаний — \x14 (регэксп MNE)
+    tal_bytes = annot_samps * 2
+    tal = bytearray(b"+0\x14\x14\x00")
+    for onset, dur, desc in annotations or []:
+        if dur > 0:
+            tal += f"+{onset}\x15{dur}\x14{desc}\x14\x00".encode("latin-1")
+        else:
+            tal += f"+{onset}\x14\x14{desc}\x14\x00".encode("latin-1")
 
     with open(path, "wb") as fh:
         fh.write(header)
         for rec in range(n_records):
             start = rec * samps_per_record
-            for ch in range(ns):
+            for ch in range(len(ch_names)):
                 fh.write(digital[ch, start : start + samps_per_record].tobytes())
+            if has_tal:
+                chunk = bytes(tal[rec * tal_bytes : (rec + 1) * tal_bytes])
+                fh.write(chunk.ljust(tal_bytes, b"\x00"))
 
 
 @pytest.fixture

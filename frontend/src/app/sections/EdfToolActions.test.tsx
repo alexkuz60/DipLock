@@ -231,3 +231,67 @@ describe('тулс-хедер раздела EDF', () => {
     expect(preprocessCalls().length).toBeGreaterThan(0)
   })
 })
+
+describe('кнопка «Нарезка эпох» в событийном режиме (N2/2.7)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useUiStore.getState().resetUiState()
+    useEdfParams.setState({
+      params: { ...EDF_PARAM_DEFAULTS },
+      availableChannels: [],
+      stageApplied: emptyStageSnapshot(),
+    })
+    useEdfRecording.setState({
+      recording: recordingFixture,
+      demo: null,
+      uploadProgress: null,
+      uploadError: null,
+      passport: { ...EMPTY_PASSPORT },
+      fileDialogRequest: 0,
+      navRequest: null,
+      stageJobs: {},
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('без выбранного события кнопка выключена и запросов не шлёт', async () => {
+    const fetchMock = mockApiFetch()
+    renderSection()
+    act(() => {
+      useEdfParams.getState().setParams({ epochMode: 'events', eventId: '' })
+    })
+
+    const button = screen.getByRole('button', { name: 'Пересчитать: Нарезка эпох' })
+    expect(button).toBeDisabled()
+
+    // Задачу без события не ставим — никаких запросов предподготовки
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/preprocess'))).toBe(false)
+
+    // Выбрали событие — кнопка включается (ссылку переполучаем: при снятии
+    // `disabled` IconButton убирает обёртку и кнопка пересоздаётся в DOM)
+    act(() => {
+      useEdfParams.getState().setParams({ eventId: 'STIM/5' })
+    })
+    expect(
+      screen.getByRole('button', { name: 'Пересчитать: Нарезка эпох' }),
+    ).toBeEnabled()
+  })
+
+  it('для записи без событий кнопка тоже выключена (режим не на что переключиться)', () => {
+    mockApiFetch()
+    renderSection()
+    act(() => {
+      useEdfRecording.setState({
+        recording: { ...recordingFixture, events: [], event_counts: {} },
+      })
+      useEdfParams.getState().setParams({ epochMode: 'events', eventId: '' })
+    })
+
+    expect(
+      screen.getByRole('button', { name: 'Пересчитать: Нарезка эпох' }),
+    ).toBeDisabled()
+  })
+})

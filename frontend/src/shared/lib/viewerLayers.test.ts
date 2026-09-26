@@ -18,6 +18,7 @@ import {
   epochFramesForChannel,
   epochMarkTitle,
   epochRejectReason,
+  eventMarks,
   formatSecondsRange,
   gridEpochLength,
   isEpochBlocked,
@@ -371,5 +372,45 @@ describe('причины и каналы блокировки эпох', () => {
       1: ['F3'],
     })
     expect(epochFramesForChannel(released, 'F3')).toEqual([])
+  })
+})
+
+describe('событийная нарезка и слой событий (N2/2.7)', () => {
+  it('buildEpochCells с явными началами строит нерегулярную сетку', () => {
+    // События в 0.5, 2.0 и 5.0 с: окна шириной 1 с не делят запись поровну
+    const cells = buildEpochCells(10, 1000, [1], [], {}, [0.5, 2.0, 5.0])
+
+    expect(cells.map((cell) => cell.onsetSec)).toEqual([0.5, 2.0, 5.0])
+    expect(cells.map((cell) => cell.durationSec)).toEqual([1, 1, 1])
+    expect(cells.map((cell) => cell.rejected)).toEqual([false, true, false])
+    // Индексы отброшенных живут в порядке событий, а не регулярных ячеек
+    expect(cells[1]?.rejectChannels).toEqual([])
+  })
+
+  it('сетка с началами обрезается по краю записи', () => {
+    const cells = buildEpochCells(5.5, 1000, [], [], {}, [0, 2, 5])
+    expect(cells[2]?.durationSec).toBe(0.5)
+  })
+
+  it('пустой список начал даёт пустую сетку', () => {
+    expect(buildEpochCells(10, 1000, [], [], {}, [])).toEqual([])
+  })
+
+  it('eventMarks переводит события паспорта в слой вьюера', () => {
+    const marks = eventMarks([
+      { onset: 1.25, duration: 0, description: 'STIM/5', source: 'stim' },
+      { onset: 3, duration: 0.5, description: 'Sound/On', source: 'annotation' },
+    ])
+
+    expect(marks).toEqual([
+      { onsetSec: 1.25, durationSec: 0, description: 'STIM/5', source: 'stim' },
+      { onsetSec: 3, durationSec: 0.5, description: 'Sound/On', source: 'annotation' },
+    ])
+  })
+
+  it('demoLayers не несёт событийной сетки — она живёт только у результата', () => {
+    const layers = demoLayers(30, ['F3'])
+    expect(layers.epochStartsSec).toBeNull()
+    expect(layers.eventId).toBeNull()
   })
 })

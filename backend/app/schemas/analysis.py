@@ -358,6 +358,26 @@ class PreprocessResult(BaseModel):
 
     # Стадия `epochs`: сетка эпох и отброшенные reject-фильтром
     epoch_length_ms: float = 0.0
+    # Событийный режим нарезки (N2, шаг 2.7): окна вокруг событий записи
+    epoch_mode: str = Field(
+        default="fixed", description="Режим нарезки: fixed (фиксированная длина) | events (по событиям)"
+    )
+    event_id: str | None = Field(
+        default=None, description="Описание события нарезки (режим events); None — фиксированный режим"
+    )
+    epoch_pre_ms: float = Field(
+        default=0.0, description="Окно до события, мс (режим events); вместе с post задаёт длину эпохи"
+    )
+    epoch_post_ms: float = Field(
+        default=0.0, description="Окно после события, мс (режим events)"
+    )
+    epoch_starts_sec: list[float] | None = Field(
+        default=None,
+        description=(
+            "Начала окон эпох от начала записи, с (событийный режим: сетка нерегулярная). "
+            "None — регулярная сетка по epoch_length_ms"
+        ),
+    )
     n_epochs_total: int = 0
     n_epochs_used: int = 0
     rejected_epochs: list[int] = Field(
@@ -370,6 +390,40 @@ class PreprocessResult(BaseModel):
 
     warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = Field(default=0.0, description="Длительность расчёта, сек")
+
+
+class EvokedResult(BaseModel):
+    """Результат задачи ERP-усреднения (``kind='evoked'``, шаг 2.7).
+
+    Усреднённая волна по каналам вокруг момента события: стимул → эпоха →
+    усреднение (`audit_strategy.md`: «стимул → эпоха → усреднение → карта»;
+    карта по Evoked — отдельная задача). Данные — в µV, ось времени — секунды
+    от события (``t=0``). Главные числа: ``n_used`` из ``n_total`` и
+    ``rejected_epochs`` — сколько событий реально вошло в среднее.
+    """
+
+    recording_id: str
+    event_id: str = Field(description="Описание события, по которому усредняли")
+    tmin: float = Field(description="Начало окна эпохи от события, с (обычно < 0)")
+    tmax: float = Field(description="Конец окна эпохи от события, с")
+    sfreq: float
+    times: list[float] = Field(description="Ось времени, с от события (t=0 — момент события)")
+    channels: list[str]
+    data_uv: list[list[float]] = Field(
+        description="Усреднённая волна [канал][время], µV"
+    )
+    baseline: list[float] | None = Field(
+        default=None,
+        description="Окно baseline-коррекции [start, end], с от события; None — без коррекции",
+    )
+    n_total: int = Field(description="Всего событий выбранного описания в записи")
+    n_used: int = Field(description="Вошло в усреднение (после отбраковки BAD_)")
+    rejected_epochs: list[int] = Field(
+        default_factory=list,
+        description="Индексы событий, отброшенных BAD_, в порядке событий",
+    )
+    warnings: list[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
 
 
 class ChannelMixOut(BaseModel):
@@ -386,6 +440,24 @@ class ChannelMixOut(BaseModel):
     group: str = Field(description="Код группы: all | left | right | frontal | …")
     channels: list[str] = Field(
         default_factory=list, description="Каналы записи, попавшие в микс (порядок монтажа)"
+    )
+
+
+class RecordingEvent(BaseModel):
+    """Событие записи: аннотация EDF+ или маркер стим-канала (N2, шаг 2.7).
+
+    Оба источника сведены к аннотациям (`services/edf_events.py`): у стим-канала
+    описание — ``STIM/<код>`` и ``source='stim'``; у аннотации файла — текст TAL
+    и ``source='annotation'``. ``BAD_``-аннотации событиями не считаются.
+    """
+
+    onset: float = Field(description="Время события от начала записи, с")
+    duration: float = Field(
+        default=0.0, description="Длительность, с (0 — точечное событие/маркер)"
+    )
+    description: str = Field(description="Описание события: «STIM/5», «Sound/On» …")
+    source: Literal["annotation", "stim"] = Field(
+        description="Источник: аннотация EDF+ или маркер стим-канала"
     )
 
 
@@ -427,6 +499,17 @@ class RecordingMeta(BaseModel):
             "Файл уже был загружен ранее: открыта существующая запись, копия не создана. "
             "Заполняется только ответом POST /recordings"
         ),
+    )
+    events: list[RecordingEvent] = Field(
+        default_factory=list,
+        description=(
+            "События записи (аннотации EDF+ и маркеры стим-каналов) по возрастанию "
+            "времени; без BAD_ (это отбраковка, а не события). Лимит — cap паспорта"
+        ),
+    )
+    event_counts: dict[str, int] = Field(
+        default_factory=dict,
+        description="Число событий по описаниям (источник селектов нарезки/ERP в UI)",
     )
 
 

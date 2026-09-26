@@ -6,6 +6,7 @@ import {
   calcJobFixture,
   dipoleRefineResultFixture,
   dipoleScanResultFixture,
+  evokedResultFixture,
   filterResponseFixture,
   initStatusFixture,
   metaFixture,
@@ -21,6 +22,7 @@ import type {
   ContourSlice,
   DipoleRefineResult,
   DipoleScanResult,
+  EvokedResult,
   FilterResponse,
   InitStatus,
   JobStatus,
@@ -42,7 +44,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 /** 202-ответ запуска задачи расчёта (срез 3.4): id задачи и адреса поллинга. */
 function calcJobCreated(
   jobId: string,
-  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine',
+  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine' | 'evoked',
 ): Record<string, string> {
   return {
     job_id: jobId,
@@ -108,6 +110,8 @@ export type MockApiOptions = {
   preprocessJob?: JobStatus
   /** Смоделировать отказ запуска стадии (404 записи) */
   preprocessStartFails?: boolean
+  /** Явный результат ERP-усреднения (шаг 2.7); иначе — фикстура */
+  evokedResult?: EvokedResult
   /** Статус задачи расчёта раздела «Диполи» (спектр и диполи) — для поллинга */
   calcJob?: JobStatus
   /** Явный результат спектра по диапазонам */
@@ -218,6 +222,13 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'dipoles'), 202)
       }
       return jsonResponse(options.dipoleScanResult ?? dipoleScanResultFixture())
+    }
+    if (url.includes('/evoked')) {
+      // ERP-усреднение (шаг 2.7): 202 + задача, результат — усреднённая волна
+      if (method === 'POST') {
+        return jsonResponse(calcJobCreated('job-evoked-1', 'evoked'), 202)
+      }
+      return jsonResponse(options.evokedResult ?? evokedResultFixture())
     }
     if (url.includes('/jobs/')) {
       return jsonResponse(

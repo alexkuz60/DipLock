@@ -6,6 +6,7 @@ import mne
 import numpy as np
 
 from app.services.artifact_detector import find_dead_channels
+from app.services.edf_events import attach_stim_annotations
 from app.services.filter_design import band_filter_kwargs
 
 logger = logging.getLogger(__name__)
@@ -67,11 +68,19 @@ def _apply_standard_montage(raw: mne.io.BaseRaw) -> None:
 
 
 def _read_raw_edf(filepath: str, units: str | None) -> mne.io.BaseRaw:
-    """Читает EDF; units передаётся только при явном указании (иначе авто MNE)."""
-    kwargs: dict = {"preload": True, "stim_channel": False}
+    """Читает EDF; units передаётся только при явном указании (иначе авто MNE).
+
+    ``stim_channel='auto'`` (N2): каналы ``status``/``trigger`` MNE помечает типом
+    ``stim``; сразу после чтения их маркеры превращаются в аннотации ``STIM/<код>``
+    и каналы удаляются (`services/edf_events.py`) — события переживают фильтры и
+    ресемпл, не мешая масштабу/QC/монтажу.
+    """
+    kwargs: dict = {"preload": True, "stim_channel": "auto"}
     if units is not None:
         kwargs["units"] = units
-    return mne.io.read_raw_edf(filepath, **kwargs)
+    raw = mne.io.read_raw_edf(filepath, **kwargs)
+    attach_stim_annotations(raw)
+    return raw
 
 
 def _ensure_physical_units(raw: mne.io.BaseRaw, requested_units: str | None) -> mne.io.BaseRaw:

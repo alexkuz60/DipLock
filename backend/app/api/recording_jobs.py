@@ -1,7 +1,7 @@
 """Задачи записи: запуск, статус, результат (A1, этап 3).
 
-Шесть «задач записи» (``preprocess`` / ``spectrum`` / ``dipoles`` /
-``spectrogram`` / ``dipole_refine``) отличаются только формой запроса и воркером. Всё остальное у
+Задачи записи (``preprocess`` / ``spectrum`` / ``dipoles`` / ``spectrogram`` /
+``dipole_refine`` / ``evoked``) отличаются только формой запроса и воркером. Всё остальное у
 них общее, и это общее живёт здесь:
 
 * ``require_recording`` — 404 с текстом для UI, если запись неизвестна/устарела;
@@ -29,6 +29,7 @@ from app.services.dipole_scanner import (
     compute_dipole_scan,
     refine_dipole_point,
 )
+from app.services.evoked import EvokedParams, run_evoked
 from app.services.job_manager import ProgressCallback, job_manager
 from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recordings import Recording, recording_registry
@@ -39,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 # Виды задач, чей результат лежит рядом с записью, а не в `/jobs/{id}/result`
 RECORDING_JOB_KINDS: tuple[str, ...] = (
-    "preprocess", "spectrum", "dipoles", "spectrogram", "dipole_refine",
+    "preprocess", "spectrum", "dipoles", "spectrogram", "dipole_refine", "evoked",
 )
 
 
@@ -62,6 +63,13 @@ def worker_preprocess(
     реестру просмотра и живёт по своему TTL.
     """
     return run_preprocess(recording, settings, params, progress)
+
+
+def worker_evoked(
+    progress: ProgressCallback, recording: Recording, params: EvokedParams,
+) -> dict[str, Any]:
+    """Воркер задачи ERP (поток): усреднение эпох вокруг событий записи (2.7)."""
+    return run_evoked(recording, settings, params, progress)
 
 
 def worker_spectrum(
@@ -98,6 +106,7 @@ WORKERS: dict[str, Callable[..., dict[str, Any]]] = {
     "spectrum": worker_spectrum,
     "spectrogram": worker_spectrogram,
     "dipoles": worker_dipole_scan,
+    "evoked": worker_evoked,
 }
 
 

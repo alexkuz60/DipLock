@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.schemas.analysis import PreprocessStage
 from app.services.artifact_cleaner import CLEAN_METHODS
 from app.services.dipole_scanner import DipoleRefineParams, DipoleScanParams
+from app.services.evoked import EvokedParams
 from app.services.preprocess import PreprocessParams
 from app.services.spectral import SPECTRUM_PSD_METHODS, SpectrumParams
 from app.services.spectrogram import SpectrogramParams
@@ -94,15 +95,50 @@ def preprocess_params(
     interpolate_bads: bool = False,
     clean_method: str = "none",
     ica_n_components: int = 0,
+    epoch_mode: str = "fixed",
+    event_id: str | None = None,
+    epoch_pre_ms: float = 200.0,
+    epoch_post_ms: float = 800.0,
 ) -> PreprocessParams:
     """Параметры стадии предподготовки; длина эпохи важна только стадии ``epochs``.
 
     Опции очистки (гармоники notch, bad-каналы, ICA/SSP) валидируются здесь же:
     неизвестный метод — 400 с текстом для UI, а не молчаливое «none» (правило 8,
-    `docs/rules/api-jobs.md`).
+    `docs/rules/api-jobs.md`). Событийный режим нарезки (``epoch_mode='events'``,
+    N2/2.7) требует описание события и корректное окно до/после.
     """
     if stage == "epochs":
-        require_epoch_length(epoch_length_ms)
+        if epoch_mode not in ("fixed", "events"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"epoch_mode должен быть fixed или events (получено: {epoch_mode!r})",
+            )
+        if epoch_mode == "fixed":
+            require_epoch_length(epoch_length_ms)
+        else:
+            if not (event_id or "").strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Событийный режим требует event_id: выберите событие записи "
+                        "в блоке «Эпохи» панели"
+                    ),
+                )
+            if epoch_pre_ms < 0 or epoch_pre_ms > 10000:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"epoch_pre_ms — окно до события от 0 до 10000 мс (получено: {epoch_pre_ms})",
+                )
+            if epoch_post_ms < 100 or epoch_post_ms > 10000:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"epoch_post_ms — окно после события от 100 до 10000 мс (получено: {epoch_post_ms})",
+                )
+            if epoch_pre_ms + epoch_post_ms > 10000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Окно эпохи (до + после) не должно быть длиннее 10000 мс",
+                )
     if clean_method not in CLEAN_METHODS:
         raise HTTPException(
             status_code=400,
@@ -135,6 +171,77 @@ def preprocess_params(
         flat_line_ms=flat_line_ms,
         run_ica=run_ica,
         epoch_length_ms=epoch_length_ms,
+        epoch_mode=epoch_mode,
+        event_id=(event_id or "").strip() or None,
+        epoch_pre_ms=epoch_pre_ms,
+        epoch_post_ms=epoch_post_ms,
+    )
+
+
+def evoked_params(
+    *,
+    event_id: str | None,
+    epoch_pre_ms: float,
+    epoch_post_ms: float,
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
+    reference: str,
+    reference_channels: str | None,
+    z_threshold: float,
+    pp_threshold_uv: float,
+    flat_line_uv: float,
+    flat_line_ms: float,
+    run_ica: bool,
+    baseline_start_ms: float | None = None,
+    baseline_end_ms: float | None = None,
+    notch_harmonics: int = 0,
+    bad_channels: str | None = None,
+    interpolate_bads: bool = False,
+    clean_method: str = "none",
+    ica_n_components: int = 0,
+) -> EvokedParams:
+    """Параметры задачи ERP: окно события + baseline + подготовка сигнала.
+
+    Окно и описание события валидируются той же формой, что и стадия «Нарезка
+    эпох» (`preprocess_params` — DRY: 400-тексты не дублируются). Baseline —
+    пара значений в мс от события; окно обязано лежать внутри эпохи.
+    """
+    prep = preprocess_params(
+        stage="epochs",
+        band_min=band_min, band_max=band_max, notch_hz=notch_hz,
+        reference=reference, reference_channels=reference_channels,
+        z_threshold=z_threshold, pp_threshold_uv=pp_threshold_uv,
+        flat_line_uv=flat_line_uv, flat_line_ms=flat_line_ms,
+        run_ica=run_ica,
+        # В режиме events длина не из списка не проверяется — значение не используется
+        epoch_length_ms=epoch_post_ms,
+        notch_harmonics=notch_harmonics, bad_channels=bad_channels,
+        interpolate_bads=interpolate_bads, clean_method=clean_method,
+        ica_n_components=ica_n_components,
+        epoch_mode="events", event_id=event_id,
+        epoch_pre_ms=epoch_pre_ms, epoch_post_ms=epoch_post_ms,
+    )
+    if (baseline_start_ms is None) != (baseline_end_ms is None):
+        raise HTTPException(
+            status_code=400,
+            detail="Baseline задаётся парой значений (start и end) либо не задаётся вовсе",
+        )
+    if (
+        baseline_start_ms is not None and baseline_end_ms is not None
+        and not (-epoch_pre_ms <= baseline_start_ms < baseline_end_ms <= epoch_post_ms)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Окно baseline [{baseline_start_ms}; {baseline_end_ms}] мс должно лежать "
+                f"внутри эпохи [−{epoch_pre_ms}; {epoch_post_ms}] мс (start < end)"
+            ),
+        )
+    return EvokedParams(
+        preprocess=prep,
+        baseline_start_ms=baseline_start_ms,
+        baseline_end_ms=baseline_end_ms,
     )
 
 

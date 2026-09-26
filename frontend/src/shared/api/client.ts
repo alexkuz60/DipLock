@@ -9,6 +9,7 @@ import type {
   ContourSlice,
   DipoleRefineResult,
   DipoleScanResult,
+  EvokedResult,
   FilterResponse,
   InitStatus,
   JobCreated,
@@ -94,7 +95,13 @@ export function apiErrorText(error: unknown): string {
 }
 
 /** Вид задачи расчёта по записи: адреса её двух запросов отличает последний сегмент. */
-export type RecordingJobKind = 'preprocess' | 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine'
+export type RecordingJobKind =
+  | 'preprocess'
+  | 'spectrum'
+  | 'dipoles'
+  | 'spectrogram'
+  | 'dipole_refine'
+  | 'evoked'
 
 /**
  * Пара запросов «запустить задачу / прочитать результат» (A10).
@@ -206,6 +213,13 @@ export const api = {
    * В форме — `stage` и параметры стадии; прогресс — `api.job`.
    */
   preprocess: recordingJob<PreprocessResult>('preprocess'),
+
+  /**
+   * ERP-усреднение по событиям (шаг 2.7): стимул → эпоха → усреднение.
+   * В форме — событие, окно до/после, baseline и параметры подготовки/отбраковки
+   * (та же форма, что у стадии «Нарезка эпох», — числа согласованы со штриховкой).
+   */
+  evoked: recordingJob<EvokedResult>('evoked'),
 
   /** Спектр по диапазонам (срез 3.4): числа PSD и ссылки на топокарты. */
   spectrum: recordingJob<SpectrumResult>('spectrum'),

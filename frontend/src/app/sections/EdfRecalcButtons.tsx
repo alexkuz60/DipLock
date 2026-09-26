@@ -10,6 +10,7 @@
 import { Filter, Loader2, ScanSearch, Scissors, type LucideIcon } from 'lucide-react'
 import {
   RECALC_STAGE_LABELS,
+  useEdfParamsValue,
   useEdfStageState,
   type RecalcStage,
 } from '@/shared/state/edfParams'
@@ -29,6 +30,7 @@ const NO_RECORDING_HINT =
 
 export function EdfRecalcButton({ stage }: { stage: RecalcStage }) {
   const { state } = useEdfStageState(stage)
+  const params = useEdfParamsValue()
   const recording = useEdfRecording((store) => store.recording)
   const job = useEdfRecording((store) => store.stageJobs[stage])
   const runStage = useEdfRecording((store) => store.runStage)
@@ -36,8 +38,21 @@ export function EdfRecalcButton({ stage }: { stage: RecalcStage }) {
   const label = RECALC_STAGE_LABELS[stage]
   const running = job?.status === 'running'
 
-  const reason =
-    state === 'stale'
+  // Событийный режим (N2/2.7) требует выбранного события: без него задача закончится
+  // 400 «Событийный режим требует event_id» — честнее выключить кнопку с подсказкой
+  const eventCounts = recording?.event_counts ?? {}
+  const eventMissing =
+    stage === 'epochs' &&
+    params.epochMode === 'events' &&
+    !(params.eventId && (eventCounts[params.eventId] ?? 0) > 0)
+  const eventHint =
+    Object.keys(eventCounts).length === 0
+      ? 'Включён режим «По событиям», но в записи нет событий (аннотаций EDF+ и маркеров стим-каналов) — переключите нарезку на «Фиксированные» в панели «Эпохи»'
+      : 'Включён режим «По событиям» — выберите событие в блоке «Эпохи» панели'
+
+  const reason = eventMissing
+    ? eventHint
+    : state === 'stale'
       ? 'параметры изменены — нужно пересчитать'
       : state === 'not_run'
         ? 'результат ещё не получен'
@@ -55,7 +70,7 @@ export function EdfRecalcButton({ stage }: { stage: RecalcStage }) {
   return (
     <span className="relative inline-flex">
       <IconButton
-        disabled={recording === null || running}
+        disabled={recording === null || running || eventMissing}
         tooltip={tooltip}
         label={`Пересчитать: ${label}`}
         active={state === 'ready'}

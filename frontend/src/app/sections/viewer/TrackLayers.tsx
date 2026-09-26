@@ -20,6 +20,7 @@ import {
   isEpochBlocked,
   type ArtifactZone,
   type EpochCell,
+  type EventMark,
 } from '@/shared/lib/viewerLayers'
 import { cx } from '@/shared/ui/cx'
 
@@ -82,6 +83,60 @@ export function ArtifactZoneLayer({
     </>
   )
 }
+
+/**
+ * Слой событий записи (N2/2.7): аннотации EDF+ и маркеры стим-каналов.
+ *
+ * Событие — момент (или короткий интервал) на всём стеке треков: вертикальная
+ * линия с тултипом «описание, интервал». Включается тумблером «Маркеры событий»
+ * панели (`eventsLayer` — отрисовка, расчёт не устаревает); слой информационный,
+ * кликов у него нет — события приходят из файла, а не правятся руками.
+ */
+export function EventLayer({
+  events,
+  geometry,
+}: {
+  events: readonly EventMark[]
+  geometry: LayerGeometry
+}) {
+  return (
+    <>
+      {events.map((event, index) => {
+        const left = timeToX(event.onsetSec, geometry.window, geometry.trackWidth)
+        if (left < 0 || left > geometry.trackWidth) return null
+        const title = `Событие: ${event.description} (${formatSecondsRange(
+          event.onsetSec,
+          event.durationSec,
+        )})`
+        return (
+          <div
+            key={`event-${index}`}
+            data-testid={`event-line-${index}`}
+            role="img"
+            aria-label={title}
+            title={title}
+            className="pointer-events-none absolute inset-y-0"
+            style={{
+              left,
+              borderLeft: '2px solid var(--color-event)',
+              // Длительные аннотации — тонкая заливка интервала, точечные — линия
+              width: event.durationSec > 0 ? Math.max(2, timeToX(
+                event.onsetSec + event.durationSec,
+                geometry.window,
+                geometry.trackWidth,
+              ) - left) : undefined,
+              background:
+                event.durationSec > 0
+                  ? 'color-mix(in srgb, var(--color-event) 12%, transparent)'
+                  : undefined,
+            }}
+          />
+        )
+      })}
+    </>
+  )
+}
+
 
 /** Косая штриховка «эпоха не пойдёт в расчёт»: цвет — токен темы, не hex в JS. */
 function hatchImage(density: number): string {

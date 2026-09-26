@@ -215,6 +215,20 @@ describe('слой параметров EDF', () => {
     expect(EDF_PARAM_DEFAULTS.runIca).toBe(false)
   })
 
+  it('событийный режим — параметры стадии «эпохи», слой событий — отрисовка (N2/2.7)', () => {
+    // Режим и окно вокруг события меняют нарезку — стадия устаревает
+    expect(STAGE_PARAM_KEYS.epochs).toContain('epochMode')
+    expect(STAGE_PARAM_KEYS.epochs).toContain('eventId')
+    expect(STAGE_PARAM_KEYS.epochs).toContain('epochPreMs')
+    expect(STAGE_PARAM_KEYS.epochs).toContain('epochPostMs')
+    // Слой событий и параметры ERP — отрисовка/другая задача, нарезку не трогают
+    expect(STAGE_PARAM_KEYS.epochs).not.toContain('eventsLayer')
+    expect(STAGE_PARAM_KEYS.epochs).not.toContain('erpChannel')
+    expect(STAGE_PARAM_KEYS.epochs).not.toContain('erpBaseline')
+    expect(EDF_PARAM_DEFAULTS.epochMode).toBe('fixed')
+    expect(EDF_PARAM_DEFAULTS.eventsLayer).toBe(true)
+  })
+
   it('в localStorage уходят параметры, но не снимки результатов', () => {
     useEdfParams.getState().markApplied()
     useEdfParams.getState().setParams({ notchHz: 50 })

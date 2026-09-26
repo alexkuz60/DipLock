@@ -25,12 +25,12 @@
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
-  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **34 HTTP-пути**.
+  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **36 HTTP-путей**.
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/types.ts`.
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (32 в `routes.py`)
+## Инвентарь эндпоинтов (34 в `routes.py`)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -63,6 +63,8 @@
 | 30 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты |
 | 31 | `GET /journal` | журнал шагов: последние замеры (`limit` 1–2000, фильтр `pipeline`) |
 | 32 | `GET /filter-response` | АЧХ применяемого фильтра (полоса + notch с гармониками; шаг 2.5, лёгкий расчёт без задачи и ETag) |
+| 33 | `POST /recordings/{id}/evoked` | ERP-усреднение по событиям (шаг 2.7: стимул → эпоха → усреднение) |
+| 34 | `GET /recordings/{id}/evoked/{job_id}` | результат ERP: усреднённая волна [канал][время] + `n_used`/`n_total` |
 
 **Чего в API нет осознанно:** листинга и удаления записей. «Закрыть запись» — **клиентское**
 действие (сброс состояния UI), файл остаётся на диске и сносится TTL-обходом реестра;
@@ -80,7 +82,8 @@
    Новый вид задачи (`kind`) обязан быть добавлен и в `RECORDING_JOB_KINDS` + `WORKERS`
    (сборка `result_url` и запуск), и в `_drop_signal_cache` (чистка кэшей записи — дисковых и
    RAM-кэша подготовленного сигнала) — иначе результат «потеряется» после вытеснения.
-   Сейчас kind: `analyze`, `preprocess`, `spectrum`, `dipoles`, `spectrogram`, `dipole_refine`.
+   Сейчас kind: `analyze`, `preprocess`, `spectrum`, `dipoles`, `spectrogram`, `dipole_refine`,
+   `evoked` (его результат кэшей записи не создаёт — чистить в `_drop_signal_cache` нечего).
    На стороне UI задача описана **одной парой** методов клиента (`recordingJob(kind)` в
    `shared/api/client.ts`: `start` + `result`), а ожидание завершения — единым `waitForJob`
    (`shared/lib/jobPolling.ts`); своих копий поллинга в сторах нет (правило 7 —

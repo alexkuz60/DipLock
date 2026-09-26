@@ -13,7 +13,7 @@ import {
 } from '@/shared/state/edfParams'
 import { useEdfRecording, EMPTY_PASSPORT } from '@/shared/state/edfRecording'
 import { mockApiFetch } from '@/test/apiMocks'
-import { metaFixture, recordingFixture } from '@/test/fixtures'
+import { metaFixture, preprocessJobFixture, recordingFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 describe('панель раздела EDF', () => {
@@ -237,5 +237,116 @@ describe('панель раздела EDF', () => {
     await user.click(screen.getByRole('button', { name: 'Снять' }))
     expect(useEdfRecording.getState().epochMarks).toEqual([])
     expect(screen.getByText('Ручных пометок: 0')).toBeInTheDocument()
+  })
+})
+
+describe('событийный режим и блок ERP (N2/2.7)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useEdfParams.setState({
+      params: { ...EDF_PARAM_DEFAULTS },
+      availableChannels: [],
+      stageApplied: emptyStageSnapshot(),
+    })
+    useEdfRecording.setState({
+      recording: recordingFixture,
+      layers: null,
+      epochMarks: [],
+      passport: { ...EMPTY_PASSPORT },
+      evoked: {
+        status: 'idle', progress: 0, message: '',
+        error: null, errorTraceback: null, result: null,
+      },
+    })
+  })
+
+  it('включение режима «По событиям» сразу подставляет первое событие записи', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+    expect(useEdfParams.getState().params.eventId).toBe('')
+
+    await user.click(screen.getByRole('button', { name: 'По событиям' }))
+
+    // Пустой выбор давал 400 «требует event_id» при нажатии «Нарезка эпохи»
+    expect(useEdfParams.getState().params.epochMode).toBe('events')
+    expect(useEdfParams.getState().params.eventId).toBe('STIM/5')
+  })
+
+  it('режим «По событиям» открывает селект событий и окно до/после', async () => {
+    mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    // Фиксированный режим: событийных контролов нет, длина эпохи на месте
+    expect(screen.queryByLabelText('Событие')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Длина эпохи')).toBeInTheDocument()
+
+    act(() => {
+      useEdfParams.getState().setParams({ epochMode: 'events' })
+    })
+
+    expect(screen.getByLabelText('Событие')).toBeInTheDocument()
+    // Селект событий — из паспорта записи (счётчики по описаниям)
+    expect(screen.getByRole('option', { name: 'STIM/5 — 2' })).toBeInTheDocument()
+    expect(screen.getByLabelText('До события')).toHaveValue(200)
+    expect(screen.getByLabelText('После события')).toHaveValue(800)
+    expect(screen.queryByLabelText('Длина эпохи')).not.toBeInTheDocument()
+  })
+
+  it('кнопка ERP disabled без события и включается с выбранным событием', async () => {
+    mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    const button = screen.getByRole('button', { name: 'Усреднить (ERP)' })
+    expect(button).toBeDisabled()
+
+    act(() => {
+      useEdfParams.getState().setParams({ epochMode: 'events', eventId: 'STIM/5' })
+    })
+    expect(button).toBeEnabled()
+  })
+
+  it('кнопка считает ERP, правка параметров — нет; волна и числа приходят в блок', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    useEdfParams.getState().setParams({ epochMode: 'events', eventId: 'STIM/5' })
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    // Правка канала графика — просмотр результата, запросов не шлёт
+    const callsBefore = fetchMock.mock.calls.length
+    await user.selectOptions(screen.getByLabelText('Канал графика'), 'F4')
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+
+    await user.click(screen.getByRole('button', { name: 'Усреднить (ERP)' }))
+
+    expect(await screen.findByTestId('evoked-result')).toBeInTheDocument()
+    expect(screen.getByText(/Событий в среднем: 2 из 2/)).toBeInTheDocument()
+    expect(screen.getByTestId('evoked-chart')).toBeInTheDocument()
+    // Запустилась именно задача ERP, а не стадия предподготовки
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url).includes('/evoked')),
+    ).toBe(true)
+  })
+
+  it('ошибка задачи ERP показывается текстом, а не молчанием', async () => {
+    const user = userEvent.setup()
+    mockApiFetch({
+      preprocessJob: {
+        ...preprocessJobFixture,
+        status: 'failed',
+        error: 'События «STIM/9» не найдены в записи',
+      },
+    })
+    useEdfParams.getState().setParams({ epochMode: 'events', eventId: 'STIM/9' })
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    await user.click(screen.getByRole('button', { name: 'Усреднить (ERP)' }))
+
+    expect(await screen.findByTestId('evoked-error')).toHaveTextContent(/не найдены/)
   })
 })
