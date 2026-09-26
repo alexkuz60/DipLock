@@ -151,7 +151,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (767 Vitest / 488 pytest), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (776 Vitest / 488 pytest), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |

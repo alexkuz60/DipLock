@@ -16,6 +16,12 @@
   `isSectionActive` от `useLocation`, ссылка помечается `aria-current`. Ловит `AppShell.test.tsx`.
 - Контролы берём из `shared/ui/` (`FieldRow`, `SegmentedControl`, `SelectField`, `NumberField`,
   `CheckboxRow`, `StatusPill`, `ZoomNavControls`) — свой самодельный контрол плодит расхождения.
+- **Меню быстрого перемещения по секциям панели опций** (хедер «Опции раздела»): `Panel` внутри
+  панели (`PanelScopeContext`) регистрирует себя в реестре `shared/ui/panelNav.ts` (ключ, заголовок,
+  DOM-элемент), `RightPanel` рендерит меню (`shared/ui/PanelNavMenu.tsx`) и по выбору пункта
+  **раскрывает** секцию (`collapsedPanels` → false) и прокручивает к ней (`scrollIntoView`,
+  guard от jsdom — как в `LocalizationTable`). Вне панели опций регистрация не идёт. Ловит
+  `app/layout/RightPanel.test.tsx`.
 
 ## Сторы (zustand, `frontend/src/shared/state/`)
 

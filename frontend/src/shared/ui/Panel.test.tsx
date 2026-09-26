@@ -5,8 +5,9 @@
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactElement } from 'react'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Panel } from './Panel'
+import { PanelNavContext, type PanelNavItem } from './panelNav'
 import { PanelScopeContext } from './panelScope'
 import { useUiStore } from '@/shared/state/uiStore'
 import { renderWithProviders } from '@/test/renderWithProviders'
@@ -133,6 +134,29 @@ describe('Panel (секция правой панели)', () => {
 
     const section = container.querySelector('section')
     expect(section?.querySelector('[data-testid="track-stack"]')?.parentElement).toBe(section)
+  })
+
+  it('внутри панели опций регистрирует себя в реестре меню быстрого перемещения', () => {
+    const register = vi.fn((item: PanelNavItem) => {
+      void item
+      return () => {}
+    })
+    renderWithProviders(
+      scoped(
+        'edf',
+        <PanelNavContext.Provider value={{ register }}>
+          <Panel title="Пороги артефактов">
+            <span>z-score</span>
+          </Panel>
+        </PanelNavContext.Provider>,
+      ),
+    )
+
+    expect(register).toHaveBeenCalledTimes(1)
+    const item = register.mock.calls[0][0]
+    expect(item.key).toBe('edf:Пороги артефактов')
+    expect(item.title).toBe('Пороги артефактов')
+    expect(item.el.tagName).toBe('SECTION')
   })
 
   it('у аккордеона обёртка прозрачна для раскладки, а свёрнутая скрыта без размонтирования', async () => {

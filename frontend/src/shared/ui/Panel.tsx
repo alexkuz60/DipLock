@@ -20,9 +20,10 @@
  * `docs/rules/frontend-perf.md` п. 3.7).
  */
 import { ChevronRight } from 'lucide-react'
-import { useId, type ReactNode } from 'react'
+import { useEffect, useId, useRef, type ReactNode } from 'react'
 import { useUiStore } from '@/shared/state/uiStore'
 import { cx } from './cx'
+import { usePanelNavRegistry } from './panelNav'
 import { usePanelScope } from './panelScope'
 
 export type PanelProps = {
@@ -56,6 +57,19 @@ export function Panel({
   const collapsed = useUiStore((state) => state.collapsedPanels[panelKey] ?? !defaultOpen)
   const setPanelCollapsed = useUiStore((state) => state.setPanelCollapsed)
   const hidden = isCollapsible && collapsed
+  /**
+   * Регистрация в меню быстрого перемещения панели опций: секция внутри панели
+   * (`scope !== null`) объявляет себя реестру (`panelNav.ts`), чтобы хедер панели
+   * показал её пунктом меню. Вне панели реестра нет — регистрировать некого.
+   */
+  const navRegistry = usePanelNavRegistry()
+  const sectionRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (scope === null || navRegistry === null) return
+    const el = sectionRef.current
+    if (!el) return
+    return navRegistry.register({ key: panelKey, title, el })
+  }, [scope, navRegistry, panelKey, title])
   const header = <span className="block">{title}</span>
   const content = (
     <>
@@ -66,6 +80,7 @@ export function Panel({
 
   return (
     <section
+      ref={sectionRef}
       data-panel-key={panelKey}
       data-collapsed={hidden ? 'true' : 'false'}
       className={cx('rounded-lg border border-border bg-bg-2 p-3', className)}
