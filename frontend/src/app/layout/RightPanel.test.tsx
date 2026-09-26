@@ -115,3 +115,91 @@ describe('правый сайдбар: меню быстрого перемещ�
     expect(screen.getByText('Настройки рабочей области')).toBeInTheDocument()
   })
 })
+
+describe('хедер панели: триггер «все секции»', () => {
+  const TITLES = ['Фильтры и референс', 'Пороги артефактов', 'Эпохи'] as const
+
+  beforeEach(() => {
+    localStorage.clear()
+    useUiStore.getState().resetUiState()
+    vi.restoreAllMocks()
+  })
+
+  it('закрытая панель схлопывается совсем, без полоски-дублёра', () => {
+    useUiStore.getState().setRightPanel('edf', false)
+    renderPanel()
+
+    // Ни самой панели, ни полоски с кнопкой «Развернуть панель опций» —
+    // возвращать её может только тулс-хедер и хоткей «[»
+    expect(screen.queryByLabelText('Панель опций раздела «EDF»')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Развернуть панель опций' })).toBeNull()
+  })
+
+  it('в хедере нет дублёра тулс-хендера, есть одна кнопка-триггер', async () => {
+    renderPanel()
+
+    // Кнопка закрытия панели — только в тулс-хедере и хоткей «[»
+    expect(screen.queryByRole('button', { name: 'Скрыть панель опций' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Свернуть панель опций' })).toBeNull()
+    // Есть раскрытые секции — триггер предлагает свернуть все
+    expect(await screen.findByRole('button', { name: 'Свернуть все секции' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Развернуть все секции' })).toBeNull()
+  })
+
+  it('секции, свёрнутые по умолчанию, не считаются раскрытыми', () => {
+    renderWithProviders(
+      <RightPanel section={SECTION}>
+        <Panel title="Эпохи" defaultOpen={false}>
+          <span>эпохи</span>
+        </Panel>
+      </RightPanel>,
+    )
+
+    // Единственная секция свёрнута по умолчанию — триггер сразу предлагает развернуть
+    expect(screen.getByRole('button', { name: 'Развернуть все секции' })).toBeInTheDocument()
+  })
+
+  it('первый клик сворачивает все секции разом и меняет подпись кнопки', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+
+    // «Эпохи» свёрнута по умолчанию, остальные раскрыты
+    expect(screen.getByRole('button', { name: 'Фильтры и референс' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(screen.getByRole('button', { name: 'Эпохи' })).toHaveAttribute('aria-expanded', 'false')
+
+    await user.click(screen.getByRole('button', { name: 'Свернуть все секции' }))
+
+    for (const title of TITLES) {
+      expect(screen.getByRole('button', { name: title })).toHaveAttribute('aria-expanded', 'false')
+    }
+    expect(useUiStore.getState().collapsedPanels).toEqual({
+      'edf:Фильтры и референс': true,
+      'edf:Пороги артефактов': true,
+      'edf:Эпохи': true,
+    })
+    // Триггер переключился: теперь он предлагает развернуть все
+    expect(screen.getByRole('button', { name: 'Развернуть все секции' })).toBeInTheDocument()
+  })
+
+  it('второй клик той же кнопки разворачивает все, включая свёрнутые по умолчанию', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+
+    await user.click(screen.getByRole('button', { name: 'Свернуть все секции' }))
+    await user.click(screen.getByRole('button', { name: 'Развернуть все секции' }))
+
+    for (const title of TITLES) {
+      expect(screen.getByRole('button', { name: title })).toHaveAttribute('aria-expanded', 'true')
+    }
+    expect(useUiStore.getState().collapsedPanels).toEqual({
+      'edf:Фильтры и референс': false,
+      'edf:Пороги артефактов': false,
+      'edf:Эпохи': false,
+    })
+    // Снова «Свернуть все секции»
+    expect(screen.getByRole('button', { name: 'Свернуть все секции' })).toBeInTheDocument()
+  })
+})

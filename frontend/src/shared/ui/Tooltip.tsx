@@ -1,5 +1,10 @@
 /**
  * Тултип на Radix: подсказки у иконок-кнопок, клавиатурный фокус и a11y из коробки.
+ *
+ * По умолчанию подсказка открывается **снизу под триггером** (правка владельца
+ * 26.09.2026): подсказки кнопок в хедерах не перекрывают соседние кнопки и контент
+ * справа/слева. Стороны с явным смыслом указывают в месте использования:
+ * левый рейл — `side="right"`, статус сервера в строке состояния — `side="top"`.
  */
 import * as RadixTooltip from '@radix-ui/react-tooltip'
 import type { ReactNode } from 'react'
@@ -19,7 +24,7 @@ export type TooltipProps = {
   side?: 'top' | 'right' | 'bottom' | 'left'
 }
 
-export function Tooltip({ label, children, side = 'right' }: TooltipProps) {
+export function Tooltip({ label, children, side = 'bottom' }: TooltipProps) {
   return (
     <RadixTooltip.Root>
       <RadixTooltip.Trigger asChild>{children}</RadixTooltip.Trigger>

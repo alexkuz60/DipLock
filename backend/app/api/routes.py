@@ -112,7 +112,7 @@ from app.services.recording_signals import (
     build_signal_blob,
 )
 from app.services.recordings import Recording, ensure_record_events, recording_registry
-from app.services.spectral import cached_topomap
+from app.services.spectral import cached_topomap, head_map_positions
 from app.services.spectrogram import (
     cached_grid as cached_spectrogram_grid,
 )
@@ -1097,6 +1097,8 @@ async def get_meta() -> MetaResponse:
         surface_version=asset_version(settings),
         surface_url=f"{prefix}/surface",
         standard_channels=list(settings.standard_channels),
+        # Карта-силуэт головы в панели «Каналы»: нормированные координаты монтажа
+        channel_positions=head_map_positions(settings.standard_channels),
         epoch_lengths_ms=list(settings.epoch_lengths_ms),
         freq_bands={
             name: [float(fmin), float(fmax)]

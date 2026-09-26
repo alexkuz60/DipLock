@@ -625,6 +625,12 @@ export type MetaResponse = {
   surface_version: string
   surface_url: string
   standard_channels: string[]
+  /**
+   * Позиции датчиков монтажа для карты-силуэта головы (панель «Каналы» EDF):
+   * [x, y] в [-1, 1], единица — край электродов, нос сервера смотрит в +y
+   * (экранная ось y инвертируется); пусто — монтаж недоступен, UI рисует список
+   */
+  channel_positions: Record<string, number[]>
   epoch_lengths_ms: number[]
   freq_bands: Record<string, number[]>
   /** Уровни пирамиды сигналов вьюера (множители зума ×1…×16) */

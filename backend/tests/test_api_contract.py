@@ -171,6 +171,21 @@ def test_meta_endpoint_returns_environment(client):
     assert any("5173" in origin for origin in body["cors_origins"])
 
 
+def test_meta_channel_positions_draw_head_map(client):
+    """/meta отдаёт нормированные позиции датчиков для карты-силуэта головы UI."""
+    body = client.get(f"{_PREFIX}/meta").json()
+    positions = body["channel_positions"]
+
+    # Каждый канал монтажа — пара [-1, 1]; единица — край электродов (контур
+    # головы UI рисует шире), нос монтажа смотрит в +y
+    assert set(settings.standard_channels) <= set(positions)
+    for xy in positions.values():
+        assert len(xy) == 2
+        assert all(-1.001 <= value <= 1.001 for value in xy)
+    assert positions["Fp1"][1] > 0 > positions["O1"][1]  # фронт сверху, затылок снизу
+    assert positions["C3"][0] < 0 < positions["C4"][0]  # левое полушарие слева
+
+
 def test_openapi_documents_response_schemas(client):
     """F4: схемы ответов попадают в OpenAPI → из них генерируются TS-типы UI."""
     spec = client.get("/openapi.json").json()

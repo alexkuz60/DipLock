@@ -10,8 +10,13 @@ import type { PanelNavItem } from './panelNav'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 const ITEMS: PanelNavItem[] = [
-  { key: 'edf:Фильтры и референс', title: 'Фильтры и референс', el: document.createElement('section') },
-  { key: 'edf:Эпохи', title: 'Эпохи', el: document.createElement('section') },
+  {
+    key: 'edf:Фильтры и референс',
+    title: 'Фильтры и референс',
+    el: document.createElement('section'),
+    defaultOpen: true,
+  },
+  { key: 'edf:Эпохи', title: 'Эпохи', el: document.createElement('section'), defaultOpen: true },
 ]
 
 describe('меню быстрого перемещения по секциям панели', () => {

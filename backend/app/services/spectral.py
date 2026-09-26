@@ -217,6 +217,26 @@ def _scalp_projection(positions: np.ndarray) -> np.ndarray:
     return xy / radius
 
 
+def head_map_positions(channels: Sequence[str]) -> dict[str, list[float]]:
+    """Позиции датчиков для карты-силуэта головы в UI: ``(x, y)`` в ``[-1, 1]``.
+
+    Проекция и нормировка — те же, что у топокарт (`_scalp_projection`):
+    единица — максимальный радиус электродов списка, нос — ``+y`` (UI инвертирует
+    экранную ось y). Нормировка по **переданному** списку, а не по отдельному
+    каналу: координаты стабильны между запросами, контур головы рисуется шире
+    датчиков — как в топокартах MNE.
+
+    Пустой dict — монтаж недоступен: карту не строим, UI показывает список
+    чекбоксов (`HeadChannelMap`), «рисовать наугад» нельзя.
+    """
+    positions = channel_positions(channels)
+    if not positions:
+        return {}
+    names = list(positions)
+    xy = _scalp_projection(np.stack([positions[name] for name in names]))
+    return {name: [float(pair[0]), float(pair[1])] for name, pair in zip(names, xy, strict=True)}
+
+
 def topomap_png(
     positions: dict[str, np.ndarray], values: dict[str, float], size: int = TOPO_SIZE,
 ) -> bytes:

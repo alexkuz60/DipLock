@@ -24,12 +24,14 @@ export function ToolHeader({ section, actions, secondary }: ToolHeaderProps) {
       {actions ? (
         <>
           <span aria-hidden className="h-6 w-px shrink-0 bg-border" />
-          <div className="flex min-w-0 items-center gap-1.5" aria-label="Действия раздела">
+          {/* Зазор между кнопками действий — pointer успевает покинуть кнопку, тултип обновляется */}
+          <div className="flex min-w-0 items-center gap-2" aria-label="Действия раздела">
             {actions}
           </div>
         </>
       ) : null}
 
+      {/* `gap-2` — зазор между кнопками, чтобы hover сбрасывался и тултип не залипал */}
       <div className="ml-auto flex shrink-0 items-center gap-2">
         {secondary}
         {section.hasRightPanel ? (

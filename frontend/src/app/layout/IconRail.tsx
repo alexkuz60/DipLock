@@ -26,7 +26,7 @@ export function RailLink({ section, badge }: { section: SectionConfig; badge?: n
   const tooltip = section.hotkey ? `${section.hint} · клавиша ${section.hotkey}` : section.hint
 
   return (
-    <Tooltip label={tooltip}>
+    <Tooltip label={tooltip} side="right">
       <NavLink
         to={section.route}
         end={section.route === '/'}
@@ -68,7 +68,7 @@ export function IconRail() {
 
       <div className="mt-auto flex flex-col items-center gap-2 border-t border-border pt-3">
         {activeJobs > 0 ? (
-          <Tooltip label={`Активных задач: ${activeJobs}`}>
+          <Tooltip label={`Активных задач: ${activeJobs}`} side="right">
             <div
               aria-label={`Активных задач: ${activeJobs}`}
               className="tnum flex h-8 min-w-8 items-center justify-center rounded-full bg-accent/20 px-2 text-sm font-semibold text-accent"

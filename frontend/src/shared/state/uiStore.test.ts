@@ -57,6 +57,28 @@ describe('uiStore', () => {
     expect(useUiStore.getState().collapsedPanels).toEqual({})
   })
 
+  it('setPanelsCollapsed меняет несколько секций одним изменением', () => {
+    useUiStore.getState().setPanelCollapsed('edf:Пороги артефактов', true)
+    useUiStore.getState().setPanelsCollapsed(['edf:Фильтры и референс', 'edf:Эпохи'], true)
+    expect(useUiStore.getState().collapsedPanels).toEqual({
+      'edf:Пороги артефактов': true,
+      'edf:Фильтры и референс': true,
+      'edf:Эпохи': true,
+    })
+
+    // «Развернуть все» снимает свёрнутость и с секций, тронутых ранее поодиночке
+    useUiStore.getState().setPanelsCollapsed(['edf:Пороги артефактов', 'edf:Эпохи'], false)
+    expect(useUiStore.getState().collapsedPanels).toEqual({
+      'edf:Пороги артефактов': false,
+      'edf:Фильтры и референс': true,
+      'edf:Эпохи': false,
+    })
+
+    // Пустой список — no-op (секции ещё не зарегистрированы)
+    useUiStore.getState().setPanelsCollapsed([], false)
+    expect(useUiStore.getState().collapsedPanels['edf:Фильтры и референс']).toBe(true)
+  })
+
   it('applyUiPreferences пишет data-атрибуты на <html>', () => {
     applyUiPreferences('xlarge', 'compact')
     expect(document.documentElement.dataset.fontScale).toBe('xlarge')

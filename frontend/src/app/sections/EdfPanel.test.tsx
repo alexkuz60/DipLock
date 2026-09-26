@@ -216,6 +216,25 @@ describe('панель раздела EDF', () => {
     expect(useEdfParams.getState().params.visibleChannels).toEqual(metaFixture.standard_channels)
   })
 
+  it('карта датчиков: клик по точке включает/выключает канал просмотра', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    act(() => useEdfParams.getState().setAvailableChannels(metaFixture.standard_channels))
+    renderWithProviders(<EdfPanel />)
+    await screen.findByTestId('head-channel-map')
+
+    // Вместо чекбоксов — силуэт головы: датчик объявлен кнопкой с aria-pressed
+    const fp1 = screen.getByRole('button', { name: 'Fp1' })
+    expect(fp1).toHaveAttribute('aria-pressed', 'true')
+
+    await user.click(fp1)
+
+    expect(fp1).toHaveAttribute('aria-pressed', 'false')
+    expect(useEdfParams.getState().params.visibleChannels).not.toContain('Fp1')
+    // Клик — только состояние, запросов в сеть нет
+    expect(useEdfParams.getState().params.visibleChannels).toContain('Fp2')
+  })
+
   it('показывает число ручных пометок эпох и снимает их кнопкой (срез 2.10)', async () => {
     const user = userEvent.setup()
     mockApiFetch()

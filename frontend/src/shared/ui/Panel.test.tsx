@@ -157,6 +157,8 @@ describe('Panel (секция правой панели)', () => {
     expect(item.key).toBe('edf:Пороги артефактов')
     expect(item.title).toBe('Пороги артефактов')
     expect(item.el.tagName).toBe('SECTION')
+    // defaultOpen нужен триггеру «все секции»: без записи в сторе это — факт свёрнутости
+    expect(item.defaultOpen).toBe(true)
   })
 
   it('у аккордеона обёртка прозрачна для раскладки, а свёрнутая скрыта без размонтирования', async () => {

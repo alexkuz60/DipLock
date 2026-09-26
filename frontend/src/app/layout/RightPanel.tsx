@@ -1,5 +1,5 @@
-/** Правый сайдбар: расширенная информация и опции раздела (схлопывается в полоску). */
-import { PanelRight } from 'lucide-react'
+/** Правый сайдбар: расширенная информация и опции раздела. Закрытая панель не рисуется. */
+import { ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import type { SectionConfig } from '@/app/sections/registry'
 import { useUiStore } from '@/shared/state/uiStore'
@@ -15,8 +15,10 @@ export type RightPanelProps = {
 
 export function RightPanel({ section, children }: RightPanelProps) {
   const open = useUiStore((state) => state.rightPanelOpen[section.id] ?? false)
-  const setRightPanel = useUiStore((state) => state.setRightPanel)
   const setPanelCollapsed = useUiStore((state) => state.setPanelCollapsed)
+  const setPanelsCollapsed = useUiStore((state) => state.setPanelsCollapsed)
+  /** Фактическая свёрнутость секций — состояние триггера «все секции» в хедере */
+  const collapsedPanels = useUiStore((state) => state.collapsedPanels)
   /**
    * Секции панели для меню быстрого перемещения: `Panel` регистрирует себя
    * монтированием (порядок пунктов = порядок секций в панели), снятие — cleanup.
@@ -59,18 +61,23 @@ export function RightPanel({ section, children }: RightPanelProps) {
 
   if (!section.hasRightPanel) return null
 
-  if (!open) {
-    return (
-      <aside className="flex w-12 shrink-0 flex-col items-center border-l border-border bg-bg-1 py-3">
-        <IconButton
-          icon={<PanelRight className="size-5" />}
-          tooltip="Развернуть панель опций ([)"
-          label="Развернуть панель опций"
-          onClick={() => setRightPanel(section.id, true)}
-        />
-      </aside>
-    )
-  }
+  /**
+   * Все ли секции панели свёрнуты **фактически**: запись из стора, а если её ещё
+   * нет — `defaultOpen` секции (так же читает `Panel`). Кнопка хедера — триггер:
+   * показывает следующее действие (свернуть, если есть раскрытые; развернуть,
+   * когда всё свёрнуто).
+   */
+  const allCollapsed =
+    navItems.length > 0 &&
+    navItems.every((item) => collapsedPanels[item.key] ?? !item.defaultOpen)
+
+  /*
+   * Закрытая панель не рисует полоски-дублёра с кнопкой «Развернуть панель опций»
+   * (правка владельца 26.09.2026): панель схлопывается совсем, контент занимает
+   * всю ширину. Возврат — только кнопкой тулс-хендера «Показать панель опций ([)»
+   * или хоткеем «[».
+   */
+  if (!open) return null
 
   return (
     <aside
@@ -81,14 +88,25 @@ export function RightPanel({ section, children }: RightPanelProps) {
         <span className="text-sm font-semibold tracking-wide text-fg-2 uppercase">
           Опции раздела
         </span>
-        <PanelNavMenu className="ml-auto" items={navItems} onPick={pickSection} />
-        <IconButton
-          size="md"
-          icon={<PanelRight className="size-5" />}
-          tooltip="Свернуть панель опций ([)"
-          label="Свернуть панель опций"
-          onClick={() => setRightPanel(section.id, false)}
-        />
+        {/*
+          Дублёра тулс-хендера («Скрыть панель опций ([)») здесь больше нет: хедер
+          панели управляет её секциями одной кнопкой-триггером «все секции». Сами
+          панель закрывают кнопка тулс-хендера и хоткей «[»; свёрнутость секций —
+          `collapsedPanels` (переживает перезаход).
+          `gap-2` — зазор между кнопками: pointer успевает покинуть кнопку
+          (сброс hover), тултип не «залипает» со старым текстом.
+        */}
+        <div className="ml-auto flex items-center gap-2">
+          <IconButton
+            icon={allCollapsed ? <ChevronsUpDown className="size-5" /> : <ChevronsDownUp className="size-5" />}
+            tooltip={allCollapsed ? 'Развернуть все секции панели' : 'Свернуть все секции панели'}
+            label={allCollapsed ? 'Развернуть все секции' : 'Свернуть все секции'}
+            active={allCollapsed}
+            disabled={navItems.length === 0}
+            onClick={() => setPanelsCollapsed(navItems.map((item) => item.key), !allCollapsed)}
+          />
+          <PanelNavMenu items={navItems} onPick={pickSection} />
+        </div>
       </div>
       {/*
         Область секций: `Panel` внутри панели опций становится аккордеоном и хранит

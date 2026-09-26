@@ -37,6 +37,7 @@ import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { EvokedChart } from '@/shared/ui/EvokedChart'
 import { FilterResponse } from '@/shared/ui/FilterResponse'
+import { HeadChannelMap } from '@/shared/ui/HeadChannelMap'
 import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
@@ -519,15 +520,14 @@ export function EdfPanel() {
             Ничего
           </Button>
         </div>
-        {channels.map((name) => (
-          <CheckboxRow
-            key={name}
-            mono
-            label={name}
-            checked={params.visibleChannels.includes(name)}
-            onChange={() => toggleChannel(name)}
-          />
-        ))}
+        {/* Клик по датчику переключает канал; каналы вне монтажа — чекбоксами
+            под картой (позиции приходят из /meta, `channel_positions`) */}
+        <HeadChannelMap
+          channels={channels}
+          positions={meta.data?.channel_positions ?? {}}
+          selected={params.visibleChannels}
+          onToggle={toggleChannel}
+        />
       </Panel>
 
       <Panel title="Отображение">

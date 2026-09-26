@@ -1157,6 +1157,13 @@ class MetaResponse(BaseModel):
     surface_version: str
     surface_url: str
     standard_channels: list[str]
+    channel_positions: dict[str, list[float]] = Field(
+        default_factory=dict,
+        description=(
+            "Позиции датчиков монтажа для карты-силуэта головы в UI: [x, y] в [-1, 1], "
+            "нос — +y; пусто — монтаж недоступен, UI рисует список каналов"
+        ),
+    )
     epoch_lengths_ms: list[float]
     freq_bands: dict[str, list[float]]
     signal_levels: list[int] = Field(

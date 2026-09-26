@@ -110,10 +110,14 @@ describe('каркас приложения', () => {
     const panel = () => screen.queryByLabelText('Панель опций раздела «EDF»')
     expect(panel()).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Свернуть панель опций' }))
+    // Сворачивает кнопка тулс-хендера: в хедере самой панели дублёра больше нет
+    await user.click(screen.getByRole('button', { name: 'Скрыть панель опций' }))
     expect(panel()).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Развернуть панель опций' }))
+    // Закрытая панель схлопается совсем: полоски-дублёра с кнопкой разворота нет —
+    // вернуть панель может только тулс-хедер (и хоткей «[»)
+    expect(screen.queryByRole('button', { name: 'Развернуть панель опций' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Показать панель опций' }))
     expect(panel()).toBeInTheDocument()
 
     // хоткей обрабатывается на уровне окна (клавиша «[» экранируется в user-event)

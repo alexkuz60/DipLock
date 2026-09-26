@@ -68,8 +68,8 @@ export function Panel({
     if (scope === null || navRegistry === null) return
     const el = sectionRef.current
     if (!el) return
-    return navRegistry.register({ key: panelKey, title, el })
-  }, [scope, navRegistry, panelKey, title])
+    return navRegistry.register({ key: panelKey, title, el, defaultOpen })
+  }, [scope, navRegistry, panelKey, title, defaultOpen])
   const header = <span className="block">{title}</span>
   const content = (
     <>

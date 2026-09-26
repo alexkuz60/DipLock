@@ -28,6 +28,11 @@ type UiState = {
   /** Свернуть/развернуть секцию панели опций (ключ «раздел:заголовок») */
   togglePanelCollapsed: (panelKey: string) => void
   setPanelCollapsed: (panelKey: string, collapsed: boolean) => void
+  /**
+   * Пакетная свёрнутость: несколько секций одним изменением стора — кнопки
+   * «Свернуть/Развернуть все секции» в хедере панели опций. Пустой список — no-op.
+   */
+  setPanelsCollapsed: (panelKeys: string[], collapsed: boolean) => void
   setFontScale: (scale: FontScale) => void
   setDensity: (density: Density) => void
   setActiveJobs: (count: number) => void
@@ -68,6 +73,13 @@ export const useUiStore = create<UiState>()(
         set((state) => ({
           collapsedPanels: { ...state.collapsedPanels, [panelKey]: collapsed },
         })),
+      setPanelsCollapsed: (panelKeys, collapsed) =>
+        set((state) => {
+          if (panelKeys.length === 0) return {}
+          const collapsedPanels = { ...state.collapsedPanels }
+          for (const panelKey of panelKeys) collapsedPanels[panelKey] = collapsed
+          return { collapsedPanels }
+        }),
       setFontScale: (fontScale) => set({ fontScale }),
       setDensity: (density) => set({ density }),
       setActiveJobs: (activeJobs) => set({ activeJobs }),
