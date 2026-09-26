@@ -9,6 +9,13 @@
   `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`,
   `ICA(random_state=…)` → `ICA(rng=…)` (сигнатура 1.13 принимает оба, первый deprecated).
   Проверяйте актуальный API через тесты.
+- Топокарты (N32) рендерят `mne.viz.plot_topomap` в **Agg**: `matplotlib.use("Agg")` вызывается на
+  импорте `services/spectral.py` до первого pyplot (его тянет внутри самого `plot_topomap`), а
+  фигура собирается через `Figure` + `FigureCanvasAgg` **без pyplot** — расчёт идёт в потоках
+  (`job_manager`, `asyncio.to_thread`), глобальное состояние pyplot там не thread-safe; после
+  рендера не должно накапливаться открытых pyplot-фигур (`plt.get_fignums()` — пусто, проверено
+  замером 26.09.2026). Дрейф API: `vmin`/`vmax` → `vlim=(…)` (MNE 1.13), `pos` — только (n, 2),
+  3 колонки XYZ отклоняются; контракт зафиксирован `tests/test_spectral.py`.
 - specparam (1/f + пики спектра, шаг 2.4) дрейфует так же: пакет переименован из FOOOF,
   стабильного 2.0 нет (в venv — `2.0.0rc7`), API результата — `results.get_params('aperiodic'|'peak')`,
   а не атрибуты `*_params_` из FOOOF 1.x. В коде используется минимум API (`SpectralModel.fit` +

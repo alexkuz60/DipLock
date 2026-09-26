@@ -40,16 +40,20 @@
   что на «розовом» фоне пики смещаются. Отказ фита не валит задачу: поля
   становятся ``null``, а текст — в ``warnings``.
 
-Топокарта (честно о компромиссе)
---------------------------------
+Топокарта
+---------
 Каналы 10-20 раскладываются на плоскость **ортогональной проекцией** координат
-монтажа (x, y в системе головы), мощность интерполируется обратными расстояниями
-на сетке ``TOPO_SIZE``, вне круга скальпа пиксель прозрачен. Это не сферическая
-сплайн-интерполяция MNE (`mne.viz.plot_topomap`) — картинка служебная, а не
-публикационная, и тянуть ради неё matplotlib в бэкенд смысла нет. Цвет — шкала
-оттенков серого: PNG-энкодер проекта (`app/utils/png.py`) пишет 8-битный серый
-(+альфа), а палитру рисовать на сервере незачем — картинка показывает форму
-распределения, а не абсолютную шкалу.
+монтажа (x, y в системе головы), интерполяцию и цвет делает MNE:
+``mne.viz.plot_topomap`` — сферический сплайн и палитра ``TOPO_CMAP`` (N32).
+Рендер — только Agg: ``matplotlib.use("Agg")`` вызывается на импорте модуля
+**до** первого pyplot (его тянет внутри себя ``plot_topomap``), а фигура
+собирается через ``Figure`` + ``FigureCanvasAgg`` без pyplot — расчёт идёт в
+потоках (`job_manager`, ``asyncio.to_thread``), глобальное состояние pyplot там
+не thread-safe. Вне контура головы пиксель прозрачен: за границей электродов
+мощности нет, и «дорисовывать» её нельзя. Шкала каждого диапазона своя
+(min..max его мощностей, как у прежнего IDW): картинка показывает форму
+распределения, абсолютное число — в подписи под ней. PNG пишет свой
+RGBA-энкодер (`app/utils/png.py`) — Pillow не нужен.
 
 Кэш
 ---
@@ -68,6 +72,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
+import matplotlib
 import mne
 import numpy as np
 
@@ -78,7 +83,13 @@ from app.services.edf_loader import _MONTAGE_NAMES
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
-from app.utils.png import encode_png_gray8
+from app.utils.png import encode_png_rgba8
+
+# Рендер топокарт — только Agg (N32): расчёт идёт в потоках, GUI-бэкенд в них
+# не работает, а без дисплея matplotlib и так свалился бы в Agg молча. Вызов
+# обязан опередить первый импорт pyplot — его тянет внутри себя
+# `mne.viz.plot_topomap` (внутри вызова функции, а не на импорте модуля).
+matplotlib.use("Agg")
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +109,9 @@ SPECTRUM_MULTITAPER_BANDWIDTH_HZ = 4.0
 # `<img>` в разделе, а браузер кэширует по URL.
 TOPO_SIZE = 128
 
-# Окно яркости топокарты: чистый 0/255 «съедает» края шкалы, поэтому рабочая
-# шкала уже полной.
-TOPO_GRAY_RANGE = (30, 235)
-
-# Показатель степени в интерполяции обратными расстояниями: 2 — стандарт для
-# карт скальпа; больше — «пятна» вокруг электродов, меньше — излишнее сглаживание.
-TOPO_IDW_POWER = 2.0
+# Палитра топокарт: viridis — перцептивно равномерная, читается и при
+# дальтонизме, и в ч/б-копии; серый IDW заменён на неё (N32).
+TOPO_CMAP = "viridis"
 
 
 class SpectrumError(ValueError):
@@ -145,9 +152,10 @@ def spectrum_signature(params: SpectrumParams, cfg: Settings, channels: Sequence
         f"method={params.psd_method}",
         ",".join(channels),
         ",".join(f"{name}:{cfg.freq_bands[name]}" for name in sorted(cfg.freq_bands)),
-        # v2: мощность полосы — интеграл PSD (N15), а не среднее — топокарты
-        # старой метрики недействительны даже при тех же параметрах.
-        "v2-integral",
+        # v3: топокарта — mne.viz.plot_topomap (сферический сплайн + палитра,
+        # N32) вместо серого IDW — картинки прежней отрисовки не отдаются даже
+        # при тех же параметрах (v2 была смена метрики мощности на интеграл, N15).
+        "v3-topomap-mne",
     )).encode("utf-8"))
     return digest.hexdigest()[:16]
 
@@ -209,48 +217,13 @@ def _scalp_projection(positions: np.ndarray) -> np.ndarray:
     return xy / radius
 
 
-def _interpolate_topomap(
-    channel_xy: np.ndarray, values: np.ndarray, size: int = TOPO_SIZE,
-) -> np.ndarray:
-    """Сетка значений топокарты: интерполяция обратными расстояниями.
-
-    Значения определены только внутри единичного круга; вне него альфа картинки
-    равна нулю — за границей электродов нет, и «дорисовывать» туда мощность нельзя.
-    """
-    axis = np.linspace(-1.0, 1.0, size)
-    grid_x, grid_y = np.meshgrid(axis, axis)
-
-    flat_x = grid_x.reshape(-1)
-    flat_y = grid_y.reshape(-1)
-    # Маска круга — в плоском виде: интерполяция считается по пикселям-строками
-    inside = (flat_x ** 2 + flat_y ** 2) <= 1.0
-    # Матрица расстояний «пиксель × канал»: (size², n_channels)
-    distances = np.hypot(
-        flat_x[:, None] - channel_xy[None, :, 0],
-        flat_y[:, None] - channel_xy[None, :, 1],
-    )
-    # Точное попадание в электрод — берём его значение как есть (иначе 0/0)
-    weights = 1.0 / np.power(np.maximum(distances, 1e-6), TOPO_IDW_POWER)
-    interpolated = (weights @ values) / np.sum(weights, axis=1)
-    return np.where(inside, interpolated, 0.0).reshape(size, size)
-
-
-def _normalize(values: np.ndarray) -> np.ndarray:
-    """Приводит мощности к 0..1; при постоянной карте — середина шкалы."""
-    low = float(np.min(values))
-    high = float(np.max(values))
-    if not np.isfinite(low) or not np.isfinite(high) or high - low < 1e-12:
-        return np.full(values.shape, 0.5, dtype=float)
-    return (values - low) / (high - low)
-
-
 def topomap_png(
     positions: dict[str, np.ndarray], values: dict[str, float], size: int = TOPO_SIZE,
 ) -> bytes:
-    """PNG топокарты: круг скальпа, серая шкала, вне круга прозрачно.
+    """PNG топокарты: контур головы, палитра MNE, вне контура прозрачно.
 
-    Чистая функция (без диска и MNE) — её и проверяет тест сервиса: картинка
-    разбирается обратно по формату `encode_png_gray8`.
+    Чистая функция (без диска) — её и проверяет тест сервиса: картинка
+    разбирается обратно RGBA-декодером (`tests/test_png.py`).
     """
     if not positions:
         raise SpectrumError("Нет позиций каналов — топокарта не строится")
@@ -259,16 +232,36 @@ def topomap_png(
         raise SpectrumError("Нет мощностей для построения топокарты")
 
     channel_xy = _scalp_projection(np.stack([positions[name] for name in names]))
-    normalized = _normalize(np.asarray([values[name] for name in names], dtype=float))
-    gray01 = _interpolate_topomap(channel_xy, normalized, size)
+    data = np.asarray([values[name] for name in names], dtype=float)
+    return encode_png_rgba8(_render_topomap(channel_xy, data, size))
 
-    low, high = TOPO_GRAY_RANGE
-    gray = np.clip(low + gray01 * (high - low), 0, 255).astype(np.uint8)
-    # Альфа — маска круга: пиксель внутри скальпа непрозрачен
-    axis = np.linspace(-1.0, 1.0, size)
-    grid_x, grid_y = np.meshgrid(axis, axis)
-    alpha = np.where((grid_x ** 2 + grid_y ** 2) <= 1.0, 255, 0).astype(np.uint8)
-    return encode_png_gray8(gray, alpha)
+
+def _render_topomap(channel_xy: np.ndarray, data: np.ndarray, size: int) -> np.ndarray:
+    """Рендер `mne.viz.plot_topomap` в RGBA-массив формы (size, size, 4).
+
+    Фигура собирается без pyplot (Agg включён на импорте модуля): расчёт идёт
+    в потоках (`job_manager`, ``asyncio.to_thread``), а глобальное состояние
+    pyplot в них не thread-safe. Ось — на весь холст, фон фигуры и оси
+    прозрачный: вне контура головы пиксель не рисуется (изображение MNE
+    обрезано контуром ``outlines='head'``, а линии контура не клипуются).
+    """
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+    from mne.viz import plot_topomap
+
+    figure = Figure(figsize=(size / 100.0, size / 100.0), dpi=100, facecolor="none")
+    canvas = FigureCanvasAgg(figure)
+    axes = figure.add_axes((0.0, 0.0, 1.0, 1.0))
+    axes.patch.set_alpha(0.0)
+    plot_topomap(
+        data, channel_xy,
+        axes=axes, show=False, cmap=TOPO_CMAP, res=size,
+        # Шкала каждого диапазона — свои min..max мощностей (как прежний IDW):
+        # картинка показывает форму распределения, число — в подписи под ней.
+        vlim=(float(np.min(data)), float(np.max(data))),
+    )
+    canvas.draw()
+    return np.asarray(canvas.buffer_rgba(), dtype=np.uint8).copy()
 
 
 def _integrate_band(freqs: np.ndarray, values: np.ndarray, df: float) -> np.ndarray:
@@ -703,7 +696,7 @@ def _write_topomap(
     path = _topomap_path(cfg, recording_id, signature, band)
     try:
         data = topomap_png(positions, values)
-    except SpectrumError as exc:
+    except Exception as exc:  # сбой картинки (в т.ч. matplotlib) не валит задачу спектра
         logger.warning("Топокарта %s не построена: %s", band, exc)
         return None
     cache_write(path, data, label="Кэш топокарт")

@@ -6,8 +6,8 @@
 роуты проверяются через `TestClient` с записью в реестре.
 
 Проверяется главное: диапазоны берутся из конфига (DRY), мощность попадает в свой
-ритм, топокарта — картинка с прозрачностью вне скальпа и кэшируется по ETag,
-а задача идёт фоново с прогрессом по эпохам.
+ритм, топокарта — RGBA-картинка с палитрой MNE и прозрачностью вне контура головы,
+кэшируется по ETag, а задача идёт фоново с прогрессом по эпохам.
 """
 import os
 import shutil
@@ -120,22 +120,24 @@ def test_spectrum_signature_follows_filter_and_channels():
 
 
 def test_topomap_png_is_circle_with_transparent_outside():
-    """Топокарта — серый + альфа: вне круга скальпа прозрачно, внутри яркость «дышит»."""
+    """Топокарта — RGBA-палитра MNE: вне контура головы прозрачно, внутри цвет «дышит»."""
     channels = list(settings.standard_channels[:8])
     positions = channel_positions(channels)
     assert len(positions) == len(channels)
     values = {name: 10.0 + index for index, name in enumerate(channels)}
 
-    pixels = _decode_png(topomap_png(positions, values))["pixels"]
+    decoded = _decode_png(topomap_png(positions, values))
+    pixels = decoded["pixels"]
 
-    assert pixels.shape[2] == 2, "ожидался серый + альфа"
+    assert decoded["color_type"] == 6, "ожидался RGBA (цвет + альфа, N32)"
     size = pixels.shape[0]
-    assert pixels[0, 0, 1] == 0, "угол картинки должен быть прозрачным"
-    assert pixels[size // 2, size // 2, 1] == 255, "центр круга непрозрачен"
-    gray = pixels[:, :, 0].astype(int)
-    assert gray.max() - gray.min() > 10, "мощность должна различаться по точкам"
-    # Прозрачные пиксели остаются «пустыми» — их яркость никем не читается
-    assert gray[size // 2, size // 2] > 0
+    assert pixels[0, 0, 3] == 0, "угол картинки должен быть прозрачным"
+    assert pixels[size - 1, 0, 3] == 0, "угол картинки должен быть прозрачным"
+    assert pixels[size // 2, size // 2, 3] == 255, "центр контура непрозрачен"
+    # Палитра, а не один оттенок: у каждой мощности свой цвет (vlim min..max)
+    opaque = pixels[pixels[:, :, 3] > 200][:, :3]
+    colors = np.unique(opaque, axis=0)
+    assert len(colors) > 50, f"ожидалась палитра, найдено цветов: {len(colors)}"
 
 
 def test_spectrum_job_flow(client, tmp_path):

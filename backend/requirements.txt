@@ -1,6 +1,10 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 mne>=1.7.0
+# Топокарты (N32): mne.viz.plot_topomap рендерит в Agg. matplotlib уже шёл
+# транзитивной зависимостью MNE, но стал прямым runtime-импортом
+# (app/services/spectral.py) — объявляем явно, как joblib/sklearn (F3).
+matplotlib>=3.8.0
 numpy>=2.0.0
 scipy>=1.14.0
 nibabel>=5.0.0

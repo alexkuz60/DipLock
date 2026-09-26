@@ -55,7 +55,7 @@ backend/app/
 │   └── uploads.py     # приём EDF: имя, размер, sha256 (F10)
 ├── schemas/           # Pydantic-контракт ответов (OpenAPI → TS-типы UI)
 ├── models/db.py       # SQLAlchemy модели (Session, Epoch, Dipole): пишется только legacy-анализ
-├── utils/             # brain_export.py, versions.py, png.py (энкодер срезов),
+├── utils/             # brain_export.py, versions.py, png.py (энкодер PNG: срезы, топокарты),
 │                      # marching_squares.py (изолинии маски без зависимостей)
 ├── services/          # КАЖДЫЙ модуль = один шаг пайплайна
 │   ├── edf_loader.py  # read_raw_edf → pick/montage/reference/filter
@@ -151,7 +151,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (776 Vitest / 488 pytest), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (776 Vitest / 493 pytest), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |

@@ -11,7 +11,7 @@ import zlib
 import numpy as np
 import pytest
 
-from app.utils.png import PNG_SIGNATURE, encode_png_gray8
+from app.utils.png import PNG_SIGNATURE, encode_png_gray8, encode_png_rgba8
 
 
 def _decode_png(data: bytes) -> dict:
@@ -34,7 +34,8 @@ def _decode_png(data: bytes) -> dict:
     width, height, depth, color_type, _, _, _ = struct.unpack(">IIBBBBB", chunks[b"IHDR"])
     assert depth == 8
     raw = zlib.decompress(chunks[b"IDAT"])
-    channels = 1 if color_type == 0 else 2
+    channels = {0: 1, 4: 2, 6: 4}.get(color_type)
+    assert channels is not None, f"неожиданный цветовой тип PNG: {color_type}"
     stride = 1 + width * channels
     assert len(raw) == height * stride, "размер распакованных данных не совпал"
 
@@ -74,6 +75,31 @@ def test_gray_alpha_channels_are_interleaved():
     assert np.array_equal(decoded["pixels"][:, :, 1], alpha), "альфа сдвинута"
 
 
+def test_rgba_png_roundtrip():
+    """RGBA-топокарта читается обратно: цвет и альфа на своём месте."""
+    rng = np.random.default_rng(3)
+    rgba = rng.integers(0, 256, size=(5, 7, 4), dtype=np.uint8)
+
+    decoded = _decode_png(encode_png_rgba8(rgba))
+
+    assert decoded["color_type"] == 6
+    assert (decoded["width"], decoded["height"]) == (7, 5)
+    assert np.array_equal(decoded["pixels"], rgba), "каналы RGBA сдвинуты"
+
+
+def test_rgba_channels_are_interleaved():
+    """R, G, B, A идут по пикселю (не блоками) — иначе картинка «раздвоится»."""
+    rgba = np.array(
+        [[[1, 2, 3, 4], [5, 6, 7, 8]], [[9, 10, 11, 12], [13, 14, 15, 16]]],
+        dtype=np.uint8,
+    )
+
+    pixels = _decode_png(encode_png_rgba8(rgba))["pixels"]
+
+    for channel in range(4):
+        assert np.array_equal(pixels[:, :, channel], rgba[:, :, channel]), f"канал {channel} сдвинут"
+
+
 @pytest.mark.parametrize(
     "gray, alpha, message",
     [
@@ -86,3 +112,17 @@ def test_invalid_input_raises(gray, alpha, message):
     """Некорректный вход — понятная ошибка, а не битый файл."""
     with pytest.raises(ValueError, match=message):
         encode_png_gray8(gray, alpha)
+
+
+@pytest.mark.parametrize(
+    "rgba, message",
+    [
+        (np.zeros((2, 2, 3), dtype=np.uint8), "форм"),
+        (np.zeros((2, 2), dtype=np.uint8), "форм"),
+        (np.zeros((2, 2, 4), dtype=np.float32), "uint8"),
+    ],
+)
+def test_invalid_rgba_input_raises(rgba, message):
+    """Некорректный RGBA-вход — понятная ошибка, а не битый файл."""
+    with pytest.raises(ValueError, match=message):
+        encode_png_rgba8(rgba)
