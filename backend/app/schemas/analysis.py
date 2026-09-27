@@ -265,6 +265,64 @@ class FilterResponseOut(BaseModel):
     sfreq: float = Field(description="Частота дискретизации расчёта, Гц")
 
 
+class MainsOut(BaseModel):
+    """Сигнал сетевого фона (`GET /recordings/{id}/mains`, Части 1 §7, L1).
+
+    Два числа и одна трасса отвечают на два вопроса: есть ли сетевая наводка
+    в записи вообще (`level_db` — уровень линий над локальным фоном PSD, дБ)
+    и что именно вырезает notch-цепочка (`trace_uv` — ``x − notch(x)``,
+    среднее по каналам, до полосового фильтра). Подробности — докстринг
+    `services/mains.py`.
+    """
+
+    freqs_hz: list[float] = Field(
+        description="Частоты notch-цепочки: основная + гармоники (N13), Гц",
+    )
+    level_db: list[float] = Field(
+        description="L1: уровень линии над фоном PSD, дБ (по freqs_hz)",
+    )
+    trace_times_sec: list[float] = Field(
+        description="Время трассы вырезанной компоненты, с (фактическое окно)",
+    )
+    trace_uv: list[float] = Field(
+        description="Вырезанная компонента, мкВ (среднее по каналам)",
+    )
+    removed_rms_uv: float = Field(
+        description="RMS вырезанного за окно, мкВ — «сколько силы ушло»",
+    )
+    channel: str = Field(
+        description="Канал трассы: автоматически самый наведённый (макс. RMS)",
+    )
+    start_sec: float = Field(description="Начало фактического окна, с (после обрезки краёв)")
+    duration_sec: float = Field(description="Длина фактического окна, с")
+    notch_hz: float = Field(description="Основная частота notch запроса, Гц")
+    notch_harmonics: int = Field(description="Число гармоник в цепочке (0…4)")
+    sfreq: float = Field(description="Частота дискретизации записи, Гц")
+
+
+class HeartRateOut(BaseModel):
+    """Ряд ЧСС, извлечённый из ЭЭГ (слот стадии ``artifacts``).
+
+    Отдельного ECG-канала в записях нет: сердечный ритм ищется по височным
+    отведениям (T7/T8, единый детектор ``services/cardio.py``). Окно →
+    медианный RR → уд/мин; ``bpm[i] = null`` — окно без достаточного числа RR
+    (разрыв линии на треке), а не нулевая ЧСС.
+    """
+
+    times_sec: list[float] = Field(description="Начала окон ряда, с (шаг hr_step_sec)")
+    bpm: list[float | None] = Field(
+        default_factory=list, description="ЧСС по окну, уд/мин (null — окно без данных)",
+    )
+    median_bpm: float | None = Field(
+        default=None, description="Медиана ЧСС за запись, уд/мин (null — данных нет)",
+    )
+    n_beats: int = Field(default=0, description="Число найденных QRS-пиков (объединение каналов)")
+    coverage_percent: float = Field(default=0.0, description="Доля окон ряда с данными, %")
+    channels: list[str] = Field(
+        default_factory=list, description="Височные каналы с подтверждённым ритмом",
+    )
+
+
 class PreprocessResult(BaseModel):
     """Результат задачи предподготовки записи (стадия ``preprocess``).
 
@@ -303,6 +361,10 @@ class PreprocessResult(BaseModel):
 
     # Стадия `artifacts`: зоны для слоёв вьюера (срез 2.6)
     artifacts: list[ArtifactZoneOut] = Field(default_factory=list)
+    heart_rate: HeartRateOut | None = Field(
+        default=None,
+        description="Ряд ЧСС из височных отведений для трека пульса (null — ритм не извлечён)",
+    )
     artifact_types: dict[str, int] = Field(
         default_factory=dict,
         description="Счётчики зон по видам артефактов (ключи — `ArtifactKind`)",

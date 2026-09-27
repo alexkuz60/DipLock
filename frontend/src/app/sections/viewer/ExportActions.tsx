@@ -35,6 +35,11 @@ export type ExportActionsProps = {
   showDroppedEpochs: boolean
   amplitudeMode: 'shared' | 'per_channel'
   amplitudeScaleUv: number
+  /**
+   * Дополнительные треки в PNG-снапшот (не каналы): трек ЧСС. В CSV не входят —
+   * там только отсчёты ЭЭГ (`windowCsv`).
+   */
+  extraTracks?: string[]
 }
 
 /** Подпись источника сигнала: уровень пирамиды или полный сигнал (демо) */
@@ -54,6 +59,7 @@ export function ExportActions({
   showDroppedEpochs,
   amplitudeMode,
   amplitudeScaleUv,
+  extraTracks = [],
 }: ExportActionsProps) {
   const filename = useEdfRecording((state) => state.recording?.filename)
   const [error, setError] = useState<string | null>(null)
@@ -90,7 +96,10 @@ export function ExportActions({
         subtitle,
         window: timeWindow,
         trackWidth,
-        tracks: channels.map((name) => ({ name, canvas: canvases[name] ?? null })),
+        tracks: [...channels, ...extraTracks].map((name) => ({
+          name,
+          canvas: canvases[name] ?? null,
+        })),
         zones,
         epochs,
         showZones: true,

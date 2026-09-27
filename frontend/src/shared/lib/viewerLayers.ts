@@ -76,6 +76,20 @@ export type EpochMark = {
 }
 
 /**
+ * Ряд ЧСС для трека пульса (слот `heartRate` слоёв, результат стадии
+ * `artifacts`; camelCase — маппинг `layersFromResult`). `bpm[i] === null` —
+ * окно без RR (разрыв линии), а не нулевая ЧСС.
+ */
+export type HeartRateSeries = {
+  timesSec: number[]
+  bpm: (number | null)[]
+  medianBpm: number | null
+  nBeats: number
+  coveragePercent: number
+  channels: string[]
+}
+
+/**
  * Слои результата, готовые к отрисовке.
  *
  * `rejectedEpochs` — индексы отброшенных эпох **в нарезке результата**, поэтому
@@ -86,6 +100,12 @@ export type EpochMark = {
  */
 export type EdfViewerLayers = {
   artifacts: ArtifactZone[]
+  /**
+   * Ряд ЧСС трека пульса: `null` — стадия артефактов считалась, но ритм не
+   * извлечён (трек показывает «не извлечено»); `undefined` — стадии ещё не было.
+   * Демо-фикстура ЧСС не несёт (как и зоны ICA).
+   */
+  heartRate?: HeartRateSeries | null
   rejectedEpochs: number[]
   /** Каналы-виновники отбраковки по индексам эпох (рамки в треках, причины) */
   rejectChannels: Record<number, string[]>

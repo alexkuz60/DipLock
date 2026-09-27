@@ -24,7 +24,7 @@
 """
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from app.core.config import Settings
@@ -344,6 +344,15 @@ def run_preprocess(
         if not stats.get("ica_applied") and params.run_ica:
             warnings.append(
                 "ICA не применена: в записи нет EOG-подобных каналов или фитинг не удался"
+            )
+        # Ряд ЧСС (трек пульса вьюера) — из того же QRS-расчёта, что зоны ecg.
+        # None честный: ритм не подтверждён — трек покажет «не извлечено».
+        heart_rate = stats.get("heart_rate")
+        base["heart_rate"] = asdict(heart_rate) if heart_rate is not None else None
+        if base["heart_rate"] is None:
+            warnings.append(
+                "ЧСС не извлечена: в записи нет височных каналов (T7/T8) либо QRS-пики "
+                "нерегулярны — трек пульса в вьюере будет пуст"
             )
         progress("done", 1.0, message=f"Найдено артефактов: {stats['total']}")
         base["duration_sec_calc"] = round(time.perf_counter() - started, 3)

@@ -135,6 +135,8 @@ export type EdfParams = {
   epochPostMs: number
   /** Слой событий записи во вьюере (отрисовка — расчёт не устаревает) */
   eventsLayer: boolean
+  /** Трек ЧСС (пульс) внизу стека: отрисовка, расчёт не устаревает */
+  heartRateTrack: boolean
   /** Канал графика ERP (просмотр результата); '' — первый видимый */
   erpChannel: string
   /** Baseline ERP-усреднения */
@@ -176,6 +178,9 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   epochPreMs: 200,
   epochPostMs: 800,
   eventsLayer: true,
+  // Трек ЧСС показываем сразу, когда стадия artifacts извлекла ритм; сам ряд
+  // приходит со стадией, здесь — только видимость (ключ отрисовки)
+  heartRateTrack: true,
   erpChannel: '',
   erpBaseline: 'minus200',
   edfUnits: 'auto',

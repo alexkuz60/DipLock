@@ -38,6 +38,7 @@ import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { EvokedChart } from '@/shared/ui/EvokedChart'
 import { FilterResponse } from '@/shared/ui/FilterResponse'
 import { HeadChannelMap } from '@/shared/ui/HeadChannelMap'
+import { MainsTrace } from '@/shared/ui/MainsTrace'
 import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
@@ -290,6 +291,11 @@ export function EdfPanel() {
           notchHz={params.notchHz ? params.notchHz : null}
           notchHarmonics={params.notchHarmonics}
         />
+        <MainsTrace
+          recordingId={demo ? null : recording?.recording_id ?? null}
+          notchHz={params.notchHz ? params.notchHz : null}
+          notchHarmonics={params.notchHarmonics}
+        />
       </Panel>
 
       <Panel title="Пороги артефактов" hint="Значения по умолчанию — из backend/.env.">
@@ -531,6 +537,12 @@ export function EdfPanel() {
       </Panel>
 
       <Panel title="Отображение">
+        <CheckboxRow
+          label="Трек ЧСС (пульс)"
+          checked={params.heartRateTrack}
+          hint="Ряд ЧСС, извлечённый из височных отведений (T7/T8) стадией «Поиск артефактов»: линия уд/мин внизу стека. Не медицинская ЭКГ; без ритма трек не показывается."
+          onChange={(checked) => setParams({ heartRateTrack: checked })}
+        />
         <SegmentedControl
           label="Амплитуда"
           value={params.amplitudeMode}

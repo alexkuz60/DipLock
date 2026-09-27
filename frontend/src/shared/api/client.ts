@@ -14,6 +14,7 @@ import type {
   InitStatus,
   JobCreated,
   JobStatus,
+  MainsResponse,
   MetaResponse,
   PreprocessResult,
   RecordingMeta,
@@ -186,6 +187,26 @@ export const api = {
       query.set('notch_harmonics', String(params.notchHarmonics))
     }
     return request<FilterResponse>(`${API_PREFIX}/filter-response?${query}`, { signal })
+  },
+
+  /**
+   * Сигнал сетевого фона записи (Части 1 §7, L1): уровни линий сети и
+   * вырезанная notch-компонентная. Как и АЧХ — только по явному раскрытию
+   * блока «Сетевой фон» (правило: считает только кнопка).
+   */
+  mains: (
+    recordingId: string,
+    params: { notchHz: number; notchHarmonics: number },
+    signal?: AbortSignal,
+  ) => {
+    const query = new URLSearchParams()
+    query.set('notch_hz', String(params.notchHz))
+    if (params.notchHarmonics > 0) {
+      query.set('notch_harmonics', String(params.notchHarmonics))
+    }
+    return request<MainsResponse>(`${API_PREFIX}/recordings/${recordingId}/mains?${query}`, {
+      signal,
+    })
   },
 
   /** Паспорт загруженной записи (метаданные, без обработки). */

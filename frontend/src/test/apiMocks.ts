@@ -9,6 +9,7 @@ import {
   evokedResultFixture,
   filterResponseFixture,
   initStatusFixture,
+  mainsFixture,
   metaFixture,
   preprocessJobFixture,
   preprocessResultFixture,
@@ -26,6 +27,7 @@ import type {
   FilterResponse,
   InitStatus,
   JobStatus,
+  MainsResponse,
   MetaResponse,
   PreprocessResult,
   PreprocessStage,
@@ -126,6 +128,8 @@ export type MockApiOptions = {
   spectrogramJob?: JobStatus
   /** АЧХ фильтра (`GET /filter-response`, шаг 2.5) */
   filterResponse?: FilterResponse
+  /** Сигнал сетевого фона (`GET /recordings/{id}/mains`) */
+  mains?: MainsResponse
   /** Смоделировать отказ запуска расчёта (404 записи) */
   calcStartFails?: boolean
   /**
@@ -261,6 +265,10 @@ export function mockApiFetch(options: MockApiOptions = {}) {
     }
     if (url.includes('/filter-response')) {
       return jsonResponse(options.filterResponse ?? filterResponseFixture())
+    }
+    if (url.includes('/mains')) {
+      // Раньше общей ветки `/recordings/`: URL mains её содержит
+      return jsonResponse(options.mains ?? mainsFixture())
     }
     if (url.includes('/meta')) {
       return jsonResponse(options.meta ?? metaFixture)

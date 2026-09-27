@@ -191,6 +191,12 @@ class Settings(BaseSettings):
     # Плохие каналы: z-score дисперсии канала (медиана/MAD по монтажу).
     bad_channel_z: float = Field(default=3.5)
 
+    # Кардио-ряд трека ЧСС (слот `heart_rate` стадии artifacts): окно и шаг
+    # сглаживания RR → уд/мин. Пороги QRS (полоса, z, IBI) — константы
+    # `services/cardio.py`, они не входят в форму стадии.
+    hr_window_sec: float = Field(default=5.0)
+    hr_step_sec: float = Field(default=1.0)
+
     # QC-индикаторы каналов вьюера (шаг 0.4): доля времени канала в зонах
     # артефактов. < warn — «ок», warn..bad — «внимание», >= bad — «плохо».
     qc_channel_warn_share: float = Field(default=0.05)

@@ -10,6 +10,7 @@ import type {
   FilterResponse,
   InitStatus,
   JobStatus,
+  MainsResponse,
   MetaResponse,
   PreprocessResult,
   PreprocessStage,
@@ -336,6 +337,8 @@ export function preprocessResultFixture(
             },
           ]
         : [],
+    // Ряд ЧСС (трек пульса): по умолчанию ритм не извлечён — тесты переопределяют
+    heart_rate: null,
     artifact_types: {
       zscore_outlier: stage === 'artifacts' ? 1 : 0,
       peak_to_peak: stage === 'artifacts' ? 1 : 0,
@@ -424,6 +427,34 @@ export function filterResponseFixture(
     filter_length_sec: 3.302,
     edge_buffer_sec: 1.651,
     notch_freqs: [50],
+    sfreq: 500,
+    ...overrides,
+  }
+}
+
+/**
+ * Сигнал сетевого фона (`GET /recordings/{id}/mains`): линии 50/100 Гц,
+ * вырезанная компонента — синус 50 Гц 2.5 мкВ, «канал с максимумом» T7.
+ */
+export function mainsFixture(overrides: Partial<MainsResponse> = {}): MainsResponse {
+  const times: number[] = []
+  const trace: number[] = []
+  for (let i = 0; i <= 300; i++) {
+    const t = i / 60
+    times.push(Number(t.toFixed(3)))
+    trace.push(Number((2.5 * Math.sin(2 * Math.PI * 50 * t)).toFixed(3)))
+  }
+  return {
+    freqs_hz: [50, 100],
+    level_db: [18.4, 7.2],
+    trace_times_sec: times,
+    trace_uv: trace,
+    removed_rms_uv: 1.768,
+    channel: 'T7',
+    start_sec: 0.752,
+    duration_sec: 5,
+    notch_hz: 50,
+    notch_harmonics: 1,
     sfreq: 500,
     ...overrides,
   }

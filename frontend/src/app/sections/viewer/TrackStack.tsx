@@ -72,6 +72,7 @@ import {
   SelectedZoneCard,
 } from './TrackLayers'
 import { ExportActions } from './ExportActions'
+import { HEART_RATE_TRACK_NAME, HeartRateTrack } from './HeartRateTrack'
 import { EPOCH_RULER_HEIGHT, EpochRuler, TimeRuler } from './TrackRulers'
 import { TrackRow } from './TrackRow'
 import { ViewerSignalCaption } from './ViewerSignalCaption'
@@ -613,6 +614,16 @@ export function TrackStack({ signal, layers: layersProp, events = [] }: TrackSta
     (name) => params.visibleChannels.includes(name) && signal.max[name],
   )
 
+  /**
+   * Трек ЧСС (пульс): ряд стадии `artifacts` — снизу стека, последним (общая
+   * ось времени у него). `layers.heartRate === null` — стадия считалась, но
+   * ритм не извлечён: трека нет, в шапке — честная плашка.
+   */
+  const heartRate = layers?.heartRate ?? null
+  const showHeartRate = Boolean(
+    params.heartRateTrack && heartRate && heartRate.timesSec.length > 0,
+  )
+
   const pointsPerChannel = signal.times.length
 
   return (
@@ -660,6 +671,23 @@ export function TrackStack({ signal, layers: layersProp, events = [] }: TrackSta
             ручных пометок: {manualMarkCount}
           </StatusPill>
         ) : null}
+        {layers && params.heartRateTrack && layers.heartRate !== undefined ? (
+          layers.heartRate ? (
+            <StatusPill
+              tone="neutral"
+              title={`ЧСС извлечена из височных отведений (${layers.heartRate.channels.join(', ')}): ${layers.heartRate.nBeats} QRS-пиков, ${layers.heartRate.coveragePercent} % окон ряда с данными. Ряд — результат стадии «Поиск артефактов», не медицинская ЭКГ.`}
+            >
+              ЧСС: {layers.heartRate.medianBpm ?? '—'} уд/мин
+            </StatusPill>
+          ) : (
+            <StatusPill
+              tone="warn"
+              title="Сердечный ритм не извлечён: в записи нет височных каналов (T7/T8) либо QRS-пики нерегулярны. Подробности — предупреждения стадии «Поиск артефактов»."
+            >
+              ЧСС не извлечена
+            </StatusPill>
+          )
+        ) : null}
         <ExportActions
           frame={signal}
           window={window}
@@ -672,6 +700,7 @@ export function TrackStack({ signal, layers: layersProp, events = [] }: TrackSta
           showDroppedEpochs={params.droppedEpochsHatched}
           amplitudeMode={params.amplitudeMode}
           amplitudeScaleUv={params.amplitudeScaleUv}
+          extraTracks={showHeartRate ? [HEART_RATE_TRACK_NAME] : []}
         />
         <span className="ml-auto truncate">
           Колесо — прокрутка треков · зум — селект «Зум отрисовки ЭЭГ» · drag — панорама · клик —
@@ -727,7 +756,9 @@ export function TrackStack({ signal, layers: layersProp, events = [] }: TrackSta
                 expanded={name === expandedChannel}
                 amplitudeMode={params.amplitudeMode}
                 amplitudeScaleUv={params.amplitudeScaleUv}
-                showXAxis={index === visible.length - 1}
+                // Общая ось времени — у последнего трека: если виден трек ЧСС,
+                // он идёт последним и ось получает он
+                showXAxis={index === visible.length - 1 && !showHeartRate}
                 qc={
                   channelQc?.[name]
                     ? {
@@ -759,6 +790,23 @@ export function TrackStack({ signal, layers: layersProp, events = [] }: TrackSta
               />
             ))
           )}
+
+          {/*
+            Трек ЧСС (пульс) — последним в стеке: своя шкала уд/мин, общая ось
+            времени у него (когда каналы все скрыты — он и вовсе единственный).
+            Ряд приходит слотом стадии `artifacts`, чекбокс «Трек ЧСС» —
+            ключ отрисовки (`heartRateTrack`), расчёт не устаревает.
+          */}
+          {showHeartRate && heartRate ? (
+            <HeartRateTrack
+              series={heartRate}
+              window={window}
+              width={width}
+              height={TRACK_HEIGHT}
+              showXAxis
+              onCanvas={registerCanvas}
+            />
+          ) : null}
 
           {/*
             Слои результата поверх canvas: одна система координат с курсором —
@@ -861,7 +909,7 @@ export function TrackStack({ signal, layers: layersProp, events = [] }: TrackSta
             uPlot остаётся визуальным бэкграундом): клик по секунде тогглит
             эпоху, в которую она попадает.
           */}
-          {visible.length > 0 ? (
+          {visible.length > 0 || showHeartRate ? (
             <TimeRuler
               cells={epochs}
               geometry={geometry}

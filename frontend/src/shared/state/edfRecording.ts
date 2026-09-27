@@ -183,6 +183,17 @@ export function layersFromResult(
       durationSec: zone.duration_sec,
       channels: zone.channels,
     }))
+    // Ряд ЧСС (трек пульса): слот той же стадии — чужие стадии его не трогают
+    next.heartRate = result.heart_rate
+      ? {
+          timesSec: result.heart_rate.times_sec,
+          bpm: result.heart_rate.bpm,
+          medianBpm: result.heart_rate.median_bpm,
+          nBeats: result.heart_rate.n_beats,
+          coveragePercent: result.heart_rate.coverage_percent,
+          channels: result.heart_rate.channels,
+        }
+      : null
   }
   if (result.stage === 'epochs') {
     next.rejectedEpochs = result.rejected_epochs

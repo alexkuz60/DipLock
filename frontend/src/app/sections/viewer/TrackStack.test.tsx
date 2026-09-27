@@ -1159,3 +1159,81 @@ describe('слой событий записи (N2/2.7)', () => {
   })
 })
 
+
+describe('трек ЧСС (пульс)', () => {
+  const heartRate = {
+    timesSec: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    bpm: [72, 72, null, 73, 74, 74, 75, null, 74, 73],
+    medianBpm: 73,
+    nBeats: 150,
+    coveragePercent: 80,
+    channels: ['T7', 'T8'],
+  }
+
+  /** Слои результата с заданным слотом ЧСС (undefined — стадия не считалась) */
+  function layersWith(hr: EdfViewerLayers['heartRate']): EdfViewerLayers {
+    return {
+      artifacts: [],
+      heartRate: hr,
+      rejectedEpochs: [],
+      rejectChannels: {},
+      epochLengthMs: null,
+      epochStartsSec: null,
+      eventId: null,
+      epochPreMs: null,
+      epochPostMs: null,
+      source: 'result',
+    }
+  }
+
+  beforeEach(() => {
+    paramsState({ visibleChannels: ['F3'] })
+    useEdfRecording.setState({
+      channelQc: null,
+      channelQcThresholds: { warn: 0.05, bad: 0.2, snrWarn: 10, snrBad: 5 },
+    })
+  })
+
+  it('ряд из результата стадии — трек «ЧСС» последним и плашка со значением', () => {
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersWith(heartRate)} />)
+
+    expect(screen.getByTestId('track-heart-rate')).toBeInTheDocument()
+    expect(screen.getByTestId('track-label-heart-rate')).toHaveTextContent('ЧСС')
+    // Порядок: каналы монтажа, затем трек ЧСС (общая ось времени у него)
+    const labels = screen
+      .getAllByTestId(/^track-label-/)
+      .map((node) => node.textContent)
+    expect(labels).toEqual(['F3', 'ЧСС'])
+    expect(screen.getByText(/ЧСС: 73 уд\/мин/)).toBeInTheDocument()
+  })
+
+  it('чекбокс «Трек ЧСС» выключает отрисовку (отрисовка — расчёт не трогает)', () => {
+    paramsState({ visibleChannels: ['F3'], heartRateTrack: false })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersWith(heartRate)} />)
+
+    expect(screen.queryByTestId('track-heart-rate')).not.toBeInTheDocument()
+    expect(screen.queryByText(/ЧСС: 73 уд\/мин/)).not.toBeInTheDocument()
+  })
+
+  it('ритм не извлечён (null) — трека нет, плашка «ЧСС не извлечена»', () => {
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layersWith(null)} />)
+
+    expect(screen.queryByTestId('track-heart-rate')).not.toBeInTheDocument()
+    expect(screen.getByText('ЧСС не извлечена')).toBeInTheDocument()
+  })
+
+  it('слот не заполнялся (не было стадии artifacts) — ни трека, ни плашек', () => {
+    const withoutHr: EdfViewerLayers = {
+      artifacts: [],
+      rejectedEpochs: [],
+      rejectChannels: {},
+      epochLengthMs: null,
+      source: 'result',
+    }
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={withoutHr} />)
+
+    expect(screen.queryByTestId('track-heart-rate')).not.toBeInTheDocument()
+    expect(screen.queryByText(/ЧСС/)).not.toBeInTheDocument()
+  })
+})
+

@@ -15,6 +15,8 @@ import {
   TRACK_HEIGHT,
   expandRangeWithZero,
   formatTick,
+  heartRateRange,
+  makeHeartRateOptions,
   makeTrackOptions,
   yRangeFor,
   type ShowZeroFlag,
@@ -83,6 +85,38 @@ describe('опции трека uPlot', () => {
     // константа не зависит от замера ResizeObserver и не может завести петлю роста DOM
     expect(EXPANDED_TRACK_HEIGHT).toBe(512)
     expect(EXPANDED_TRACK_HEIGHT).toBe(TRACK_HEIGHT * 8)
+  })
+})
+
+describe('трек ЧСС (пульс)', () => {
+  it('диапазон оси Y по ряду с зазором; пропуски null не берутся', () => {
+    // Авто по данным с зазором 10 % спана (70…90 → 68…92)
+    expect(heartRateRange([70, null, 90])).toEqual([68, 92])
+    // Ноль не уходит за край шкалы — деления читаются
+    expect(heartRateRange([0, 10])).toEqual([0, 11])
+    // Ряд из одного значения — симметричное окно, а не линия на границе
+    expect(heartRateRange([75, 75])).toEqual([65, 85])
+    // Нет данных — честный фолбэк 40…180 уд/мин, а не [Infinity, -Infinity]
+    expect(heartRateRange([])).toEqual([40, 180])
+    expect(heartRateRange([null, null])).toEqual([40, 180])
+  })
+
+  it('опции чарта ЧСС: границы окна, разрывы не соединяются, своя ось Y', () => {
+    const options = makeHeartRateOptions(600, TRACK_HEIGHT, WINDOW, [50, 100], true)
+
+    // Ось X — границы окна вьюера, как у каналов (окном управляет стек)
+    expect(options.scales?.x).toMatchObject({ time: false, min: WINDOW.t0, max: WINDOW.t1 })
+    expect(options.scales?.y).toMatchObject({ range: [50, 100] })
+    expect(options.axes?.[0]).not.toMatchObject({ show: false })
+
+    // Одна видимая серия (линия уд/мин): spanGaps false — null разрывает линию,
+    // а не выдумывает точку на месте «нет RR в окне»
+    expect(options.series).toHaveLength(2)
+    expect(options.series?.[1]).toMatchObject({ show: true, spanGaps: false })
+
+    // Жесты и легенда выключены — как у треков каналов (жесты разбирает стек)
+    expect(options.legend?.show).toBe(false)
+    expect(options.cursor?.show).toBe(false)
   })
 })
 

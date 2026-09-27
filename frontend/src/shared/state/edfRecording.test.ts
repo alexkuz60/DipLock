@@ -314,6 +314,40 @@ describe('стадии предподготовки (срез 2.7)', () => {
     expect(afterArtifacts.artifacts[0].channels).toEqual(['F3', 'C3'])
   })
 
+  it('layersFromResult: ряд ЧСС — слот стадии artifacts, чужие стадии не трогают', () => {
+    const heartRate = {
+      times_sec: [0, 1, 2],
+      bpm: [72, null, 74],
+      median_bpm: 73,
+      n_beats: 30,
+      coverage_percent: 66.7,
+      channels: ['T7', 'T8'],
+    }
+    const withHr = layersFromResult(
+      preprocessResultFixture('artifacts', { heart_rate: heartRate }),
+      null,
+    )
+    expect(withHr.heartRate).toEqual({
+      timesSec: [0, 1, 2],
+      bpm: [72, null, 74],
+      medianBpm: 73,
+      nBeats: 30,
+      coveragePercent: 66.7,
+      channels: ['T7', 'T8'],
+    })
+
+    // Нарезка эпох слот ЧСС не трогает (стадии раздельные, как у зон)
+    const afterEpochs = layersFromResult(preprocessResultFixture('epochs'), withHr)
+    expect(afterEpochs.heartRate).toEqual(withHr.heartRate)
+
+    // Ритм не извлечён — честный null, а не отсутствие поля (плашка «не извлечена»)
+    const withoutRhythm = layersFromResult(
+      preprocessResultFixture('artifacts', { heart_rate: null }),
+      null,
+    )
+    expect(withoutRhythm.heartRate).toBeNull()
+  })
+
   it('layersFromResult не тащит демо-фикстуру в результат расчёта', () => {
     const demo = {
       artifacts: [

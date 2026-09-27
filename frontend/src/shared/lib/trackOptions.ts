@@ -43,6 +43,97 @@ export function formatTick(spanSec: number, value: number): string {
   return `${value.toFixed(digits)} с`
 }
 
+/**
+ * Ось времени трека: подписи с точностью по ширине всего окна (или скрыта —
+ * общая ось рисуется только у последнего трека стека). Общая для треков каналов
+ * и трека ЧСС, чтобы снапшот окна выглядел одинаково.
+ */
+function timeAxis(show: boolean): uPlot.Axis {
+  return show
+    ? {
+        stroke: AXIS_TEXT,
+        font: '12px system-ui',
+        grid: { stroke: AXIS_GRID, width: 1 },
+        ticks: { show: false },
+        size: 26,
+        values: (self, splits) => {
+          const span = self.scales.x.max! - self.scales.x.min!
+          return splits.map((v) => formatTick(span, v))
+        },
+      }
+    : { show: false }
+}
+
+/** Цвет линии трека ЧСС — тот же, что у слоя зон `ecg` (`index.css`) */
+const HEART_RATE_STROKE = '#db61a2'
+
+/**
+ * Диапазон оси Y трека ЧСС: авто по ряду с зазором 10 %, фолбэк 40…180 уд/мин.
+ * Пропуски (`null` — окна без RR) в расчёт не берутся; ряд из одной точки
+ * получает симметричное окно ±10, чтобы линия не легла на границу поля.
+ */
+export function heartRateRange(bpm: readonly (number | null)[]): [number, number] {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const value of bpm) {
+    if (value == null || !Number.isFinite(value)) continue
+    if (value < lo) lo = value
+    if (value > hi) hi = value
+  }
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return [40, 180]
+  if (hi <= lo) return [Math.max(0, lo - 10), hi + 10]
+  const pad = (hi - lo) * 0.1
+  return [Math.max(0, lo - pad), hi + pad]
+}
+
+/**
+ * Опции трека ЧСС: линия уд/мин по времени с разрывами (`null` в ряде uPlot
+ * рисует пропуск — на месте «нет RR в окне» нет выдуманной точки), своя
+ * ось Y с делениями без единиц (единица — в подписи трека) и та же ось
+ * времени, что у каналов.
+ */
+export function makeHeartRateOptions(
+  width: number,
+  height: number,
+  window: TimeWindow,
+  yRange: [number, number],
+  showXAxis: boolean,
+): uPlot.Options {
+  return {
+    width,
+    height,
+    legend: { show: false },
+    cursor: { show: false },
+    padding: [4, 4, 0, 0],
+    scales: {
+      x: { time: false, min: window.t0, max: window.t1 },
+      y: { range: yRange },
+    },
+    axes: [
+      timeAxis(showXAxis),
+      {
+        stroke: AXIS_TEXT,
+        font: '11px system-ui',
+        grid: { stroke: AXIS_GRID, width: 1 },
+        ticks: { show: false },
+        size: 34,
+        values: (_self, splits) => splits.map((v) => String(Math.round(v))),
+      },
+    ],
+    series: [
+      {},
+      {
+        show: true,
+        label: 'ЧСС',
+        points: { show: false },
+        stroke: HEART_RATE_STROKE,
+        width: 1.25,
+        spanGaps: false,
+      },
+    ],
+  }
+}
+
 /** Диапазон оси Y: общий (±N мкВ) или авто по окну канала. */
 export function yRangeFor(
   mode: 'shared' | 'per_channel',
@@ -123,22 +214,7 @@ export function makeTrackOptions(
       x: { time: false, min: window.t0, max: window.t1 },
       y: { range: yRange },
     },
-    axes: [
-      showXAxis
-        ? {
-            stroke: AXIS_TEXT,
-            font: '12px system-ui',
-            grid: { stroke: AXIS_GRID, width: 1 },
-            ticks: { show: false },
-            size: 26,
-            values: (self, splits) => {
-              const span = self.scales.x.max! - self.scales.x.min!
-              return splits.map((v) => formatTick(span, v))
-            },
-          }
-        : { show: false },
-      { show: false },
-    ],
+    axes: [timeAxis(showXAxis), { show: false }],
     series: [
       {},
       // min — невидимая опорная серия огибающей (нужна band'у)

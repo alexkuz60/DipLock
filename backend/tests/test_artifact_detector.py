@@ -224,19 +224,27 @@ def test_ocular_blink_detected_on_frontal():
 
 
 def test_ecg_rhythm_detected_on_temporal():
-    """Периодические QRS-пики на T7 (каждые 0.8 с) — зоны ecg по ритму."""
+    """Периодические QRS-пики на T7 и T8 (синфазно) — зоны ecg по ритму.
+
+    Ритм подтверждается минимум на двух височных (QRS синфазны на обоих
+    отведениях; одиночный шумовой канал — не ритм, шаг 5 `cardio.detect_qrs`).
+    """
     n = int(_SFREQ * 20.0)
     names = ["T7", "T8", "C3", "C4"]
     data = np.random.default_rng(2).standard_normal((4, n)) * 1e-6
     for beat in range(int(20.0 / 0.8)):
         idx = int(beat * 0.8 * _SFREQ) + 100
         data[0, idx: idx + 3] += 60e-6  # острый QRS-импульс
+        data[1, idx: idx + 3] += 60e-6  # синфазно на втором височном
 
     raw = mne.io.RawArray(data, mne.create_info(names, _SFREQ, "eeg"), verbose=False)
-    _, stats = detect_artifacts(raw, settings, run_ica=False)
+    annotations, stats = detect_artifacts(raw, settings, run_ica=False)
 
     ecg_zones = [z for z in stats["zones"] if z["kind"] == "ecg"]
-    assert ecg_zones and ecg_zones[0]["channels"] == ["T7"]
+    assert ecg_zones, "зоны ecg должны найтись на обоих височных"
+    assert {ch for z in ecg_zones for ch in z["channels"]} == {"T7", "T8"}
+    # ЭКГ — информационный вид: в аннотациях BAD_ его быть не должно (N6)
+    assert not any("ecg" in desc for desc in annotations.description)
 
 
 def test_muscle_burst_detected():

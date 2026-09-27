@@ -202,6 +202,54 @@ def test_artifacts_stage_returns_channel_qc(tmp_path, edf_file):
         assert 0.0 <= row["artifact_share"] <= 1.0
 
 
+def test_artifacts_stage_extracts_heart_rate(tmp_path):
+    """Височные с QRS-ритмом → слот `heart_rate` с рядом ЧСС (трек пульса)."""
+    from tests.conftest import write_minimal_edf
+
+    path = tmp_path / "rhythm.edf"
+    sfreq = 500.0
+    names = ["T7", "T8", "C3", "C4"]
+    n = int(30 * sfreq)
+    period = 0.75  # 80 уд/мин
+    rng = np.random.default_rng(1)
+    data = rng.standard_normal((len(names), n))  # шум ~1 мкВ (данные в µV)
+    for channel in (0, 1):  # синфазные QRS на T7/T8
+        for beat in range(int(30 / period)):
+            idx = int(beat * period * sfreq) + 100
+            data[channel, idx: idx + 3] += 60.0
+    write_minimal_edf(path, names, data, sfreq)
+    recording = _register(tmp_path, path)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="artifacts", run_ica=False),
+        progress=lambda *_, **__: None,
+    )
+
+    hr = result["heart_rate"]
+    assert hr is not None, "ряд ЧСС обязан извлечься из височных с ритмом"
+    assert hr["median_bpm"] is not None
+    assert abs(hr["median_bpm"] - 80.0) <= 3.0
+    assert hr["n_beats"] >= 30
+    assert len(hr["times_sec"]) == len(hr["bpm"])
+    assert set(hr["channels"]) == {"T7", "T8"}
+    assert not any("ЧСС не извлечена" in warning for warning in result["warnings"])
+
+
+def test_artifacts_stage_heart_rate_none_without_rhythm(tmp_path, edf_file):
+    """Без височных каналов/ритма слот `heart_rate` — null и честное предупреждение."""
+    recording = _register(tmp_path, edf_file)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="artifacts", run_ica=False),
+        progress=lambda *_, **__: None,
+    )
+
+    assert result["heart_rate"] is None
+    assert any("ЧСС не извлечена" in warning for warning in result["warnings"])
+
+
 def test_artifacts_stage_qc_marks_flat_recording(tmp_path):
     """Запись «замирает» на секунду (нули 1 с из 4): у всех каналов доля ≥ 0.2.
 

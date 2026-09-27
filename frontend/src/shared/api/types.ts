@@ -126,6 +126,22 @@ export type CleanReport = {
 }
 
 /**
+ * Ряд ЧСС, извлечённый из ЭЭГ (слот стадии `artifacts`, `HeartRateOut` бэкенда).
+ *
+ * Отдельного ECG-канала в записях нет: сердечный ритм ищется по височным
+ * отведениям (T7/T8). `bpm[i] === null` — окно без достаточного числа RR
+ * (разрыв линии на треке), а не нулевая ЧСС.
+ */
+export type HeartRateOut = {
+  times_sec: number[]
+  bpm: (number | null)[]
+  median_bpm: number | null
+  n_beats: number
+  coverage_percent: number
+  channels: string[]
+}
+
+/**
  * Результат одной стадии предподготовки (`GET /recordings/{id}/preprocess/{job}`).
  * Заполнены только поля запрошенной стадии, остальные — пустые значения.
  */
@@ -145,6 +161,11 @@ export type PreprocessResult = {
   sfreq: number
   duration_sec: number
   artifacts: ArtifactZoneOut[]
+  /**
+   * Ряд ЧСС из височных отведений — трек пульса вьюера (стадия artifacts;
+   * null — ритм не извлечён: нет T7/T8 либо пики нерегулярны).
+   */
+  heart_rate: HeartRateOut | null
   artifact_types: ArtifactTypes
   ica_applied: boolean
   /** QC-сводка по каналам (стадия artifacts, шаг 0.4); у других стадий пусто */
@@ -223,6 +244,31 @@ export type FilterResponse = {
   /** Частоты notch с гармониками (N13) */
   notch_freqs: number[]
   /** Частота дискретизации расчёта, Гц */
+  sfreq: number
+}
+
+/**
+ * Сигнал сетевого фона (`GET /recordings/{id}/mains`, Части 1 §7, L1):
+ * уровни линий сети над фоном PSD и вырезанная notch-компонентная за окно.
+ */
+export type MainsResponse = {
+  /** Частоты notch-цепочки: основная + гармоники (N13), Гц */
+  freqs_hz: number[]
+  /** L1: уровень линии над фоном PSD, дБ (по freqs_hz; 0 — не измерено) */
+  level_db: number[]
+  /** Время трассы вырезанной компоненты, с (фактическое окно) */
+  trace_times_sec: number[]
+  /** Вырезанная компонента, мкВ */
+  trace_uv: number[]
+  /** RMS вырезанного за окно, мкВ */
+  removed_rms_uv: number
+  /** Канал трассы: автоматически самый наведённый (макс. RMS) */
+  channel: string
+  start_sec: number
+  duration_sec: number
+  notch_hz: number
+  notch_harmonics: number
+  /** Частота дискретизации записи, Гц */
   sfreq: number
 }
 

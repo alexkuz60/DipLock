@@ -25,8 +25,10 @@ raw не попадают **вовсе** — эпоху они убить не �
 Новые детекторы (этап «поиск + QC») — MNE/NumPy/SciPy only, без новых
 зависимостей: мускулатура — ``mne.preprocessing.annotate_muscle_zscore``,
 сетевой шум — свой Welch-PSD по гармоникам 50/60 Гц, окулярный — прокси
-Fp1/Fp2, ЭКГ — QRS-пики T7/T8, клиппинг/разрыв/pop — оконные критерии,
-ICA-EOG — ``find_bads_eog`` по EOG-каналам либо прокси Fp1/Fp2 (N8).
+Fp1/Fp2, ЭКГ — единый кардио-детектор (``services/cardio.py``: зоны ``ecg``,
+прокси для ICA и ряд ЧСС из одного QRS-расчёта), клиппинг/разрыв/pop —
+оконные критерии, ICA-EOG — ``find_bads_eog`` по EOG-каналам либо прокси
+Fp1/Fp2 (N8).
 """
 import logging
 from typing import Any
@@ -42,6 +44,13 @@ from app.services.artifact_cleaner import (
     find_eog_component_inds,
     fit_ica,
 )
+from app.services.cardio import (
+    HeartRateSeries,
+    detect_qrs,
+    ecg_zones,
+    heart_rate_series,
+)
+from app.utils.robust import robust_stats
 
 logger = logging.getLogger(__name__)
 
@@ -84,26 +93,8 @@ ANNOTATION_DESC: dict[str, str] = {
     "electrode_pop": f"{BAD_PREFIX}electrode_pop",
 }
 
-# Прокси-каналы для окулярного и ЭКГ-детекторов (10-20; T3/T4 — старые имена)
+# Прокси-каналы для окулярного детектора (10-20; T3/T4 — старые имена)
 _FRONTAL = ("FP1", "FP2", "FPZ")
-_TEMPORAL = ("T7", "T8", "T3", "T4")
-
-
-def _robust_stats(x: NDArray) -> tuple[float, float]:
-    """Медиана и устойчивый масштаб (1.4826·MAD, фолбэк — std) по M11.
-
-    Обычное среднее/std съедаются самими артефактами (выброс тянет std вверх и
-    прячется за собственным порогом) — детектор считает «норму» по медиане.
-    """
-    x = np.asarray(x, dtype=float)
-    x = x[np.isfinite(x)]
-    if x.size == 0:
-        return 0.0, 0.0
-    med = float(np.median(x))
-    scale = float(np.median(np.abs(x - med))) * 1.4826
-    if scale <= 0.0:
-        scale = float(np.std(x))
-    return med, scale
 
 
 def _sliding_robust_z(
@@ -128,7 +119,7 @@ def _sliding_robust_z(
     if n == 0:
         return np.zeros(0, dtype=bool)
     win = max(2, round(window_sec * sfreq))
-    glob_med, glob_scale = _robust_stats(x)
+    glob_med, glob_scale = robust_stats(x)
     if glob_scale <= 0.0:
         glob_scale = 1.0
     x_safe = np.where(np.isfinite(x), x, glob_med)
@@ -141,7 +132,7 @@ def _sliding_robust_z(
     meds = np.empty(len(starts))
     scales = np.empty(len(starts))
     for k, start in enumerate(starts):
-        meds[k], scales[k] = _robust_stats(x[start: start + win])
+        meds[k], scales[k] = robust_stats(x[start: start + win])
     scales[~np.isfinite(scales) | (scales <= 0.0)] = glob_scale
     meds[~np.isfinite(meds)] = glob_med
     centers = np.asarray(starts, dtype=float) + win / 2.0
@@ -376,7 +367,7 @@ def _detect_ocular(
         if ch.upper() not in _FRONTAL:
             continue
         x = np.convolve(np.nan_to_num(data[i]), kernel, mode="same")
-        med, scale = _robust_stats(x)
+        med, scale = robust_stats(x)
         if scale <= 0:
             continue
         for zone in _runs_to_zones(
@@ -384,48 +375,6 @@ def _detect_ocular(
         ):
             zone["channels"] = [ch]
             zones.append(zone)
-    return zones
-
-
-def _detect_ecg(data: NDArray, names: list[str], sfreq: float) -> list[dict[str, Any]]:
-    """ЭКГ-наводка: периодические QRS-пики на T7/T8 (ритм проверяется по IBI).
-
-    Прокси ЭКГ без ECG-канала — височные отведения: полоса 5–20 Гц (QRS), пики
-    огибающей ≥ 4 robust-z; если пики квазипериодичны (интервал 0.3–1.5 с,
-    разброс < 40 % медианы) — это сердечный ритм, а не случайные всплески.
-    """
-    from scipy.signal import butter, filtfilt, find_peaks
-
-    nyq = sfreq / 2.0
-    if nyq <= 25.0:
-        return []
-    zones: list[dict[str, Any]] = []
-    for i, ch in enumerate(names):
-        if ch.upper() not in _TEMPORAL:
-            continue
-        x = np.nan_to_num(data[i])
-        b, a = butter(2, [5.0 / nyq, 20.0 / nyq], btype="band")
-        env = np.abs(filtfilt(b, a, x))
-        med, scale = _robust_stats(env)
-        if scale <= 0:
-            continue
-        peaks, _ = find_peaks(env, height=med + 4.0 * scale, distance=max(1, int(0.3 * sfreq)))
-        if peaks.size < 4:
-            continue
-        ibi = np.diff(peaks) / sfreq
-        median_ibi = float(np.median(ibi))
-        if not 0.3 <= median_ibi <= 1.5 or float(np.std(ibi)) >= 0.4 * median_ibi:
-            continue
-        half = int(0.15 * sfreq)
-        for peak in peaks:
-            onset = max(0, int(peak) - half) / sfreq
-            end = min(x.shape[0], int(peak) + half) / sfreq
-            zones.append({
-                "kind": "ecg",
-                "onset_sec": round(onset, 3),
-                "duration_sec": round(end - onset, 3),
-                "channels": [ch],
-            })
     return zones
 
 
@@ -509,10 +458,21 @@ def detect_artifacts(
     zones.extend(_detect_breaks(data, names, sfreq, settings))
     # 5. Всплески электродов (pop)
     zones.extend(_detect_pops(data, names, sfreq, settings))
-    # 6. Мышечный (ЭМГ), 8. Окулярный, 9. ЭКГ — информационные виды
+    # 6. Мышечный (ЭМГ), 8. Окулярный, 9. ЭКГ — информационные виды.
+    # Кардио — один QRS-расчёт на три потребителя: зоны `ecg` ниже, прокси для
+    # ICA-очистки (`cardio.ecg_proxy`) и ряд ЧСС в `stats["heart_rate"]`.
     zones.extend(_detect_muscle(raw, settings))
     zones.extend(_detect_ocular(data, names, sfreq, settings))
-    zones.extend(_detect_ecg(data, names, sfreq))
+    duration_sec = data.shape[1] / sfreq if sfreq > 0 else 0.0
+    qrs = detect_qrs(data, names, sfreq)
+    zones.extend(ecg_zones(qrs, sfreq, duration_sec))
+    hr: HeartRateSeries | None = None
+    if qrs.is_rhythm:
+        hr = heart_rate_series(
+            qrs, duration_sec,
+            window_sec=float(settings.hr_window_sec),
+            step_sec=float(settings.hr_step_sec),
+        )
     # 7. Сетевой шум 50/60 Гц: зоны + уровень (QC)
     line_zones, line_level = line_noise_zones(data, sfreq, names, settings)
     zones.extend(line_zones)
@@ -558,6 +518,9 @@ def detect_artifacts(
         "ica_applied": ica_applied,
         "zones": zones,
         "line_noise_level": line_level,
+        # Ряд ЧСС (трек пульса вьюера): None — ритм не подтверждён (нет
+        # височных каналов, пики нерегулярны) или запись слишком короткая
+        "heart_rate": hr,
     }
 
 
@@ -568,8 +531,8 @@ def find_bad_channels(raw: mne.io.BaseRaw, bad_channel_z: float) -> list[str]:
     оба случая интерполяция чинит лучше, чем оставляет (PDF «плохие каналы»).
     Список идёт в QC (`bad_channels`) и в параметры очистки (stage `filter`).
     """
-    scales = np.array([_robust_stats(ch)[1] for ch in raw.get_data()])
-    med, mad_scale = _robust_stats(scales)
+    scales = np.array([robust_stats(ch)[1] for ch in raw.get_data()])
+    med, mad_scale = robust_stats(scales)
     if mad_scale <= 0:
         return []
     z = (scales - med) / mad_scale

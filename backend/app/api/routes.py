@@ -74,6 +74,7 @@ from app.schemas.analysis import (
     FilterResponseOut,
     JobCreated,
     JobStatus,
+    MainsOut,
     MetaResponse,
     MriSliceRef,
     MriSlicesOut,
@@ -98,6 +99,7 @@ from app.services.atlas_contours import (
 from app.services.channel_mix import mixes_for
 from app.services.filter_design import filter_response
 from app.services.job_manager import job_manager, noop_progress
+from app.services.mains import mains_component
 from app.services.mri_slices import (
     mri_meta,
 )
@@ -1066,6 +1068,66 @@ async def get_filter_response(
         edge_buffer_sec=design.edge_buffer_sec,
         notch_freqs=[float(value) for value in response.notch_freqs],
         sfreq=sfreq,
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/mains",
+    response_model=MainsOut,
+    summary="Сигнал сетевого фона: уровни линий (L1) и вырезанная notch-компонентная",
+)
+async def get_recording_mains(
+    recording_id: str,
+    notch_hz: float | None = Query(None, description="Частота notch, Гц (50/60)"),
+    notch_harmonics: int = Query(
+        0, description="Гармоники notch (100/150/200/240 Гц), 0–4",
+    ),
+    start_sec: float = Query(0.0, ge=0.0, description="Начало окна трассы, с"),
+    duration_sec: float = Query(5.0, description="Длина окна трассы, с (до 60)"),
+) -> MainsOut:
+    """Сигнал сетевого фона записи: лёгкий синтхронный расчёт (Части 1 §7, L1).
+
+    Не задача (job) и без ETag: ``prepared_raw`` кэширует чтение EDF (A4),
+    ``notch_filter`` на копии — секунды. Возвращает уровни линий сети над
+    фоном PSD (``level_db``) и вырезанную компоненту ``x − notch(x)`` за окно
+    (``trace_uv``, среднее по каналам, до полосового фильтра). UI — блок
+    «Сетевой фон» в панели «Фильтр и референс», свёрнут по умолчанию:
+    запрос шлёт только явное раскрытие (правило «считает только кнопка»).
+    """
+    recording = require_recording(recording_id)
+    if notch_hz is None:
+        raise HTTPException(
+            status_code=400, detail="Задайте notch_hz — без notch нечего вырезать",
+        )
+    if not 0 < notch_hz < 2000:
+        raise HTTPException(status_code=400, detail="notch_hz — от 0 до 2000 Гц")
+    if not 0 <= notch_harmonics <= 4:
+        raise HTTPException(
+            status_code=400, detail="notch_harmonics — целое 0…4 (гармоники 50/60 Гц)",
+        )
+    if duration_sec <= 0 or duration_sec > 60:
+        raise HTTPException(status_code=400, detail="duration_sec — от 0.1 до 60 с")
+    try:
+        result = await asyncio.to_thread(
+            mains_component,
+            recording, settings,
+            notch_hz, notch_harmonics,
+            start_sec=start_sec, duration_sec=duration_sec,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return MainsOut(
+        freqs_hz=result.freqs_hz,
+        level_db=result.level_db,
+        trace_times_sec=result.trace_times_sec,
+        trace_uv=result.trace_uv,
+        removed_rms_uv=result.removed_rms_uv,
+        channel=result.channel,
+        start_sec=result.start_sec,
+        duration_sec=result.duration_sec,
+        notch_hz=result.notch_hz,
+        notch_harmonics=result.notch_harmonics,
+        sfreq=result.sfreq,
     )
 
 

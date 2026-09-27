@@ -43,6 +43,8 @@ describe('слой параметров EDF', () => {
     expect(params.flatLineMs).toBe(200)
     expect(params.epochLengthMs).toBe(2000)
     expect(params.visibleChannels).toEqual(metaFixture.standard_channels)
+    // Трек ЧСС — отрисовка: включён по умолчанию (ряд придёт со стадией artifacts)
+    expect(params.heartRateTrack).toBe(true)
   })
 
   it('без meta возвращает статические дефолты', () => {

@@ -30,6 +30,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.core.config import Settings
+from app.services.cardio import ecg_proxy
 from app.services.filter_design import band_filter_kwargs, harmonic_frequencies
 
 logger = logging.getLogger(__name__)
@@ -117,19 +118,6 @@ def amplitude_p95_uv(data: NDArray) -> float | None:
     if finite.size == 0:
         return None
     return round(float(np.percentile(finite, 95)) * 1e6, 2)
-
-
-def _ecg_proxy(data: NDArray, names: list[str], sfreq: float) -> NDArray | None:
-    """Прокси ЭКГ из височных отведений (QRS 5–20 Гц, огибающая)."""
-    from scipy.signal import butter, filtfilt
-
-    idx = [i for i, ch in enumerate(names) if ch.upper() in ("T7", "T8", "T3", "T4")]
-    if not idx or sfreq <= 50.0:
-        return None
-    x = np.nan_to_num(data[idx]).mean(axis=0)
-    nyq = sfreq / 2.0
-    b, a = butter(2, [5.0 / nyq, 20.0 / nyq], btype="band")
-    return np.abs(filtfilt(b, a, x))
 
 
 def apply_cleaning(
@@ -264,8 +252,12 @@ def _clean_ica(raw: mne.io.BaseRaw, spec: CleanSpec, report: CleanReport) -> Non
 
 
 def _ica_ecg_inds(ica: mne.preprocessing.ICA, raw: mne.io.BaseRaw) -> list[int]:
-    """Компоненты ICA, коррелирующие с QRS-прокси (T7/T8), — ЭКГ-наводка."""
-    proxy = _ecg_proxy(raw.get_data(), list(raw.ch_names), float(raw.info["sfreq"]))
+    """Компоненты ICA, коррелирующие с QRS-прокси (T7/T8), — ЭКГ-наводка.
+
+    Прокси берётся из единого кардио-детектора (`services/cardio.py`) — того же,
+    что строит зоны `ecg` и ряд ЧСС.
+    """
+    proxy = ecg_proxy(raw.get_data(), list(raw.ch_names), float(raw.info["sfreq"]))
     if proxy is None:
         return []
     sources = ica.get_sources(raw).get_data()

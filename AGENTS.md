@@ -56,10 +56,11 @@ backend/app/
 ├── schemas/           # Pydantic-контракт ответов (OpenAPI → TS-типы UI)
 ├── models/db.py       # SQLAlchemy модели (Session, Epoch, Dipole): пишется только legacy-анализ
 ├── utils/             # brain_export.py, versions.py, png.py (энкодер PNG: срезы, топокарты),
-│                      # marching_squares.py (изолинии маски без зависимостей)
+│                      # marching_squares.py (изолинии маски), robust.py (медиана/MAD детекторов)
 ├── services/          # КАЖДЫЙ модуль = один шаг пайплайна
 │   ├── edf_loader.py  # read_raw_edf → pick/montage/reference/filter
 │   ├── artifact_detector.py, artifact_cleaner.py, epoch_segmenter.py, bandpass_filter.py
+│   ├── cardio.py      # кардио без ECG-канала: единый QRS → зоны ecg, прокси ICA, ряд ЧСС (трек пульса)
 │   ├── filter_design.py # дизайн фильтра: FIR/IIR, переходные полосы, буферы края, АЧХ (2.5)
 │   ├── dipole_fitter.py     # точный фитинг (эксперим.): mne.fit_dipole по эпохам, цена в /meta
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
@@ -72,6 +73,7 @@ backend/app/
 │   ├── analysis_pipeline.py # пайплайн файлового анализа (/analyze, /jobs) + запись в БД (A1)
 │   ├── cache_store.py     # единый дисковый кэш: путь/чтение/атомарная запись/очистка (этап 2)
 │   ├── journal.py         # журнал шагов пайплайнов: GET /journal (этап 5)
+│   ├── mains.py           # сигнал сетевого фона: уровни L1 и вырезанная notch-компонентная
 │   ├── job_store.py       # файл задачи на диске: история и результат (A8)
 │   ├── orphans.py         # обход сирот при старте (A6)
 │   ├── asset_versions.py  # единый отпечаток версий ассетов (A7)
@@ -151,7 +153,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (822 Vitest / 501 pytest), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (838 Vitest / 522 pytest), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |
