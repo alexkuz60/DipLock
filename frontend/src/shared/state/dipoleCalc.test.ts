@@ -279,7 +279,7 @@ describe('состояние расчёта диполей', () => {
       ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
     )
     expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/spectrum')
-    expect(useDipoleCalc.getState().spectrum?.bands).toHaveLength(5)
+    expect(useDipoleCalc.getState().spectrum?.bands).toHaveLength(7)
     expect(useDipoleCalc.getState().spectrumJob?.status).toBe('succeeded')
   })
 

@@ -42,8 +42,16 @@ def test_apply_band_filter_custom_requires_bounds(epochs_alpha):
         apply_band_filter(epochs_alpha, "custom")
 
 
-@pytest.mark.parametrize("band", ["delta", "theta", "alpha", "beta", "gamma"])
+@pytest.mark.parametrize(
+    "band",
+    [*settings.freq_bands, *settings.functional_bands],
+)
 def test_apply_band_filter_standard_bands(epochs_alpha, band):
+    """Все именованные полосы (базовые октавные + функциональные) фильтруют.
+
+    `high_gamma` 64–128 на записях 250 Гц зажимается ниже Найквиста
+    (`nyquist_ceiling_hz`) — фильтр работает, а не падает ValueError от MNE.
+    """
     out = apply_band_filter(epochs_alpha, band)
     assert out is not epochs_alpha
     assert len(out) == len(epochs_alpha)

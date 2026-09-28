@@ -1236,7 +1236,19 @@ class MetaResponse(BaseModel):
         ),
     )
     epoch_lengths_ms: list[float]
-    freq_bands: dict[str, list[float]]
+    freq_bands: dict[str, list[float]] = Field(
+        description=(
+            "Базовые октавные полосы (ключи стабильны — адрес результатов): "
+            "δ, δ/θ, θ, α, β, γ, γ-high; источник — core/config.py"
+        ),
+    )
+    functional_bands: dict[str, list[float]] = Field(
+        default_factory=dict,
+        description=(
+            "Функциональные ритмы (μ, σ, κ, τ, λ, ψ) — только пресеты фильтра "
+            "диполей, в спектр/топокартах не участвуют; источник — core/config.py"
+        ),
+    )
     signal_levels: list[int] = Field(
         default_factory=list, description="Уровни пирамиды сигналов для вьюера (×1…×16)"
     )

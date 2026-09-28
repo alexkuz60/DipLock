@@ -39,22 +39,22 @@ function formEntries(form: FormData): Record<string, string> {
 describe('домен расчёта диполей: формы, отпечатки и нормализация', () => {
   it('собирает формы задач из параметров: без выдуманных значений', () => {
     expect(formEntries(buildDipoleForm(CALC_PARAM_DEFAULTS))).toEqual({
-      band_min: '1',
-      band_max: '40',
+      band_min: '0.5',
+      band_max: '128',
       epoch_length_ms: '1000',
       grid_mm: '7',
     })
     // Спектр считается с той же полосой, но без шага сетки (он не нужен PSD);
     // метод PSD уходит только спектру (N17)
     expect(formEntries(buildSpectrumForm(CALC_PARAM_DEFAULTS))).toEqual({
-      band_min: '1',
-      band_max: '40',
+      band_min: '0.5',
+      band_max: '128',
       epoch_length_ms: '1000',
       psd_method: 'welch',
     })
     expect(formEntries(buildSpectrumForm({ ...CALC_PARAM_DEFAULTS, psdMethod: 'multitaper' }))).toEqual({
-      band_min: '1',
-      band_max: '40',
+      band_min: '0.5',
+      band_max: '128',
       epoch_length_ms: '1000',
       psd_method: 'multitaper',
     })
@@ -113,7 +113,7 @@ describe('домен расчёта диполей: формы, отпечатк
     const wide = normalizeCalcParams({
       ...CALC_PARAM_DEFAULTS,
       filterPreset: 'none',
-      filterBandHz: [1, 40],
+      filterBandHz: [0.5, 128],
     })
     expect(wide.filterPreset).toBe('band_1_40')
 
@@ -140,7 +140,7 @@ describe('домен расчёта диполей: формы, отпечатк
     const result = dipoleScanResultFixture()
 
     // Результат фикстуры посчитан на параметрах по умолчанию: сетка 7 мм,
-    // полоса 1–40 Гц, reject 150 мкВ — расхождения быть не должно
+    // полоса 0.5–128 Гц (широкий), reject 150 мкВ — расхождения быть не должно
     expect(resultSignature(result)).toBe(calcSignature(CALC_PARAM_DEFAULTS))
     expect(resultMatchesParams(result, CALC_PARAM_DEFAULTS)).toBe(true)
 

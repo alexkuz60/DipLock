@@ -113,12 +113,18 @@ def signals_layer_query(
 def validate_analysis_request(
     epoch_length_ms: float, freq_band: str, single_freq: float | None,
 ) -> None:
-    """Проверка параметров файлового анализа (``/analyze`` и ``/jobs``)."""
+    """Проверка параметров файлового анализа (``/analyze`` и ``/jobs``).
+
+    Именованные полосы — базовые ``freq_bands`` и функциональные
+    ``functional_bands`` (фаза A): оба словаря резолвит ``band_bounds``,
+    поэтому форма может предложить и те, и другие.
+    """
     require_epoch_length(epoch_length_ms)
-    if freq_band not in ("all", "custom", *settings.freq_bands.keys()):
+    known_bands = (*settings.freq_bands.keys(), *settings.functional_bands.keys())
+    if freq_band not in ("all", "custom", *known_bands):
         raise HTTPException(
             status_code=400,
-            detail=f"freq_band должен быть 'all'/'custom' или {list(settings.freq_bands.keys())}",
+            detail=f"freq_band должен быть 'all'/'custom' или {list(known_bands)}",
         )
     if single_freq is not None and freq_band != "all":
         raise HTTPException(status_code=400, detail="single_freq ставится вместе с freq_band='all'")

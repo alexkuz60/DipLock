@@ -86,6 +86,11 @@ describe('спектр по диапазонам', () => {
   it('подписывает ритмы по-русски, а неизвестный ключ показывает как есть', () => {
     expect(bandLabel('alpha')).toContain('альфа')
     expect(bandLabel('omega')).toBe('omega')
+    // Новые ключи сетки (фаза A): октавная полоса и функциональный ритм
+    expect(bandLabel('delta_theta')).toContain('транзит')
+    expect(bandLabel('high_gamma')).toContain('высокочастотная')
+    expect(bandLabel('mu')).toContain('мю')
+    expect(bandLabel('psi')).toContain('пси')
     expect(bandRangeLabel(band())).toBe('8–13 Гц')
   })
 

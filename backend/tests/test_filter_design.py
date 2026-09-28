@@ -197,6 +197,9 @@ def test_band_bounds_matches_apply_band_filter_cases():
 
     assert band_bounds("all") is None
     assert band_bounds("alpha") == settings.freq_bands["alpha"]
+    assert band_bounds("high_gamma") == settings.freq_bands["high_gamma"]
+    # Функциональные ритмы резолвятся тем же порядком (фаза A)
+    assert band_bounds("mu") == settings.functional_bands["mu"]
     assert band_bounds("custom", 7.0, 9.5) == (7.0, 9.5)
     assert band_bounds("all", single_freq=7.83, bandwidth_hz=0.5) == (7.58, 8.08)
     with pytest.raises(ValueError, match="custom_min"):

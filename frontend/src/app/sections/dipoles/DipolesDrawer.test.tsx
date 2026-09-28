@@ -45,14 +45,16 @@ describe('выдвижная панель раздела «Диполи»', () =
     useDipoleCalc.setState({ view: 'topomap', spectrum: spectrumResultFixture() })
     renderWithProviders(<DipolesDrawer />)
 
-    const alpha = screen.getByAltText('Топокарта α — альфа (8–13 Гц)')
+    const alpha = screen.getByAltText('Топокарта α/низкий β — альфа/низкий бета (8–16 Гц)')
     expect(alpha.getAttribute('src')).toBe(
       '/api/v1/recordings/rec-1/spectrum/topomap/alpha.png?band_min=1&band_max=40&epoch_length_ms=1000&psd_method=welch&v=spec1234abcd',
     )
     // Мощность подписана рядом с картинкой; неизмеренная — «—», а не «0.00»
-    expect(screen.getByText(/8–13 Гц · 12.50 мкВ² · 55 %/)).toBeInTheDocument()
-    expect(screen.getByText(/30–40 Гц · — мкВ²/)).toBeInTheDocument()
-    expect(screen.getAllByTestId(/^topomap-/)).toHaveLength(5)
+    expect(screen.getByText(/8–16 Гц · 12.50 мкВ² · 55 %/)).toBeInTheDocument()
+    expect(screen.getByText(/64–128 Гц · — мкВ²/)).toBeInTheDocument()
+    // 7 полос сетки: у 6 картинки есть, у γ-high (вне полосы фильтра) — заглушка
+    expect(screen.getAllByTestId(/^topomap-(?!unavailable)/)).toHaveLength(7)
+    expect(screen.getAllByTestId(/^topomap-unavailable-/)).toHaveLength(1)
   })
 
   it('без спектра объясняет и запускает расчёт только по кнопке', async () => {
@@ -72,7 +74,7 @@ describe('выдвижная панель раздела «Диполи»', () =
       ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
     )
     expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/spectrum')
-    expect(await screen.findAllByAltText(/Топокарта/)).toHaveLength(5)
+    expect(await screen.findAllByAltText(/Топокарта/)).toHaveLength(6)
   })
 
   it('кнопка расчёта выключена без записи и объясняет причину', async () => {
@@ -89,7 +91,7 @@ describe('выдвижная панель раздела «Диполи»', () =
     renderWithProviders(<DipolesDrawer />)
 
     expect(screen.getByTestId('fft-histogram')).toBeInTheDocument()
-    for (const band of ['delta', 'theta', 'alpha', 'beta', 'gamma']) {
+    for (const band of ['delta', 'delta_theta', 'theta', 'alpha', 'beta', 'gamma', 'high_gamma']) {
       expect(screen.getByTestId(`fft-bar-${band}`)).toBeInTheDocument()
     }
     expect(screen.getByTestId('fft-psd-line')).toBeInTheDocument()
@@ -140,7 +142,7 @@ describe('выдвижная панель раздела «Диполи»', () =
 
     // Окно сузилось до альфа-ритма: на ломаной остались только его частоты
     expect(pointsOf()).toHaveLength(3)
-    expect(screen.getByTestId('fft-window-label')).toHaveTextContent('Показано 8–13 Гц из 1–40 Гц')
+    expect(screen.getByTestId('fft-window-label')).toHaveTextContent('Показано 8–16 Гц из 1–40 Гц')
     expect(screen.getByTestId('fft-bar-alpha')).toHaveAttribute('data-in-range', 'true')
     expect(screen.getByTestId('fft-bar-delta')).toHaveAttribute('data-in-range', 'false')
     // Полосы вне окна остаются на месте (приглушены), а не исчезают: видно, что

@@ -4,7 +4,7 @@ import mne
 import numpy as np
 
 from app.core.config import settings
-from app.services.filter_design import band_filter_kwargs
+from app.services.filter_design import band_filter_kwargs, nyquist_ceiling_hz
 
 # Фильтровать можно как эпохи, так и continuous raw (рекомендуется raw — см. routes).
 type FilterTarget = mne.Epochs | mne.io.BaseRaw
@@ -24,6 +24,10 @@ def band_bounds(
     разбора параметров. Порядок веток — как в ``apply_band_filter``:
     ``single_freq`` важнее имени диапазона («all» + одиночная частота — это
     узкая полоса вокруг частоты, а не «без фильтра»).
+
+    Именованные диапазоны резолвятся из ``freq_bands`` (базовые октавные полосы,
+    они же считаются в спектре) и из ``functional_bands`` (функциональные ритмы —
+    только пресеты фильтра, фаза A): оба словаря — из ``core/config.py``.
     """
     if single_freq is not None:
         half = bandwidth_hz / 2
@@ -36,6 +40,8 @@ def band_bounds(
         return custom_min, custom_max
     if band_name in settings.freq_bands:
         return settings.freq_bands[band_name]
+    if band_name in settings.functional_bands:
+        return settings.functional_bands[band_name]
     raise ValueError(f"Неизвестный диапазон: {band_name}")
 
 
@@ -50,7 +56,8 @@ def apply_band_filter(
     """
     Применяет фильтр к эпохам или continuous-сигналу (raw).
 
-    - band_name: 'all', 'delta', 'theta', 'alpha', 'beta', 'gamma'
+    - band_name: 'all', 'custom', имя из ``freq_bands``/``functional_bands``
+      (напр. 'alpha', 'high_gamma', 'mu')
     - custom_min/custom_max: кастомный диапазон (напр. 7.0–9.5)
     - single_freq: одиночная частота (напр. 7.83 Гц) → narrow bandpass
       bandwidth_hz центрируется на ней (7.58 — 8.08)
@@ -60,14 +67,20 @@ def apply_band_filter(
     — FIR с явными переходными полосами (N11). Для коротких эпох (< длины
     FIR-фильтра) фильтрация даёт искажения — поэтому в пайплайне фильтр
     применяется к raw ДО нарезки.
+
+    Верхняя граница зажимается до ``nyquist_ceiling_hz`` (Найквист − 2 Гц):
+    полоса вроде «широкий 0.5–128» на записи 250 Гц фильтруется до 123 Гц, а не
+    падает ``ValueError`` от MNE.
     """
     bounds = band_bounds(band_name, custom_min, custom_max, single_freq, bandwidth_hz)
     if bounds is None:
         return epochs
     fmin, fmax = bounds
+    sfreq = float(epochs.info["sfreq"])
+    fmax = min(fmax, nyquist_ceiling_hz(sfreq))
     return epochs.copy().filter(
         fmin, fmax, verbose=False,
-        **band_filter_kwargs(fmin, fmax, float(epochs.info["sfreq"])),
+        **band_filter_kwargs(fmin, fmax, sfreq),
     )
 
 
@@ -89,9 +102,14 @@ def compute_band_powers(
     n_times = len(epochs.times)
     n_fft = min(256, n_times)
 
-    # Один общий расчёт PSD по всему охвату диапазонов (MNE >= 1.10: compute_psd)
+    # Один общий расчёт PSD по всему охвату диапазонов (MNE >= 1.10: compute_psd).
+    # Верх — не выше Найквиста: сетка `freq_bands` доходит до 128 Гц, а MNE на
+    # записи 250 Гц отдаёт ValueError «fmax must not exceed ½ the sampling frequency».
     fmin_total = min(bands.values(), key=lambda x: x[0])[0]
-    fmax_total = max(bands.values(), key=lambda x: x[1])[1]
+    fmax_total = min(
+        max(bands.values(), key=lambda x: x[1])[1],
+        nyquist_ceiling_hz(float(epochs.info["sfreq"])),
+    )
     spectrum = epochs.compute_psd(
         method="welch", fmin=fmin_total, fmax=fmax_total,
         n_fft=n_fft, verbose=False,

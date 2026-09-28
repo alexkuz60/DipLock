@@ -105,7 +105,14 @@ def test_compute_spectrum_puts_power_into_its_band(tmp_path):
     assert result["freqs"][0] >= min(band[0] for band in settings.freq_bands.values())
     assert result["warnings"] == []
     for band in result["bands"]:
-        assert band["topomap_url"].endswith(f"/spectrum/topomap/{band['name']}.png")
+        measured = any(band["fmin"] <= f <= band["fmax"] for f in result["freqs"])
+        if measured:
+            assert band["topomap_url"].endswith(f"/spectrum/topomap/{band['name']}.png")
+        else:
+            # Полоса целиком вне оси PSD (здесь фильтр 1–40 Гц отсек γ-high):
+            # топокарта не строится, мощность — честный null, а не выдуманный ноль
+            assert band["topomap_url"] is None
+            assert band["power_uv2"] is None
 
 
 def test_spectrum_signature_follows_filter_and_channels():
@@ -216,8 +223,11 @@ def test_band_power_outside_frequency_axis_is_none_not_nan():
     # Один бин в полосе Simpson не интегрирует: оценка значением × шаг оси (4 Гц)
     assert powers["delta"] == 4.0
     assert powers["alpha"] == 4.0
+    # Полосы сетки (β 16–32, γ 32–64, γ-high 64–128) за пределами оси — не измерены
+    assert powers["beta"] is None
     assert powers["gamma"] is None
-    band = SpectrumBandOut(name="gamma", fmin=30, fmax=40, power_uv2=powers["gamma"])
+    assert powers["high_gamma"] is None
+    band = SpectrumBandOut(name="gamma", fmin=32, fmax=64, power_uv2=powers["gamma"])
     dumped = band.model_dump_json()
     assert "NaN" not in dumped
     assert "null" in dumped
@@ -227,8 +237,8 @@ def test_band_power_is_integral_not_mean():
     """N15: мощность полосы — площадь под PSD, а не среднее по бинам.
 
     На плоском спектре (все PSD = 1 мкВ²/Гц) среднее давало бы 1.0 для всех
-    диапазонов, а интеграл пропорционален ширине полосы: β (13–30) в 17/5 раза
-    больше α (8–13). Именно это делает мощности диапазонов сравнимыми.
+    диапазонов, а интеграл пропорционален ширине полосы: β (16–32) в 16/8 = 2
+    раза больше α (8–16). Именно это делает мощности диапазонов сравнимыми.
     """
     from app.services.spectral import _band_powers
 
@@ -237,9 +247,9 @@ def test_band_power_is_integral_not_mean():
 
     powers = _band_powers(freqs, psd, settings.freq_bands)
 
-    assert powers["alpha"] == pytest.approx(5.0)
-    assert powers["beta"] == pytest.approx(17.0)
-    assert powers["beta"] / powers["alpha"] == pytest.approx(17.0 / 5.0)
+    assert powers["alpha"] == pytest.approx(8.0)
+    assert powers["beta"] == pytest.approx(16.0)
+    assert powers["beta"] / powers["alpha"] == pytest.approx(2.0)
 
 
 def test_spectrum_reports_iaf_ratios_and_epoch_spread(tmp_path):
@@ -310,7 +320,10 @@ def test_multitaper_method_reports_alpha_tone_on_short_epochs(tmp_path):
     # Окно анализа multitaper — вся эпоха: в подписи её длина, а не усечённый `n_fft`
     assert result["n_fft"] > 250 * 250 / 1000 / 2  # больше половины эпохи, отсчётов
     powers = {band["name"]: band["power_uv2"] for band in result["bands"]}
-    assert powers["alpha"] > powers["delta"]
+    # δ 0.5–2 Гц на частотной сетке 4 Гц (эпоха 250 мс) не покрыт ни одним бином —
+    # честный `None` («не измерено»), а не ноль; тон обязан быть в α, а не в β
+    assert powers["alpha"] is not None
+    assert powers["delta"] is None or powers["alpha"] > powers["delta"]
     assert powers["alpha"] > powers["beta"]
     # IAF на сетке 250 мс (< 3 бинов в α) честно `None` — N16; центр здесь
     # уточняет specparam (суббиново), а не аргмакс по грубой сетке

@@ -11,6 +11,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   BANDWIDTH_RANGE,
+  FUNCTIONAL_GROUP,
   SINGLE_FREQ_RANGE,
   bandForPreset,
   filterBandText,
@@ -28,13 +29,25 @@ import {
   type CalcFilterParams,
 } from './calcFilter'
 
-/** Диапазоны ритмов так, как их отдаёт `/meta` (фикстура бэкенда). */
+/** Базовые октавные полосы так, как их отдаёт `/meta.freq_bands` (фаза A). */
 const FREQ_BANDS: Record<string, number[]> = {
-  delta: [1, 4],
+  delta: [0.5, 2],
+  delta_theta: [2, 4],
   theta: [4, 8],
-  alpha: [8, 13],
-  beta: [13, 30],
-  gamma: [30, 40],
+  alpha: [8, 16],
+  beta: [16, 32],
+  gamma: [32, 64],
+  high_gamma: [64, 128],
+}
+
+/** Функциональные ритмы — `/meta.functional_bands`: только пресеты фильтра. */
+const FUNCTIONAL_BANDS: Record<string, number[]> = {
+  mu: [8, 13],
+  sigma: [11, 16],
+  kappa: [8, 12],
+  tau: [8, 9],
+  lambda: [4, 5],
+  psi: [35, 55],
 }
 
 function filterParams(overrides: Partial<CalcFilterParams> = {}): CalcFilterParams {
@@ -49,27 +62,41 @@ function filterParams(overrides: Partial<CalcFilterParams> = {}): CalcFilterPara
 }
 
 describe('форма фильтров расчёта', () => {
-  it('собирает пресеты ритмов из метаданных сервера', () => {
-    const options = filterPresetOptions(FREQ_BANDS)
+  it('собирает пресеты ритмов из метаданных сервера, функциональные — группой', () => {
+    const options = filterPresetOptions(FREQ_BANDS, FUNCTIONAL_BANDS)
 
     expect(options.map((option) => option.value)).toEqual([
       'band_1_40',
       'delta',
+      'delta_theta',
       'theta',
       'alpha',
       'beta',
       'gamma',
+      'high_gamma',
+      'mu',
+      'sigma',
+      'kappa',
+      'tau',
+      'lambda',
+      'psi',
       'single',
       'custom',
       'none',
     ])
-    // Подпись несёт границы с сервера: «α — альфа 8–13 Гц», а не «альфа» без чисел
-    expect(options.find((option) => option.value === 'alpha')?.label).toBe('α — альфа 8–13 Гц')
-    expect(options.find((option) => option.value === 'alpha')?.band).toEqual([8, 13])
+    // Подпись несёт границы с сервера: «α…8–16 Гц», а не «альфа» без чисел
+    expect(options.find((option) => option.value === 'alpha')?.label).toBe(
+      'α/низкий β — альфа/низкий бета 8–16 Гц',
+    )
+    expect(options.find((option) => option.value === 'alpha')?.band).toEqual([8, 16])
+    // Функциональные ритмы — отдельный <optgroup>; базовые — без группы
+    expect(options.find((option) => option.value === 'mu')?.group).toBe(FUNCTIONAL_GROUP)
+    expect(options.find((option) => option.value === 'alpha')?.group).toBeUndefined()
+    expect(options.find((option) => option.value === 'none')?.group).toBeUndefined()
   })
 
   it('не выдумывает диапазон ритма, которого нет в конфиге сервера', () => {
-    const options = filterPresetOptions({ alpha: [8, 13] })
+    const options = filterPresetOptions({ alpha: [8, 16] })
 
     expect(options.map((option) => option.value)).toEqual([
       'band_1_40',
@@ -79,14 +106,19 @@ describe('форма фильтров расчёта', () => {
       'none',
     ])
     // Полосы пресета нет — пресет не «работает по памяти», а просто отсутствует
-    expect(presetBand('delta', { alpha: [8, 13] })).toBeNull()
-    expect(presetBand('alpha', { alpha: [8, 13] })).toEqual([8, 13])
+    expect(presetBand('delta', { alpha: [8, 16] })).toBeNull()
+    expect(presetBand('alpha', { alpha: [8, 16] })).toEqual([8, 16])
+    // Функционального ритма нет в метаданных — пункта и полосы нет
+    expect(presetBand('mu', { alpha: [8, 16] })).toBeNull()
+    expect(presetBand('mu', {}, {})).toBeNull()
+    expect(presetBand('mu', {}, FUNCTIONAL_BANDS)).toEqual([8, 13])
   })
 
   it('приводит полосу к порядку, округлению и границам контролов', () => {
     expect(normalizeFilterBand([13, 8])).toEqual([8, 13])
     expect(normalizeFilterBand([8.04, 12.96])).toEqual([8, 13])
-    expect(normalizeFilterBand([-5, 200])).toEqual([0.1, 100])
+    // Верх границы контрола — по сетке полос (γ-high до 128 Гц)
+    expect(normalizeFilterBand([-5, 200])).toEqual([0.1, 128])
     // Пустая полоса — это «без фильтра»: фильтр нулевой ширины задача не примет
     expect(normalizeFilterBand([8, 8])).toBeNull()
     expect(normalizeFilterBand([Number.NaN, 10])).toBeNull()
@@ -108,29 +140,33 @@ describe('форма фильтров расчёта', () => {
 
   it('выводит пресет из полосы, а не из «выбранного ранее»', () => {
     const presetOf = (band: [number, number] | null) =>
-      filterPresetOf(filterParams({ filterBandHz: band }), FREQ_BANDS)
+      filterPresetOf(filterParams({ filterBandHz: band }), FREQ_BANDS, FUNCTIONAL_BANDS)
 
     expect(presetOf(null)).toBe('none')
-    expect(presetOf([1, 40])).toBe('band_1_40')
-    expect(presetOf([8, 13])).toBe('alpha')
+    expect(presetOf([0.5, 128])).toBe('band_1_40')
+    expect(presetOf([8, 16])).toBe('alpha')
     expect(presetOf([7.6, 8.1])).toBe('single')
+    // Полоса функционального ритма узнаётся своим пресетом (μ 8–13)
+    expect(presetOf([8, 13])).toBe('mu')
     // Ни ритм, ни одиночная частота: полосу задали руками
     expect(presetOf([5, 20])).toBe('custom')
   })
 
   it('выбор пресета даёт его полосу, а поля «одиночной» и «своей» помнятся', () => {
     const params = filterParams()
-    expect(bandForPreset(params, 'alpha', FREQ_BANDS)).toEqual([8, 13])
-    expect(bandForPreset(params, 'band_1_40', FREQ_BANDS)).toEqual([1, 40])
+    expect(bandForPreset(params, 'alpha', FREQ_BANDS)).toEqual([8, 16])
+    expect(bandForPreset(params, 'band_1_40', FREQ_BANDS)).toEqual([0.5, 128])
     expect(bandForPreset(params, 'none', FREQ_BANDS)).toBeNull()
     expect(bandForPreset(params, 'single', FREQ_BANDS)).toEqual([7.6, 8.1])
+    // Функциональный ритм берёт границы из `functional_bands`
+    expect(bandForPreset(params, 'mu', FREQ_BANDS, FUNCTIONAL_BANDS)).toEqual([8, 13])
 
-    // «Свой диапазон» открывается на текущей полосе; от «без фильтра» — на 1–40
+    // «Свой диапазон» открывается на текущей полосе; от «без фильтра» — на 0.5–128
     expect(bandForPreset(filterParams({ filterBandHz: [5, 20] }), 'custom', FREQ_BANDS)).toEqual([
       5, 20,
     ])
     expect(bandForPreset(filterParams({ filterBandHz: null }), 'custom', FREQ_BANDS)).toEqual([
-      1, 40,
+      0.5, 128,
     ])
   })
 
@@ -151,10 +187,10 @@ describe('форма фильтров расчёта', () => {
   it('описывает в итоге именно то, что уйдёт в задачу', () => {
     const alpha: Pick<CalcFilterParams, 'filterPreset' | 'filterBandHz'> = {
       filterPreset: 'alpha',
-      filterBandHz: [8, 13],
+      filterBandHz: [8, 16],
     }
     expect(filterSummary(filterParams({ ...alpha, notchHz: 50 }), FREQ_BANDS)).toBe(
-      'α — альфа 8–13 Гц · сетевой фильтр 50 Гц',
+      'α/низкий β — альфа/низкий бета 8–16 Гц · сетевой фильтр 50 Гц',
     )
     expect(
       filterSummary(filterParams({ filterPreset: 'single', filterBandHz: [7.6, 8.1] }), FREQ_BANDS),
@@ -165,6 +201,14 @@ describe('форма фильтров расчёта', () => {
     expect(
       filterSummary(filterParams({ filterPreset: 'custom', filterBandHz: [5, 20] }), FREQ_BANDS),
     ).toBe('свой диапазон 5–20 Гц · без сетевого фильтра')
+    // «Широкий» и так печатает полосу — без дублирования чисел в названии
+    expect(
+      filterSummary(filterParams({ filterPreset: 'band_1_40', filterBandHz: [0.5, 128] })),
+    ).toBe('широкий 0.5–128 Гц · без сетевого фильтра')
+    // Функциональный ритм в итоге — своя подпись (метаданные для него не нужны)
+    expect(
+      filterSummary(filterParams({ filterPreset: 'mu', filterBandHz: [8, 13] }), {}, FUNCTIONAL_BANDS),
+    ).toBe('μ — мю 8–13 Гц · без сетевого фильтра')
   })
 
   it('печатает в итоге полосу, а не «обещанные» числа из названия ритма', () => {
@@ -172,11 +216,14 @@ describe('форма фильтров расчёта', () => {
     // показывает фактические границы расчёта, а не старые числа из подписи пункта
     expect(
       filterSummary(filterParams({ filterPreset: 'alpha', filterBandHz: [8, 12] }), FREQ_BANDS),
-    ).toBe('α — альфа 8–12 Гц · без сетевого фильтра')
+    ).toBe('α/низкий β — альфа/низкий бета 8–12 Гц · без сетевого фильтра')
   })
 
   it('отличает пресет от значения из localStorage, которого не знает', () => {
     expect(filterPresetIsValid('alpha')).toBe(true)
+    expect(filterPresetIsValid('high_gamma')).toBe(true)
+    expect(filterPresetIsValid('mu')).toBe(true)
+    expect(filterPresetIsValid('psi')).toBe(true)
     expect(filterPresetIsValid('none')).toBe(true)
     expect(filterPresetIsValid('band_1_40')).toBe(true)
     expect(filterPresetIsValid('gamma_2')).toBe(false)
@@ -184,9 +231,10 @@ describe('форма фильтров расчёта', () => {
   })
 
   it('подписывает полосу и пресет для панели', () => {
-    expect(filterBandText([1, 40])).toBe('1–40 Гц')
+    expect(filterBandText([0.5, 128])).toBe('0.5–128 Гц')
     expect(filterBandText(null)).toBe('без фильтра')
     expect(filterBandText([8.5, 13])).toBe('8.5–13 Гц')
-    expect(filterPresetLabel('gamma', FREQ_BANDS)).toBe('γ — гамма 30–40 Гц')
+    expect(filterPresetLabel('gamma', FREQ_BANDS)).toBe('γ — гамма 32–64 Гц')
+    expect(filterPresetLabel('psi', FREQ_BANDS, FUNCTIONAL_BANDS)).toBe('ψ — пси 35–55 Гц')
   })
 })

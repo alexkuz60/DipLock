@@ -55,7 +55,23 @@ export const metaFixture: MetaResponse = {
     O2: [0.257, -0.965],
   },
   epoch_lengths_ms: [250, 500, 750, 1000, 1250, 1500, 1750, 2000],
-  freq_bands: { delta: [1, 4], theta: [4, 8], alpha: [8, 13], beta: [13, 30], gamma: [30, 40] },
+  freq_bands: {
+    delta: [0.5, 2],
+    delta_theta: [2, 4],
+    theta: [4, 8],
+    alpha: [8, 16],
+    beta: [16, 32],
+    gamma: [32, 64],
+    high_gamma: [64, 128],
+  },
+  functional_bands: {
+    mu: [8, 13],
+    sigma: [11, 16],
+    kappa: [8, 12],
+    tau: [8, 9],
+    lambda: [4, 5],
+    psi: [35, 55],
+  },
   signal_levels: [1, 2, 4, 8, 16],
   signal_base_points: 4000,
   artifact_thresholds: {
@@ -488,23 +504,30 @@ export const calcJobFixture: JobStatus = {
 export function spectrumResultFixture(
   overrides: Partial<SpectrumResult> = {},
 ): SpectrumResult {
+  // 7 базовых полос сетки (фаза A): γ частично внутри полосы фильтра 1–40 Гц —
+  // измерена, γ-high целиком вне её — «не измерено» (именно null, а не 0)
   const bands: SpectrumBandOut[] = [
-    { name: 'delta', fmin: 1, fmax: 4, power_uv2: 2.5, relative_power: 0.11,
+    { name: 'delta', fmin: 0.5, fmax: 2, power_uv2: 2.5, relative_power: 0.11,
       median_power_uv2: 2.4, q25_power_uv2: 2.1, q75_power_uv2: 2.8,
       topomap_url: topomapUrl('delta') },
+    { name: 'delta_theta', fmin: 2, fmax: 4, power_uv2: 3.0, relative_power: 0.13,
+      median_power_uv2: 2.9, q25_power_uv2: 2.6, q75_power_uv2: 3.3,
+      topomap_url: topomapUrl('delta_theta') },
     { name: 'theta', fmin: 4, fmax: 8, power_uv2: 3.5, relative_power: 0.15,
       median_power_uv2: 3.4, q25_power_uv2: 3.0, q75_power_uv2: 3.9,
       topomap_url: topomapUrl('theta') },
-    { name: 'alpha', fmin: 8, fmax: 13, power_uv2: 12.5, relative_power: 0.55,
+    { name: 'alpha', fmin: 8, fmax: 16, power_uv2: 12.5, relative_power: 0.55,
       median_power_uv2: 12.2, q25_power_uv2: 11.0, q75_power_uv2: 13.4,
       topomap_url: topomapUrl('alpha') },
-    { name: 'beta', fmin: 13, fmax: 30, power_uv2: 4.5, relative_power: 0.19,
-      median_power_uv2: 4.4, q25_power_uv2: 4.0, q75_power_uv2: 4.9,
+    { name: 'beta', fmin: 16, fmax: 32, power_uv2: 0.4, relative_power: 0.02,
+      median_power_uv2: 0.4, q25_power_uv2: 0.3, q75_power_uv2: 0.5,
       topomap_url: topomapUrl('beta') },
-    // γ вне узкой полосы фильтра: мощность «не измерена» — именно null, а не 0
-    { name: 'gamma', fmin: 30, fmax: 40, power_uv2: null, relative_power: null,
-      median_power_uv2: null, q25_power_uv2: null, q75_power_uv2: null,
+    { name: 'gamma', fmin: 32, fmax: 64, power_uv2: 0.15, relative_power: 0.01,
+      median_power_uv2: 0.1, q25_power_uv2: 0.1, q75_power_uv2: 0.2,
       topomap_url: topomapUrl('gamma') },
+    { name: 'high_gamma', fmin: 64, fmax: 128, power_uv2: null, relative_power: null,
+      median_power_uv2: null, q25_power_uv2: null, q75_power_uv2: null,
+      topomap_url: null },
   ]
   return {
     recording_id: recordingFixture.recording_id,
@@ -586,7 +609,8 @@ export function dipoleScanResultFixture(
     channels: [...recordingFixture.channels],
     sfreq: recordingFixture.sfreq,
     epoch_length_ms: 1000,
-    filter_band_hz: [1, 40],
+    // «На параметрах по умолчанию»: полоса CALC_PARAM_DEFAULTS (широкий 0.5–128)
+    filter_band_hz: [0.5, 128],
     notch_hz: null,
     n_epochs_total: 4,
     n_epochs_used: 4,
@@ -658,7 +682,8 @@ export function spectrogramResultFixture(
     overlap_pct: 75,
     fmax_hz: 40,
     n_fft: 256,
-    filter_band_hz: [1, 40],
+    // «На параметрах по умолчанию»: полоса EEG_PARAM_DEFAULTS (широкий 0.5–128)
+    filter_band_hz: [0.5, 128],
     notch_hz: null,
     reference: 'average',
     reference_channels: [],

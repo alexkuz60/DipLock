@@ -152,7 +152,11 @@ export type DipoleCalcState = {
   /** Метод PSD спектра (N17): только задача спектра, диполи не пересчитываются */
   setPsdMethod: (value: 'welch' | 'multitaper') => void
   /** Выбор пресета фильтра: полоса пресета — данные (ритмы идут из `/meta`) */
-  setFilterPreset: (preset: CalcFilterPresetId, freqBands: Record<string, number[]>) => void
+  setFilterPreset: (
+    preset: CalcFilterPresetId,
+    freqBands: Record<string, number[]>,
+    functionalBands?: Record<string, number[]>,
+  ) => void
   /** Полоса фильтра числом (поля «свой диапазон»): границы нормализуются */
   setFilterBand: (band: readonly number[] | null) => void
   /** Сетевой фильтр 50/60 Гц (`null` — выключен) */
@@ -298,12 +302,12 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       // Окно уточнения — только варианты списка: произвольное число здесь значило
       // бы «случайные 40 секунд счёта», а не выбор точности (шаг 1.5)
       setRefineHalfwinMs: (value) => set({ refineHalfwinMs: normalizeRefineHalfwin(value) }),
-      setFilterPreset: (preset, freqBands) =>
+      setFilterPreset: (preset, freqBands, functionalBands = {}) =>
         set((state) => ({
           params: {
             ...state.params,
             filterPreset: preset,
-            filterBandHz: bandForPreset(state.params, preset, freqBands),
+            filterBandHz: bandForPreset(state.params, preset, freqBands, functionalBands),
           },
         })),
       // Полосу правят поля «своего диапазона»: выбор становится «своим», а если
@@ -516,7 +520,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         const storedParams = (stored.params ?? {}) as Partial<CalcParams>
         const merged = { ...current.params, ...storedParams }
         // Состояние до среза 3.6 не знало пресета: выводим его из сохранённой
-        // полосы, а не подставляем «широкий 1–40» к любой полосе (иначе список
+        // полосы, а не подставляем «широкий» к любой полосе (иначе список
         // называл бы ритмом не то, что уйдёт в расчёт)
         if (storedParams.filterPreset === undefined) {
           merged.filterPreset = filterPresetOf(merged, {})

@@ -48,7 +48,8 @@ describe('раздел «Настройки»', () => {
     renderWithProviders(<SettingsSection />)
 
     expect(await screen.findByText('Диапазоны, Гц')).toBeInTheDocument()
-    expect(screen.getByText(/"alpha":\[8,13\]/)).toBeInTheDocument()
+    expect(screen.getByText(/"alpha":\[8,16\]/)).toBeInTheDocument()
+    expect(screen.getByText(/"high_gamma":\[64,128\]/)).toBeInTheDocument()
     expect(screen.getByText(/backend\/\.env/)).toBeInTheDocument()
   })
 })

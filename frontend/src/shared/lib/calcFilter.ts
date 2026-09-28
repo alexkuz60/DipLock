@@ -8,13 +8,19 @@
  * хранит **полосу** (`filterBandHz`), а пресеты δ…γ, «одиночная частота» и «свой
  * диапазон» — лишь способы её выбрать: выбранный пресет **выводится** из полосы
  * (`filterPresetOf`), а не лежит рядом с ней. Иначе после смены `freq_bands` на
- * сервере подпись «α 8–13 Гц» показывала бы одно, а в задачу уходили прежние
- * числа — расхождение, которое глазами не поймать.
+ * сервере подпись показывала бы одно, а в задачу уходили прежние числа —
+ * расхождение, которое глазами не поймать.
  *
- * Диапазоны ритмов не дублируются в UI: их приносит `/meta` (`freq_bands`,
- * единственный источник — `core/config.py`), как длины эпох. Пока метаданные не
- * загружены, ритмов в списке нет вовсе (а не «примерно такие»); «широкий 1–40»,
- * «свой диапазон», «одиночная частота» и «без фильтра» работают и без них.
+ * Диапазоны ритмов не дублируются в UI: их приносит `/meta` — два словаря из
+ * `core/config.py` (фаза A):
+ *
+ * * `freq_bands` — 7 базовых октавных полос (сетка спектра, кнопки «Ритмы»);
+ * * `functional_bands` — 6 функциональных ритмов (μ, σ, κ, τ, λ, ψ): живут
+ *   **только** в списке пресетов фильтра, отдельной группой в `<select>`.
+ *
+ * Пока метаданные не загружены, ритмов в списке нет вовсе (а не «примерно
+ * такие»); «широкий 0.5–128», «свой диапазон», «одиночная частота» и «без
+ * фильтра» работают и без них.
  *
  * Одиночная частота — это узкая полоса `f ± bw/2`: ровно так её считает бэкенд
  * для `single_freq` в предподготовке записи (`services/bandpass_filter.py`),
@@ -38,27 +44,51 @@ export type CalcFilterParams = {
   bandwidthHz: number
 }
 
-/** Границы ввода полосы, Гц: выше 100 Гц полосу задавать нечем (это выше любого ЭЭГ-ритма). */
-export const BAND_RANGE: [number, number] = [0.1, 100]
-export const SINGLE_FREQ_RANGE: [number, number] = [0.5, 70]
+/** Границы ввода полосы, Гц: верх — по сетке `freq_bands` (δ … γ-high до 128). */
+export const BAND_RANGE: [number, number] = [0.1, 128]
+export const SINGLE_FREQ_RANGE: [number, number] = [0.5, 128]
 export const BANDWIDTH_RANGE: [number, number] = [0.1, 10]
 
-/** «Широкий» пресет: 1–40 Гц — та же полоса, что была у расчёта до среза 3.6. */
-export const WIDE_FILTER_BAND: [number, number] = [1, 40]
+/** «Широкий» пресет: вся частотная сетка спектра, Гц (0.5–128, фаза A). */
+export const WIDE_FILTER_BAND: [number, number] = [0.5, 128]
 
 /** Порядок ритмов в списке — от медленного к быстрому (как в `core/config.py`). */
-export const RHYTHM_PRESETS = ['delta', 'theta', 'alpha', 'beta', 'gamma'] as const
+export const RHYTHM_PRESETS = [
+  'delta',
+  'delta_theta',
+  'theta',
+  'alpha',
+  'beta',
+  'gamma',
+  'high_gamma',
+] as const
 
 export type RhythmPresetId = (typeof RHYTHM_PRESETS)[number]
 
-/** Пресеты списка «Фильтр расчёта». Ритмы узнаются по ключам `freq_bands`. */
-export type CalcFilterPresetId = 'band_1_40' | RhythmPresetId | 'single' | 'custom' | 'none'
+/** Функциональные ритмы: границы приходят из `/meta.functional_bands`. */
+export const FUNCTIONAL_PRESETS = ['mu', 'sigma', 'kappa', 'tau', 'lambda', 'psi'] as const
+
+export type FunctionalPresetId = (typeof FUNCTIONAL_PRESETS)[number]
+
+/** Заголовок группы функциональных ритмов в `<select>` (отдельный `<optgroup>`). */
+export const FUNCTIONAL_GROUP = 'Функциональные ритмы'
+
+/** Пресеты списка «Фильтр расчёта». Ритмы узнаются по ключам словарёв `/meta`. */
+export type CalcFilterPresetId =
+  | 'band_1_40'
+  | RhythmPresetId
+  | FunctionalPresetId
+  | 'single'
+  | 'custom'
+  | 'none'
 
 export type FilterPresetOption = {
   value: CalcFilterPresetId
   label: string
   /** Полоса пресета, Гц (`null` — пресет полосу не задаёт: «свой»/«одиночная»/«без») */
   band: [number, number] | null
+  /** Группа в списке (отдельный `<optgroup>`); без группы — базовый пункт */
+  group?: string
 }
 
 /** Значения селекта сетевого фильтра: строки, потому что это нативный `<select>`. */
@@ -119,45 +149,70 @@ export function singleFreqBand(freqHz: number, bandwidthHz: number): [number, nu
 }
 
 /**
- * Полоса пресета: ритмы — из `/meta`, «широкий» — 1–40 Гц, «без фильтра» — нет
- * фильтра. У «своего диапазона» и «одиночной частоты» полосы в пресете нет
- * (`null`): её задаёт пользователь, а не таблица пресетов.
+ * Полоса пресета: ритмы — из `/meta` (`freq_bands` + `functional_bands`),
+ * «широкий» — 0.5–128 Гц, «без фильтра» — нет фильтра. У «своего диапазона» и
+ * «одиночной частоты» полосы в пресете нет (`null`): её задаёт пользователь, а
+ * не таблица пресетов.
  */
 export function presetBand(
   preset: CalcFilterPresetId,
   freqBands: Record<string, number[]>,
+  functionalBands: Record<string, number[]> = {},
 ): [number, number] | null {
   if (preset === 'none') return null
   if (preset === 'band_1_40') return WIDE_FILTER_BAND
   if (preset === 'single' || preset === 'custom') return null
-  return normalizeFilterBand(freqBands[preset] ?? null)
+  return normalizeFilterBand(freqBands[preset] ?? functionalBands[preset] ?? null)
 }
 
 /**
  * Полоса для выбранного в списке пресета: у ритмов и «широкого» — из пресета,
  * у «одиночной частоты» — по запомненным частоте и ширине, у «своего» — текущая
- * полоса (поля показывают то же число) с откатом к 1–40, если фильтра не было.
+ * полоса (поля показывают то же число) с откатом к 0.5–128, если фильтра не было.
  */
 export function bandForPreset(
   params: CalcFilterParams,
   preset: CalcFilterPresetId,
   freqBands: Record<string, number[]>,
+  functionalBands: Record<string, number[]> = {},
 ): [number, number] | null {
   if (preset === 'single') return singleFreqBand(params.singleFreqHz, params.bandwidthHz)
   if (preset === 'custom') return params.filterBandHz ?? WIDE_FILTER_BAND
-  return presetBand(preset, freqBands)
+  return presetBand(preset, freqBands, functionalBands)
 }
 
-/** Список пресетов панели: ритмы — из `freq_bands`, порядок — δ, θ, α, β, γ. */
-export function filterPresetOptions(freqBands: Record<string, number[]>): FilterPresetOption[] {
+/**
+ * Список пресетов панели: широкий → базовые ритмы (δ … γ-high, из `freq_bands`)
+ * → группа функциональных ритмов (из `functional_bands`, отдельный `<optgroup>`)
+ * → одиночная частота, свой, без фильтра.
+ */
+export function filterPresetOptions(
+  freqBands: Record<string, number[]>,
+  functionalBands: Record<string, number[]> = {},
+): FilterPresetOption[] {
   const options: FilterPresetOption[] = [
-    { value: 'band_1_40', label: `1–${WIDE_FILTER_BAND[1]} Гц (широкий)`, band: WIDE_FILTER_BAND },
+    {
+      value: 'band_1_40',
+      label: `${WIDE_FILTER_BAND[0]}–${WIDE_FILTER_BAND[1]} Гц (широкий)`,
+      band: WIDE_FILTER_BAND,
+    },
   ]
   for (const rhythm of RHYTHM_PRESETS) {
     const band = normalizeFilterBand(freqBands[rhythm] ?? null)
     // Ритма нет в конфиге сервера — не выдумываем диапазон «на глаз»
     if (band === null) continue
     options.push({ value: rhythm, label: `${BAND_LABELS[rhythm]} ${filterBandText(band)}`, band })
+  }
+  for (const rhythm of FUNCTIONAL_PRESETS) {
+    const band = normalizeFilterBand(functionalBands[rhythm] ?? null)
+    // Функционального ритма нет в метаданных — пункта нет (как и у базовых)
+    if (band === null) continue
+    options.push({
+      value: rhythm,
+      label: `${BAND_LABELS[rhythm]} ${filterBandText(band)}`,
+      band,
+      group: FUNCTIONAL_GROUP,
+    })
   }
   options.push({ value: 'single', label: 'Одиночная частота', band: null })
   options.push({ value: 'custom', label: 'Свой диапазон', band: null })
@@ -169,8 +224,12 @@ export function filterPresetOptions(freqBands: Record<string, number[]>): Filter
 export function filterPresetLabel(
   preset: CalcFilterPresetId,
   freqBands: Record<string, number[]>,
+  functionalBands: Record<string, number[]> = {},
 ): string {
-  return filterPresetOptions(freqBands).find((option) => option.value === preset)?.label ?? preset
+  return (
+    filterPresetOptions(freqBands, functionalBands).find((option) => option.value === preset)
+      ?.label ?? preset
+  )
 }
 
 /**
@@ -187,10 +246,11 @@ export function filterPresetLabel(
 export function filterPresetOf(
   params: Omit<CalcFilterParams, 'filterPreset'>,
   freqBands: Record<string, number[]>,
+  functionalBands: Record<string, number[]> = {},
 ): CalcFilterPresetId {
   const band = params.filterBandHz
   if (band === null) return 'none'
-  for (const option of filterPresetOptions(freqBands)) {
+  for (const option of filterPresetOptions(freqBands, functionalBands)) {
     if (option.band && sameBand(band, option.band)) return option.value
   }
   const single = singleFreqBand(params.singleFreqHz, params.bandwidthHz)
@@ -204,12 +264,18 @@ export function filterBandText(band: readonly number[] | null): string {
 }
 
 /** Название пресета **без чисел**: числа печатает итоговая подпись по полосе. */
-function presetName(preset: CalcFilterPresetId, freqBands: Record<string, number[]>): string {
-  if (preset === 'band_1_40') return `${WIDE_FILTER_BAND[0]}–${WIDE_FILTER_BAND[1]} Гц (широкий)`
+function presetName(
+  preset: CalcFilterPresetId,
+  freqBands: Record<string, number[]>,
+  functionalBands: Record<string, number[]> = {},
+): string {
+  // Числа «широкого» и так печатает полоса: дублировать их в имени — только
+  // путать («0.5–128 Гц (широкий) 1–40 Гц» у сохранённых старых параметров)
+  if (preset === 'band_1_40') return 'широкий'
   if (preset === 'custom') return 'свой диапазон'
   if (preset === 'single') return 'одиночная частота'
   if (preset === 'none') return 'без полосового фильтра'
-  return BAND_LABELS[preset] ?? String(filterPresetLabel(preset, freqBands))
+  return BAND_LABELS[preset] ?? String(filterPresetLabel(preset, freqBands, functionalBands))
 }
 
 /**
@@ -222,6 +288,7 @@ function presetName(preset: CalcFilterPresetId, freqBands: Record<string, number
 export function filterSummary(
   params: CalcFilterParams,
   freqBands: Record<string, number[]> = {},
+  functionalBands: Record<string, number[]> = {},
 ): string {
   const notch = params.notchHz ? `сетевой фильтр ${params.notchHz} Гц` : 'без сетевого фильтра'
   if (params.filterBandHz === null) return `без полосового фильтра · ${notch}`
@@ -230,7 +297,7 @@ export function filterSummary(
       params.filterBandHz,
     )}, ширина ${params.bandwidthHz} Гц) · ${notch}`
   }
-  return `${presetName(params.filterPreset, freqBands)} ${filterBandText(
+  return `${presetName(params.filterPreset, freqBands, functionalBands)} ${filterBandText(
     params.filterBandHz,
   )} · ${notch}`
 }
@@ -242,7 +309,8 @@ export function filterPresetIsValid(preset: string): preset is CalcFilterPresetI
     preset === 'single' ||
     preset === 'custom' ||
     preset === 'none' ||
-    (RHYTHM_PRESETS as readonly string[]).includes(preset)
+    (RHYTHM_PRESETS as readonly string[]).includes(preset) ||
+    (FUNCTIONAL_PRESETS as readonly string[]).includes(preset)
   )
 }
 

@@ -17,6 +17,7 @@ import { api } from '@/shared/api/client'
 import {
   BANDWIDTH_RANGE,
   NOTCH_OPTIONS,
+  RHYTHM_PRESETS,
   SINGLE_FREQ_RANGE,
   filterBandText,
   filterPresetOptions,
@@ -80,10 +81,11 @@ export function EegPanel() {
     retry: false,
   })
   const freqBands = meta.data?.freq_bands ?? {}
+  const functionalBands = meta.data?.functional_bands ?? {}
   const demoChannels = demo?.channels ?? []
   const channelOptionsList = channelOptions(recording, demoChannels)
   const channel = resolveChannel(recording, demoChannels, params.channel)
-  const presets = filterPresetOptions(freqBands)
+  const presets = filterPresetOptions(freqBands, functionalBands)
   const stale = result !== null && !eegResultMatchesParams(result, params)
   const fullFreq = grid ? ([0, grid.fmaxHz] as [number, number]) : null
 
@@ -306,7 +308,10 @@ export function EegPanel() {
       <Panel title="Окно частот" hint="Срез уже полученной сетки: запросов не делает.">
         <FieldRow label="Ритмы">
           <div className="flex flex-wrap items-center gap-2">
-            {Object.entries(BAND_LABELS).map(([name, label]) => {
+            {/* Кнопки — только базовые октавные полосы (`freq_bands`); функциональные
+                ритмы живут в списке пресетов фильтра и здесь не мешают */}
+            {RHYTHM_PRESETS.map((name) => {
+              const label = BAND_LABELS[name] ?? name
               const band = freqBands[name]
               return (
                 <Button
@@ -360,8 +365,12 @@ export function EegPanel() {
         <SelectField
           label="Полоса"
           value={params.filter.filterPreset}
-          options={presets.map((option) => ({ value: option.value, label: option.label }))}
-          onChange={(value) => setFilterPreset(value, freqBands)}
+          options={presets.map((option) => ({
+            value: option.value,
+            label: option.label,
+            group: option.group,
+          }))}
+          onChange={(value) => setFilterPreset(value, freqBands, functionalBands)}
           hint={
             Object.keys(freqBands).length === 0
               ? 'Диапазоны ритмов придут из метаданных сервера.'
@@ -422,7 +431,7 @@ export function EegPanel() {
           onChange={(value) => setNotchHz(notchFromOption(value))}
         />
         <p className="ui-list-row py-1 text-sm text-fg-2">
-          {filterSummary(params.filter, freqBands)}
+          {filterSummary(params.filter, freqBands, functionalBands)}
         </p>
       </Panel>
 

@@ -219,11 +219,17 @@ describe('панель раздела «Диполи»', () => {
 
     const select = await screen.findByLabelText('Фильтр расчёта')
     // Подпись несёт границы с сервера — UI их не выдумывает
-    expect(await screen.findByRole('option', { name: 'α — альфа 8–13 Гц' })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('option', { name: 'α/низкий β — альфа/низкий бета 8–16 Гц' }),
+    ).toBeInTheDocument()
+    // Функциональные ритмы — отдельная группа пунктов (фаза A)
+    expect(
+      screen.getByRole('option', { name: 'μ — мю 8–13 Гц' }),
+    ).toBeInTheDocument()
 
     await user.selectOptions(select, 'alpha')
 
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([8, 13])
+    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([8, 16])
     // Выбор пресета — не запуск: из запросов только метаданные
     const urls = fetchSpy.mock.calls.map(([input]) => String(input))
     expect(urls.every((url) => url.includes('/meta'))).toBe(true)
@@ -278,18 +284,18 @@ describe('панель раздела «Диполи»', () => {
     const select = await screen.findByLabelText('Фильтр расчёта')
     await user.selectOptions(select, 'custom')
 
-    // Полоса по умолчанию (1–40 Гц) совпадает с «широким» пресетом: список не
+    // Полоса по умолчанию (0.5–128 Гц) совпадает с «широким» пресетом: список не
     // должен «отскакивать» назад и прятать поля, иначе свою полосу не ввести
     expect(useDipoleCalc.getState().params.filterPreset).toBe('custom')
     expect(select).toHaveValue('custom')
-    expect(screen.getByLabelText('Полоса от')).toHaveValue(1)
-    expect(screen.getByLabelText('Полоса до')).toHaveValue(40)
+    expect(screen.getByLabelText('Полоса от')).toHaveValue(0.5)
+    expect(screen.getByLabelText('Полоса до')).toHaveValue(128)
 
     // Правка поля переводит полосу и остаётся «своим диапазоном»
     const to = screen.getByLabelText('Полоса до')
     await user.clear(to)
     await user.type(to, '35')
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([1, 35])
+    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([0.5, 35])
     expect(useDipoleCalc.getState().params.filterPreset).toBe('custom')
   })
 

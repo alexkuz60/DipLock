@@ -705,7 +705,10 @@ export type MetaResponse = {
    */
   channel_positions: Record<string, number[]>
   epoch_lengths_ms: number[]
+  /** Базовые октавные полосы (ключи стабильны — адрес результатов), источник — core/config.py */
   freq_bands: Record<string, number[]>
+  /** Функциональные ритмы (μ, σ, κ, τ, λ, ψ) — только пресеты фильтра диполей */
+  functional_bands: Record<string, number[]>
   /** Уровни пирамиды сигналов вьюера (множители зума ×1…×16) */
   signal_levels: number[]
   /** Точек на канал на уровне ×1 (2 × ширина вьюпорта) */

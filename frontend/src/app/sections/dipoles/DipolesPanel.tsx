@@ -113,13 +113,14 @@ export function DipolesPanel() {
   // Диапазоны ритмов — тот же `/meta`, из которого берутся длины эпох: список
   // пресетов не дублирует числа конфига сервера в коде UI
   const freqBands = meta.data?.freq_bands ?? {}
-  const presetOptions = filterPresetOptions(freqBands)
+  const functionalBands = meta.data?.functional_bands ?? {}
+  const presetOptions = filterPresetOptions(freqBands, functionalBands)
   // Показываем выбор пользователя; если такого пункта в текущих метаданных нет
   // (ритм убрали из конфига сервера), берём пресет по полосе — значение списка
   // не должно «повисать» вне его пунктов
   const filterPreset = presetOptions.some((option) => option.value === calcParams.filterPreset)
     ? calcParams.filterPreset
-    : filterPresetOf(calcParams, freqBands)
+    : filterPresetOf(calcParams, freqBands, functionalBands)
   const filterBand = calcParams.filterBandHz ?? WIDE_FILTER_BAND
   // Результат посчитан на других параметрах: панель обязана сказать это явно,
   // а не выглядеть «актуальной» (та же подпись, что в таблице локализации)
@@ -249,8 +250,8 @@ export function DipolesPanel() {
         <SelectField
           label="Фильтр расчёта"
           value={filterPreset}
-          options={presetOptions.map(({ value, label }) => ({ value, label }))}
-          onChange={(value) => setFilterPreset(value, freqBands)}
+          options={presetOptions.map(({ value, label, group }) => ({ value, label, group }))}
+          onChange={(value) => setFilterPreset(value, freqBands, functionalBands)}
           hint="Полоса уходит в задачу как band_min/band_max. Диапазоны ритмов приходят с сервера (/meta), одиночная частота — узкая полоса f ± bw/2. Правка ничего не запускает."
         />
         {filterPreset === 'single' ? (
@@ -309,7 +310,7 @@ export function DipolesPanel() {
           hint="50/60 Гц: подавляет наводку сети. Уходит в задачу как notch_hz."
         />
         <p className="mt-2 text-sm text-fg-2">
-          {`В расчёт уйдёт: ${filterSummary(calcParams, freqBands)}`}
+          {`В расчёт уйдёт: ${filterSummary(calcParams, freqBands, functionalBands)}`}
         </p>
 
         <SelectField

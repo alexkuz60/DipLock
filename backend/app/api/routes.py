@@ -1200,6 +1200,10 @@ async def get_meta() -> MetaResponse:
             name: [float(fmin), float(fmax)]
             for name, (fmin, fmax) in settings.freq_bands.items()
         },
+        functional_bands={
+            name: [float(fmin), float(fmax)]
+            for name, (fmin, fmax) in settings.functional_bands.items()
+        },
         signal_levels=[int(level) for level in settings.signal_levels],
         signal_base_points=settings.signal_base_points,
         artifact_thresholds=ArtifactThresholds(

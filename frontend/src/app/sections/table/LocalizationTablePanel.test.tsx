@@ -88,7 +88,7 @@ describe('панель раздела «Таблица локализации»'
     expect(screen.getByText('Строк: 4')).toBeInTheDocument()
     expect(screen.getByText('Метод: fast_grid, сетка 7 мм')).toBeInTheDocument()
     expect(screen.getByText('Эпох в расчёте: 4 из 4')).toBeInTheDocument()
-    expect(screen.getByText('Полоса: 1–40 Гц')).toBeInTheDocument()
+    expect(screen.getByText('Полоса: 0.5–128 Гц')).toBeInTheDocument()
     expect(screen.queryByText('Результата нет')).not.toBeInTheDocument()
   })
 

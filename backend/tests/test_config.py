@@ -1,13 +1,41 @@
 """Тесты конфигурации: единый источник DRY для диапазонов и длин эпох."""
 from app.core.config import Settings, settings
 
+# Базовые октавные полосы (фаза A): ключи стабильны — это адрес результатов
+# (кэш топокарт, строки БД), поэтому тест фиксирует и набор, и границы.
+FREQ_BANDS_EXACT = {
+    "delta": (0.5, 2),
+    "delta_theta": (2, 4),
+    "theta": (4, 8),
+    "alpha": (8, 16),
+    "beta": (16, 32),
+    "gamma": (32, 64),
+    "high_gamma": (64, 128),
+}
+
+# Функциональные ритмы — только пресеты фильтра (не участвуют в спектре).
+FUNCTIONAL_BANDS_EXACT = {
+    "mu": (8, 13),
+    "sigma": (11, 16),
+    "kappa": (8, 12),
+    "tau": (8, 9),
+    "lambda": (4, 5),
+    "psi": (35, 55),
+}
+
 
 def test_freq_bands_exact_set():
-    assert set(settings.freq_bands) == {"delta", "theta", "alpha", "beta", "gamma"}
+    assert settings.freq_bands == FREQ_BANDS_EXACT
+
+
+def test_functional_bands_exact_set():
+    assert settings.functional_bands == FUNCTIONAL_BANDS_EXACT
+    # Функциональные ритмы — отдельный словарь: в спектр/топокартах их нет
+    assert set(settings.functional_bands).isdisjoint(settings.freq_bands)
 
 
 def test_freq_bands_intervals_valid():
-    for name, (fmin, fmax) in settings.freq_bands.items():
+    for name, (fmin, fmax) in {**settings.freq_bands, **settings.functional_bands}.items():
         assert 0 < fmin < fmax, f"диапазон {name} некорректен"
 
 

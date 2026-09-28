@@ -81,6 +81,7 @@ from app.services import journal
 from app.services.cache_store import cache_clear, cache_path, cache_write
 from app.services.edf_loader import _MONTAGE_NAMES
 from app.services.epoch_segmenter import segment_epochs
+from app.services.filter_design import nyquist_ceiling_hz
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
 from app.utils.png import encode_png_rgba8
@@ -94,7 +95,7 @@ matplotlib.use("Agg")
 logger = logging.getLogger(__name__)
 
 # Окно Welch: длиннее 256 отсчётов смысла нет (частотное разрешение и так выше,
-# чем нужно для диапазонов шириной 3–17 Гц), а коротким эпохам окно урезается.
+# чем нужно для октавных полос), а коротким эпохам окно урезается.
 SPECTRUM_N_FFT = 256
 
 # Методы оценки PSD (N17): Welch — привычный, multitaper (DPSS) — для коротких
@@ -429,8 +430,22 @@ def _compute_psd(
     n_times = len(epochs.times)
     sfreq = float(epochs.info["sfreq"])
     n_fft = int(min(max(4, params.n_fft), n_times))
+    # Ось PSD — пересечение сетки `freq_bands` и полосы фильтра: сигнал **вне**
+    # полосы отфильтрован, и числа там — околонулевой шум, а не спектр (по ним
+    # 1/f-фит «раздувал» бы наклон, а бинов вне оси у диапазона честно нет —
+    # None). Потолок — Найквист − 2 Гц: сетка доходит до 128 Гц, а запись может
+    # быть 250 Гц (MNE: «fmax must not exceed ½ the sampling frequency»).
     fmin = min(band[0] for band in cfg.freq_bands.values())
     fmax = max(band[1] for band in cfg.freq_bands.values())
+    if params.filter_band is not None:
+        fmin = max(fmin, params.filter_band[0])
+        fmax = min(fmax, params.filter_band[1])
+    fmax = min(fmax, nyquist_ceiling_hz(sfreq))
+    if fmin >= fmax:
+        raise SpectrumError(
+            f"Полоса фильтра {params.filter_band} целиком выше частотного предела "
+            f"записи (Найквист − 2 Гц = {nyquist_ceiling_hz(sfreq):g} Гц)"
+        )
 
     if params.psd_method == "multitaper":
         bandwidth = max(SPECTRUM_MULTITAPER_BANDWIDTH_HZ, 2.0 * sfreq / n_times)

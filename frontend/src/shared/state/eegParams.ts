@@ -163,7 +163,7 @@ export const EEG_PARAM_DEFAULTS: EegParams = {
   spectrogram: { windowMs: 500, overlapPct: 75, fmaxHz: 40 },
   filter: {
     filterPreset: 'band_1_40',
-    filterBandHz: [1, 40],
+    filterBandHz: [0.5, 128],
     notchHz: null,
     singleFreqHz: 7.83,
     bandwidthHz: 0.5,
@@ -375,7 +375,11 @@ export type EegState = {
   /** Окно частот: кнопки ритмов, поля «от/до», «весь диапазон» — только просмотр */
   setFreqWindow: (window: FreqWindow | null) => void
   setSpectrogramParams: (patch: Partial<EegSpectrogramParams>) => void
-  setFilterPreset: (preset: CalcFilterPresetId, freqBands: Record<string, number[]>) => void
+  setFilterPreset: (
+    preset: CalcFilterPresetId,
+    freqBands: Record<string, number[]>,
+    functionalBands?: Record<string, number[]>,
+  ) => void
   setFilterBand: (band: [number, number]) => void
   setNotchHz: (value: number | null) => void
   setSingleFreq: (value: number) => void
@@ -427,14 +431,19 @@ export const useEegParams = create<EegState>()(
             spectrogram: { ...state.params.spectrogram, ...patch },
           }),
         })),
-      setFilterPreset: (preset, freqBands) =>
+      setFilterPreset: (preset, freqBands, functionalBands = {}) =>
         set((state) => ({
           params: {
             ...state.params,
             filter: {
               ...state.params.filter,
               filterPreset: preset,
-              filterBandHz: bandForPreset(state.params.filter, preset, freqBands),
+              filterBandHz: bandForPreset(
+                state.params.filter,
+                preset,
+                freqBands,
+                functionalBands,
+              ),
             },
           },
         })),

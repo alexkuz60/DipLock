@@ -164,7 +164,24 @@ def test_meta_endpoint_returns_environment(client):
     assert body["app_version"] == settings.app_version
     assert body["python_version"] and body["mne_version"] and body["numpy_version"]
     assert body["database_backend"].split("+")[0] in ("sqlite", "postgresql")
-    assert body["freq_bands"]["alpha"] == [8.0, 13.0]
+    assert body["freq_bands"] == {
+        "delta": [0.5, 2.0],
+        "delta_theta": [2.0, 4.0],
+        "theta": [4.0, 8.0],
+        "alpha": [8.0, 16.0],
+        "beta": [16.0, 32.0],
+        "gamma": [32.0, 64.0],
+        "high_gamma": [64.0, 128.0],
+    }
+    # Функциональные ритмы — отдельным полем (только пресеты фильтра, фаза A)
+    assert body["functional_bands"] == {
+        "mu": [8.0, 13.0],
+        "sigma": [11.0, 16.0],
+        "kappa": [8.0, 12.0],
+        "tau": [8.0, 9.0],
+        "lambda": [4.0, 5.0],
+        "psi": [35.0, 55.0],
+    }
     assert body["standard_channels"] == list(settings.standard_channels)
     assert body["surface_url"] == f"{_PREFIX}/surface"
     assert body["max_concurrent_jobs"] >= 1

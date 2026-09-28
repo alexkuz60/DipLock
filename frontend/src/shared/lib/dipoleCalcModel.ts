@@ -100,7 +100,7 @@ export type CalcParams = {
 
 export const CALC_PARAM_DEFAULTS: CalcParams = {
   filterPreset: 'band_1_40',
-  filterBandHz: [1, 40],
+  filterBandHz: [0.5, 128],
   notchHz: null,
   // Значения одиночной частоты — заготовка формы: 7.83 Гц (частота Шумана) с
   // полосой ±0.25 Гц. Ширина по умолчанию та же, что у предподготовки записи
@@ -412,8 +412,8 @@ export function normalizeCalcParams(params: CalcParams): CalcParams {
   const storedPreset = filterPresetIsValid(params.filterPreset) ? params.filterPreset : 'custom'
   // Пара «пресет + полоса» должна быть непротиворечивой: пустая полоса — только у
   // «без фильтра», а непустая не может стоять у него же. Пресет при этом берём из
-  // полосы (`filterPresetOf` без метаданных: 1–40 → «широкий», полоса одиночной
-  // частоты → «одиночная», иначе «свой диапазон» — его поля покажут эти числа).
+  // полосы (`filterPresetOf` без метаданных: «широкий» 0.5–128 узнаётся сам, полоса
+  // одиночной частоты → «одиночная», иначе «свой диапазон» — его поля покажут эти числа).
   const filterPreset =
     filterBandHz === null
       ? 'none'
