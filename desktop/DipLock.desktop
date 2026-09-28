@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=DipLock
+Name[ru]=DipLock
+Comment=Анализ ЭЭГ и 3D-локализация токовых диполей
+Comment[en]=EEG analysis and 3D localization of current dipoles
+Exec=/home/alexkuz60/DipLock/start.sh
+Icon=diplock
+Terminal=false
+Categories=Science;
+Keywords=EEG;EDF;dipole;ЭЭГ;диполи;
+StartupNotify=true

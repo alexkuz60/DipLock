@@ -118,6 +118,21 @@ npm run build:watch # автосборка туда же при правках: 
 Legacy-страница с прогрессом инициализации осталась доступна по `/legacy`.
 Статус фаз, принципы интерфейса и план работ — `docs/ui.md`.
 
+## 🖥 Запуск с рабочего стола (единый лаунчер)
+
+```bash
+./start.sh            # поднять сервер (или только открыть UI, если уже поднят)
+./start.sh status     # жив ли процесс и /health
+./start.sh stop       # остановить сервер по PID-файлу
+
+bash desktop/install-desktop.sh          # ярлык «DipLock» в меню приложений (+иконка)
+bash desktop/install-desktop.sh remove   # удалить ярлык
+```
+
+Лаунчер стартует `uvicorn` из `backend/venv` на `127.0.0.1:8000` (без `--reload`),
+ждёт `/health` и открывает `http://localhost:8000/ui/` в браузере. Лог и PID —
+`data/logs/server.log` / `server.pid`. Работает только собранная версия UI
+(`cd frontend && npm run build`); sudo не нужно — ярлык ставится в `~/.local/share`.
 
 ---
 
