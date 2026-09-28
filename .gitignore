@@ -107,3 +107,6 @@ task.md
 
 # --- SageMath ---
 *.sage.py
+
+# --- Служебные каталоги ИИ-агентов ---
+.commandcode/
