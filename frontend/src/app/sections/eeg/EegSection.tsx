@@ -65,7 +65,7 @@ import { artifactZonesForChannels, zonesInWindow } from '@/shared/lib/eegArtifac
 import { artifactCounts, visibleZones } from '@/shared/lib/viewerLayers'
 import { useEdfParams, type ArtifactKind } from '@/shared/state/edfParams'
 import { TIME_LEVELS, eegResultMatchesParams, useEegParams } from '@/shared/state/eegParams'
-import { useEdfRecording } from '@/shared/state/edfRecording'
+import { useEdfRecording, useSignalLayerFrames } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
@@ -111,9 +111,9 @@ export function EegSection() {
   return <EegRecording recording={recording} levels={levels} />
 }
 
-/** Запись раздела: догрузка уровня пирамиды сигналов и передача кадра рабочей области. */
+/** Запись раздела: догрузка уровня пирамиды активного слоя и передача кадра рабочей области. */
 function EegRecording({ recording, levels }: { recording: RecordingMeta; levels: number[] }) {
-  const frames = useEdfRecording((state) => state.signalFrames)
+  const { layer, frames } = useSignalLayerFrames()
   const pending = useEdfRecording((state) => state.signalsPending)
   const signalsError = useEdfRecording((state) => state.signalsError)
   const loadSignals = useEdfRecording((state) => state.loadSignals)
@@ -121,14 +121,15 @@ function EegRecording({ recording, levels }: { recording: RecordingMeta; levels:
   const level = resolveSignalLevel(TIME_LEVELS[levelIndex] ?? 1, levels)
   const baseLevel = resolveSignalLevel(levels[0] ?? 1, levels)
 
-  // Уровень ×1 — мгновенный вид «вся сессия»: грузим сразу, ещё до первого зума
+  // Уровень ×1 — мгновенный вид «вся сессия»: грузим сразу, ещё до первого зума;
+  // слой видимости общий с EDF (шаг 2 плана) — кадр ЭЭГ тоже ленивый по слою
   useEffect(() => {
-    void loadSignals(baseLevel)
-  }, [loadSignals, baseLevel, recording.recording_id])
+    void loadSignals(baseLevel, layer)
+  }, [loadSignals, baseLevel, layer, recording.recording_id])
 
   useEffect(() => {
-    void loadSignals(level)
-  }, [loadSignals, level, recording.recording_id])
+    void loadSignals(level, layer)
+  }, [loadSignals, level, layer, recording.recording_id])
 
   const frame = selectFrame(frames, level)
   if (signalsError && !frame) {
@@ -137,7 +138,7 @@ function EegRecording({ recording, levels }: { recording: RecordingMeta; levels:
         <ErrorBlock
           title="Не удалось получить сигналы записи"
           message={signalsError}
-          onRetry={() => void loadSignals(level)}
+          onRetry={() => void loadSignals(level, layer)}
         />
       </div>
     )

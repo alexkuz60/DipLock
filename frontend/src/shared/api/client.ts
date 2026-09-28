@@ -18,6 +18,8 @@ import type {
   MetaResponse,
   PreprocessResult,
   RecordingMeta,
+  SignalLayer,
+  SignalsPrepQuery,
   SpectrogramResult,
   SpectrumResult,
 } from './types'
@@ -215,17 +217,34 @@ export const api = {
 
   /**
    * Сигналы записи для вьюера: бинарный контейнер float32 (срез 2.5).
-   * `level` — множитель зума из `signal_levels` (`/meta`).
+   * `level` — множитель зума из `signal_levels` (`/meta`); `options.layer` —
+   * слой видимости (шаг 2 плана), `options.prep` — параметры подготовленной
+   * базы слоёв `cleaned`/`diff` (форма стадии «Фильтр и референс» в query).
    */
   recordingSignals: async (
     recordingId: string,
     level: number,
-    signal?: AbortSignal,
+    options?: {
+      layer?: SignalLayer
+      prep?: SignalsPrepQuery
+      signal?: AbortSignal
+    },
   ): Promise<ArrayBuffer> => {
-    const path = `${API_PREFIX}/recordings/${recordingId}/signals?level=${level}`
+    const layer = options?.layer ?? 'raw'
+    const query = new URLSearchParams({ level: String(level), layer })
+    // Параметры подготовки — только непустые: пустой query у сырого слоя
+    // не меняет его семантику (сервер читает их только для cleaned/diff).
+    if (layer !== 'raw') {
+      for (const [key, value] of Object.entries(options?.prep ?? {})) {
+        if (value !== undefined && value !== null && value !== '') {
+          query.set(key, String(value))
+        }
+      }
+    }
+    const path = `${API_PREFIX}/recordings/${recordingId}/signals?${query.toString()}`
     let response: Response
     try {
-      response = await fetch(path, { signal })
+      response = await fetch(path, { signal: options?.signal })
     } catch (cause) {
       throw new ApiError('Сервер недоступен (проверьте, запущен ли backend)', 0, cause)
     }

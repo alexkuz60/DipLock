@@ -23,7 +23,7 @@ import type { RecordingMeta } from '@/shared/api/types'
 import { DEMO_CHANNELS } from '@/shared/lib/demoSignal'
 import { selectFrame, resolveSignalLevel } from '@/shared/lib/signalFrame'
 import { eventMarks } from '@/shared/lib/viewerLayers'
-import { acceptEdfFile, useEdfRecording } from '@/shared/state/edfRecording'
+import { acceptEdfFile, useEdfRecording, useSignalLayerFrames } from '@/shared/state/edfRecording'
 import { TIME_LEVELS, useEdfParams } from '@/shared/state/edfParams'
 import { Button } from '@/shared/ui/Button'
 import { cx } from '@/shared/ui/cx'
@@ -146,7 +146,7 @@ function Dropzone({
   )
 }
 
-/** Треки записи: догрузка уровня пирамиды + состояния loading/error/stale. */
+/** Треки записи: догрузка уровня пирамиды активного слоя + состояния loading/error/stale. */
 function RecordingTracks({
   recording,
   levels,
@@ -155,7 +155,7 @@ function RecordingTracks({
   /** Доступные уровни пирамиды (множители зума из `/meta`) */
   levels: number[]
 }) {
-  const frames = useEdfRecording((state) => state.signalFrames)
+  const { layer, frames, stale } = useSignalLayerFrames()
   const pending = useEdfRecording((state) => state.signalsPending)
   const signalsError = useEdfRecording((state) => state.signalsError)
   const loadSignals = useEdfRecording((state) => state.loadSignals)
@@ -167,14 +167,15 @@ function RecordingTracks({
   const baseLevel = resolveSignalLevel(levels[0] ?? 1, levels)
 
   // Уровень ×1 — мгновенный вид «вся сессия»: грузим его сразу, ещё до того,
-  // как пользователь начнёт зумить (docs/ui.md §8).
+  // как пользователь начнёт зумить (docs/ui.md §8). Слой в ключе: смена вида
+  // лениво догружает свой кадр, не трогая остальные уровни и стадии.
   useEffect(() => {
-    void loadSignals(baseLevel)
-  }, [loadSignals, baseLevel, recording.recording_id])
+    void loadSignals(baseLevel, layer)
+  }, [loadSignals, baseLevel, layer, recording.recording_id])
 
   useEffect(() => {
-    void loadSignals(level)
-  }, [loadSignals, level, recording.recording_id])
+    void loadSignals(level, layer)
+  }, [loadSignals, level, layer, recording.recording_id])
 
   const frame = selectFrame(frames, level)
   const loaded = Boolean(frames[level])
@@ -185,7 +186,7 @@ function RecordingTracks({
         <ErrorBlock
           title="Не удалось получить сигналы записи"
           message={signalsError}
-          onRetry={() => void loadSignals(level)}
+          onRetry={() => void loadSignals(level, layer)}
         />
       ) : !frame ? (
         <LoadingBlock label={`Чтение сигналов записи (уровень ×${level})…`} />
@@ -195,10 +196,15 @@ function RecordingTracks({
             <ErrorBlock
               title="Уровень не догрузился"
               message={signalsError}
-              onRetry={() => void loadSignals(level)}
+              onRetry={() => void loadSignals(level, layer)}
             />
           ) : null}
-          <TrackStack signal={frame} layers={layers ?? undefined} events={events} />
+          <TrackStack
+            signal={frame}
+            layers={layers ?? undefined}
+            events={events}
+            signalsStale={stale}
+          />
           <p className="tnum px-2 pb-1 text-xs text-fg-2">
             {pending > 0 && !loaded
               ? `Уровень ×${level} догружается — пока показывается ${frame.level > 0 ? `уровень ×${frame.level}` : 'полный сигнал'}`

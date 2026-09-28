@@ -24,6 +24,30 @@ describe('apiErrorText', () => {
 })
 
 describe('api', () => {
+  it('recordingSignals несёт слой и параметры подготовки в query (шаг 2 плана)', async () => {
+    const fetchMock = mockApiFetch()
+
+    await api.recordingSignals('rec1', 2)
+    await api.recordingSignals('rec1', 2, {
+      layer: 'cleaned',
+      prep: { band_min: 1, band_max: 40, clean_method: 'ica', bad_channels: '' },
+    })
+
+    const urls = fetchMock.mock.calls.map(([url]) => String(url))
+    // Сырой слой: только уровень и слой — параметры подготовки не шлются вовсе
+    expect(urls[0]).toContain('level=2')
+    expect(urls[0]).toContain('layer=raw')
+    expect(urls[0]).not.toContain('band_min')
+    // Подготовленные слои: та же форма, что стадия «Фильтр и референс»
+    expect(urls[1]).toContain('layer=cleaned')
+    expect(urls[1]).toContain('band_min=1')
+    expect(urls[1]).toContain('band_max=40')
+    expect(urls[1]).toContain('clean_method=ica')
+    // Пустые значения не засоряют query (notch выключен, bad-каналов нет)
+    expect(urls[1]).not.toContain('notch_hz=')
+    expect(urls[1]).not.toContain('bad_channels')
+  })
+
   it('meta() возвращает разобранный JSON', async () => {
     mockApiFetch()
     const meta = await api.meta()

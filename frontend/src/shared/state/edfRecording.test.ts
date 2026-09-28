@@ -15,6 +15,8 @@ import {
   layersFromResult,
   openRecordingById,
   reconcileEventId,
+  signalsPrepQuery,
+  signalsPrepSignature,
   useEdfRecording,
   validateEdfFile,
 } from '@/shared/state/edfRecording'
@@ -23,6 +25,7 @@ import {
   emptyStageSnapshot,
   stageStateOf,
   useEdfParams,
+  type EdfParams,
 } from '@/shared/state/edfParams'
 import { mockApiFetch } from '@/test/apiMocks'
 import {
@@ -158,7 +161,7 @@ describe('состояние раздела EDF', () => {
     useEdfRecording.getState().finishUpload(recordingFixture)
 
     await useEdfRecording.getState().loadSignals(1)
-    const frame = useEdfRecording.getState().signalFrames[1]
+    const frame = useEdfRecording.getState().signalFrames.raw?.frames[1]
     expect(frame?.sourceId).toBe(recordingFixture.recording_id)
     expect(frame?.channels).toEqual(recordingFixture.channels)
     expect(useEdfRecording.getState().signalsPending).toBe(0)
@@ -194,7 +197,7 @@ describe('состояние раздела EDF', () => {
 
   it('смена записи сбрасывает кэш кадров сигналов и ошибку', () => {
     useEdfRecording.setState({
-      signalFrames: { 1: { level: 1 } as never },
+      signalFrames: { raw: { sig: '', frames: { 1: { level: 1 } as never } } },
       signalsError: 'старая ошибка',
     })
 
@@ -202,6 +205,143 @@ describe('состояние раздела EDF', () => {
 
     expect(useEdfRecording.getState().signalFrames).toEqual({})
     expect(useEdfRecording.getState().signalsError).toBeNull()
+  })
+})
+
+describe('слои видимости сигналов (шаг 2 плана)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useEdfRecording.setState({
+      recording: null,
+      demo: null,
+      signalFrames: {},
+      signalsInFlight: {},
+      signalsPending: 0,
+      signalsError: null,
+      layers: null,
+    })
+    useEdfParams.setState({
+      params: { ...EDF_PARAM_DEFAULTS },
+      availableChannels: [],
+      stageApplied: emptyStageSnapshot(),
+    })
+  })
+
+  it('signalsPrepQuery повторяет форму стадии «Фильтр и референс» только нужным', () => {
+    const params: EdfParams = {
+      ...EDF_PARAM_DEFAULTS,
+      notchHz: 50,
+      notchHarmonics: 2,
+      cleanMethod: 'ica',
+      icaNComponents: 6,
+      badChannels: 'C3, T7',
+      interpolateBads: true,
+    }
+    expect(signalsPrepQuery(params)).toEqual({
+      band_min: 1,
+      band_max: 40,
+      notch_hz: 50,
+      notch_harmonics: 2,
+      bad_channels: 'C3, T7',
+      interpolate_bads: true,
+      clean_method: 'ica',
+      ica_n_components: 6,
+    })
+
+    // Пресет «Без фильтра» — полосы в слое нет; average-референс — без списка каналов
+    const noBand = signalsPrepQuery({ ...EDF_PARAM_DEFAULTS, filterPreset: 'none' })
+    expect(noBand.band_min).toBeUndefined()
+    expect(noBand.reference_channels).toBeUndefined()
+
+    // Референс «по каналам» — списком видимых каналов, ровно как в buildPreprocessForm
+    const custom = signalsPrepQuery({
+      ...EDF_PARAM_DEFAULTS,
+      reference: 'custom',
+      visibleChannels: ['C3', 'C4'],
+    })
+    expect(custom.reference_channels).toBe('C3,C4')
+  })
+
+  it('отпечаток слоя не меняется от правок вида, но ловит смену фильтра/очистки', () => {
+    const base = { ...EDF_PARAM_DEFAULTS }
+    const signature = signalsPrepSignature(base, 'cleaned')
+    // Сырой слой от параметров не зависит
+    expect(signalsPrepSignature(base, 'raw')).toBe('')
+
+    // Правки вида: слой, зум, амплитуда, пороги — отпечаток тот же
+    const viewEdits: Partial<EdfParams> = {
+      signalLayer: 'diff',
+      timeLevel: 2,
+      amplitudeScaleUv: 10,
+      zScoreThreshold: 9,
+    }
+    expect(signalsPrepSignature({ ...base, ...viewEdits }, 'cleaned')).toBe(signature)
+
+    // Правки «Фильтр и референс» — другой отпечаток (кадры слоя устаревают)
+    expect(signalsPrepSignature({ ...base, cleanMethod: 'ica' }, 'cleaned')).not.toBe(signature)
+    expect(signalsPrepSignature({ ...base, notchHz: 50 }, 'cleaned')).not.toBe(signature)
+    expect(signalsPrepSignature({ ...base, filterPreset: 'none' }, 'cleaned')).not.toBe(signature)
+  })
+
+  it('слои грузятся лениво и независимо: свой запрос, свой кадр, общий кэш', async () => {
+    const fetchMock = mockApiFetch()
+    useEdfRecording.getState().finishUpload(recordingFixture)
+
+    await useEdfRecording.getState().loadSignals(1, 'raw')
+    await useEdfRecording.getState().loadSignals(1, 'cleaned')
+
+    const urls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/signals'))
+    expect(urls).toHaveLength(2)
+    expect(urls[0]).toContain('layer=raw')
+    expect(urls[0]).not.toContain('band_min')
+    expect(urls[1]).toContain('layer=cleaned')
+    expect(urls[1]).toContain('band_min=1')
+
+    const frames = useEdfRecording.getState().signalFrames
+    expect(frames.raw?.frames[1]).toBeTruthy()
+    expect(frames.cleaned?.frames[1]).toBeTruthy()
+    expect(frames.cleaned?.sig).toBe(
+      signalsPrepSignature(useEdfParams.getState().params, 'cleaned'),
+    )
+
+    // Повторные вызовы кэшируются по слою — запросов больше нет
+    await useEdfRecording.getState().loadSignals(1, 'raw')
+    await useEdfRecording.getState().loadSignals(1, 'cleaned')
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/signals')),
+    ).toHaveLength(2)
+    expect(useEdfRecording.getState().signalsPending).toBe(0)
+  })
+
+  it('правка параметра очистки: кэш виден до перезапроса, новый отпечаток начинает слой заново', async () => {
+    const fetchMock = mockApiFetch()
+    useEdfRecording.getState().finishUpload(recordingFixture)
+    await useEdfRecording.getState().loadSignals(1, 'cleaned')
+
+    // Правка вида не делает запросов и не трогает кэш (правило UI)
+    useEdfParams.getState().setParams({ signalLayer: 'diff' })
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/signals')),
+    ).toHaveLength(1)
+    expect(useEdfRecording.getState().signalFrames.cleaned).toBeTruthy()
+
+    // Правка параметра стадии filter: следующий вызов слоя перезапрашивает его
+    useEdfParams.getState().setParams({ cleanMethod: 'ica' })
+    await useEdfRecording.getState().loadSignals(1, 'cleaned')
+
+    const urls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('layer=cleaned'))
+    expect(urls).toHaveLength(2)
+    expect(urls[0]).toContain('clean_method=none')
+    expect(urls[1]).toContain('clean_method=ica')
+
+    const cleaned = useEdfRecording.getState().signalFrames.cleaned
+    expect(cleaned?.sig).toBe(signalsPrepSignature(useEdfParams.getState().params, 'cleaned'))
+    // Кадры разных параметров не смешиваются: новый отпечаток начинает слой заново
+    expect(Object.keys(cleaned?.frames ?? {})).toEqual(['1'])
   })
 })
 

@@ -37,7 +37,7 @@
 | 1 | `POST /analyze` | синхронный полный анализ EDF (legacy-ветка) |
 | 2 | `POST /recordings` | загрузка EDF для просмотра (sha256-дедуп, без обработки) |
 | 3 | `GET /recordings/{id}` | паспорт записи |
-| 4 | `GET /recordings/{id}/signals` | пирамида огибающей ×1…×16 (контейнер `DPS1`, ETag) |
+| 4 | `GET /recordings/{id}/signals` | пирамида огибающей ×1…×16 и слои видимости `layer=raw\|cleaned\|diff` (контейнер `DPS1`, ETag включает слой и параметры подготовки) |
 | 5 | `POST /recordings/{id}/preprocess` | стадия предподготовки: `filter` / `artifacts` / `epochs` |
 | 6 | `GET /recordings/{id}/preprocess/{job_id}` | результат стадии |
 | 7 | `POST /recordings/{id}/spectrum` | спектр δ…γ (Welch или multitaper PSD, `psd_method`; 1/f + пики specparam) |

@@ -20,11 +20,15 @@ import { useMemo } from 'react'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { MetaResponse } from '@/shared/api/types'
+import type { SignalLayer } from '@/shared/api/types'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
 
 // Контракт артефактов живёт в `shared/lib/artifacts.ts` (срез 2.6): цвета селектят
 // и панель, и слои вьюера. Реэкспорт — чтобы раздел импортировал одно место.
 export type { ArtifactKind } from '@/shared/lib/artifacts'
+// Слой видимости — контракт API (`GET …/signals?layer=`); реэкспорт, чтобы
+// разделы брали тип вместе с параметрами из одного места.
+export type { SignalLayer } from '@/shared/api/types'
 export {
   ARTIFACT_COLORS,
   ARTIFACT_KINDS,
@@ -39,6 +43,34 @@ export type ReferenceMode = 'average' | 'custom'
 
 /** Режим навигатора зума в шапке: листание окон или прыжки по номеру артефакта */
 export type NavMode = 'window' | 'artifact'
+
+/**
+ * Варианты слоя видимости треков (шаг 2 плана «слои видимости», 27.09.2026).
+ * Тип — `SignalLayer` (`shared/api/types.ts`, реэкспорт выше): параметр
+ * **вне** `STAGE_PARAM_KEYS`, переключение слоя — отрисовка, расчёт не
+ * запускается и не устаревает. Содержимое слоёв `cleaned`/`diff` собирается
+ * сервером по параметрам стадии «Фильтр и референс» (`signalsPrepQuery`),
+ * лениво и с собственным ETag.
+ */
+export const SIGNAL_LAYER_OPTIONS: { value: SignalLayer; label: string; title: string }[] = [
+  {
+    value: 'raw',
+    label: 'Сырой',
+    title: 'Исходный сигнал записи без обработки — пирамида вьюера (N14: вьюер намеренно сырой)',
+  },
+  {
+    value: 'cleaned',
+    label: 'После очистки',
+    title:
+      'Сигнал расчётов по текущим параметрам «Фильтр и референс»: полоса, notch, референс и очистка — то, что идёт в спектр и диполи',
+  },
+  {
+    value: 'diff',
+    label: 'Разница',
+    title:
+      'Вклад очистки на подготовленной базе: (без очистки) − (с очисткой) — что убрала ICA/SSP, гармоники notch и интерполяция bad-каналов',
+  },
+]
 
 /** Метод артефактуальной очистки (стадия «Фильтр и референс», MNE-only) */
 export type CleanMethod = 'none' | 'ica' | 'ssp'
@@ -137,6 +169,8 @@ export type EdfParams = {
   eventsLayer: boolean
   /** Трек ЧСС (пульс) внизу стека: отрисовка, расчёт не устаревает */
   heartRateTrack: boolean
+  /** Слой видимости треков: отрисовка, расчёт не устаревает (см. SignalLayer) */
+  signalLayer: SignalLayer
   /** Канал графика ERP (просмотр результата); '' — первый видимый */
   erpChannel: string
   /** Baseline ERP-усреднения */
@@ -181,6 +215,8 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   // Трек ЧСС показываем сразу, когда стадия artifacts извлекла ритм; сам ряд
   // приходит со стадией, здесь — только видимость (ключ отрисовки)
   heartRateTrack: true,
+  // Три слоя видимости: по умолчанию сырая пирамида (N14)
+  signalLayer: 'raw',
   erpChannel: '',
   erpBaseline: 'minus200',
   edfUnits: 'auto',
@@ -240,9 +276,10 @@ export const RECALC_STAGE_LABELS: Record<RecalcStage, string> = {
 }
 
 /**
- * Параметры каждой стадии. Зум, шкала мкВ и видимость зон сюда не входят:
- * это отрисовка, а не расчёт. Выбор каналов — исключение: при референсе «по
- * каналам» он меняет результат фильтрации, поэтому относится к стадии «фильтр».
+ * Параметры каждой стадии. Зум, шкала мкВ, видимость зон и **слой сигнала**
+ * (`signalLayer`) сюда не входят: это отрисовка, а не расчёт. Выбор каналов —
+ * исключение: при референсе «по каналам» он меняет результат фильтрации,
+ * поэтому относится к стадии «фильтр».
  */
 export const STAGE_PARAM_KEYS: Record<RecalcStage, (keyof EdfParams)[]> = {
   filter: [

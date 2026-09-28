@@ -44,6 +44,7 @@ from app.api.params import (
     evoked_params,
     parse_filter_band,
     preprocess_params,
+    signals_layer_query,
     spectrogram_params,
     spectrum_params,
     stored_spectrogram_params,
@@ -283,6 +284,21 @@ async def get_recording(recording_id: str) -> RecordingMeta:
 async def get_recording_signals(
     recording_id: str,
     level: int = Query(default=1, ge=1, description="Уровень пирамиды (множитель зума ×1…×16)"),
+    layer: str = Query(
+        default="raw",
+        description="Слой видимости: raw (сырая пирамида) | cleaned (сигнал расчётов) | diff (вклад очистки)",
+    ),
+    # Параметры подготовленной базы слоёв cleaned/diff — та же форма, что у
+    # стадии «Фильтр и референс» (шаг 2 плана «слои видимости»)
+    band_min: float | None = Query(None, description="Нижняя граница полосы, Гц"),
+    band_max: float | None = Query(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Query(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    reference_channels: str | None = Query(None, description="Каналы референса через запятую (без них — average)"),
+    notch_harmonics: int = Query(0, description="Гармоники notch (100/150/200/240 Гц), 0–4"),
+    bad_channels: str | None = Query(None, description="Плохие каналы через запятую («C3, T7»)"),
+    interpolate_bads: bool = Query(False, description="Интерполировать bad-каналы (до ICA/SSP)"),
+    clean_method: str = Query("none", description="Очистка: none | ica | ssp"),
+    ica_n_components: int = Query(0, description="Число компонент ICA (0 — auto, MNE выберет)"),
     if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """Огибающая сигналов для вьюера треков (срез 2.5, docs/ui.md §8).
@@ -292,10 +308,28 @@ async def get_recording_signals(
     Минимумы/максимумы считаются по временным корзинам, поэтому пики артефактов
     не теряются при прореживании. Уровень отдаётся с ``ETag``: повторный запрос
     с тем же ``If-None-Match`` получает 304, а сам уровень кэшируется на диске.
+
+    ``layer`` — слой видимости (шаг 2 плана): ``raw`` — прежняя сырая пирамида
+    (N14), ``cleaned``/``diff`` — подготовленный сигнал по параметрам формы
+    «Фильтр и референс» и вклад очистки. Слой — видимость: правка параметра не
+    запускает расчёт и не трогает стадии, но ETag включает параметры — смена
+    полосы/очистки отдаёт другой уровень, а не молчаливую подмену.
     """
     recording = require_recording(recording_id)
+    query = signals_layer_query(
+        layer=layer,
+        band_min=band_min,
+        band_max=band_max,
+        notch_hz=notch_hz,
+        reference_channels=reference_channels,
+        notch_harmonics=notch_harmonics,
+        bad_channels=bad_channels,
+        interpolate_bads=interpolate_bads,
+        clean_method=clean_method,
+        ica_n_components=ica_n_components,
+    )
     try:
-        data, version = await asyncio.to_thread(build_signal_blob, recording, level, settings)
+        data, version = await asyncio.to_thread(build_signal_blob, recording, level, settings, query)
     except SignalBuildError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -305,7 +339,7 @@ async def get_recording_signals(
         media_type="application/octet-stream",
         # Запись живёт по TTL реестра, поэтому кэшируем приватно и недолго
         cache_control=CACHE_PRIVATE_HOUR,
-        headers={"X-Signal-Level": str(level)},
+        headers={"X-Signal-Level": str(level), "X-Signal-Layer": query.layer},
     )
 
 

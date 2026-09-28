@@ -92,10 +92,21 @@ export type TrackStackProps = {
    * загрузкой файла, а не результатом стадий.
    */
   events?: readonly EventMark[]
+  /**
+   * Слой «после очистки»/«разница» собран по прежним параметрам «Фильтр и
+   * референс» (правки после загрузки): подпись в шапке честно это говорит
+   * (шаг 2 плана «слои видимости»).
+   */
+  signalsStale?: boolean
 }
 
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */
-export function TrackStack({ signal, layers: layersProp, events = [] }: TrackStackProps) {
+export function TrackStack({
+  signal,
+  layers: layersProp,
+  events = [],
+  signalsStale = false,
+}: TrackStackProps) {
   const params = useEdfParamsValue()
   const navigate = useNavigate()
   const toggleArtifactVisibility = useEdfParams((state) => state.toggleArtifactVisibility)
@@ -108,6 +119,12 @@ export function TrackStack({ signal, layers: layersProp, events = [] }: TrackSta
   const artifactTypes = useEdfRecording((state) => state.artifactTypes)
   /** Паспорт фильтра стадии «Фильтр и референс» (подпись N14: треки без фильтра) */
   const filterDesign = useEdfRecording((state) => state.filterDesign)
+  /**
+   * Слой видимости (шаг 2 плана «слои видимости»): демо-кадр всегда «сырой» —
+   * у фикстуры сервера и параметров подготовки нет.
+   */
+  const signalLayer = useEdfParams((state) => state.params.signalLayer)
+  const captionLayer = signal.sourceId === DEMO_SOURCE_ID ? 'raw' : signalLayer
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -636,7 +653,11 @@ export function TrackStack({ signal, layers: layersProp, events = [] }: TrackSta
         <span data-testid="signal-source">
           {signal.level > 0 ? `огибающая, ${pointsPerChannel} т/канал` : 'полный сигнал'}
         </span>
-        <ViewerSignalCaption filterDesign={filterDesign} />
+        <ViewerSignalCaption
+          filterDesign={filterDesign}
+          layer={captionLayer}
+          stale={signalsStale}
+        />
         {layers ? (
           <StatusPill
             tone="neutral"

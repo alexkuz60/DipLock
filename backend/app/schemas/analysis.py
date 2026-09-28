@@ -589,10 +589,19 @@ class RecordingSignalsHeader(BaseModel):
     пики артефактов не теряются при прореживании — это требование вьюера
     (docs/ui.md §8). При ``decimated=false`` каждая корзина содержит один
     отсчёт и ``min`` не передаётся: ``min == max``.
+
+    ``layer`` — слой видимости вьюера (шаг 2 плана): ``raw`` (сырая пирамида,
+    N14) | ``cleaned`` (подготовленный сигнал расчётов) | ``diff`` (вклад
+    очистки: без очистки − с очисткой). Старые кэшированные ответы поля не
+    содержат — клиент читает его как ``raw``.
     """
 
     recording_id: str
     level: int = Field(description="Уровень пирамиды (множитель зума ×1…×16)")
+    layer: Literal["raw", "cleaned", "diff"] = Field(
+        default="raw",
+        description="Слой видимости: raw (сырая пирамида) | cleaned (сигнал расчётов) | diff (вклад очистки)",
+    )
     channels: list[str] = Field(description="Каналы в порядке отрисовки (как в паспорте записи)")
     sfreq: float = Field(description="Частота дискретизации огибающей, Гц")
     duration_sec: float

@@ -46,4 +46,40 @@ describe('ViewerSignalCaption', () => {
     expect(title).toContain('IIR')
     expect(title).toContain('края записи не режутся')
   })
+
+  // Три слоя видимости (шаг 2 плана): каждый слой явно назван — это отдельные
+  // срезы, а не тихая подмена сырого вьюера (N14 остаётся в силе)
+  it('слой «после очистки» — явная пометка «сигнал расчётов», а не сырой трек', () => {
+    renderWithProviders(<ViewerSignalCaption filterDesign={null} layer="cleaned" />)
+    const pill = screen.getByText('треки: после очистки (сигнал расчётов)')
+    expect(pill).toBeInTheDocument()
+    const title = pill.closest('span[title]')?.getAttribute('title') ?? ''
+    expect(title).toContain('Отдельный срез, а не подмена сырого вьюера')
+    expect(title).toContain('«Фильтр и референс»')
+    // Сырой слой больше не показан — старой подписи на экране нет
+    expect(screen.queryByText('треки: исходный сигнал без фильтра')).not.toBeInTheDocument()
+  })
+
+  it('слой «разница» называет вклад очистки и его базу', () => {
+    renderWithProviders(<ViewerSignalCaption filterDesign={null} layer="diff" />)
+    const pill = screen.getByText('треки: разница — вклад очистки')
+    const title = pill.closest('span[title]')?.getAttribute('title') ?? ''
+    expect(title).toContain('без очистки) − (с очисткой)')
+    expect(title).toContain('без запуска расчёта')
+  })
+
+  it('устаревший слой — отдельная warn-пилюля с объяснением обновления', () => {
+    renderWithProviders(
+      <ViewerSignalCaption filterDesign={null} layer="cleaned" stale />,
+    )
+    expect(screen.getByText('слой по прежним параметрам')).toBeInTheDocument()
+    expect(
+      screen.getByText('слой по прежним параметрам').closest('span[title]')?.getAttribute('title'),
+    ).toContain('переключении слоя или уровня зума')
+  })
+
+  it('для сырого слоя warn-пилюля не показывается', () => {
+    renderWithProviders(<ViewerSignalCaption filterDesign={null} layer="raw" stale />)
+    expect(screen.queryByText('слой по прежним параметрам')).not.toBeInTheDocument()
+  })
 })

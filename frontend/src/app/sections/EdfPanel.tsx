@@ -21,6 +21,7 @@ import {
   FILTER_PRESETS,
   RECALC_STAGES,
   RECALC_STAGE_LABELS,
+  SIGNAL_LAYER_OPTIONS,
   TIME_LEVELS,
   useEdfParams,
   useEdfParamsValue,
@@ -537,6 +538,18 @@ export function EdfPanel() {
       </Panel>
 
       <Panel title="Отображение">
+        {/* Три слоя видимости (шаг 2 плана): параметр вне STAGE_PARAM_KEYS —
+            переключение только меняет вид треков, расчёт не запускается и не
+            устаревает. Контрол есть только у записи: у демо сервера нет. */}
+        {recording && !demo && recording.channels.length > 0 ? (
+          <SegmentedControl
+            label="Слой сигнала"
+            value={params.signalLayer}
+            options={SIGNAL_LAYER_OPTIONS}
+            onChange={(value) => setParams({ signalLayer: value })}
+            hint="Видимость треков, не расчёт: слои «После очистки» и «Разница» собираются сервером лениво по текущим параметрам «Фильтр и референс» (без запуска стадии). Пока очистка не настроена, «Разница» нулевая."
+          />
+        ) : null}
         <CheckboxRow
           label="Трек ЧСС (пульс)"
           checked={params.heartRateTrack}

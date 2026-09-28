@@ -18,6 +18,8 @@ export const SIGNAL_MAGIC = 'DPS1'
 export type SignalContainerHeader = {
   recording_id: string
   level: number
+  /** Слой видимости; отсутствует в старых ответах — читаем как `raw` */
+  layer?: string
   channels: string[]
   sfreq: number
   duration_sec: number

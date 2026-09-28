@@ -16,10 +16,15 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.schemas.analysis import PreprocessStage
-from app.services.artifact_cleaner import CLEAN_METHODS
+from app.services.artifact_cleaner import CLEAN_METHODS, CleanSpec
 from app.services.dipole_scanner import DipoleRefineParams, DipoleScanParams
 from app.services.evoked import EvokedParams
 from app.services.preprocess import PreprocessParams
+from app.services.recording_signals import (
+    SIGNAL_LAYER_LITERALS,
+    SIGNAL_LAYERS,
+    SignalsLayerQuery,
+)
 from app.services.spectral import SPECTRUM_PSD_METHODS, SpectrumParams
 from app.services.spectrogram import SpectrogramParams
 from app.services.spectrogram import validate_params as _validate_spectrogram_params
@@ -62,6 +67,49 @@ def require_epoch_length(epoch_length_ms: float) -> None:
         )
 
 
+def signals_layer_query(
+    *,
+    layer: str,
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
+    reference_channels: str | None,
+    notch_harmonics: int = 0,
+    bad_channels: str | None = None,
+    interpolate_bads: bool = False,
+    clean_method: str = "none",
+    ica_n_components: int = 0,
+) -> SignalsLayerQuery:
+    """Слой видимости вьюера и база подготовленных слоёв из query (шаг 2 плана).
+
+    Проверки — те же, что у стадии «Фильтр и референс» (полоса парой, опции
+    очистки): слой — видимость, но «после очистки» обязан строиться по честным
+    параметрам, иначе показанная обработка разошлась бы с расчётом.
+    """
+    layer_value = SIGNAL_LAYER_LITERALS.get(layer)
+    if layer_value is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"layer должен быть одним из {list(SIGNAL_LAYERS)} (получено: {layer!r})",
+        )
+    band = parse_filter_band(band_min, band_max)
+    _require_clean_options(clean_method, notch_harmonics, ica_n_components)
+    bads = tuple(name.strip() for name in (bad_channels or "").split(",") if name.strip())
+    return SignalsLayerQuery(
+        layer=layer_value,
+        band=band,
+        notch_hz=notch_hz,
+        reference_channels=tuple(parse_reference_channels(reference_channels) or ()),
+        clean=CleanSpec(
+            notch_harmonics=notch_harmonics,
+            bad_channels=bads,
+            interpolate_bads=interpolate_bads,
+            method=clean_method,
+            ica_n_components=ica_n_components,
+        ),
+    )
+
+
 def validate_analysis_request(
     epoch_length_ms: float, freq_band: str, single_freq: float | None,
 ) -> None:
@@ -74,6 +122,29 @@ def validate_analysis_request(
         )
     if single_freq is not None and freq_band != "all":
         raise HTTPException(status_code=400, detail="single_freq ставится вместе с freq_band='all'")
+
+
+def _require_clean_options(clean_method: str, notch_harmonics: int, ica_n_components: int) -> None:
+    """Опции очистки из формы: неизвестный метод или диапазон — 400 (правило 8).
+
+    Общая проверка для стадии предподготовки и слоёв видимости вьюера: слой —
+    видимость, но его параметры те же, что у стадии «Фильтр и референс», и
+    молчаливое «none» вместо опечатки показало бы другую обработку.
+    """
+    if clean_method not in CLEAN_METHODS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"clean_method должен быть одним из {list(CLEAN_METHODS)}",
+        )
+    if not 0 <= notch_harmonics <= 4:
+        raise HTTPException(
+            status_code=400,
+            detail="notch_harmonics — целое 0…4 (гармоники 50/60 Гц: 100/150/200/240 Гц)",
+        )
+    if ica_n_components < 0:
+        raise HTTPException(
+            status_code=400, detail="ica_n_components неотрицателен (0 — auto, MNE выберет)",
+        )
 
 
 def preprocess_params(
@@ -139,20 +210,7 @@ def preprocess_params(
                     status_code=400,
                     detail="Окно эпохи (до + после) не должно быть длиннее 10000 мс",
                 )
-    if clean_method not in CLEAN_METHODS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"clean_method должен быть одним из {list(CLEAN_METHODS)}",
-        )
-    if not 0 <= notch_harmonics <= 4:
-        raise HTTPException(
-            status_code=400,
-            detail="notch_harmonics — целое 0…4 (гармоники 50/60 Гц: 100/150/200/240 Гц)",
-        )
-    if ica_n_components < 0:
-        raise HTTPException(
-            status_code=400, detail="ica_n_components неотрицателен (0 — auto, MNE выберет)",
-        )
+    _require_clean_options(clean_method, notch_harmonics, ica_n_components)
 
     return PreprocessParams(
         stage=stage,

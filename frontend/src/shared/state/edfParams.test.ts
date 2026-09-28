@@ -231,6 +231,20 @@ describe('слой параметров EDF', () => {
     expect(EDF_PARAM_DEFAULTS.eventsLayer).toBe(true)
   })
 
+  it('слой сигнала — отрисовка: по умолчанию сырой и вне STAGE_PARAM_KEYS (шаг 2 плана)', () => {
+    expect(EDF_PARAM_DEFAULTS.signalLayer).toBe('raw')
+    for (const stage of RECALC_STAGES) {
+      expect(STAGE_PARAM_KEYS[stage]).not.toContain('signalLayer')
+    }
+    // Переключение слоя не помечает ни одну стадию устаревшей
+    useEdfParams.getState().markApplied()
+    useEdfParams.getState().setParams({ signalLayer: 'cleaned' })
+    expect(stageState('filter')).toBe('ready')
+    expect(stageState('artifacts')).toBe('ready')
+    expect(stageState('epochs')).toBe('ready')
+    expect(useEdfParams.getState().params.signalLayer).toBe('cleaned')
+  })
+
   it('в localStorage уходят параметры, но не снимки результатов', () => {
     useEdfParams.getState().markApplied()
     useEdfParams.getState().setParams({ notchHz: 50 })

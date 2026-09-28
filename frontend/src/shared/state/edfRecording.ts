@@ -10,6 +10,7 @@
  * загрузки или drag & drop), никаких авто-запросов.
  */
 import { create } from 'zustand'
+import { useMemo } from 'react'
 import { api, apiErrorText } from '@/shared/api/client'
 import type {
   ArtifactTypes,
@@ -18,6 +19,8 @@ import type {
   EvokedResult,
   PreprocessResult,
   RecordingMeta,
+  SignalLayer,
+  SignalsPrepQuery,
 } from '@/shared/api/types'
 import { uploadRecording } from '@/shared/api/upload'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
@@ -49,14 +52,29 @@ import {
 import { useDipoleCalc } from './dipoleCalc'
 import { useEegParams } from './eegParams'
 
-/** Снимает отметку «уровень в полёте», не мутируя прежний объект состояния. */
+/**
+ * Снимает отметку «уровень в полёте», не мутируя прежний объект состояния.
+ * Ключ — строка `${layer}:${sig}:${level}`: слои и параметры независимы, и
+ * два полёта разных слоёв не мешают друг другу.
+ */
 function releaseLevel(
-  inFlight: Record<number, boolean>,
-  level: number,
-): Record<number, boolean> {
+  inFlight: Record<string, boolean>,
+  key: string,
+): Record<string, boolean> {
   const next = { ...inFlight }
-  delete next[level]
+  delete next[key]
   return next
+}
+
+/**
+ * Кэш одного слоя пирамиды: `sig` — отпечаток параметров подготовленной базы
+ * (пустой у `raw`), по нему кадры признаются устаревшими после правки
+ * «Фильтр и референс». Слои живут отдельно: переключение вида не гасит уже
+ * загруженные уровни (ленивая загрузка — каждый слой сам по себе).
+ */
+export type SignalLayerFrames = {
+  sig: string
+  frames: Record<number, SignalFrame>
 }
 
 /** Совпадает с MAX_UPLOAD_SIZE бэкенда (200 МБ) — проверяем до отправки */
@@ -130,6 +148,42 @@ export function buildPreprocessForm(stage: RecalcStage, params: EdfParams): Form
     }
   }
   return form
+}
+
+/**
+ * Параметры подготовленной базы слоёв `cleaned`/`diff` для `GET …/signals`
+ * (шаг 2 плана «слои видимости»): те же значения стадии «Фильтр и референс»,
+ * что в `buildPreprocessForm('filter')`, но **только** то, что меняет
+ * содержимое слоя (единицы EDF и пороги не входят; выбор каналов входит —
+ * при референсе «по каналам» он меняет сигнал).
+ */
+export function signalsPrepQuery(params: EdfParams): SignalsPrepQuery {
+  const query: SignalsPrepQuery = {}
+  const band = filterBandOf(params)
+  if (band) {
+    query.band_min = band[0]
+    query.band_max = band[1]
+  }
+  if (params.notchHz) query.notch_hz = params.notchHz
+  if (params.reference === 'custom' && params.visibleChannels.length) {
+    query.reference_channels = params.visibleChannels.join(',')
+  }
+  query.notch_harmonics = params.notchHarmonics
+  if (params.badChannels.trim()) query.bad_channels = params.badChannels.trim()
+  query.interpolate_bads = params.interpolateBads
+  query.clean_method = params.cleanMethod
+  query.ica_n_components = params.icaNComponents
+  return query
+}
+
+/**
+ * Отпечаток параметров слоя для кэша кадров: смена полосы/notch/референса/
+ * очистки делает загруженные `cleaned`/`diff`-кадры устаревшими. Сырой слой от
+ * параметров не зависит — его отпечаток всегда пустой.
+ */
+export function signalsPrepSignature(params: EdfParams, layer: SignalLayer): string {
+  if (layer === 'raw') return ''
+  return JSON.stringify(signalsPrepQuery(params))
 }
 
 /**
@@ -324,10 +378,14 @@ export type EdfRecordingState = {
   uploadError: string | null
   /** Демо-кадр сигнала для отладки вьюера (без сервера) */
   demo: SignalFrame | null
-  /** Кадры пирамиды сигналов записи по уровням зума (срез 2.5) */
-  signalFrames: Record<number, SignalFrame>
-  /** Уровни, запрос которых уже в полёте (защита от дублей при двух эффектах) */
-  signalsInFlight: Record<number, boolean>
+  /** Кадры пирамиды сигналов по слоям и уровням зума (срез 2.5, шаг 2 плана) */
+  signalFrames: Partial<Record<SignalLayer, SignalLayerFrames>>
+  /**
+   * Полёты запросов: ключ `${layer}:${sig}:${level}` — слои и параметры
+   * независимы, защита от дублей при двух эффектах и от гонки «параметры
+   * изменились, пока старый ответ летел».
+   */
+  signalsInFlight: Record<string, boolean>
   /** Сколько уровней сигнала грузится прямо сейчас (для индикатора) */
   signalsPending: number
   /** Текст ошибки загрузки сигналов (для ErrorBlock + «Повторить») */
@@ -403,8 +461,8 @@ export type EdfRecordingState = {
   openDemo: (channels?: string[]) => void
   /** Закрыть демо-режим */
   closeDemo: () => void
-  /** Догрузить уровень пирамиды сигналов записи (кэшируется в сторе) */
-  loadSignals: (level: number) => Promise<void>
+  /** Догрузить уровень пирамиды активного слоя (кэшируется в сторе) */
+  loadSignals: (level: number, layer?: SignalLayer) => Promise<void>
   /**
    * Запустить стадию предподготовки по кнопке (срез 2.7): 202 + задача →
    * поллинг прогресса → результат в слои вьюера + снимок параметров стадии.
@@ -522,28 +580,55 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
   },
   closeDemo: () => set({ demo: null, layers: null, epochMarks: [], artifactTypes: null }),
 
-  loadSignals: async (level) => {
+  loadSignals: async (level, layer) => {
     const { recording, signalFrames, signalsInFlight } = get()
-    // Кадр уже есть или запрос в полёте: второй раз не грузим. Эффекты
-    // «предзагрузка ×1» и «текущий уровень» на старте совпадают, и без этой
+    if (!recording) return
+    // Слой по умолчанию — активный параметр вида; секции передают свой явно.
+    const activeLayer = layer ?? useEdfParams.getState().params.signalLayer
+    const prepSignature = signalsPrepSignature(useEdfParams.getState().params, activeLayer)
+    const cached = signalFrames[activeLayer]
+    // Ключ полёта несёт слой, отпечаток и уровень: два слоя (и два набора
+    // параметров) грузятся независимо, а устаревший полёт не блокирует новый.
+    const key = `${activeLayer}:${prepSignature}:${level}`
+    // Кадр уровня уже есть и параметры те же, или запрос в полёте: не грузим.
+    // Эффекты «предзагрузка ×1» и «текущий уровень» на старте совпадают — без
     // проверки уровень ×1 запрашивался бы дважды.
-    if (!recording || signalFrames[level] || signalsInFlight[level]) return
+    if (signalsInFlight[key]) return
+    if (cached && cached.sig === prepSignature && cached.frames[level]) return
+
     set((state) => ({
-      signalsInFlight: { ...state.signalsInFlight, [level]: true },
+      signalsInFlight: { ...state.signalsInFlight, [key]: true },
       signalsPending: state.signalsPending + 1,
       signalsError: null,
     }))
+    const prep = activeLayer === 'raw' ? undefined : signalsPrepQuery(useEdfParams.getState().params)
     try {
-      const buffer = await api.recordingSignals(recording.recording_id, level)
+      const buffer = await api.recordingSignals(recording.recording_id, level, {
+        layer: activeLayer,
+        prep,
+      })
       const frame = decodeSignalFrame(buffer)
-      set((state) => ({
-        signalFrames: { ...state.signalFrames, [level]: frame },
-        signalsInFlight: releaseLevel(state.signalsInFlight, level),
-        signalsPending: Math.max(0, state.signalsPending - 1),
-      }))
+      // Ответ мог прийти после смены записи или параметров — чужое не кладём
+      const dropped =
+        get().recording?.recording_id !== recording.recording_id ||
+        signalsPrepSignature(useEdfParams.getState().params, activeLayer) !== prepSignature
+      set((state) => {
+        const stored = state.signalFrames[activeLayer]
+        // Новый отпечаток начинает слой заново: кадры разных параметров не
+        // смешиваются (иначе уровни зума молча показывали бы старую полосу).
+        const frames =
+          stored && stored.sig === prepSignature ? { ...stored.frames, [level]: frame } : { [level]: frame }
+        return {
+          signalFrames: dropped
+            ? state.signalFrames
+            : { ...state.signalFrames, [activeLayer]: { sig: prepSignature, frames } },
+          signalsInFlight: releaseLevel(state.signalsInFlight, key),
+          signalsPending: Math.max(0, state.signalsPending - 1),
+        }
+      })
     } catch (error) {
       set((state) => ({
-        signalsInFlight: releaseLevel(state.signalsInFlight, level),
+        signalsInFlight: releaseLevel(state.signalsInFlight, key),
         signalsPending: Math.max(0, state.signalsPending - 1),
         signalsError: apiErrorText(error),
       }))
@@ -821,6 +906,27 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
     useEegParams.getState().reset()
   },
 }))
+
+/**
+ * Кадры активного слоя видимости (шаг 2 плана) + признак устаревания.
+ *
+ * Правка параметра **не делает запросов** (правило UI): уже загруженный слой
+ * продолжает показываться, но `stale=true` честно говорит, что он собран по
+ * прежним параметрам «Фильтр и референс». Обновление — лениво, при следующем
+ * вызове `loadSignals` (смена слоя, уровня зума или записи).
+ */
+export function useSignalLayerFrames(): {
+  layer: SignalLayer
+  frames: Record<number, SignalFrame>
+  stale: boolean
+} {
+  const layer = useEdfParams((state) => state.params.signalLayer)
+  const params = useEdfParams((state) => state.params)
+  const cache = useEdfRecording((state) => state.signalFrames[layer])
+  const prepSignature = useMemo(() => signalsPrepSignature(params, layer), [params, layer])
+  const stale = layer !== 'raw' && Boolean(cache) && cache!.sig !== prepSignature
+  return { layer, frames: cache?.frames ?? {}, stale }
+}
 
 /** Почему файл не принят (null — файл подходит). Проверяем до отправки на сервер. */
 export function validateEdfFile(file: File): string | null {

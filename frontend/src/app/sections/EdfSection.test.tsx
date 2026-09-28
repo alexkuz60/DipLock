@@ -92,7 +92,7 @@ describe('рабочая область раздела EDF', () => {
     renderWithProviders(<EdfSection />)
 
     await user.upload(screen.getByLabelText('Выбрать файл EDF'), edfFile())
-    await waitFor(() => expect(useEdfRecording.getState().signalFrames[1]).toBeTruthy())
+    await waitFor(() => expect(useEdfRecording.getState().signalFrames.raw?.frames[1]).toBeTruthy())
 
     // Демо-фикстура под реальную запись не подставляется: её зоны и штриховка
     // читались бы как детекция (ручная проверка, 19.09.2026)
@@ -133,7 +133,7 @@ describe('рабочая область раздела EDF', () => {
     await user.upload(screen.getByLabelText('Выбрать файл EDF'), edfFile())
 
     // Догрузка уровня ×1 в стор идёт асинхронно — ждём её, а не только паспорт
-    await waitFor(() => expect(useEdfRecording.getState().signalFrames[1]).toBeTruthy())
+    await waitFor(() => expect(useEdfRecording.getState().signalFrames.raw?.frames[1]).toBeTruthy())
 
     const signalsCalls = fetchMock.mock.calls
       .map(([url]) => String(url))

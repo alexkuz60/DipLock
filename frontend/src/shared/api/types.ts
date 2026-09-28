@@ -83,6 +83,33 @@ export type ArtifactTypes = Partial<Record<import('@/shared/lib/artifacts').Arti
 /** Стадия предподготовки записи (срез 2.7) — совпадает с `RecalcStage` в UI */
 export type PreprocessStage = 'filter' | 'artifacts' | 'epochs'
 
+/**
+ * Слой видимости треков вьюера (`GET /recordings/{id}/signals?layer=`, шаг 2
+ * плана «слои видимости»): `raw` — сырая пирамида (N14), `cleaned` —
+ * подготовленный сигнал расчётов, `diff` — вклад очистки (без очистки − с
+ * очисткой) на подготовленной базе.
+ */
+export type SignalLayer = 'raw' | 'cleaned' | 'diff'
+
+/**
+ * Параметры подготовленной базы слоёв `cleaned`/`diff`: плоская проекция
+ * формы стадии «Фильтр и референс» в query (те же имена, что у `/preprocess`).
+ * Для `raw` не передаются — сырой слой параметров не читает.
+ */
+export type SignalsPrepQuery = {
+  band_min?: number
+  band_max?: number
+  notch_hz?: number
+  /** Каналы референса через запятую; без них сервер считает average */
+  reference_channels?: string
+  notch_harmonics?: number
+  /** Плохие каналы через запятую («C3,T7») */
+  bad_channels?: string
+  interpolate_bads?: boolean
+  clean_method?: string
+  ica_n_components?: number
+}
+
 /** Зона артефакта из результата стадии (слои вьюера, срез 2.6/2.7) */
 export type ArtifactZoneOut = {
   kind: import('@/shared/lib/artifacts').ArtifactKind

@@ -2,7 +2,7 @@
  * Тесты панели раздела EDF: значения из /meta, отсутствие авто-запусков
  * обработки и индикация устаревшего результата по стадиям.
  */
-import { act, screen } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { EdfPanel } from './EdfPanel'
@@ -26,6 +26,7 @@ describe('панель раздела EDF', () => {
     })
     useEdfRecording.setState({
       recording: null,
+      demo: null,
       layers: null,
       epochMarks: [],
       passport: { ...EMPTY_PASSPORT },
@@ -95,6 +96,22 @@ describe('панель раздела EDF', () => {
     expect(screen.queryByRole('button', { name: /Пересчитать/ })).not.toBeInTheDocument()
     // Пока записи нет, пересчитывать нечего — вместо статуса ясная причина
     expect(screen.getByText(/пересчитывать пока нечего/)).toBeInTheDocument()
+  })
+
+  it('без записи (и в демо) контрола слоя нет: нечего переключать', async () => {
+    mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+    expect(screen.queryByRole('group', { name: 'Слой сигнала' })).not.toBeInTheDocument()
+
+    // Демо-кадр: сервера и параметров подготовки нет — слой тоже не показываем
+    act(() => {
+      useEdfRecording.setState({
+        recording: recordingFixture,
+        demo: { sourceId: 'demo' } as never,
+      })
+    })
+    expect(screen.queryByRole('group', { name: 'Слой сигнала' })).not.toBeInTheDocument()
   })
 
   it('с записью показывает статус и подпись по стадиям перерасчёта', () => {
@@ -367,5 +384,29 @@ describe('событийный режим и блок ERP (N2/2.7)', () => {
     await user.click(screen.getByRole('button', { name: 'Усреднить (ERP)' }))
 
     expect(await screen.findByTestId('evoked-error')).toHaveTextContent(/не найдены/)
+  })
+
+  // Три слоя видимости (шаг 2 плана): контрол — параметр отрисовки
+  it('«Слой сигнала» у записи: переключение меняет вид без запросов и без устаревания стадий', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    useEdfRecording.setState({ recording: recordingFixture, passport: { ...EMPTY_PASSPORT } })
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+    useEdfParams.getState().markApplied()
+
+    const group = screen.getByRole('group', { name: 'Слой сигнала' })
+    const callsBefore = fetchMock.mock.calls.length
+
+    await user.click(within(group).getByRole('button', { name: 'После очистки' }))
+
+    expect(useEdfParams.getState().params.signalLayer).toBe('cleaned')
+    // Ни запроса, ни «параметры изменены»: слой вне STAGE_PARAM_KEYS
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+    expect(screen.getByText('Результат соответствует параметрам')).toBeInTheDocument()
+
+    await user.click(within(group).getByRole('button', { name: 'Сырой' }))
+    expect(useEdfParams.getState().params.signalLayer).toBe('raw')
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 })
