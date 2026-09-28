@@ -165,17 +165,23 @@ function RecordingTracks({
   const levelIndex = useEdfParams((state) => state.params.timeLevel)
   const level = resolveSignalLevel(TIME_LEVELS[levelIndex] ?? 1, levels)
   const baseLevel = resolveSignalLevel(levels[0] ?? 1, levels)
+  // Полоса слоя band (Фаза B): значение читаем всегда (хук безусловно),
+  // но в deps попадает только у активного слоя band — правка полосы не
+  // делает запросов другим слоям, а при активном band догружает кадр так
+  // же, как переключение слоя (это отрисовка, не расчёт стадии).
+  const signalBandKey = useEdfParams((state) => state.params.signalBandKey)
+  const bandKey = layer === 'band' ? signalBandKey : null
 
   // Уровень ×1 — мгновенный вид «вся сессия»: грузим его сразу, ещё до того,
   // как пользователь начнёт зумить (docs/ui.md §8). Слой в ключе: смена вида
   // лениво догружает свой кадр, не трогая остальные уровни и стадии.
   useEffect(() => {
     void loadSignals(baseLevel, layer)
-  }, [loadSignals, baseLevel, layer, recording.recording_id])
+  }, [loadSignals, baseLevel, layer, recording.recording_id, bandKey])
 
   useEffect(() => {
     void loadSignals(level, layer)
-  }, [loadSignals, level, layer, recording.recording_id])
+  }, [loadSignals, level, layer, recording.recording_id, bandKey])
 
   const frame = selectFrame(frames, level)
   const loaded = Boolean(frames[level])

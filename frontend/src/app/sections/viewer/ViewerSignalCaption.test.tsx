@@ -68,6 +68,15 @@ describe('ViewerSignalCaption', () => {
     expect(title).toContain('без запуска расчёта')
   })
 
+  it('слой «по полосе» называет персист и ключ (Фаза B)', () => {
+    renderWithProviders(<ViewerSignalCaption filterDesign={null} layer="band" />)
+    const pill = screen.getByText('треки: подготовленная полоса (персист)')
+    expect(pill).toBeInTheDocument()
+    const title = pill.closest('span[title]')?.getAttribute('title') ?? ''
+    expect(title).toContain('Персист подготовленного массива')
+    expect(title).toContain('«запись + полоса + notch + референс»')
+  })
+
   it('устаревший слой — отдельная warn-пилюля с объяснением обновления', () => {
     renderWithProviders(
       <ViewerSignalCaption filterDesign={null} layer="cleaned" stale />,

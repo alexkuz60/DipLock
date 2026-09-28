@@ -290,6 +290,12 @@ def _drop_signal_cache(recording_id: str) -> None:
         return
     clear_prepared_cache(recording_id)
 
+    try:
+        from app.services.prepared_persist import clear_persist_cache
+    except ImportError:  # pragma: no cover — модуль всегда есть
+        return
+    clear_persist_cache(settings, recording_id)
+
 
 class RecordingRegistry:
     """In-memory реестр записей с TTL-очисткой каталогов и лимитом истории."""

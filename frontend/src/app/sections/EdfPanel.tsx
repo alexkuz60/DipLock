@@ -12,6 +12,8 @@ import { useQuery } from '@tanstack/react-query'
 import { RotateCcw } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { RecalcProgress } from './EdfToolActions'
+import { filterBandText, FUNCTIONAL_GROUP } from '@/shared/lib/calcFilter'
+import { bandLabel } from '@/shared/lib/spectrum'
 import {
   ARTIFACT_COLORS,
   ARTIFACT_KINDS,
@@ -131,6 +133,23 @@ export function EdfPanel() {
     ? availableChannels
     : (meta.data?.standard_channels ?? [])
   const epochLengths = meta.data?.epoch_lengths_ms ?? []
+  /**
+   * Пункты селекта «Полоса слоя» (Фаза B): ключи `freq_bands`/`functional_bands`
+   * `/meta` с подписями и границами. Ключ стабилен = адрес персиста, поэтому в
+   * `value` уходит именно он, а не границы; отсутствующие в метаданных ключи
+   * пункта не имеют (как в списках пресетов фильтра).
+   */
+  const bandKeyOptions = [
+    ...Object.entries(meta.data?.freq_bands ?? {}).map(([key, band]) => ({
+      value: key,
+      label: `${bandLabel(key)} ${filterBandText(band)}`,
+    })),
+    ...Object.entries(meta.data?.functional_bands ?? {}).map(([key, band]) => ({
+      value: key,
+      label: `${bandLabel(key)} ${filterBandText(band)}`,
+      group: FUNCTIONAL_GROUP,
+    })),
+  ]
   /** Канал графика ERP: свой выбор, иначе первый видимый канал */
   const erpChannel = params.erpChannel || params.visibleChannels[0] || channels[0] || ''
   const channelOptions = channels.map((name) => ({ value: name, label: name }))
@@ -548,6 +567,20 @@ export function EdfPanel() {
             options={SIGNAL_LAYER_OPTIONS}
             onChange={(value) => setParams({ signalLayer: value })}
             hint="Видимость треков, не расчёт: слои «После очистки» и «Разница» собираются сервером лениво по текущим параметрам «Фильтр и референс» (без запуска стадии). Пока очистка не настроена, «Разница» нулевая."
+          />
+        ) : null}
+        {/* Полоса слоя «По полосе» (Фаза B): ключ из /meta, параметр вне
+            STAGE_PARAM_KEYS — смена только меняет отпечаток кадров слоя,
+            стадии не устаревают и расчёт не запускается. Пункты — те же
+            словари freq_bands/functional_bands, что и в спектре: ключи
+            стабильны = адрес персиста. */}
+        {recording && !demo && params.signalLayer === 'band' ? (
+          <SelectField
+            label="Полоса слоя"
+            value={params.signalBandKey}
+            options={bandKeyOptions}
+            onChange={(value) => setParams({ signalBandKey: value })}
+            hint="Именованная полоса (δ … γ-high, μ … ψ) — адрес подготовленного массива на диске. Кадр обновится лениво при следующей загрузке (переключение слоя/уровня), правка стадии не требуется."
           />
         ) : null}
         <CheckboxRow

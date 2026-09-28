@@ -120,16 +120,20 @@ function EegRecording({ recording, levels }: { recording: RecordingMeta; levels:
   const levelIndex = useEegParams((state) => state.params.timeLevel)
   const level = resolveSignalLevel(TIME_LEVELS[levelIndex] ?? 1, levels)
   const baseLevel = resolveSignalLevel(levels[0] ?? 1, levels)
+  // Полоса слоя band — общий параметр с EDF (Фаза B): читаем безусловно
+  // (хук), в deps — только когда слой band активен
+  const signalBandKey = useEdfParams((state) => state.params.signalBandKey)
+  const bandKey = layer === 'band' ? signalBandKey : null
 
   // Уровень ×1 — мгновенный вид «вся сессия»: грузим сразу, ещё до первого зума;
   // слой видимости общий с EDF (шаг 2 плана) — кадр ЭЭГ тоже ленивый по слою
   useEffect(() => {
     void loadSignals(baseLevel, layer)
-  }, [loadSignals, baseLevel, layer, recording.recording_id])
+  }, [loadSignals, baseLevel, layer, recording.recording_id, bandKey])
 
   useEffect(() => {
     void loadSignals(level, layer)
-  }, [loadSignals, level, layer, recording.recording_id])
+  }, [loadSignals, level, layer, recording.recording_id, bandKey])
 
   const frame = selectFrame(frames, level)
   if (signalsError && !frame) {

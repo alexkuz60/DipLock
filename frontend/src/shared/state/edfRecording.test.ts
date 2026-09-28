@@ -237,7 +237,7 @@ describe('слои видимости сигналов (шаг 2 плана)', (
       badChannels: 'C3, T7',
       interpolateBads: true,
     }
-    expect(signalsPrepQuery(params)).toEqual({
+    expect(signalsPrepQuery(params, 'cleaned')).toEqual({
       band_min: 1,
       band_max: 40,
       notch_hz: 50,
@@ -249,7 +249,10 @@ describe('слои видимости сигналов (шаг 2 плана)', (
     })
 
     // Пресет «Без фильтра» — полосы в слое нет; average-референс — без списка каналов
-    const noBand = signalsPrepQuery({ ...EDF_PARAM_DEFAULTS, filterPreset: 'none' })
+    const noBand = signalsPrepQuery(
+      { ...EDF_PARAM_DEFAULTS, filterPreset: 'none' },
+      'cleaned',
+    )
     expect(noBand.band_min).toBeUndefined()
     expect(noBand.reference_channels).toBeUndefined()
 
@@ -258,8 +261,40 @@ describe('слои видимости сигналов (шаг 2 плана)', (
       ...EDF_PARAM_DEFAULTS,
       reference: 'custom',
       visibleChannels: ['C3', 'C4'],
-    })
+    }, 'cleaned')
     expect(custom.reference_channels).toBe('C3,C4')
+  })
+
+  it('слой band шлёт только ключ персиста: band_key + notch + референс', () => {
+    const params: EdfParams = {
+      ...EDF_PARAM_DEFAULTS,
+      signalBandKey: 'mu',
+      notchHz: 60,
+      cleanMethod: 'ica',
+      reference: 'custom',
+      visibleChannels: ['C3', 'C4'],
+    }
+    expect(signalsPrepQuery(params, 'band')).toEqual({
+      band_key: 'mu',
+      notch_hz: 60,
+      reference_channels: 'C3,C4',
+    })
+
+    // Числовая полоса и опции очистки с band_key несовместны (сервер 400) —
+    // в query они не входят, а смена полосы делает кадр устаревшим
+    const bandSignature = signalsPrepSignature(params, 'band')
+    expect(signalsPrepSignature({ ...params, signalBandKey: 'alpha' }, 'band')).not.toBe(
+      bandSignature,
+    )
+    // Опции очистки содержимое band-слоя не меняют — и отпечаток не трогают
+    expect(
+      signalsPrepSignature({ ...params, cleanMethod: 'ssp', badChannels: 'C3' }, 'band'),
+    ).toBe(bandSignature)
+    // А notch и референс — часть ключа персиста, меняют
+    expect(signalsPrepSignature({ ...params, notchHz: 0 }, 'band')).not.toBe(bandSignature)
+    expect(
+      signalsPrepSignature({ ...params, reference: 'average' }, 'band'),
+    ).not.toBe(bandSignature)
   })
 
   it('отпечаток слоя не меняется от правок вида, но ловит смену фильтра/очистки', () => {
@@ -313,6 +348,51 @@ describe('слои видимости сигналов (шаг 2 плана)', (
       fetchMock.mock.calls.filter(([url]) => String(url).includes('/signals')),
     ).toHaveLength(2)
     expect(useEdfRecording.getState().signalsPending).toBe(0)
+  })
+
+  it('слой band шлёт band_key, грузится лениво и кэшируется своим отпечатком', async () => {
+    const fetchMock = mockApiFetch()
+    useEdfRecording.getState().finishUpload(recordingFixture)
+    useEdfParams.getState().setParams({ signalBandKey: 'theta', signalLayer: 'band' })
+
+    await useEdfRecording.getState().loadSignals(1, 'band')
+
+    const urls = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('/signals'))
+    expect(urls).toHaveLength(1)
+    expect(urls[0]).toContain('layer=band')
+    expect(urls[0]).toContain('band_key=theta')
+    // Числовая полоса и опции очистки с band_key несовместны — в query их нет
+    expect(urls[0]).not.toContain('band_min')
+    expect(urls[0]).not.toContain('clean_method')
+
+    // Кадр лежит своим слоем и своим отпечатком
+    const band = useEdfRecording.getState().signalFrames.band
+    expect(band?.frames[1]).toBeTruthy()
+    expect(band?.sig).toBe(signalsPrepSignature(useEdfParams.getState().params, 'band'))
+
+    // Повтор того же уровня и той же полосы — без запроса
+    await useEdfRecording.getState().loadSignals(1, 'band')
+    expect(
+      fetchMock.mock.calls.filter(([url]) => String(url).includes('/signals')),
+    ).toHaveLength(1)
+
+    // Смена полосы — другой отпечаток: следующий вызов перезапрашивает
+    useEdfParams.getState().setParams({ signalBandKey: 'alpha' })
+    await useEdfRecording.getState().loadSignals(1, 'band')
+    const afterChange = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes('layer=band'))
+    expect(afterChange).toHaveLength(2)
+    expect(afterChange[1]).toContain('band_key=alpha')
+    // Кадры двух полос не смешиваются: новый отпечаток начал слой заново
+    expect(
+      useEdfRecording.getState().signalFrames.band?.frames,
+    ).toEqual(expect.objectContaining({ 1: expect.anything() }))
+    expect(useEdfRecording.getState().signalFrames.band?.sig).toBe(
+      signalsPrepSignature(useEdfParams.getState().params, 'band'),
+    )
   })
 
   it('правка параметра очистки: кэш виден до перезапроса, новый отпечаток начинает слой заново', async () => {

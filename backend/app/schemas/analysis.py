@@ -598,9 +598,12 @@ class RecordingSignalsHeader(BaseModel):
 
     recording_id: str
     level: int = Field(description="Уровень пирамиды (множитель зума ×1…×16)")
-    layer: Literal["raw", "cleaned", "diff"] = Field(
+    layer: Literal["raw", "cleaned", "diff", "band"] = Field(
         default="raw",
-        description="Слой видимости: raw (сырая пирамида) | cleaned (сигнал расчётов) | diff (вклад очистки)",
+        description=(
+            "Слой видимости: raw (сырая пирамида) | cleaned (сигнал расчётов) | "
+            "diff (вклад очистки) | band (персист подготовленного массива по band_key, фаза B)"
+        ),
     )
     channels: list[str] = Field(description="Каналы в порядке отрисовки (как в паспорте записи)")
     sfreq: float = Field(description="Частота дискретизации огибающей, Гц")

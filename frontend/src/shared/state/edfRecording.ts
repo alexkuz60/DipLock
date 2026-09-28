@@ -156,8 +156,21 @@ export function buildPreprocessForm(stage: RecalcStage, params: EdfParams): Form
  * что в `buildPreprocessForm('filter')`, но **только** то, что меняет
  * содержимое слоя (единицы EDF и пороги не входят; выбор каналов входит —
  * при референсе «по каналам» он меняет сигнал).
+ *
+ * Слой `band` (Фаза B) собирается иначе: только `band_key` + notch +
+ * референс — ровно ключ персиста (`docs/rules/data-and-caches.md` п.16).
+ * Числовая полоса и опции очистки с ним несовместны (сервер отвечает 400),
+ * поэтому в отпечаток и в query они для него не входят.
  */
-export function signalsPrepQuery(params: EdfParams): SignalsPrepQuery {
+export function signalsPrepQuery(params: EdfParams, layer: SignalLayer): SignalsPrepQuery {
+  if (layer === 'band') {
+    const query: SignalsPrepQuery = { band_key: params.signalBandKey }
+    if (params.notchHz) query.notch_hz = params.notchHz
+    if (params.reference === 'custom' && params.visibleChannels.length) {
+      query.reference_channels = params.visibleChannels.join(',')
+    }
+    return query
+  }
   const query: SignalsPrepQuery = {}
   const band = filterBandOf(params)
   if (band) {
@@ -178,12 +191,14 @@ export function signalsPrepQuery(params: EdfParams): SignalsPrepQuery {
 
 /**
  * Отпечаток параметров слоя для кэша кадров: смена полосы/notch/референса/
- * очистки делает загруженные `cleaned`/`diff`-кадры устаревшими. Сырой слой от
- * параметров не зависит — его отпечаток всегда пустой.
+ * очистки делает загруженные `cleaned`/`diff`-кадры устаревшими; у `band` —
+ * смена `band_key`/notch/референса (опции очистки на его содержимое не
+ * влияют — и не должны «устаревать» кадр). Сырой слой от параметров не
+ * зависит — его отпечаток всегда пустой.
  */
 export function signalsPrepSignature(params: EdfParams, layer: SignalLayer): string {
   if (layer === 'raw') return ''
-  return JSON.stringify(signalsPrepQuery(params))
+  return JSON.stringify(signalsPrepQuery(params, layer))
 }
 
 /**
@@ -601,7 +616,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
       signalsPending: state.signalsPending + 1,
       signalsError: null,
     }))
-    const prep = activeLayer === 'raw' ? undefined : signalsPrepQuery(useEdfParams.getState().params)
+    const prep = activeLayer === 'raw' ? undefined : signalsPrepQuery(useEdfParams.getState().params, activeLayer)
     try {
       const buffer = await api.recordingSignals(recording.recording_id, level, {
         layer: activeLayer,

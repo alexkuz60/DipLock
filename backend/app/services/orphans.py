@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 # Кэши, ключ которых — recording_id: у сироты их не чистит никто (см. правило 3
 # в ``docs/rules/data-and-caches.md``).
-RECORDING_CACHE_SUBDIRS = ("signals", "spectra", "spectrograms")
+RECORDING_CACHE_SUBDIRS = ("signals", "spectra", "spectrograms", "prepared")
 
 
 @dataclass

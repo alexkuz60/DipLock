@@ -292,6 +292,10 @@ async def get_recording_signals(
     # стадии «Фильтр и референс» (шаг 2 плана «слои видимости»)
     band_min: float | None = Query(None, description="Нижняя граница полосы, Гц"),
     band_max: float | None = Query(None, description="Верхняя граница полосы, Гц"),
+    band_key: str | None = Query(
+        None,
+        description="Ключ полосы для слоя band (фаза B): один из freq_bands/functional_bands",
+    ),
     notch_hz: float | None = Query(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
     reference_channels: str | None = Query(None, description="Каналы референса через запятую (без них — average)"),
     notch_harmonics: int = Query(0, description="Гармоники notch (100/150/200/240 Гц), 0–4"),
@@ -311,7 +315,9 @@ async def get_recording_signals(
 
     ``layer`` — слой видимости (шаг 2 плана): ``raw`` — прежняя сырая пирамида
     (N14), ``cleaned``/``diff`` — подготовленный сигнал по параметрам формы
-    «Фильтр и референс» и вклад очистки. Слой — видимость: правка параметра не
+    «Фильтр и референс» и вклад очистки, ``band`` — персист подготовленного
+    массива по именованной полосе ``band_key`` (Фаза B: полоса/очистка в query
+    с ним несовместны — 400). Слой — видимость: правка параметра не
     запускает расчёт и не трогает стадии, но ETag включает параметры — смена
     полосы/очистки отдаёт другой уровень, а не молчаливую подмену.
     """
@@ -320,6 +326,7 @@ async def get_recording_signals(
         layer=layer,
         band_min=band_min,
         band_max=band_max,
+        band_key=band_key,
         notch_hz=notch_hz,
         reference_channels=reference_channels,
         notch_harmonics=notch_harmonics,

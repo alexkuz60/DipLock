@@ -46,6 +46,17 @@ describe('api', () => {
     // Пустые значения не засоряют query (notch выключен, bad-каналов нет)
     expect(urls[1]).not.toContain('notch_hz=')
     expect(urls[1]).not.toContain('bad_channels')
+
+    // Слой band (Фаза B): band_key уезжает в query тем же механизмом prep
+    await api.recordingSignals('rec1', 2, {
+      layer: 'band',
+      prep: { band_key: 'mu', notch_hz: 50 },
+    })
+    const bandUrl = fetchMock.mock.calls.map(([url]) => String(url))[2] ?? ''
+    expect(bandUrl).toContain('layer=band')
+    expect(bandUrl).toContain('band_key=mu')
+    expect(bandUrl).toContain('notch_hz=50')
+    expect(bandUrl).not.toContain('clean_method')
   })
 
   it('meta() возвращает разобранный JSON', async () => {

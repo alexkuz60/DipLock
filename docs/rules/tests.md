@@ -457,7 +457,22 @@ Vitest +12 — `edfParams.test` (+1: `signalLayer` по умолчанию `raw`
 функциональных ритмов в `<select>`; `SelectField` группирует подряд идущие `group` в `<optgroup>`.
 
 
-Всего **850 тестов Vitest (75 файлов) и 528 pytest** (без маркера `integration`; со всеми — 536) (из них
+**Фаза B — персист подготовленного массива и слой `band` (29.09.2026).** pytest +10 —
+`tests/test_prepared_persist.py` (7: первый вызов кладёт файл, повтор после сброса RAM-кэша
+читает диск без чтения EDF; ключ разводит полосу/notch/референс — 4 файла; неизвестный `band_key` —
+`PreparedPersistError`; обрезанный payload — промах с пересчётом, а не падение; сбой `cache_write`
+не ломает сборку; `clear_persist_cache` по записи и вытеснение реестра чистят персист; чужой
+заголовок/сигнатура — `None`) и `test_recording_signals.py` (+3: слой `band` — 200, `header.layer`,
+alpha убирает смещение, 304 на повтор, свой ETag против beta, файл `level1-band-{sig}.bin` и
+каталог `prepared/`; 400 без `band_key`/с неизвестным/с `band_min`/с очисткой; `band_key` вне слоя
+`band` — 400). Vitest +4 — `edfParams.test` (+1: 4 пункта `SIGNAL_LAYER_OPTIONS`, `signalBandKey`
+дефолт `alpha` и вне `STAGE_PARAM_KEYS`, смена не устаревает стадии), `edfRecording.test` (+1: слой
+`band` шлёт только `band_key`+notch+референс, кэш своим отпечатком, смена полосы перезапрашивает и
+не смешивает кадры), `ViewerSignalCaption.test` (+1: текст «подготовленная полоса (персист)» с
+ключом в title); существующий `client.test` расширен (`band_key`/notch уезжают в query слоя `band`,
+`clean_method` нет). Обновлён `test_orphans.py`: `RECORDING_CACHE_SUBDIRS` включает `prepared`.
+
+Всего **854 теста Vitest (75 файлов) и 538 pytest** (без маркера `integration`; со всеми — 546) (из них
 26 — геометрия, укладка и кэш среза МРТ, 25 — контуры атласа (изолинии, выборка осей,
 производная BA-разметка, структура по MNI, кэш, роуты), 21 — спектр и быстрый расчёт
 (включая multitaper для коротких эпох, 1/f + пики specparam и ETag топокарт от метода PSD),

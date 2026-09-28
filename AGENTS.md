@@ -78,6 +78,7 @@ backend/app/
 │   ├── orphans.py         # обход сирот при старте (A6)
 │   ├── asset_versions.py  # единый отпечаток версий ассетов (A7)
 │   ├── prepared_signal.py # RAM-кэш подготовленного сигнала: EDF один раз на набор параметров (A4)
+│   ├── prepared_persist.py # дисковый персист массива по полосе: ключ band_key+notch+референс (Фаза B)
 │   ├── job_manager.py     # фоновые задачи: этапы, прогресс эпох, семафор (F7)
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
 │   ├── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)
@@ -153,7 +154,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (850 Vitest / 536 pytest), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (854 Vitest / 546 pytest), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |

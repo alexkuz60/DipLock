@@ -39,6 +39,7 @@ from app.services import journal
 from app.services.artifact_cleaner import CleanSpec
 from app.services.cache_store import cache_clear, cache_path, cache_read, cache_write
 from app.services.edf_loader import normalize_channel_name
+from app.services.prepared_persist import PreparedPersistError, prepared_array
 from app.services.prepared_signal import prepared_raw_report
 from app.services.recordings import Recording
 
@@ -49,13 +50,15 @@ MAGIC = b"DPS1"
 _HEADER_LEN_FMT = "<I"
 
 # Слои видимости вьюера (шаг 2 плана): сырой / после очистки / разница вклада
-# очистки. `raw` — прежнее поведение без изменений. Словарь — единственный
-# источник и имён, и литеральных типов (валидация в `api/params.py`).
-SignalLayer = Literal["raw", "cleaned", "diff"]
+# очистки + персист по полосе (Фаза B). `raw` — прежнее поведение без изменений.
+# Словарь — единственный источник и имён, и литеральных типов (валидация в
+# `api/params.py`).
+SignalLayer = Literal["raw", "cleaned", "diff", "band"]
 SIGNAL_LAYER_LITERALS: dict[str, SignalLayer] = {
     "raw": "raw",
     "cleaned": "cleaned",
     "diff": "diff",
+    "band": "band",
 }
 SIGNAL_LAYERS: tuple[str, ...] = tuple(SIGNAL_LAYER_LITERALS)
 
@@ -87,15 +90,29 @@ class SignalsLayerQuery:
     notch_hz: float | None = None
     reference_channels: tuple[str, ...] = ()
     clean: CleanSpec = field(default_factory=CleanSpec)
+    band_key: str | None = None
+    """Именованный ключ полосы слоя ``band`` (фаза B): адрес персиста
+    ``recording_id + band_key + notch + референс`` (п.16
+    ``docs/rules/data-and-caches.md``). Для остальных слоёв не читается."""
 
     def signature(self) -> str:
         """Короткий отпечаток параметров слоя (sha1, 12 hex — как у ключа prepared)."""
-        parts = [
-            f"{self.band[0]:g}-{self.band[1]:g}" if self.band else "-",
-            str(self.notch_hz or 0),
-            ",".join(self.reference_channels) or "average",
-            self.clean.label(),
-        ]
+        if self.layer == "band":
+            # Ключ слоя band — ровно набор персиста (п.16): band_key, notch,
+            # референс. Очистка в него не входит — слой собирается без неё,
+            # поэтому два запроса с разным clean обязаны дать один файл.
+            parts = [
+                f"band_key={self.band_key or '-'}",
+                str(self.notch_hz or 0),
+                ",".join(self.reference_channels) or "average",
+            ]
+        else:
+            parts = [
+                f"{self.band[0]:g}-{self.band[1]:g}" if self.band else "-",
+                str(self.notch_hz or 0),
+                ",".join(self.reference_channels) or "average",
+                self.clean.label(),
+            ]
         # sha1 — не криптография, а короткий ключ кэша (та же оговорка, что в
         # `prepared_signal.signature`): коллизия стоит лишнего попадания, не данных.
         return hashlib.sha1(  # noqa: S324 — ключ кэша, не защита данных
@@ -322,12 +339,58 @@ def _build_prepared_level(
     )
 
 
+def _build_band_level(
+    recording: Recording, level: int, settings: Settings, query: SignalsLayerQuery,
+) -> bytes:
+    """Слой ``band``: огибающая подготовленного массива из персиста по полосе.
+
+    Отличия от ``cleaned``: полоса адресуется именованным ``band_key`` (фаза A),
+    очистка не применяется (ключ персиста её не содержит), а сам массив живёт на
+    диске и переживает рестарт процесса — повторное переключение слоя не читает
+    EDF (инвариант п.16 ``docs/rules/data-and-caches.md``).
+    """
+    if not query.band_key:
+        raise SignalBuildError("Слой band требует band_key (имя полосы из freq_bands/functional_bands)")
+    try:
+        array = prepared_array(
+            recording, settings, query.band_key,
+            notch_hz=query.notch_hz,
+            reference_channels=list(query.reference_channels) or None,
+            # Слой вьюера всегда average: режим «none» — миксы каналов «ЭЭГ»,
+            # у них нет пирамиды записи.
+            reference_mode="average",
+            pipeline="signals",
+        )
+    except PreparedPersistError as exc:
+        raise SignalBuildError(str(exc)) from exc
+
+    n_times = int(array.data.shape[1])
+    if n_times <= 0 or array.sfreq <= 0:
+        raise SignalBuildError("Файл не содержит данных (sfreq или длина записи равны нулю)")
+    if not array.channels:
+        raise SignalBuildError("В файле нет каналов для отрисовки")
+
+    n_points, decimated = _grid(n_times, level, settings)
+    # Персист хранит вольты — перевод в мкВ тем же множителем, что у других
+    # подготовленных слоёв: переключение слоёв не «прыгает» масштабом.
+    rows = _envelope_rows(
+        lambda start, stop: array.data[:, start:stop],
+        n_times, n_points, decimated, 1e6, len(array.channels),
+    )
+    return _assemble(
+        recording, level, array.channels, n_times, array.sfreq,
+        n_points, decimated, "band", rows,
+    )
+
+
 def _build_level(
     recording: Recording, level: int, settings: Settings, query: SignalsLayerQuery,
 ) -> bytes:
     """Строит контейнер сигналов уровня ``level`` выбранного слоя."""
     if query.layer in ("cleaned", "diff"):
         return _build_prepared_level(recording, level, settings, query)
+    if query.layer == "band":
+        return _build_band_level(recording, level, settings, query)
     return _build_raw_level(recording, level, settings)
 
 

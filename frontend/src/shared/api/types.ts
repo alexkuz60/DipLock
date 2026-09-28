@@ -87,18 +87,23 @@ export type PreprocessStage = 'filter' | 'artifacts' | 'epochs'
  * Слой видимости треков вьюера (`GET /recordings/{id}/signals?layer=`, шаг 2
  * плана «слои видимости»): `raw` — сырая пирамида (N14), `cleaned` —
  * подготовленный сигнал расчётов, `diff` — вклад очистки (без очистки − с
- * очисткой) на подготовленной базе.
+ * очисткой) на подготовленной базе, `band` — персист подготовленного массива
+ * по именованной полосе `band_key` (Фаза B).
  */
-export type SignalLayer = 'raw' | 'cleaned' | 'diff'
+export type SignalLayer = 'raw' | 'cleaned' | 'diff' | 'band'
 
 /**
  * Параметры подготовленной базы слоёв `cleaned`/`diff`: плоская проекция
  * формы стадии «Фильтр и референс» в query (те же имена, что у `/preprocess`).
- * Для `raw` не передаются — сырой слой параметров не читает.
+ * Для `raw` не передаются — сырой слой параметров не читает. Слой `band`
+ * берёт только `band_key` (+ notch/референс): числовая полоса и опции
+ * очистки с ним несовместны — сервер отвечает 400 (Фаза B).
  */
 export type SignalsPrepQuery = {
   band_min?: number
   band_max?: number
+  /** Ключ полосы для слоя `band`: один из `freq_bands`/`functional_bands` */
+  band_key?: string
   notch_hz?: number
   /** Каналы референса через запятую; без них сервер считает average */
   reference_channels?: string

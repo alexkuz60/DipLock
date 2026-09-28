@@ -281,3 +281,74 @@ def test_signals_layers_have_distinct_etag_and_cache_files(client, edf_file):
     assert "level1.bin" in files
     assert any(name.startswith("level1-cleaned-") for name in files)
     assert any(name.startswith("level1-diff-") for name in files)
+
+
+def test_band_layer_serves_persist_and_keeps_own_etag(client, synth_edf):
+    """Слой band (Фаза B): собирается по band_key, свой ETag/файл, 304 на повтор."""
+    sfreq = 250.0
+    n_times = int(4 * sfreq)
+    t = np.arange(n_times) / sfreq
+    # Синус 10 Гц (в alpha 8–16) + смещение: high-pass полосы уберёт офсет
+    data = np.vstack([10 * np.sin(2 * np.pi * 10 * t) + 30 + i for i in range(5)])
+    path = synth_edf("band.edf", data, sfreq)
+    meta = _upload(client, path, name="band.edf")
+    url = f"/api/v1/recordings/{meta['recording_id']}/signals?level=1"
+
+    banded = client.get(f"{url}&layer=band&band_key=alpha")
+    assert banded.status_code == 200, banded.text
+    header, payload = _parse(banded.content)
+    assert header["layer"] == "band"
+    assert header["channels"] == meta["channels"]
+    assert header["n_points"] == payload.shape[1]
+    # Alpha-фильтр убрал смещение 30 мкВ — слой действительно подготовленный
+    assert abs(float(payload.mean())) < 5.0
+
+    # Повтор тем же ETag → 304; другой band_key → другой уровень
+    repeat = client.get(
+        f"{url}&layer=band&band_key=alpha",
+        headers={"If-None-Match": banded.headers["etag"]},
+    )
+    assert repeat.status_code == 304
+    beta = client.get(f"{url}&layer=band&band_key=beta")
+    assert beta.status_code == 200, beta.text
+    assert beta.headers["etag"] != banded.headers["etag"]
+
+    cache_dir = os.path.join(settings.cache_dir, "signals", meta["recording_id"])
+    files = os.listdir(cache_dir)
+    assert any(name.startswith("level1-band-") for name in files)
+    # Персист массива записан отдельным кэшем (ключ — band_key)
+    persist_dir = os.path.join(settings.cache_dir, "prepared", meta["recording_id"])
+    assert os.path.isdir(persist_dir)
+    assert any(name.startswith("alpha-") for name in os.listdir(persist_dir))
+
+
+def test_band_layer_rejects_wrong_params(client, edf_file):
+    """Слой band: без/с чужим band_key, с границами или очисткой — 400 с текстом."""
+    meta = _upload(client, edf_file)
+    url = f"/api/v1/recordings/{meta['recording_id']}/signals?level=1&layer=band"
+
+    no_key = client.get(url)
+    assert no_key.status_code == 400
+    assert "band_key" in no_key.json()["detail"]
+
+    unknown = client.get(f"{url}&band_key=alpha_wide")
+    assert unknown.status_code == 400
+    assert "band_key" in unknown.json()["detail"]
+
+    with_bounds = client.get(f"{url}&band_key=alpha&band_min=8&band_max=16")
+    assert with_bounds.status_code == 400
+    assert "band_min" in with_bounds.json()["detail"]
+
+    with_clean = client.get(f"{url}&band_key=alpha&clean_method=ica")
+    assert with_clean.status_code == 400
+    assert "очистки" in with_clean.json()["detail"]
+
+
+def test_band_key_is_rejected_for_other_layers(client, edf_file):
+    """band_key вне слоя band — 400: молчаливое игнорирование запрещено."""
+    meta = _upload(client, edf_file)
+    url = f"/api/v1/recordings/{meta['recording_id']}/signals?level=1"
+
+    response = client.get(f"{url}&layer=cleaned&band_min=1&band_max=40&band_key=alpha")
+    assert response.status_code == 400
+    assert "band_key" in response.json()["detail"]

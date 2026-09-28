@@ -74,6 +74,7 @@ def signals_layer_query(
     band_max: float | None,
     notch_hz: float | None,
     reference_channels: str | None,
+    band_key: str | None = None,
     notch_harmonics: int = 0,
     bad_channels: str | None = None,
     interpolate_bads: bool = False,
@@ -85,6 +86,11 @@ def signals_layer_query(
     Проверки — те же, что у стадии «Фильтр и референс» (полоса парой, опции
     очистки): слой — видимость, но «после очистки» обязан строиться по честным
     параметрам, иначе показанная обработка разошлась бы с расчётом.
+
+    Слой ``band`` (Фаза B) адресуется ``band_key`` — ключом из
+    ``freq_bands``/``functional_bands``, а не границами: это адрес персиста.
+    Числовая полоса и опции очистки с ним несовместны (ключ персиста их не
+    содержит) — сервер отвечает 400, а не молча игнорирует.
     """
     layer_value = SIGNAL_LAYER_LITERALS.get(layer)
     if layer_value is None:
@@ -93,6 +99,20 @@ def signals_layer_query(
             detail=f"layer должен быть одним из {list(SIGNAL_LAYERS)} (получено: {layer!r})",
         )
     band = parse_filter_band(band_min, band_max)
+    if layer_value == "band":
+        _require_band_key_layer(band_key, band, notch_harmonics, bad_channels,
+                                interpolate_bads, clean_method, ica_n_components)
+        return SignalsLayerQuery(
+            layer="band",
+            band_key=band_key,
+            notch_hz=notch_hz,
+            reference_channels=tuple(parse_reference_channels(reference_channels) or ()),
+        )
+    if band_key:
+        raise HTTPException(
+            status_code=400,
+            detail="band_key передаётся только для слоя band (для cleaned/diff используйте band_min/band_max)",
+        )
     _require_clean_options(clean_method, notch_harmonics, ica_n_components)
     bads = tuple(name.strip() for name in (bad_channels or "").split(",") if name.strip())
     return SignalsLayerQuery(
@@ -108,6 +128,47 @@ def signals_layer_query(
             ica_n_components=ica_n_components,
         ),
     )
+
+
+def _require_band_key_layer(
+    band_key: str | None,
+    band: tuple[float, float] | None,
+    notch_harmonics: int,
+    bad_channels: str | None,
+    interpolate_bads: bool,
+    clean_method: str,
+    ica_n_components: int,
+) -> None:
+    """Проверки слоя ``band``: обязателен известный ``band_key``, без числовых
+    границ и опций очистки (они не входят в ключ персиста, п.16)."""
+    known = (*settings.freq_bands.keys(), *settings.functional_bands.keys())
+    if not band_key:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Слой band требует band_key — один из {list(known)}",
+        )
+    if band_key not in known:
+        raise HTTPException(
+            status_code=400,
+            detail=f"band_key должен быть одним из {list(known)} (получено: {band_key!r})",
+        )
+    if band is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Слой band адресуется band_key — band_min/band_max с ним несовместны",
+        )
+    if (
+        clean_method != "none"
+        or notch_harmonics
+        or (bad_channels or "").strip()
+        or interpolate_bads
+        or ica_n_components
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Слой band собирается без очистки (ключ персиста её не содержит): "
+                   "clean_method=none, без bad-каналов, гармоников и ICA",
+        )
 
 
 def validate_analysis_request(

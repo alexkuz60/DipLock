@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   EDF_PARAM_DEFAULTS,
   RECALC_STAGES,
+  SIGNAL_LAYER_OPTIONS,
   STAGE_PARAM_KEYS,
   edfParamsFromMeta,
   emptyStageSnapshot,
@@ -243,6 +244,22 @@ describe('слой параметров EDF', () => {
     expect(stageState('artifacts')).toBe('ready')
     expect(stageState('epochs')).toBe('ready')
     expect(useEdfParams.getState().params.signalLayer).toBe('cleaned')
+  })
+
+  it('полоса слоя band (Фаза B) — отрисовка: дефолт alpha, вне STAGE_PARAM_KEYS', () => {
+    // Четыре слоя: сырой/очистка/разница + персист по полосе
+    expect(SIGNAL_LAYER_OPTIONS.map((option) => option.value)).toEqual([
+      'raw', 'cleaned', 'diff', 'band',
+    ])
+    expect(EDF_PARAM_DEFAULTS.signalBandKey).toBe('alpha')
+    for (const stage of RECALC_STAGES) {
+      expect(STAGE_PARAM_KEYS[stage]).not.toContain('signalBandKey')
+    }
+    // Смена полосы не устаревает стадии — это отрисовка слоя
+    useEdfParams.getState().markApplied()
+    useEdfParams.getState().setParams({ signalBandKey: 'mu' })
+    expect(stageState('filter')).toBe('ready')
+    expect(stageState('epochs')).toBe('ready')
   })
 
   it('в localStorage уходят параметры, но не снимки результатов', () => {

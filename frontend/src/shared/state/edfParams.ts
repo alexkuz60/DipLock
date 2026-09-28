@@ -70,6 +70,12 @@ export const SIGNAL_LAYER_OPTIONS: { value: SignalLayer; label: string; title: s
     title:
       'Вклад очистки на подготовленной базе: (без очистки) − (с очисткой) — что убрала ICA/SSP, гармоники notch и интерполяция bad-каналов',
   },
+  {
+    value: 'band',
+    label: 'По полосе',
+    title:
+      'Персист подготовленного массива по именованной полосе (δ … γ-high, μ … ψ): то, что идёт в расчёт, но без очистки — ключ «запись + полоса + notch + референс», живёт на диске (Фаза B)',
+  },
 ]
 
 /** Метод артефактуальной очистки (стадия «Фильтр и референс», MNE-only) */
@@ -171,6 +177,13 @@ export type EdfParams = {
   heartRateTrack: boolean
   /** Слой видимости треков: отрисовка, расчёт не устаревает (см. SignalLayer) */
   signalLayer: SignalLayer
+  /**
+   * Ключ полосы слоя `band` (Фаза B): один из `freq_bands`/`functional_bands`
+   * `/meta`. Отрисовка — вне `STAGE_PARAM_KEYS`, но входит в отпечаток кадров
+   * слоя: смена полосы показывает «слой по прежним параметрам» и лениво
+   * перезапрашивается.
+   */
+  signalBandKey: string
   /** Канал графика ERP (просмотр результата); '' — первый видимый */
   erpChannel: string
   /** Baseline ERP-усреднения */
@@ -217,6 +230,9 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   heartRateTrack: true,
   // Три слоя видимости: по умолчанию сырая пирамида (N14)
   signalLayer: 'raw',
+  // Полоса слоя «По полосе»: alpha — самая частая рабочая полоса; ключи
+  // стабильны (фаза A), а список пунктов приходит из /meta
+  signalBandKey: 'alpha',
   erpChannel: '',
   erpBaseline: 'minus200',
   edfUnits: 'auto',
