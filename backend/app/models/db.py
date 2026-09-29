@@ -1,7 +1,8 @@
 """SQLAlchemy модели для локального режима (SQLite)."""
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, inspect, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -32,6 +33,14 @@ class Session(Base):
 
 
 class EpochRecord(Base):
+    """Эпоха сессии: все полосы сетки ``freq_bands`` (4.1, N38).
+
+    Колонки мощностей — ровно ключи ``settings.freq_bands`` + ``_power``:
+    раньше таблица хранила 4 полосы при 7 в конфиге, и γ и новые полосы
+    молча терялись при записи. Смена сетки — только вместе с колонками:
+    до alembic (4.2) ручной догонкой в ``init_db``, после — миграцией.
+    """
+
     __tablename__ = "epochs"
     id = Column(Integer, primary_key=True)
     session_id = Column(String, ForeignKey("sessions.id"))
@@ -40,9 +49,12 @@ class EpochRecord(Base):
     duration_ms = Column(Float)
     has_artifact = Column(Integer, default=0)
     delta_power = Column(Float)
+    delta_theta_power = Column(Float)
     theta_power = Column(Float)
     alpha_power = Column(Float)
     beta_power = Column(Float)
+    gamma_power = Column(Float)
+    high_gamma_power = Column(Float)
 
 
 class Dipole(Base):
@@ -62,7 +74,29 @@ class Dipole(Base):
     trajectory_json = Column(JSON)  # полная траектория для анимации
 
 
-# Асинхронная функция для создания таблиц
+def _add_missing_columns(conn: Connection) -> None:
+    """Догоняет колонки существующих таблиц до модели (ручная правка до alembic).
+
+    ``create_all`` создаёт отсутствующие таблицы, но **не меняет** существующие:
+    файл БД, созданный до 4.1 (4 полосы вместо 7), иначе падал бы на вставке
+    эпох («no such column»). Идентификаторы берутся из ``Base.metadata`` —
+    это собственная схема, а не пользовательский ввод. После введения
+    alembic-миграций (todo 4.2) шаг заменит миграция.
+    """
+    inspector = inspect(conn)
+    for table in Base.metadata.sorted_tables:
+        existing = {column["name"] for column in inspector.get_columns(table.name)}
+        for column in table.c:
+            if column.name in existing:
+                continue
+            type_sql = column.type.compile(dialect=conn.dialect)
+            conn.execute(
+                text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {type_sql}")
+            )
+
+
 async def init_db():
+    """Создаёт таблицы и догоняет колонки старых файлов БД (см. ``_add_missing_columns``)."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)

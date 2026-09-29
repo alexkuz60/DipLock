@@ -277,16 +277,21 @@ async def save_analysis_to_db(result: dict[str, Any]) -> None:
         epoch_rows: dict[int, Any] = {}
         for record in result.get("epochs") or []:
             powers = record.get("band_powers") or {}
+            # Колонки мощностей = ключи settings.freq_bands + «_power» (4.1, N38):
+            # прежняя таблица из 4 колонок молча теряла γ и новые полосы. Нет
+            # значения (отброшенная эпоха, старый результат) — NULL; полоса из
+            # конфига без колонки в модели дала бы TypeError, а не тихую потерю.
+            band_columns = {
+                f"{band}_power": powers.get(f"{band}_power")
+                for band in settings.freq_bands
+            }
             row = EpochRecord(
                 session_id=result["session_id"],
                 epoch_index=record.get("epoch_index"),
                 start_time_sec=record.get("start_time_sec"),
                 duration_ms=record.get("duration_ms"),
                 has_artifact=int(bool(record.get("has_artifact"))),
-                delta_power=powers.get("delta_power"),
-                theta_power=powers.get("theta_power"),
-                alpha_power=powers.get("alpha_power"),
-                beta_power=powers.get("beta_power"),
+                **band_columns,
             )
             session.add(row)
             epoch_rows[record.get("epoch_index")] = row

@@ -13,6 +13,7 @@ from typing import Any
 import mne
 import numpy as np
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.core.config import settings
@@ -256,3 +257,74 @@ def test_compute_band_powers_returns_per_epoch_and_means(epochs_alpha):
 def test_compute_band_powers_empty_bands(epochs_alpha):
     """Без диапазонов оба словаря пусты (пайплайн не обязан их проверять)."""
     assert compute_band_powers(epochs_alpha, {}) == ({}, {})
+
+
+# ---------- колонки полос = freq_bands (4.1, N38) ----------
+
+
+def test_epoch_columns_cover_all_freq_bands():
+    """Схема ``epochs`` содержит колонку для каждой полосы ``freq_bands`` (4.1, N38)."""
+    columns = set(db_module.EpochRecord.__table__.columns.keys())
+    expected = {f"{band}_power" for band in settings.freq_bands}
+    assert expected <= columns
+    # Ровно сетка конфига: колонки мощностей = ключи freq_bands + «_power».
+    assert {name for name in columns if name.endswith("_power")} == expected
+
+
+def test_save_analysis_writes_every_band_column(sqlite_db):
+    """Каждая полоса сетки доезжает в свою колонку; пустые мощности — NULL (4.1)."""
+    result = _result()
+    values = {f"{band}_power": float(index + 1) for index, band in enumerate(settings.freq_bands)}
+    result["epochs"][0]["band_powers"] = dict(values)
+    result["epochs"][2]["band_powers"] = {}
+    asyncio.run(save_analysis_to_db(result))
+
+    async def _read():
+        async with db_module.AsyncSessionLocal() as session:
+            rows = await session.execute(
+                select(db_module.EpochRecord).order_by(db_module.EpochRecord.epoch_index)
+            )
+            return list(rows.scalars())
+
+    rows = asyncio.run(_read())
+    assert len(rows) == 3
+    for key, expected in values.items():
+        assert getattr(rows[0], key) == pytest.approx(expected)
+        # Отброшенная эпоха и эпоха без мощностей — NULL, а не 0 и не пропуск.
+        assert getattr(rows[1], key) is None
+        assert getattr(rows[2], key) is None
+
+
+def test_init_db_upgrades_legacy_db_with_four_band_columns(tmp_path, monkeypatch):
+    """Старый файл БД (4 полосы) догоняется до сетки freq_bands, а не падает (4.1).
+
+    ``create_all`` существующие таблицы не меняет: без ручной догонки вставка
+    эпох в файл, созданный до 4.1, падала бы с «no such column».
+    """
+    path = tmp_path / "legacy.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(db_module, "engine", engine)
+    monkeypatch.setattr(db_module, "AsyncSessionLocal", maker)
+    asyncio.run(db_module.init_db())
+
+    # Откат схемы к виду «до 4.1» — имитация файла, созданного прежней версией.
+    con = sqlite3.connect(path)
+    try:
+        con.executescript(
+            "ALTER TABLE epochs DROP COLUMN delta_theta_power;"
+            "ALTER TABLE epochs DROP COLUMN gamma_power;"
+            "ALTER TABLE epochs DROP COLUMN high_gamma_power;"
+        )
+        con.commit()
+    finally:
+        con.close()
+
+    result = _result()
+    result["epochs"][0]["band_powers"]["gamma_power"] = 42.0
+    # init_db внутри сохранения и догоняет колонки — вставка проходит.
+    asyncio.run(save_analysis_to_db(result))
+
+    assert _rows(path, "select gamma_power from epochs where epoch_index = 0") == [(42.0,)]
+    columns = {row[1] for row in _rows(path, "pragma table_info(epochs)")}
+    assert {"delta_theta_power", "gamma_power", "high_gamma_power"} <= columns
