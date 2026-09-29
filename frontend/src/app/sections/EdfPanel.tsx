@@ -283,10 +283,10 @@ export function EdfPanel() {
           <p className="mt-1 text-sm text-fg-2" data-testid="clean-report">
             Очистка:
             {cleanReport.n_components_removed
-              ? ` ICA −${cleanReport.n_components_removed} комп. (индексы: ${cleanReport.removed_components.join(', ')})`
+              ? ` ICA −${cleanReport.n_components_removed} комп. (индексы: ${(cleanReport.removed_components ?? []).join(', ')})`
               : ''}
             {cleanReport.n_projectors ? ` SSP: ${cleanReport.n_projectors} проекторов` : ''}
-            {cleanReport.interpolated_channels.length
+            {cleanReport.interpolated_channels?.length
               ? ` интерполировано: ${cleanReport.interpolated_channels.join(', ')}`
               : ''}
             {cleanReport.amplitude_p95_uv_before !== null &&
@@ -518,12 +518,12 @@ export function EdfPanel() {
               {evoked.result.baseline
                 ? `, baseline ${Math.round(evoked.result.baseline[0] * 1000)}…${Math.round(evoked.result.baseline[1] * 1000)} мс`
                 : ', без baseline'}
-              {evoked.result.rejected_epochs.length
+              {evoked.result.rejected_epochs?.length
                 ? `, отброшено событий: ${evoked.result.rejected_epochs.length}`
                 : ''}
               . Ось: мс от события (0 — стимул), мкВ.
             </p>
-            {evoked.result.warnings.map((warning) => (
+            {(evoked.result.warnings ?? []).map((warning) => (
               <p key={warning} className="text-xs text-warn">
                 {warning}
               </p>
@@ -560,7 +560,7 @@ export function EdfPanel() {
         {/* Три слоя видимости (шаг 2 плана): параметр вне STAGE_PARAM_KEYS —
             переключение только меняет вид треков, расчёт не запускается и не
             устаревает. Контрол есть только у записи: у демо сервера нет. */}
-        {recording && !demo && recording.channels.length > 0 ? (
+        {recording && !demo && (recording.channels?.length ?? 0) > 0 ? (
           <SegmentedControl
             label="Слой сигнала"
             value={params.signalLayer}

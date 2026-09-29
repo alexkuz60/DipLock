@@ -243,7 +243,7 @@ export function DipolesPanel() {
             </StatusPill>
           ) : null}
           <StatusPill tone={spectrum ? 'ok' : 'neutral'}>
-            {spectrum ? `Спектр: диапазонов ${spectrum.bands.length}` : 'Спектр не рассчитан'}
+            {spectrum ? `Спектр: диапазонов ${spectrum.bands?.length ?? 0}` : 'Спектр не рассчитан'}
           </StatusPill>
         </div>
 
@@ -398,7 +398,7 @@ export function DipolesPanel() {
           правка параметров здесь ничего не запускает.
         </p>
         <p className="mt-2 text-sm text-fg-2">{dipoleLayerStatus(visibleLayer)}</p>
-        {calcResult?.warnings.length ? (
+        {calcResult?.warnings?.length ? (
           <ul className="mt-1 list-inside list-disc text-sm text-warn">
             {calcResult.warnings.map((warning) => (
               <li key={warning}>{warning}</li>

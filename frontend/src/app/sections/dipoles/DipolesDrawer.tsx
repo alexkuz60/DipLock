@@ -138,7 +138,7 @@ export function DipolesDrawer() {
               {spectrumMetrics(spectrum).join(' · ')}
             </p>
           ) : null}
-          {spectrum.missed_channels.length > 0 ? (
+          {spectrum.missed_channels && spectrum.missed_channels.length > 0 ? (
             <p className="mb-2 text-sm text-warn">
               {`Без позиции в монтаже (в топокарты не попали): ${spectrum.missed_channels.join(', ')}`}
             </p>

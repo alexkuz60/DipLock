@@ -253,7 +253,7 @@ export function DipolesToolHeaderActions() {
       : recording === null
         ? NO_RECORDING_HINT
         : result
-          ? `Пересчитать диполи: точек ${result.points.length}, сетка ${result.grid_mm} мм`
+          ? `Пересчитать диполи: точек ${result.points?.length ?? 0}, сетка ${result.grid_mm} мм`
           : 'Рассчитать диполи быстро: одна точка на эпоху в пике GFP, перебор сетки узлов'
 
   return (
@@ -337,7 +337,7 @@ export function DipolesToolHeaderActions() {
 
       {result ? (
         <StatusPill tone="ok" title={`Метод: ${result.method}, сетка ${result.grid_mm} мм`}>
-          {`Быстрый режим: ${result.points.length} точек`}
+          {`Быстрый режим: ${result.points?.length ?? 0} точек`}
         </StatusPill>
       ) : null}
 

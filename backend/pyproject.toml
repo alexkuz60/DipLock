@@ -59,7 +59,8 @@ known-first-party = ["app"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["app"]
+# alembic (env.py + versions/) тоже проверяем: миграции — часть кода (4.2).
+files = ["app", "alembic"]
 # Научный стек (mne/nibabel/scipy) поставляется без стабов — их отсутствие не ошибка.
 ignore_missing_imports = true
 # Проверяем тела функций и без аннотаций: без этого «страховка» пропускает самые частые ошибки.

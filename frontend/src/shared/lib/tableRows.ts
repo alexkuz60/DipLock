@@ -202,11 +202,11 @@ export type LocalizationRow = {
  * Сортировка — отдельная функция (порядок из API не обязан совпадать с показом).
  */
 export function localizationRows(result: DipoleScanResult): LocalizationRow[] {
-  return result.points.map((point) => ({
+  return (result.points ?? []).map((point) => ({
     id: `${point.epoch_index}-${Math.round(point.time_ms)}`,
     epochIndex: point.epoch_index,
     timeMs: point.time_ms,
-    mni: mniOf(point.mni_coords),
+    mni: mniOf(point.mni_coords ?? null),
     amplitudeNaM: point.amplitude_nam,
     gof: point.gof,
     // RIV/CI (2.6/N23): приходят готовыми от сервера; `null` — не посчитано,
@@ -217,9 +217,9 @@ export function localizationRows(result: DipoleScanResult): LocalizationRow[] {
     // становятся `null` — в ячейке «—», в подсказке строки их просто нет.
     area: atlasLabel(point.brodmann_area),
     structure: atlasLabel(point.anatomical_structure),
-    structureDistanceMm: point.structure_distance_mm,
-    areaDistanceMm: point.brodmann_distance_mm,
-    outsideBrain: point.outside_brain,
+    structureDistanceMm: point.structure_distance_mm ?? null,
+    areaDistanceMm: point.brodmann_distance_mm ?? null,
+    outsideBrain: point.outside_brain ?? null,
   }))
 }
 

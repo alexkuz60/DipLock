@@ -49,7 +49,7 @@ export function normalizePlaybackSpeed(value: number): PlaybackSpeed {
  */
 export function canPlayback(result: DipoleScanResult | null): boolean {
   if (!result) return false
-  return result.points.length > 0 && result.n_epochs_total > 0 && result.epoch_length_ms > 0
+  return (result.points?.length ?? 0) > 0 && result.n_epochs_total > 0 && result.epoch_length_ms > 0
 }
 
 /** Длительность воспроизведения, мс: вся нарезка эпох результата. */

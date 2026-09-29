@@ -27,7 +27,9 @@
 - `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
   `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **41 HTTP-путь** (36 в `routes.py` + 5 уровня приложения).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
-  из OpenAPI генерируются TS-типы `frontend/src/shared/api/types.ts`.
+  из OpenAPI генерируются TS-типы `frontend/src/shared/api/schema.d.ts` (`npm run gen:api`;
+  выгрузка `openapi.json` — `venv/bin/python -m scripts.export_openapi`, свежесть — pytest
+  `test_openapi_json_is_up_to_date` и CI-шаг `git diff`, 4.2).
 - Swagger: `http://localhost:8000/docs`.
 
 ## Инвентарь эндпоинтов (36 в `routes.py`)

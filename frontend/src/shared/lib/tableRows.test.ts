@@ -56,7 +56,7 @@ describe('строки таблицы локализации', () => {
 
     // В фикстуре 4 точки, одна без MNI: «все результаты» — это все, а не
     // «те, что удалось навести на проекции»
-    expect(rows).toHaveLength(result.points.length)
+    expect(rows).toHaveLength(result.points?.length ?? 0)
     expect(missingMniCount(rows)).toBe(1)
     expect(rows[3].mni).toBeNull()
     expect(rows[0].mni).toEqual([12, -34.5, 18])

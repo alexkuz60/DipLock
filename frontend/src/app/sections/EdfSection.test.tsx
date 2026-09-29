@@ -141,7 +141,7 @@ describe('рабочая область раздела EDF', () => {
     expect(signalsCalls).toHaveLength(1)
     expect(signalsCalls[0]).toContain(`/recordings/${recordingFixture.recording_id}/signals?level=1`)
     // Кадр записи (а не демо) уходит во вьюер: первый канал монтage получает трек
-    expect(await screen.findByTestId(`track-${recordingFixture.channels[0]}`)).toBeInTheDocument()
+    expect(await screen.findByTestId(`track-${recordingFixture.channels?.[0]}`)).toBeInTheDocument()
   })
 
   it('сообщает об ошибке сервера и не оставляет запись', async () => {

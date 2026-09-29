@@ -48,7 +48,7 @@ describe('диалог паспорта сессии', () => {
   it('показывает число каналов 10-20 и предупреждения записи', () => {
     // Свое число каналов монтажа — чтобы «8» не совпало с n_channels (иначе
     // getByText не различил бы значения двух строк «Каналов» и «Каналов 10-20»).
-    const channels = recordingFixture.channels.slice(0, 8)
+    const channels = (recordingFixture.channels ?? []).slice(0, 8)
     useEdfRecording.setState({
       recording: {
         ...recordingFixture,

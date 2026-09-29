@@ -33,8 +33,11 @@ export function isMixChannel(channel: string): boolean {
 }
 
 /** Микс записи по идентификатору канала; `null` — обычный канал или демо-режим */
-export function mixOf(recording: RecordingMeta | null, channel: string): RecordingMeta['mixes'][number] | null {
-  return recording?.mixes.find((mix) => mix.id === channel) ?? null
+export function mixOf(
+  recording: RecordingMeta | null,
+  channel: string,
+): NonNullable<RecordingMeta['mixes']>[number] | null {
+  return recording?.mixes?.find((mix) => mix.id === channel) ?? null
 }
 
 /** Подпись канала для трека и статусной строки: «Fp1» или «Микс: Лобные» */
@@ -81,7 +84,7 @@ export function channelSourceChannels(
   channel: string,
 ): string[] {
   const mix = mixOf(recording, channel)
-  if (mix) return [...mix.channels]
+  if (mix) return [...(mix.channels ?? [])]
   return channel ? [channel] : []
 }
 

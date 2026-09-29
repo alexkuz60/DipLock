@@ -265,8 +265,8 @@ export function MriProjection({
    * пустой список — «на этом срезе метки нет», и подменять это фикстурой нельзя
    * (иначе на срезе без поля появилось бы нарисованное поле).
    */
-  const structureShapes = contours ? contours.structures : null
-  const areaShapes = contours ? contours.areas : null
+  const structureShapes = contours?.structures ?? null
+  const areaShapes = contours?.areas ?? null
   const grid = useMemo(() => planeGridLines(plane), [plane])
   const guides = useMemo(() => sliceGuides(plane, slices), [plane, slices])
   const edges = useMemo(() => planeEdgeLabels(plane), [plane])

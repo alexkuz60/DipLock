@@ -39,6 +39,7 @@ from numpy.typing import NDArray
 from scipy import ndimage
 
 from app.core.config import Settings
+from app.schemas.analysis import RecordStatus
 from app.services.artifact_cleaner import (
     FRONTAL_PROXY,
     find_eog_component_inds,
@@ -621,7 +622,7 @@ def record_qc_status(
     snr_db: float | None,
     bad_channels: list[str],
     settings: Settings,
-) -> tuple[str, list[str]]:
+) -> tuple[RecordStatus, list[str]]:
     """Вердикт QC-светофора записи (шаг 2.2/N10): худший из четырёх категорий.
 
     Категории: чистые данные (``good_data_percent``), сетевой шум
@@ -630,13 +631,14 @@ def record_qc_status(
     Статус — худший по категориям (``ok`` < ``warn`` < ``bad``); причины —
     короткие тексты для тултипа пилюли UI. Пороги — ``qc_*`` из ``Settings``
     (ручки владельца, не хардкод: числа порогов уточнятся с реальными
-    записями — стратегия `01-signal-quality` §14).
+    записями — стратегия `01-signal-quality` §14). Возвращаемый тип —
+    ``RecordStatus`` из контракта (4.2): OpenAPI отдаёт enum, а не «любую строку».
     """
     rank = {"ok": 0, "warn": 1, "bad": 2}
-    status = "ok"
+    status: RecordStatus = "ok"
     reasons: list[str] = []
 
-    def _raise(new: str, reason: str) -> None:
+    def _raise(new: RecordStatus, reason: str) -> None:
         nonlocal status
         if rank[new] > rank[status]:
             status = new
@@ -649,7 +651,7 @@ def record_qc_status(
         _raise("warn", f"чистых данных {good_data_percent:.0f} %")
 
     if line_noise_level is not None and line_noise_level >= settings.qc_line_noise_warn:
-        level = "bad" if line_noise_level >= settings.qc_line_noise_bad else "warn"
+        level: RecordStatus = "bad" if line_noise_level >= settings.qc_line_noise_bad else "warn"
         _raise(level, f"сетевой шум ×{line_noise_level:.1f}")
 
     if snr_db is not None:

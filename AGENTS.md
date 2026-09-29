@@ -18,8 +18,10 @@ cd backend && python -m venv venv
 venv/bin/pip install -r requirements.txt              # + requirements-dev.txt для тестов, ruff, mypy
 venv/bin/uvicorn app.main:app --reload --port 8000    # рабочая директория — backend/
 venv/bin/python -m pytest                             # тесты backend
-venv/bin/ruff check app tests scripts                 # линтер (конфиг: backend/pyproject.toml)
-venv/bin/mypy app                                     # проверка типов
+venv/bin/ruff check app tests scripts alembic         # линтер (конфиг: backend/pyproject.toml)
+venv/bin/mypy app alembic                             # проверка типов
+venv/bin/alembic upgrade head                         # схема БД (создаёт/догоняет только alembic)
+venv/bin/alembic revision --autogenerate -m "..."     # новая миграция после правки моделей
 
 # проверка API (Swagger: http://localhost:8000/docs)
 curl http://localhost:8000/health        # {"status":"ok",...}
@@ -36,6 +38,7 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # ESLint 9
 npm run build      # → ../backend/app/static/ui (раздаётся FastAPI по /ui/)
 npm run build:watch # автосборка туда же при правках: :8000/ui/ не отдаёт устаревший бандл
+npm run gen:api    # TS-типы: src/shared/api/openapi.json → schema.d.ts (4.2)
 ```
 
 Детали фронтенда — `frontend/README.md`.
@@ -86,7 +89,10 @@ backend/app/
 │   ├── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)
 │   └── atlas_contours.py  # контуры структур и полей Бродмана на срезе (вектор, ETag) (3.9)
 backend/scripts/       # dedupe_recordings.py (чистка дублей в data/edf),
-                       # build_atlas_contours.py (прогрев кэша контуров, 3.9)
+                       # build_atlas_contours.py (прогрев кэша контуров, 3.9),
+                       # export_openapi.py (выгрузка openapi.json для gen:api, 4.2)
+backend/alembic/       # миграции схемы БД: env.py (URL из settings/движка), versions/ (0001)
+backend/alembic.ini    # конфиг alembic (запуск из backend/)
 backend/pyproject.toml # конфиг ruff + mypy
 frontend/              # UI (Vite+React+TS), сборка → backend/app/static/ui
 data/                  # локальные данные (edf/results/cache) — НЕ коммитить
@@ -103,7 +109,13 @@ docs/ui.md             # спецификация UI и дорожная кар�
 - **Async**: НЕ выполняйте тяжёлые MNE/CPU-операции напрямую в `async def` — используйте
   `asyncio.to_thread` / `run_in_executor` или job-очередь (`app/services/job_manager.py`).
 - **Контракт API** описывается Pydantic-моделями в `app/schemas/` (+`response_model`): из OpenAPI
-  генерируются TS-типы UI; «сырые» dict в ответах не добавляем.
+  генерируются TS-типы UI (`cd frontend && npm run gen:api`; выгрузку обновляет
+  `venv/bin/python -m scripts.export_openapi`, свежесть обоих файлов ловят стражи — pytest и CI);
+  «сырые» dict в ответах не добавляем.
+- **Схема БД — только через alembic** (`backend/alembic/`): правка моделей →
+  `venv/bin/alembic revision --autogenerate`; `init_db` поднимает файл до head (старые файлы
+  ревизия `0001` догоняет сама), паритет моделей и миграций — страж
+  `tests/test_migrations.py`. `Base.metadata.create_all` в сервисах не используем.
 - **Тяжёлые статические ассеты** (меш fsaverage, BA-индексы) — только отдельными кэшируемыми
   эндпоинтами (`app/services/surface_cache.py`), никогда внутри `/analyze`.
 - **Роут = форма и контракт, работа — в слое ниже**: приём файла (`api/uploads.py`), разбор формы и

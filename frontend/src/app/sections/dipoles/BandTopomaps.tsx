@@ -28,7 +28,7 @@ export function BandTopomaps({ spectrum, query, className }: BandTopomapsProps) 
 
   return (
     <div className={cx('flex flex-wrap gap-3', className)} data-testid="band-topomaps">
-      {spectrum.bands.map((band) => {
+      {(spectrum.bands ?? []).map((band) => {
         const url = topomapUrl(spectrum, band, query)
         const broken = failed[band.name] === true
         return (
@@ -60,7 +60,7 @@ export function BandTopomaps({ spectrum, query, className }: BandTopomapsProps) 
               <br />
               <span className="tnum text-fg-2">
                 {bandRangeLabel(band)} · {formatPower(band.power_uv2)} мкВ²
-                {band.relative_power !== null
+                {band.relative_power != null
                   ? ` · ${Math.round(band.relative_power * 100)} %`
                   : ''}
               </span>

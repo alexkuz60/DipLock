@@ -69,7 +69,7 @@ export function FftHistogram({
   const window = clampFreqWindow(spectrum.freqs, range)
   const appliedWindow = hasWindow ? window : null
   const shown = spectrumWithinWindow(spectrum.freqs, spectrum.psd_mean_uv2, appliedWindow)
-  const bars = histogramBars(spectrum.bands, appliedWindow)
+  const bars = histogramBars(spectrum.bands ?? [], appliedWindow)
   const polyline = psdPolyline(
     shown.freqs,
     shown.power,
@@ -82,11 +82,12 @@ export function FftHistogram({
   // поэтому пики читаются как «высота над фоном», а не над осью.
   const background = spectrumWithinWindow(
     spectrum.freqs,
-    spectrum.aperiodic_fit_uv2,
+    spectrum.aperiodic_fit_uv2 ?? [],
     appliedWindow,
   )
   const backgroundLine =
-    spectrum.aperiodic_fit_uv2.length === spectrum.freqs.length && shown.freqs.length >= 2
+    (spectrum.aperiodic_fit_uv2 ?? []).length === spectrum.freqs.length &&
+    shown.freqs.length >= 2
       ? psdPolyline(
           background.freqs,
           background.power,
@@ -100,7 +101,7 @@ export function FftHistogram({
   const [fMin, fMax] = window
   const shownPeaks =
     shown.freqs.length >= 2
-      ? spectrum.peaks.filter(
+      ? (spectrum.peaks ?? []).filter(
           (peak) => peak.center_hz >= fMin - 1e-9 && peak.center_hz <= fMax + 1e-9,
         )
       : []

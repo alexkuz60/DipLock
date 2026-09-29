@@ -11,7 +11,12 @@ npm run typecheck  # tsc --noEmit
 npm run lint       # ESLint
 npm run build      # сборка в ../backend/app/static/ui (раздаётся FastAPI по /ui/)
 npm run build:watch # автосборка туда же: чтобы :8000/ui/ не отдавал устаревший бандл после правок
+npm run gen:api    # TS-типы из OpenAPI: src/shared/api/openapi.json → schema.d.ts (4.2)
 ```
+
+Выгрузка `openapi.json` обновляется на стороне бэкенда
+(`cd ../backend && venv/bin/python -m scripts.export_openapi`), свежесть обоих файлов
+ловят стражи: pytest `test_openapi_json_is_up_to_date` и CI-шаг `gen:api` + `git diff`.
 
 Бэкенд должен быть запущен:
 

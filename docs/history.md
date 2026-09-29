@@ -3,6 +3,66 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 29.09.2026 — 4.2: alembic-миграции + генерация TS-типов из OpenAPI
+
+**Из `todo.md` (дословно):**
+> - [ ] **4.2 (N37, N39, P1):** alembic-миграции + генерация TS-типов из OpenAPI.
+
+**Alembic (N37).**
+
+1. **Каркас**: `backend/alembic.ini` (`script_location` через `%(here)s`, `prepend_sys_path = .`)
+   и `backend/alembic/env.py`: URL — из программного вызова (`init_db` подставляет URL своего
+   движка: тесты работают на изолированной tmp-БД) или из `settings.database_url` (CLI);
+   async-драйвер срезается (`sqlite+aiosqlite` → `sqlite`, `postgresql+asyncpg` → `postgresql`),
+   `render_as_batch=True` под SQLite, `target_metadata = Base.metadata` (включён и в
+   `pyproject.toml`: `mypy app alembic`, ruff — `… scripts alembic`).
+2. **Ревизия `0001_baseline`** — замороженные определения `sessions`/`epochs`/`dipoles` (7 колонок
+   полос = `freq_bands`), **терпима к существующим файлам**: таблицы создаются только если их нет,
+   недостающие колонки догоняются (это и есть замена ручной догонки `_add_missing_columns` из
+   4.1 — файл «до 4.1» получает версию `0001` сам, без `alembic stamp`). Индексы N37:
+   FK (`ix_epochs_session_id`, `ix_dipoles_session_id`, `ix_dipoles_epoch_id`), `brodmann_area`,
+   `gof`; `trajectory_json` — `jsonb` + GIN в PostgreSQL (в моделях — `JSON().with_variant(...)`).
+   Дев-БД `backend/diplock.db` поднята вживую: `alembic check` — «No new upgrade operations»
+   (паритет моделей и миграций подтверждён и на реальной файле).
+3. **`init_db`** теперь `await asyncio.to_thread(_upgrade_to_head, …)` (правило Async) — схему
+   создают и меняют только миграции; `Base.metadata.create_all` и `_add_missing_columns` из
+   сервисов удалены. **Ловушка, закрытая тестом**: `str(URL)` маскирует пароль (`***`) — URL для
+   alembic собирается через `render_as_string(hide_password=False)`, иначе PostgreSQL уходил бы
+   с паролем-заглушкой. Ещё одна находка: новые индексы изменили порядок выдачи строк без
+   `ORDER BY` — два теста `test_analysis_db.py` получили явный `order by id`.
+4. **Стражи** (`tests/test_migrations.py`, +6): подъём свежего файла до head с `alembic_version`,
+   **паритет «миграция == `Base.metadata`»** (колонки, типы, индексы — правка модели без новой
+   ревизии падает тестом), идемпотентность повторного `init_db`, срезка async-драйвера из URL.
+   Legacy-тест 4.1 адаптирован: имитация файла «до alembic» = DROP колонок + `DROP alembic_version`.
+
+**Генерация TS-типов из OpenAPI.**
+
+5. **Выгрузка**: `backend/scripts/export_openapi.py` пишет `frontend/src/shared/api/openapi.json`
+   (36 путей, 57 схем; коммитится). Свежесть против `app.openapi()` ловит pytest
+   `test_openapi_json_is_up_to_date` (падает с текстом команды перегенерации).
+6. **Генерация**: devDependency `openapi-typescript@7` + `npm run gen:api` →
+   `shared/api/schema.d.ts` (5010 строк, JSDoc из описаний Pydantic). Свежесть — CI frontend:
+   `gen:api` + `git diff --exit-code`. Генерация детерминирована (проверено повторным запуском);
+   `schema.d.ts` в eslint-ignores и `.prettierignore` (правится только генератором).
+7. **`types.ts` переписан на алиасы** `components['schemas'][…]` (35 типов) с маппингом
+   переименований: `ChannelQc`←`ChannelQcOut`, `MainsResponse`←`MainsOut`,
+   `FilterResponse`←`FilterResponseOut`, `CleanReport`←`CleanReportOut`,
+   `DipoleScanPoint`←`DipoleScanPointOut`, `RecordingMix`←`ChannelMixOut`,
+   `ContourShape`/`ContourSlice`←`…Out`, `JobState`←`JobStatus['status']`; ручными остались
+   только типы, которых в API нет: `InitStatus` (сырой dict `/init-status`), `SignalLayer`,
+   `SignalsPrepQuery`, `PreprocessStage`, `CheckStatus`, `ArtifactKind`/`ArtifactTypes`.
+8. **Честность контракта**: ~90 ошибок `tsc` после переключения — поля Pydantic с `default` в
+   OpenAPI необязательны (раньше ручной тип утверждал обратное); чтение приведено к
+   `?? null/[]`/`?.` без изменения поведения (поле в ответе есть — берётся оно). Контракт
+   ужесточён там, где сервер и так варит ровно три значения: `record_status` →
+   `Literal["ok","warn","bad"]` (`RecordStatus` в схеме + аннотация `record_qc_status`).
+   Найдено и исправлено попутно: `localizationRows` терял `?? null` для дистанций до атласа.
+
+**Тесты**: pytest **549** (со всеми — **557**), Vitest **854**; ruff/mypy (`app alembic`),
+eslint/tsc чисты; бандл собран. Правила — `AGENTS.md` (команды/конвенции),
+`docs/rules/api-jobs.md`, `docs/rules/tests.md`, `docs/ui/shell.md` §7; данные — `docs/data_map.md`
+(строка БД).
+
 ## 29.09.2026 — 4.1: колонки полос `EpochRecord` = `freq_bands` (N38)
 
 **Из `todo.md` (дословно):**

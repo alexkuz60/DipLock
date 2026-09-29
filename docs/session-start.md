@@ -1,6 +1,6 @@
 # Памятка агенту: с чего начинать сессию
 
-> Обновляется в конце крупных срезов (последнее — **29.09.2026**: фаза B (персист + слой `band`), 3.3 (дедуп `spectrum_signature`), 3.4 (разрезка `MriProjection.tsx`), 4.1 (колонки полос `epochs`)).
+> Обновляется в конце крупных срезов (последнее — **29.09.2026**: фаза B (персист + слой `band`), 3.3 (дедуп `spectrum_signature`), 3.4 (разрезка `MriProjection.tsx`), 4.1 (колонки полос `epochs`), 4.2 (alembic + генерация TS-типов из OpenAPI)).
 > Живой список задач — `todo.md`, журнал закрытого — `docs/history.md`, правила — `AGENTS.md`.
 
 ## Чек-лист старта
@@ -17,7 +17,16 @@
    правило → `docs/rules/` (+ строка в карте `AGENTS.md`), тест → рядом с кодом, закрытое →
    `docs/history.md` (дословно), открытое → `todo.md` (`docs/rules/docs.md`).
 
-## Состояние на конец 29.09.2026 (фаза B, 3.3, 3.4 и 4.1 закрыты)
+## Состояние на конец 29.09.2026 (фаза B, 3.3, 3.4, 4.1 и 4.2 закрыты)
+
+- **4.2 (29.09.2026)**: схему БД создаёт и меняет **только alembic** (`backend/alembic/`,
+  ревизия `0001` терпит старые файлы и заменяет `_add_missing_columns`; `init_db` =
+  `upgrade head` в `asyncio.to_thread`; индексы N37, `trajectory_json` = jsonb+GIN в PG;
+  страж паритета моделей и миграций — `tests/test_migrations.py`). TS-типы генерируются:
+  `venv/bin/python -m scripts.export_openapi` → `frontend/src/shared/api/openapi.json` →
+  `npm run gen:api` → `schema.d.ts`; `types.ts` — алиасы `components['schemas']`, стражи —
+  pytest (`test_openapi_json_is_up_to_date`) и CI (`gen:api` + `git diff --exit-code`).
+  Факт — `docs/history.md` 29.09.2026.
 
 - **Фаза B (29.09.2026)**: `services/prepared_persist.py` — дисковый персист подготовленного
   массива по полосе (ключ `recording_id + band_key + notch + референс`, контейнер `DPP1`,
@@ -41,14 +50,14 @@
   ось PSD = сетка ∩ полоса фильтра, дефолт расчёта 0.5–128 (объяснения в `docs/history.md` 28.09.2026).
 - **Фаза C — только инварианты**: `docs/rules/dipoles.md` п.6 (`band_key` для пакетного расчёта;
   вход готов — `prepared_persist.prepared_array` даёт массив без перечитывания EDF).
-- Числа: **854 Vitest / 542 pytest** (550 с `integration`), ruff/mypy/eslint/tsc чисты,
+- Числа: **854 Vitest / 549 pytest** (557 с `integration`), ruff/mypy (`app alembic`)/eslint/tsc чисты,
   бандл собран в `backend/app/static/ui` (не коммитится — `.gitignore`).
 
 ## Следующий шаг (порядок из todo.md)
 
-1. **4.2** (alembic-миграции + генерация TS-типов из OpenAPI) — 4.1 специально была «до alembic».
-2. Далее из todo.md: **3.5** (3D — Niivue), «Независимые отмены чистки с оценкой потерь»
-   (визуализация, п.3).
+1. **3.5** (N25, N35: 3D — Niivue, контур головы из `seghead.mgz`, совместный курсор).
+2. Далее из todo.md: «Независимые отмены чистки с оценкой потерь» (визуализация, п.3),
+   «Тестовый EDF» (`data/edf/test.edf`, маркер `integration`).
 
 ## Повторявшиеся ловушки
 

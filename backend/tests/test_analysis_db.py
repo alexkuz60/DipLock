@@ -228,7 +228,7 @@ def test_save_result_without_epochs_keeps_dipoles_unlinked(sqlite_db):
 
     assert _rows(sqlite_db, "select count(*) from epochs")[0][0] == 0
     assert _rows(sqlite_db, "select count(*) from dipoles")[0][0] == 2
-    assert _rows(sqlite_db, "select epoch_id from dipoles") == [(None,), (None,)]
+    assert _rows(sqlite_db, "select epoch_id from dipoles order by id") == [(None,), (None,)]
     assert _rows(sqlite_db, "pragma foreign_key_check") == []
 
 
@@ -238,7 +238,8 @@ def test_dipole_without_matching_epoch_is_not_linked(sqlite_db):
     result["best_fit_dipoles"][1]["epoch_index"] = 99
     asyncio.run(save_analysis_to_db(result))
 
-    assert _rows(sqlite_db, "select epoch_id from dipoles") == [(1,), (None,)]
+    # ORDER BY обязателен: без него порядок задаёт индекс epoch_id (4.2), а не вставка.
+    assert _rows(sqlite_db, "select epoch_id from dipoles order by id") == [(1,), (None,)]
     assert _rows(sqlite_db, "pragma foreign_key_check") == []
 
 
@@ -298,8 +299,10 @@ def test_save_analysis_writes_every_band_column(sqlite_db):
 def test_init_db_upgrades_legacy_db_with_four_band_columns(tmp_path, monkeypatch):
     """Старый файл БД (4 полосы) догоняется до сетки freq_bands, а не падает (4.1).
 
-    ``create_all`` существующие таблицы не меняет: без ручной догонки вставка
-    эпох в файл, созданный до 4.1, падала бы с «no such column».
+    ``create_all`` существующие таблицы не меняет, а до alembic колонки
+    догонялись вручную; с 4.2 их догоняет ревизия ``0001``. Имитация файла
+    «до alembic» — DROP колонок **и** таблицы ``alembic_version`` (у старого
+    файла её не было, иначе upgrade посчитал бы схему уже поднятой).
     """
     path = tmp_path / "legacy.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
@@ -312,6 +315,7 @@ def test_init_db_upgrades_legacy_db_with_four_band_columns(tmp_path, monkeypatch
     con = sqlite3.connect(path)
     try:
         con.executescript(
+            "DROP TABLE IF EXISTS alembic_version;"
             "ALTER TABLE epochs DROP COLUMN delta_theta_power;"
             "ALTER TABLE epochs DROP COLUMN gamma_power;"
             "ALTER TABLE epochs DROP COLUMN high_gamma_power;"

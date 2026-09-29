@@ -98,7 +98,7 @@ export function SessionPassportDialog({ open, onClose }: SessionPassportDialogPr
         <div className="mt-3 rounded-lg border border-border bg-bg-2 px-3 py-2">
           <InfoRow label="Файл" value={recording?.filename ?? 'не загружен'} mono />
           <InfoRow label="Каналов" value={recording?.n_channels ?? null} />
-          <InfoRow label="Каналов 10-20" value={recording ? recording.channels.length : null} />
+          <InfoRow label="Каналов 10-20" value={recording ? (recording.channels ?? []).length : null} />
           <InfoRow label="Частота дискретизации" value={recording ? `${recording.sfreq} Гц` : null} mono />
           <InfoRow label="Длина сессии" value={recording ? `${recording.duration_sec} с` : null} mono />
           <InfoRow
@@ -121,7 +121,7 @@ export function SessionPassportDialog({ open, onClose }: SessionPassportDialogPr
           </div>
         ) : null}
 
-        {recording?.warnings.length ? (
+        {recording?.warnings?.length ? (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {recording.warnings.map((warning) => (
               <StatusPill key={warning} tone="warn">

@@ -1,0 +1,2 @@
+# Генерируемые файлы (4.2): openapi-typescript, правка только через npm run gen:api
+src/shared/api/schema.d.ts

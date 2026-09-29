@@ -8,7 +8,13 @@ import tseslint from 'typescript-eslint'
 export default tseslint.config(
   {
     // Собранный UI лежит внутри бэкенда — линтуем только исходники frontend/
-    ignores: ['node_modules', 'dist', '../backend/app/static/ui'],
+    ignores: [
+      'node_modules',
+      'dist',
+      '../backend/app/static/ui',
+      // Генерируемые файлы (4.2): openapi-typescript, не правится руками
+      'src/shared/api/schema.d.ts',
+    ],
   },
   {
     files: ['**/*.{ts,tsx}'],

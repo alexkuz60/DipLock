@@ -98,7 +98,7 @@ export function dipoleLayerStatus(layer: DipoleLayer): string {
  */
 export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
   const points: DipolePoint[] = []
-  for (const point of result.points) {
+  for (const point of result.points ?? []) {
     const coords = point.mni_coords
     if (!coords || coords.length !== 3) continue
     const [x, y, z] = coords
@@ -115,11 +115,11 @@ export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
       },
       amplitudeNaM: point.amplitude_nam,
       gof: point.gof,
-      brodmannArea: point.brodmann_area,
-      structure: point.anatomical_structure,
-      structureDistanceMm: point.structure_distance_mm,
-      areaDistanceMm: point.brodmann_distance_mm,
-      outsideBrain: point.outside_brain,
+      brodmannArea: point.brodmann_area ?? null,
+      structure: point.anatomical_structure ?? null,
+      structureDistanceMm: point.structure_distance_mm ?? null,
+      areaDistanceMm: point.brodmann_distance_mm ?? null,
+      outsideBrain: point.outside_brain ?? null,
     })
   }
   return { points, source: 'result' }

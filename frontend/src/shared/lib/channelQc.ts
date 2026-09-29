@@ -52,7 +52,7 @@ export function channelQcTooltip(name: string, qc: ChannelQc): string {
   if (qc.artifact_sec <= 0) {
     return `${name}: артефактов не найдено${extraText}`
   }
-  const parts = (Object.entries(qc.by_kind) as [ArtifactKind, number][])
+  const parts = (Object.entries(qc.by_kind ?? {}) as [ArtifactKind, number][])
     .filter(([, seconds]) => seconds > 0)
     .map(([kind, seconds]) => `${ARTIFACT_LABELS[kind]} ${seconds.toFixed(1)} с`)
   const breakdown = parts.length ? ` (${parts.join(', ')})` : ''

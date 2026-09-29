@@ -106,7 +106,7 @@ export function spectrumQueryOf(result: SpectrumResult): SpectrumQuery {
   const band = result.filter_band_hz
   return {
     filterBandHz: band && band.length === 2 ? [band[0], band[1]] : null,
-    notchHz: result.notch_hz,
+    notchHz: result.notch_hz ?? null,
     epochLengthMs: result.epoch_length_ms,
     // `?? 'welch'` — для результатов задач, записанных до появления поля
     // (файлы `results_dir/jobs/*.json`): тогда методом был Welch.
@@ -148,7 +148,7 @@ export function histogramBars(
   window: FreqWindow | null = null,
 ): BandBar[] {
   const powers = bands.map((band) =>
-    band.power_uv2 !== null && Number.isFinite(band.power_uv2) ? band.power_uv2 : null,
+    band.power_uv2 != null && Number.isFinite(band.power_uv2) ? band.power_uv2 : null,
   )
   const max = Math.max(0, ...powers.map((value) => value ?? 0))
 
@@ -326,19 +326,19 @@ export function spectrumSummary(result: SpectrumResult): string {
  */
 export function spectrumMetrics(result: SpectrumResult): string[] {
   const metrics: string[] = []
-  if (result.iaf_hz !== null && Number.isFinite(result.iaf_hz)) {
+  if (result.iaf_hz != null && Number.isFinite(result.iaf_hz)) {
     metrics.push(`IAF ${result.iaf_hz.toFixed(1)} Гц`)
   }
-  if (result.theta_beta_ratio !== null && Number.isFinite(result.theta_beta_ratio)) {
+  if (result.theta_beta_ratio != null && Number.isFinite(result.theta_beta_ratio)) {
     metrics.push(`θ/β ${result.theta_beta_ratio.toFixed(2)}`)
   }
-  if (result.theta_alpha_beta_ratio !== null && Number.isFinite(result.theta_alpha_beta_ratio)) {
+  if (result.theta_alpha_beta_ratio != null && Number.isFinite(result.theta_alpha_beta_ratio)) {
     metrics.push(`(θ+α)/β ${result.theta_alpha_beta_ratio.toFixed(2)}`)
   }
-  if (result.aperiodic_exponent !== null && Number.isFinite(result.aperiodic_exponent)) {
+  if (result.aperiodic_exponent != null && Number.isFinite(result.aperiodic_exponent)) {
     metrics.push(`1/f ${result.aperiodic_exponent.toFixed(2)}`)
   }
-  const top = result.peaks[0]
+  const top = result.peaks?.[0]
   if (top && Number.isFinite(top.center_hz)) {
     metrics.push(`пик ${top.center_hz.toFixed(1)} Гц`)
   }

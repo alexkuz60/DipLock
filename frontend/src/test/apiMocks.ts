@@ -61,7 +61,7 @@ function calcJobCreated(
  * Формат — тот же контейнер, что отдаёт бэкенд (см. `signalBlob.ts`).
  */
 export function signalsFixtureResponse(
-  channels: string[] = recordingFixture.channels,
+  channels: string[] = recordingFixture.channels ?? [],
 ): Response {
   const nPoints = 100
   const body = encodeSignalBlob(

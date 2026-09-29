@@ -158,7 +158,7 @@ export function LocalizationTableSection() {
         <StatusPill tone="warn">
           Смягчите порог reject в панели раздела «Диполи» и пересчитайте
         </StatusPill>
-        {result.warnings.map((warning) => (
+        {(result.warnings ?? []).map((warning) => (
           <StatusPill key={warning} tone="warn">
             {warning}
           </StatusPill>
@@ -188,7 +188,7 @@ export function LocalizationTableSection() {
           {`Эпох в расчёте: ${result.n_epochs_used} из ${result.n_epochs_total}`}
         </StatusPill>
         <StatusPill tone="neutral">
-          {`Полоса: ${filterBandText(result.filter_band_hz)}${result.notch_hz ? ` · notch ${result.notch_hz} Гц` : ''}`}
+          {`Полоса: ${filterBandText(result.filter_band_hz ?? null)}${result.notch_hz ? ` · notch ${result.notch_hz} Гц` : ''}`}
         </StatusPill>
         {hiddenColumns > 0 ? (
           <StatusPill tone="neutral">{`Скрыто колонок: ${hiddenColumns}`}</StatusPill>
@@ -230,7 +230,7 @@ export function LocalizationTableSection() {
         сейчас показаны все точки результата, включая те, что без MNI.
       </p>
 
-      {result.warnings.length ? (
+      {result.warnings?.length ? (
         <ul className="list-inside list-disc text-sm text-warn">
           {result.warnings.map((warning) => (
             <li key={warning}>{warning}</li>

@@ -245,32 +245,33 @@ export function layersFromResult(
   const next: EdfViewerLayers = { ...base, source: 'result' }
 
   if (result.stage === 'artifacts') {
-    next.artifacts = result.artifacts.map((zone, index) => ({
+    // Артефакты и ряд ЧСС — поля с default в схеме (могут отсутствовать в ответе)
+    next.artifacts = (result.artifacts ?? []).map((zone, index) => ({
       id: `${zone.kind}-${index + 1}`,
       kind: zone.kind as ArtifactKind,
       onsetSec: zone.onset_sec,
       durationSec: zone.duration_sec,
-      channels: zone.channels,
+      channels: zone.channels ?? [],
     }))
     // Ряд ЧСС (трек пульса): слот той же стадии — чужие стадии его не трогают
     next.heartRate = result.heart_rate
       ? {
           timesSec: result.heart_rate.times_sec,
-          bpm: result.heart_rate.bpm,
-          medianBpm: result.heart_rate.median_bpm,
+          bpm: result.heart_rate.bpm ?? [],
+          medianBpm: result.heart_rate.median_bpm ?? null,
           nBeats: result.heart_rate.n_beats,
           coveragePercent: result.heart_rate.coverage_percent,
-          channels: result.heart_rate.channels,
+          channels: result.heart_rate.channels ?? [],
         }
       : null
   }
   if (result.stage === 'epochs') {
-    next.rejectedEpochs = result.rejected_epochs
+    next.rejectedEpochs = result.rejected_epochs ?? []
     // Каналы-виновники и порог reject-фильтра — причины блокировки: рамки в
     // треках соответствующих каналов и строка в тултипе эпохи
     const channelsByIndex: Record<number, string[]> = {}
-    for (const item of result.rejected_epoch_channels) {
-      channelsByIndex[item.index] = [...item.channels]
+    for (const item of result.rejected_epoch_channels ?? []) {
+      channelsByIndex[item.index] = [...(item.channels ?? [])]
     }
     next.rejectChannels = channelsByIndex
     // Индексы отброшенных эпох имеют смысл только вместе с длиной нарезки, в
@@ -730,7 +731,7 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
 
       // QC-иконки каналов: сводка приходит только у стадии artifacts
       const channelQc =
-        result.stage === 'artifacts' && result.channel_qc.length
+        result.stage === 'artifacts' && result.channel_qc?.length
           ? Object.fromEntries(result.channel_qc.map((row) => [row.channel, row]))
           : get().channelQc
       const channelQcThresholds =
@@ -748,12 +749,12 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         result.stage === 'artifacts'
           ? {
               goodDataPercent: result.good_data_percent,
-              lineNoiseLevel: result.line_noise_level,
-              badChannels: result.bad_channels,
-              snrDbMedian: result.snr_db_median,
-              deadChannels: result.dead_channels,
+              lineNoiseLevel: result.line_noise_level ?? null,
+              badChannels: result.bad_channels ?? [],
+              snrDbMedian: result.snr_db_median ?? null,
+              deadChannels: result.dead_channels ?? [],
               recordStatus: result.record_status,
-              recordStatusReasons: result.record_status_reasons,
+              recordStatusReasons: result.record_status_reasons ?? [],
             }
           : get().qcSummary
       const cleanReport = result.stage === 'filter' ? result.clean : get().cleanReport
@@ -762,14 +763,14 @@ export const useEdfRecording = create<EdfRecordingState>()((set, get) => ({
         result.stage === 'filter'
           ? {
               method: result.filter_method,
-              lengthSec: result.filter_length_sec,
+              lengthSec: result.filter_length_sec ?? null,
               edgeBufferSec: result.edge_buffer_sec,
             }
           : get().filterDesign
       // Счётчики типов (`artifact_types`): у `ica_eog` — число EOG-компонент
       // (зоны ICA контракт больше не отдаёт — фидбэк 24.09.2026)
       const artifactTypes =
-        result.stage === 'artifacts' ? result.artifact_types : get().artifactTypes
+        result.stage === 'artifacts' ? (result.artifact_types ?? {}) : get().artifactTypes
 
       set((state) => ({
         layers: layersFromResult(result, state.layers),
@@ -1008,7 +1009,7 @@ export async function startUpload(file: File): Promise<void> {
  */
 function applyRecordingMeta(meta: RecordingMeta): void {
   useEdfRecording.getState().finishUpload(meta)
-  useEdfParams.getState().setAvailableChannels(meta.channels)
+  useEdfParams.getState().setAvailableChannels(meta.channels ?? [])
   // Событие нарезки/ERP (N2/2.7) принадлежит записи: сверяем выбор с событиями
   // новой записи, иначе «Нарезка эпохи» в событийном режиме уходила бы в 400
   useEdfParams

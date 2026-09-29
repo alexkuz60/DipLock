@@ -82,8 +82,11 @@ export function contourPathPx(
 ): string {
   return shape.hulls
     .map((hull) => {
+      // Pydantic отдаёт пары как обычные массивы — tuple-тип восстанавливаем
       const points = hull
-        .map((point) => normalizedToPx(contourPointToNormalized(plane, point), plane, padding))
+        .map((point) =>
+          normalizedToPx(contourPointToNormalized(plane, point as [number, number]), plane, padding),
+        )
         .map((pixel) => `${pixel.x.toFixed(2)} ${pixel.y.toFixed(2)}`)
         .join(' L ')
       return `M ${points} Z`
@@ -117,7 +120,12 @@ export function shapeContainsPoint(
   let inside = false
   for (const hull of shape.hulls) {
     if (hull.length < 3) continue
-    if (pointInPolygon(hull.map((vertex) => contourPointToNormalized(plane, vertex)), point)) {
+    if (
+      pointInPolygon(
+        hull.map((vertex) => contourPointToNormalized(plane, vertex as [number, number])),
+        point,
+      )
+    ) {
       inside = !inside
     }
   }
@@ -148,8 +156,8 @@ export function contourSummary(slice: ContourSlice | null): {
   areas: number
 } {
   return {
-    structures: slice?.structures.length ?? 0,
-    areas: slice?.areas.length ?? 0,
+    structures: slice?.structures?.length ?? 0,
+    areas: slice?.areas?.length ?? 0,
   }
 }
 

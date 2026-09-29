@@ -6,8 +6,8 @@
 исключений «на глаз» в конфиге нет — каждое подписано причиной):
 
 ```bash
-cd backend && venv/bin/ruff check app tests scripts   # линтер
-cd backend && venv/bin/mypy app                        # типы (check_untyped_defs = true)
+cd backend && venv/bin/ruff check app tests scripts alembic  # линтер
+cd backend && venv/bin/mypy app alembic                      # типы (check_untyped_defs = true)
 ```
 
 Набор правил ruff — осознанный, а не «всё включено»: `E4/E7/E9/F` (pycodestyle+pyflakes), `I`
@@ -28,7 +28,8 @@ cd backend && venv/bin/mypy app                        # типы (check_untyped
 только точечно и с пояснением (`cast` для `nib.load`, `# noqa` для `hashlib.sha1` в ключе RAM-кэша).
 
 CI — `.github/workflows/ci.yml`: job `backend` (`ruff` → `mypy` → `pytest -m "not integration"`) и
-job `frontend` (`npm run lint` → `typecheck` → `test` → `build`). Локально те же команды, поэтому
+job `frontend` (`npm run lint` → `gen:api` + `git diff --exit-code` (свежесть `schema.d.ts`, 4.2) →
+`typecheck` → `test` → `build`). Локально те же команды, поэтому
 «зелёный CI» проверяется без пуша. Инструменты лежат в `backend/requirements-dev.txt`.
 
 **Правило (зависимости):** всё, что приложение импортирует на старте (`app/models/db.py`
@@ -480,7 +481,15 @@ alpha убирает смещение, 304 на повтор, свой ETag пр
 каждую полосу конфига и ровно их набор), запись всех семи мощностей при сохранении (пустые — NULL)
 и догонка файла БД «до 4.1» в `init_db` (DROP колонок → ручное восстановление колонок).
 
-Всего **854 теста Vitest (75 файлов) и 542 pytest** (без маркера `integration`; со всеми — 550) (из них
+Миграции и генерация TS-типов (4.2, 29.09.2026): pytest +7 — `tests/test_migrations.py` (6):
+подъём свежего файла до head с `alembic_version`, **страж паритета** «миграционная схема ==
+`Base.metadata`» (колонки, типы, индексы — правка модели без ревизии падает здесь), идемпотентность
+повторного `init_db` и срезка async-драйвера из URL (включая сохранение пароля, который `str(URL)`
+маскирует); плюс страж свежести выгрузки `openapi.json` против `app.openapi()`
+(`test_openapi_json_is_up_to_date`) — его же обновляет `scripts/export_openapi.py`, а
+`schema.d.ts` — CI (`npm run gen:api` + `git diff --exit-code`).
+
+Всего **854 теста Vitest (75 файлов) и 549 pytest** (без маркера `integration`; со всеми — 557) (из них
 26 — геометрия, укладка и кэш среза МРТ, 25 — контуры атласа (изолинии, выборка осей,
 производная BA-разметка, структура по MNI, кэш, роуты), 22 — спектр и быстрый расчёт
 (включая multitaper для коротких эпох, 1/f + пики specparam, ETag топокарт от метода PSD и

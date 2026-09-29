@@ -43,7 +43,8 @@ export function responseChart(
   width = 320,
   height = 120,
 ): ResponseChartGeometry {
-  const { freqs_hz: freqs, gain_db: gains, band_hz: bandRaw, notch_freqs: notchs } = response
+  const { freqs_hz: freqs, gain_db: gains, band_hz: bandRaw, notch_freqs: notchsRaw } = response
+  const notchs = notchsRaw ?? []
   const fMax = freqs.length ? freqs[freqs.length - 1] : 1
   const band =
     bandRaw && bandRaw.length === 2 ? ([bandRaw[0], bandRaw[1]] as [number, number]) : null
@@ -99,13 +100,13 @@ export function filterPassportText(response: FilterResponse): string {
   const parts: string[] = []
   if (response.method === 'fir') {
     parts.push('метод: FIR')
-    if (response.filter_length_sec !== null) {
+    if (response.filter_length_sec != null) {
       parts.push(`ядро ${response.filter_length_sec.toFixed(2)} с`)
     }
     if (response.edge_buffer_sec > 0) {
       parts.push(`краевой буфер ±${response.edge_buffer_sec.toFixed(2)} с (BAD_edge)`)
     }
-    if (response.l_trans_bandwidth_hz !== null && response.h_trans_bandwidth_hz !== null) {
+    if (response.l_trans_bandwidth_hz != null && response.h_trans_bandwidth_hz != null) {
       parts.push(
         `переходные полосы ${response.l_trans_bandwidth_hz.toFixed(1)}/${response.h_trans_bandwidth_hz.toFixed(1)} Гц`,
       )
@@ -115,7 +116,7 @@ export function filterPassportText(response: FilterResponse): string {
   } else {
     parts.push('только notch — полосового фильтра нет')
   }
-  if (response.notch_freqs.length) {
+  if (response.notch_freqs?.length) {
     parts.push(`notch: ${response.notch_freqs.map((f) => f.toFixed(0)).join('/')} Гц`)
   }
   return parts.join(' · ')

@@ -828,7 +828,7 @@ describe('событийный режим и ERP (N2/2.7)', () => {
   })
 
   it('reconcileEventId: событие живёт только внутри своей записи', () => {
-    const counts = recordingFixture.event_counts
+    const counts = recordingFixture.event_counts ?? {}
     // Событие прежней записи есть и в новой — выбор остаётся
     expect(reconcileEventId('Sound/On', counts)).toEqual({ eventId: 'Sound/On' })
     // Описания из прежней записи в новой нет — берём первое событие новой

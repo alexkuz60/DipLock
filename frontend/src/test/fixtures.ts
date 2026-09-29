@@ -316,7 +316,7 @@ export function preprocessResultFixture(
   return {
     recording_id: recordingFixture.recording_id,
     stage,
-    channels: [...recordingFixture.channels],
+    channels: [...(recordingFixture.channels ?? [])],
     band_hz: stage === 'filter' ? [1, 40] : null,
     notch_hz: stage === 'filter' ? 50 : null,
     reference: 'average',
@@ -401,8 +401,8 @@ export function evokedResultFixture(overrides: Partial<EvokedResult> = {}): Evok
     tmax: 0.8,
     sfreq: 50,
     times,
-    channels: [...recordingFixture.channels],
-    data_uv: recordingFixture.channels.map((_channel, channelIndex) =>
+    channels: [...(recordingFixture.channels ?? [])],
+    data_uv: (recordingFixture.channels ?? []).map((_channel, channelIndex) =>
       times.map(
         (timeSec) =>
           Math.round(Math.sin((timeSec + 0.2) * 10 + channelIndex) * 20 * 1000) / 1000,
@@ -531,7 +531,7 @@ export function spectrumResultFixture(
   ]
   return {
     recording_id: recordingFixture.recording_id,
-    channels: [...recordingFixture.channels],
+    channels: [...(recordingFixture.channels ?? [])],
     missed_channels: [],
     sfreq: recordingFixture.sfreq,
     epoch_length_ms: 1000,
@@ -564,7 +564,8 @@ export function dipoleRefineResultFixture(
   overrides: Partial<DipoleRefineResult> = {},
 ): DipoleRefineResult {
   const scan = dipoleScanResultFixture()
-  const fast = scan.points[0]
+  const fast = scan.points?.[0]
+  if (!fast) throw new Error('dipoleScanResultFixture: неожиданно пустые точки')
   return {
     recording_id: recordingFixture.recording_id,
     method: 'bem_fit',
@@ -606,7 +607,7 @@ export function dipoleScanResultFixture(
     brodmann_method: 'nearest_cortex_vertex',
     reference: 'average',
     reference_channels: null,
-    channels: [...recordingFixture.channels],
+    channels: [...(recordingFixture.channels ?? [])],
     sfreq: recordingFixture.sfreq,
     epoch_length_ms: 1000,
     // «На параметрах по умолчанию»: полоса CALC_PARAM_DEFAULTS (широкий 0.5–128)
@@ -674,7 +675,7 @@ export function spectrogramResultFixture(
   return {
     recording_id: recordingFixture.recording_id,
     channel: 'Fp1',
-    channels: [...recordingFixture.channels],
+    channels: [...(recordingFixture.channels ?? [])],
     mix_channels: [],
     sfreq: recordingFixture.sfreq,
     duration_sec: recordingFixture.duration_sec,

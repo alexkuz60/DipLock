@@ -65,7 +65,7 @@ describe('api', () => {
     expect(meta.app).toBe('DipLock')
     expect(meta.freq_bands.alpha).toEqual([8, 16])
     // Функциональные ритмы — отдельным полем (фаза A: только пресеты фильтра)
-    expect(meta.functional_bands.mu).toEqual([8, 13])
+    expect(meta.functional_bands?.mu).toEqual([8, 13])
   })
 
   it('бросает ApiError с detail при ошибке HTTP', async () => {

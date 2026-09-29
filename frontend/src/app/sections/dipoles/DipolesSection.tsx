@@ -166,7 +166,7 @@ export function DipolesSection() {
    */
   const displayLayer = useMemo(() => withOverlapCounts(visibleLayer), [visibleLayer])
   const hidden = hiddenByThreshold(layer, threshold)
-  const mniMissing = result !== null && layer.points.length < result.points.length
+  const mniMissing = result !== null && layer.points.length < (result.points?.length ?? 0)
   /**
    * Выделенный диполь ищем в **полном** слое, а не в отфильтрованном порогом:
    * порог «КД» управляет только отрисовкой, и уже выделенная точка не должна

@@ -30,9 +30,9 @@ jobs:
       - name: Установка зависимостей
         run: pip install -r requirements-dev.txt
       - name: ruff (линтер)
-        run: ruff check app tests scripts
+        run: ruff check app tests scripts alembic
       - name: mypy (типы)
-        run: mypy app
+        run: mypy app alembic
       - name: pytest (без integration)
         run: python -m pytest -q -m "not integration"
 
@@ -51,6 +51,12 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Установка зависимостей
         run: npm ci
+      - name: Генерация TS-типов (schema.d.ts == openapi.json)
+        # Свежесть самого openapi.json (против app.openapi()) ловит pytest
+        # backend (test_openapi_json_is_up_to_date); здесь — производное от него
+        run: |
+          npm run gen:api
+          git diff --exit-code -- src/shared/api/schema.d.ts
       - name: eslint
         run: npm run lint
       - name: tsc --noEmit

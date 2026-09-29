@@ -125,7 +125,7 @@ describe('рабочая область раздела «ЭЭГ»', () => {
     // Спектрограмма до расчёта не выдумывается: раздел говорит, что её нет
     expect(screen.getByText('спектрограмма не рассчитана')).toBeInTheDocument()
     expect(
-      screen.getByText(new RegExp(`Канал ${recordingFixture.channels[0]}`)),
+      screen.getByText(new RegExp(`Канал ${recordingFixture.channels?.[0]}`)),
     ).toBeInTheDocument()
   })
 

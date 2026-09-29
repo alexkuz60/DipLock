@@ -1,11 +1,22 @@
-"""SQLAlchemy модели для локального режима (SQLite)."""
-from datetime import datetime
+"""SQLAlchemy модели для локального режима (SQLite).
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, inspect, text
-from sqlalchemy.engine import Connection
+Схему создаёт и изменяет **только alembic** (`init_db` поднимает её до head,
+`alembic/versions/` — замороженные определения, 4.2); `Base.metadata` здесь —
+источник истины для autogenerate, расхождение с миграциями ловит страж
+`tests/test_migrations.py::test_migration_schema_matches_models`.
+"""
+import asyncio
+from datetime import datetime
+from pathlib import Path
+
+from alembic.config import Config
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
+from alembic import command
 from app.core.config import settings
 
 # SQLite для локальной разработки; PostgreSQL используется в продакшене через docker-compose
@@ -14,6 +25,11 @@ DATABASE_URL = settings.database_url
 
 engine = create_async_engine(DATABASE_URL, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+# alembic.ini и каталог миграций лежат в backend/ (db.py → app/models/ → backend/).
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_ALEMBIC_INI = _BACKEND_DIR / "alembic.ini"
+
 
 
 class Base(DeclarativeBase):
@@ -37,13 +53,14 @@ class EpochRecord(Base):
 
     Колонки мощностей — ровно ключи ``settings.freq_bands`` + ``_power``:
     раньше таблица хранила 4 полосы при 7 в конфиге, и γ и новые полосы
-    молча терялись при записи. Смена сетки — только вместе с колонками:
-    до alembic (4.2) ручной догонкой в ``init_db``, после — миграцией.
+    молча терялись при записи. Смена сетки — только вместе с колонками и
+    **новой миграцией** alembic (догонка старых файлов — в ревизии ``0001``,
+    страж паритета — `tests/test_migrations.py`).
     """
 
     __tablename__ = "epochs"
     id = Column(Integer, primary_key=True)
-    session_id = Column(String, ForeignKey("sessions.id"))
+    session_id = Column(String, ForeignKey("sessions.id"), index=True)
     epoch_index = Column(Integer)
     start_time_sec = Column(Float)
     duration_ms = Column(Float)
@@ -59,44 +76,56 @@ class EpochRecord(Base):
 
 class Dipole(Base):
     __tablename__ = "dipoles"
+    # Индексы под запросы Фазы 5 (N37): фильтры таблицы и агрегация по ROI/полосе.
+    __table_args__ = (
+        Index("ix_dipoles_trajectory_json", "trajectory_json", postgresql_using="gin"),
+    )
     id = Column(Integer, primary_key=True)
-    session_id = Column(String, ForeignKey("sessions.id"))
-    epoch_id = Column(Integer, ForeignKey("epochs.id"))
+    session_id = Column(String, ForeignKey("sessions.id"), index=True)
+    epoch_id = Column(Integer, ForeignKey("epochs.id"), index=True)
     time_ms = Column(Float)
     mni_x = Column(Float)
     mni_y = Column(Float)
     mni_z = Column(Float)
     amplitude_nam = Column(Float)
-    gof = Column(Float)
+    gof = Column(Float, index=True)
     anatomical_roi = Column(String)
-    brodmann_area = Column(String)
+    brodmann_area = Column(String, index=True)
     freq_band = Column(String)
-    trajectory_json = Column(JSON)  # полная траектория для анимации
+    # JSON, а в PostgreSQL — jsonb + GIN (N37): на SQLite вариант игнорируется.
+    trajectory_json = Column(JSON().with_variant(postgresql.JSONB(), "postgresql"))
 
 
-def _add_missing_columns(conn: Connection) -> None:
-    """Догоняет колонки существующих таблиц до модели (ручная правка до alembic).
+def _sync_driver_url(url: URL) -> str:
+    """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 
-    ``create_all`` создаёт отсутствующие таблицы, но **не меняет** существующие:
-    файл БД, созданный до 4.1 (4 полосы вместо 7), иначе падал бы на вставке
-    эпох («no such column»). Идентификаторы берутся из ``Base.metadata`` —
-    это собственная схема, а не пользовательский ввод. После введения
-    alembic-миграций (todo 4.2) шаг заменит миграция.
+    ``sqlite+aiosqlite`` → ``sqlite``, ``postgresql+asyncpg`` → ``postgresql``
+    (поставляемый psycopg2-binary): миграции выполняются синхронным API.
+    ``str(url)`` маскирует пароль («***») — берём ``render_as_string`` явно,
+    иначе подключение к PostgreSQL ушло бы с паролем-заглушкой.
     """
-    inspector = inspect(conn)
-    for table in Base.metadata.sorted_tables:
-        existing = {column["name"] for column in inspector.get_columns(table.name)}
-        for column in table.c:
-            if column.name in existing:
-                continue
-            type_sql = column.type.compile(dialect=conn.dialect)
-            conn.execute(
-                text(f"ALTER TABLE {table.name} ADD COLUMN {column.name} {type_sql}")
-            )
+    sync = url.set(drivername=url.drivername.partition("+")[0])
+    return sync.render_as_string(hide_password=False)
 
 
-async def init_db():
-    """Создаёт таблицы и догоняет колонки старых файлов БД (см. ``_add_missing_columns``)."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        await conn.run_sync(_add_missing_columns)
+def _upgrade_to_head(database_url: str) -> None:
+    """Поднимает схему до последней ревизии alembic (блокирующий I/O — для потока).
+
+    URL передаётся явно: тесты подменяют ``engine`` на изолированную БД,
+    а ``alembic.ini`` URL не задаёт (env.py иначе взял бы ``settings``).
+    """
+    config = Config(str(_ALEMBIC_INI))
+    # set_main_option использует ConfigParser-интерполяцию: % в URL экранируем.
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    command.upgrade(config, "head")
+
+
+async def init_db() -> None:
+    """Поднимает схему БД до head: схему создают и меняют только миграции.
+
+    Файлы, созданные ``create_all`` до alembic (в т.ч. «до 4.1» с 4 полосами),
+    ревизия ``0001`` догоняет автоматически — ручная догонка (4.1) удалена.
+    Выполняется в отдельном потоке: синхронные запросы блокируют event loop.
+    """
+    await asyncio.to_thread(_upgrade_to_head, _sync_driver_url(engine.url))
+

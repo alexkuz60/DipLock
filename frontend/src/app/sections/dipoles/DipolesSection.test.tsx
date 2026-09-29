@@ -225,7 +225,7 @@ describe('рабочая область раздела «Диполи»', () => 
    */
   it('растит кольцо по числу диполей в узле и не подменяет координаты', () => {
     const result = dipoleScanResultFixture()
-    const shared = result.points[0]
+    const shared = result.points![0]
     useDipoleCalc.setState({
       result: {
         ...result,
@@ -234,7 +234,7 @@ describe('рабочая область раздела «Диполи»', () => 
         points: [
           { ...shared, epoch_index: 0 },
           { ...shared, epoch_index: 1 },
-          { ...result.points[1], epoch_index: 2 },
+          { ...result.points![1], epoch_index: 2 },
         ],
       },
     })
@@ -261,12 +261,12 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(readout).toContain('диполей в узле: 2')
     expect(readout).toContain('эпохи узла: 1, 2')
     // Координаты диполя и результат задачи не подменяются отрисовкой
-    expect(useDipoleCalc.getState().result?.points[0].mni_coords).toEqual(shared.mni_coords)
+    expect(useDipoleCalc.getState().result?.points?.[0]?.mni_coords).toEqual(shared.mni_coords)
   })
 
   it('показывает кратность заливкой, когда кольцо упёрлось в предел сетки', () => {
     const result = dipoleScanResultFixture()
-    const shared = result.points[0]
+    const shared = result.points![0]
     useDipoleCalc.setState({
       result: {
         ...result,

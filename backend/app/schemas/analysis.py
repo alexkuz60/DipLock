@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field, field_validator
 
 # Статусы фоновой задачи; cancelled — отмена из UI (3.2)
 JobState = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+# Светофор записи (QC, шаг 2.2/N10): худший из четырёх категорий —
+# ровно эти три значения возвращает ``record_qc_status`` (уровни rank).
+RecordStatus = Literal["ok", "warn", "bad"]
 # Тот же набор значениями: нужен там, где состояние приходит извне типа
 # (восстановление задачи из файла `job_store`) и его надо сузить обратно к Literal.
 JOB_STATES: tuple[JobState, ...] = ("queued", "running", "succeeded", "failed", "cancelled")
@@ -403,7 +406,7 @@ class PreprocessResult(BaseModel):
         default_factory=list,
         description="Мёртвые каналы (константные до референса), не исправленные интерполяцией",
     )
-    record_status: str = Field(
+    record_status: RecordStatus = Field(
         default="ok", description="Светофор записи: ok | warn | bad (худший из категорий)",
     )
     record_status_reasons: list[str] = Field(

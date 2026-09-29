@@ -5,8 +5,10 @@
 e2e-прогон на реальном EDF — отдельный integration-тест.
 """
 import io
+import json
 import os
 import time
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -17,6 +19,9 @@ from app.services import analysis_pipeline
 from app.services.surface_cache import clear_asset_cache
 
 _PREFIX = settings.api_prefix
+# Выгрузка OpenAPI для генерации TS-типов UI (4.2): её же коммитит скрипт
+# backend/scripts/export_openapi.py — путь от tests/ до корня репозитория.
+_OPENAPI_JSON = Path(__file__).resolve().parents[2] / "frontend" / "src" / "shared" / "api" / "openapi.json"
 _LH_INFLATED = os.path.join(settings.subjects_dir, "fsaverage", "surf", "lh.inflated")
 _NEEDS_FSAVERAGE = pytest.mark.skipif(
     not os.path.exists(_LH_INFLATED), reason="fsaverage поверхность недоступна",
@@ -224,6 +229,23 @@ def test_openapi_documents_response_schemas(client):
         f"{_PREFIX}/brodmann-labels", f"{_PREFIX}/meta",
     ):
         assert path in paths, f"в OpenAPI нет пути {path}"
+
+
+def test_openapi_json_is_up_to_date(client):
+    """Выгрузка `openapi.json` == свежий `app.openapi()` (4.2, генерация TS-типов).
+
+    Файл коммитится и служит входом для `npm run gen:api` (фронт): изменили
+    Pydantic-схему или роуты, но не перегенерировали — тест падает с командой
+    перегенерации, а UI собирается против устаревшего контракта.
+    """
+    assert _OPENAPI_JSON.exists(), (
+        f"нет {_OPENAPI_JSON}: запустите backend/venv/bin/python -m scripts.export_openapi"
+    )
+    committed = json.loads(_OPENAPI_JSON.read_text(encoding="utf-8"))
+    assert committed == client.app.openapi(), (
+        "openapi.json устарел: backend/venv/bin/python -m scripts.export_openapi "
+        "и cd frontend && npm run gen:api"
+    )
 
 
 def test_init_status_extended_payload(client):

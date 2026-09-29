@@ -441,7 +441,7 @@ export function EegPanel() {
           value={result ? channelLabel(recording, result.channel) : null}
           mono
         />
-        {result && result.mix_channels.length ? (
+        {result?.mix_channels?.length ? (
           <InfoRow label="Каналы микса" value={result.mix_channels.join(', ')} mono />
         ) : null}
         <InfoRow label="Окно задания" value={result ? `${Math.round(result.window_ms)} мс` : null} />

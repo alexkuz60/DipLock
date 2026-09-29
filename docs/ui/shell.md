@@ -107,8 +107,12 @@ cd frontend && npm run build                   # → backend/app/static/ui
 
 Источник истины — Pydantic-схемы `backend/app/schemas/analysis.py`, они попадают в OpenAPI
 (`/openapi.json` содержит `AnalyzeResponse`, `DipoleFit`, `JobStatus`, `MetaResponse`, `SurfaceOut`…).
-TS-типы в `frontend/src/shared/api/types.ts` пока описаны вручную; следующий шаг — генерация
-через `openapi-typescript` (пункт дорожной карты). Каждый ответ типизирован: `response_model`
+TS-типы **генерируются** (4.2): `npm run gen:api` собирает `shared/api/schema.d.ts` из выгрузки
+`shared/api/openapi.json` (её обновляет `venv/bin/python -m scripts.export_openapi`), а
+`shared/api/types.ts` — алиасы `components['schemas']` с привычными UI именами плюс ручные типы,
+которых в API нет (`InitStatus` — сырой dict, `SignalLayer`, `SignalsPrepQuery`). Свежесть выгрузки
+ловит pytest (`test_openapi_json_is_up_to_date`), свежесть `schema.d.ts` — CI (`gen:api` +
+`git diff --exit-code`). Каждый ответ типизирован: `response_model`
 в FastAPI валидирует данные, поэтому расхождение контракта и реализации падает тестом, а не UI.
 
 | Метод | Назначение | Кто использует |

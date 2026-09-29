@@ -293,7 +293,7 @@ export function refinedSummary(refined: DipoleRefineResult): string {
     return `Оценка узла сетки на BEM: GOF ${(refined.point.gof * 100).toFixed(1)} % · свободный фит не выполнен`
   }
   const parts = [`BEM GOF ${(refined.point.gof * 100).toFixed(1)} %`]
-  if (refined.grid_gof_bem !== null) {
+  if (refined.grid_gof_bem != null) {
     parts.push(`сетка на BEM ${(refined.grid_gof_bem * 100).toFixed(1)} %`)
   }
   parts.push(`Δ ${refined.shift_mm.toFixed(1)} мм`)
@@ -309,11 +309,11 @@ export function refineTooltip(refined: DipoleRefineResult): string {
     ? `MNI ${refined.point.mni_coords.map((value) => value.toFixed(1)).join(' / ')}`
     : 'MNI нет'
   const gridBem =
-    refined.grid_gof_bem !== null
+    refined.grid_gof_bem != null
       ? `, тот же узел на BEM: ${(refined.grid_gof_bem * 100).toFixed(1)} %`
       : ''
   const riv =
-    refined.point.riv !== null && Number.isFinite(refined.point.riv)
+    refined.point.riv != null && Number.isFinite(refined.point.riv)
       ? `, RIV ${(refined.point.riv * 100).toFixed(1)} %`
       : ', RIV не посчитан'
   const head = refined.free_fit
@@ -391,7 +391,7 @@ export function resultSignature(result: DipoleScanResult): string {
   const band = result.filter_band_hz
   return signatureOf({
     band: band && band.length === 2 ? [band[0], band[1]] : null,
-    notchHz: result.notch_hz,
+    notchHz: result.notch_hz ?? null,
     epochLengthMs: result.epoch_length_ms,
     gridMm: result.grid_mm,
   })
