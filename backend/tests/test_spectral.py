@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 from app.core.config import settings
+from app.services import spectral as spectral_mod
 from app.services.recordings import recording_registry
 from app.services.spectral import (
     SpectrumParams,
@@ -124,6 +125,31 @@ def test_spectrum_signature_follows_filter_and_channels():
     assert spectrum_signature(base, settings, channels) != spectrum_signature(other, settings, channels)
     assert spectrum_signature(base, settings, channels) != spectrum_signature(base, settings, channels[:3])
     assert spectrum_signature(base, settings, channels) == spectrum_signature(base, settings, list(channels))
+
+
+def test_compute_spectrum_computes_signature_once(tmp_path, monkeypatch):
+    """Подпись кэша считается один раз на задачу: второй расчёт — дубль (3.3, N26).
+
+    Аудит находил в `compute_spectrum` два одинаковых вызова `spectrum_signature`
+    (строки 359 и 384 в ревизии 7625de6); дубль удалён в 09b403d — тест не даёт
+    ему вернуться. Второй вызов в `cached_topomap` не считается: это отдельная
+    точка входа со своими каналами (`recording.meta`), не дубль внутри задачи.
+    """
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+    original = spectral_mod.spectrum_signature
+    calls: list[int] = []
+
+    def counting(params, cfg, channels):
+        calls.append(1)
+        return original(params, cfg, channels)
+
+    monkeypatch.setattr(spectral_mod, "spectrum_signature", counting)
+    compute_spectrum(
+        recording, settings,
+        SpectrumParams(filter_band=(1, 40), epoch_length_ms=1000.0),
+    )
+
+    assert len(calls) == 1
 
 
 def test_topomap_png_is_circle_with_transparent_outside():
