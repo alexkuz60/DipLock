@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **35 роутов**, префикс `/api/v1` из `settings.api_prefix`.
+- `backend/app/api/routes.py` — **36 роутов**, префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
   - `api/params.py` — формы → параметры сервисов и проверки с текстом для UI (400);
@@ -25,12 +25,12 @@
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
-  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **40 HTTP-путей** (35 в `routes.py` + 5 уровня приложения).
+  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **41 HTTP-путь** (36 в `routes.py` + 5 уровня приложения).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/types.ts`.
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (35 в `routes.py`)
+## Инвентарь эндпоинтов (36 в `routes.py`)
 
 | # | Метод и путь | Назначение |
 |---|---|---|

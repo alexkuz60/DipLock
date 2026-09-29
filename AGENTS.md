@@ -48,7 +48,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 35 роутов (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 36 роутов (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -66,6 +66,8 @@ backend/app/
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
 │   ├── preprocess.py      # стадии предподготовки записи: filter/artifacts/epochs (2.7)
+│   ├── edf_events.py      # события записи: аннотации EDF+ и маркеры стим-каналов (2.7)
+│   ├── evoked.py          # ERP-усреднение по событиям: задача kind=evoked (2.7)
 │   ├── spectral.py        # спектр δ…γ (Welch/multitaper + 1/f-фит specparam) + топокарты PNG, кэш + ETag (3.4)
 │   ├── spectrogram.py     # спектрограмма канала: STFT → сетка дБ (DPS2), кэш + ETag (5)
 │   ├── channel_mix.py     # виртуальные каналы «ЭЭГ»: миксы групп 10-20 из паспорта записи (5+)
