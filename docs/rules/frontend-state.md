@@ -94,7 +94,8 @@
    **Практика разрезки (17.09.2026):** крупный модуль делят по ответственности, а не «по строкам»:
    * чистая арифметика и данные-заглушки — в `shared/lib` (`mriProjections` ↔ `mriDemoShapes`:
      фикстуры собраны в один файл, чтобы удалить их одной операцией, когда появятся реальные данные);
-   * части одного экрана — в файлы рядом (`viewer/TrackRow.tsx`, `dipoles/MriProjectionParts.tsx`),
+   * части одного экрана — в файлы рядом (`viewer/TrackRow.tsx`, `dipoles/MriProjectionParts.tsx`,
+     `dipoles/MriProjectionLayers.tsx` — семь SVG-слоёв проекции, 3.4),
      чтобы хозяин остался сборкой: `TrackStack` — окно, жесты и слои; `TrackRow` — чарт канала;
    * домен стора — в `shared/lib` (`state/dipoleCalc.ts` → `lib/dipoleCalcModel.ts`: типы и дефолты
      параметров, рамки контролов, `FormData`-формы, отпечатки параметров/результата, `CalcJob` и

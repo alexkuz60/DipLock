@@ -43,9 +43,9 @@
   (`DELETE /jobs/{id}`, кнопки отмены у прогресса, статус `cancelled`).
 - **3.2б (N33):** параметры расчёта в URL — ЗАКРЫТ 26.09.2026 → `docs/history.md` (query `rec`/`band`/`slice`, зеркало `app/UrlSync.tsx`).
 - **3.3 (N26, P2):** дедуп `spectrum_signature`; мелкий долг клиента — ЗАКРЫТ 29.09.2026 → `docs/history.md` (дубль удалён ещё в 09b403d, закрыт тестом-стражом).
-- [ ] **3.4 (остаток разрезки фронтенда):** семь SVG-слоёв `MriProjection.tsx` (723 строки) по
-      правилу `docs/rules/frontend-state.md` п.6 — перенос без изменения поведения, после каждого
-      шага lint/typecheck/test.
+- **3.4 (остаток разрезки фронтенда):** семь SVG-слоёв `MriProjection.tsx` (723 строки) по
+      правилу `docs/rules/frontend-state.md` п.6 — ЗАКРЫТ 29.09.2026 → `docs/history.md`
+      (`MriProjectionLayers.tsx`; lint/typecheck/Vitest 854 зелёные без правок).
 - [ ] **3.5 (N25, N35, P2):** 3D — Niivue (читает NIfTI/GIFTI/FreeSurfer как есть; реконсилированное
       решение против самописного GLB); контур головы из `seghead.mgz`, совместный курсор проекций.
 - [ ] **Тестовый EDF:** проверка полного пайплайна на `data/edf/test.edf` (маркер `integration`).

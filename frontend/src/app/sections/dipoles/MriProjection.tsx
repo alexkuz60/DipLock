@@ -15,6 +15,11 @@
  * **разные слои** (срез 3.5): «где» и «куда» отвечают на разные вопросы, и при
  * плотном облаке точек лучи мешают читать позиции (и наоборот).
  *
+ * Слои вынесены в `MriProjectionLayers.tsx` (разрезка 3.4, правило
+ * `docs/rules/frontend-state.md` п.6): здесь — состояние, геометрия, жесты
+ * и сборка `<svg>`; части фигуры (подписи краёв, кадр, перекрестие) — в
+ * `MriProjectionParts.tsx`.
+ *
  * Позиция диполя — кольцо **фиксированного экранного штриха** (2 px при любом
  * размере окна: фигура растягивается по ширине колонки, поэтому геометрия кольца
  * делится на масштаб `renderedWidth / viewBox.width`, который отслеживает
@@ -66,7 +71,6 @@ import {
   PROJECTION_LABELS,
   PROJECTION_PADDING,
   coordsLabel,
-  ellipsePx,
   mniToNormalized,
   normalizedToPx,
   planeEdgeLabels,
@@ -77,8 +81,6 @@ import {
   pxToNormalized,
   sliceGuides,
   sliceLabel,
-  xOfNormalized,
-  yOfNormalized,
   type MniVector,
   type PixelPoint,
   type ProjectionPlane,
@@ -93,10 +95,7 @@ import {
   demoSliceStructures,
 } from '@/shared/lib/mriDemoShapes'
 import { MRI_SLICE_UNAVAILABLE, mriSliceRect, mriSliceUrl } from '@/shared/lib/mriSlices'
-import {
-  contourPathPx,
-  shapeAtPoint,
-} from '@/shared/lib/atlasContours'
+import { shapeAtPoint } from '@/shared/lib/atlasContours'
 import type { ContourSlice, MriSliceRef } from '@/shared/api/types'
 import {
   DIPOLE_DOT_STROKE_PX,
@@ -107,7 +106,6 @@ import {
   dipoleMarker,
   dipoleNodeSiblings,
   dipoleNodeTitle,
-  dipolePointTitle,
   dipoleRayVisual,
   emptyDipoleLayer,
   type DipoleLayer,
@@ -115,6 +113,15 @@ import {
 } from '@/shared/lib/dipolePoints'
 import { layerVisible, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { cx } from '@/shared/ui/cx'
+import {
+  AnatomyLayer,
+  BrodmannLayer,
+  DipoleDotsLayer,
+  HeadLayer,
+  MniLayer,
+  MriLayer,
+  VectorLayer,
+} from './MriProjectionLayers'
 import { EdgeLabel, FrameMarker, ReferenceCross } from './MriProjectionParts'
 
 export type MriProjectionProps = {
@@ -407,317 +414,60 @@ export function MriProjection({
       >
         {/* Наконечники векторов рисуются полигонами (см. `dipoleArrowHead`): тег
             `<marker>` один на проекцию и не подстраивается под длину луча. */}
-        {/*
-          Срез МРТ — подложка: рисуется первым, чтобы сетка, поля и диполи легли
-          поверх. Прямоугольник картинки равен прямоугольнику плоскости, а масштаб
-          мм/пиксель у фигуры общий, поэтому `preserveAspectRatio="none"` ничего не
-          растягивает: пиксель PNG и пиксель фигуры — один и тот же миллиметр.
-        */}
-        {mriShown ? (
-          <image
-            data-testid={`layer-mri-${plane}`}
-            href={mriHref ?? undefined}
-            x={imageRect.x}
-            y={imageRect.y}
-            width={imageRect.width}
-            height={imageRect.height}
-            preserveAspectRatio="none"
-            onError={() => setFailedHref(mriHref)}
-          />
-        ) : null}
+        {/* Слои снизу вверх (порядок и подписи — в `shared/state/dipoleParams.ts`);
+            сами слои — `MriProjectionLayers.tsx` (разрезка 3.4) */}
+        <MriLayer
+          plane={plane}
+          mriShown={mriShown}
+          mriHref={mriHref}
+          imageRect={imageRect}
+          onImageError={() => setFailedHref(mriHref)}
+        />
 
-        {/*
-          Анатомические структуры атласа (`aparc+aseg`): реальные контуры среза.
-          Дырки (желудочки внутри структур) приходят отдельными полигонами, поэтому
-          заливка — `evenodd`: «кольцо» не закрашивается. Подписи в `<title>` —
-          та же подсказка, что видна под курсором в строке под фигурой.
-        */}
-        {layerVisible(visibility, 'anatomy') && structureShapes ? (
-          <g data-testid={`layer-anatomy-${plane}`}>
-            {structureShapes.map((shape) => {
-              const active = selectedStructure === shape.id
-              return (
-                <path
-                  key={shape.id}
-                  data-testid={`anatomy-${plane}-${shape.id}`}
-                  data-active={active ? 'true' : 'false'}
-                  d={contourPathPx(plane, shape)}
-                  fillRule="evenodd"
-                  fill="var(--color-mri-structure)"
-                  fillOpacity={active ? 0.3 : 0.12}
-                  stroke="var(--color-mri-structure)"
-                  strokeOpacity={active ? 0.95 : 0.55}
-                  strokeWidth={active ? 1.6 : 0.9}
-                >
-                  <title>{`${shape.label} · ${shape.area_mm2} мм²`}</title>
-                </path>
-              )
-            })}
-          </g>
-        ) : null}
+        <AnatomyLayer
+          plane={plane}
+          visibility={visibility}
+          structureShapes={structureShapes}
+          selectedStructure={selectedStructure}
+        />
 
-        {layerVisible(visibility, 'head') ? (
-          <polygon
-            data-testid={`layer-head-${plane}`}
-            points={contour}
-            fill="var(--color-mri-outline)"
-            fillOpacity={0.07}
-            stroke="var(--color-mri-outline)"
-            strokeOpacity={0.75}
-            strokeWidth={1.2}
-          />
-        ) : null}
+        <HeadLayer plane={plane} visibility={visibility} contour={contour} />
 
-        {layerVisible(visibility, 'mni') ? (
-          <g data-testid={`layer-mni-${plane}`}>
-            {/* Координатная сетка MNI: нулевые линии — оси AC–PC, они ярче */}
-            {grid.map((line) => {
-              const zero = line.valueMm === 0
-              if (line.orientation === 'vertical') {
-                const x = xOfNormalized(plane, line.at)
-                return (
-                  <line
-                    key={`grid-v-${line.valueMm}`}
-                    data-testid={`grid-${plane}-v-${line.valueMm}`}
-                    x1={x}
-                    y1={PROJECTION_PADDING}
-                    x2={x}
-                    y2={box.height - PROJECTION_PADDING}
-                    stroke="var(--color-mri-slice)"
-                    strokeOpacity={zero ? 0.45 : 0.16}
-                    strokeDasharray={zero ? undefined : '3 4'}
-                  />
-                )
-              }
-              const y = yOfNormalized(plane, line.at)
-              return (
-                <line
-                  key={`grid-h-${line.valueMm}`}
-                  data-testid={`grid-${plane}-h-${line.valueMm}`}
-                  x1={PROJECTION_PADDING}
-                  y1={y}
-                  x2={box.width - PROJECTION_PADDING}
-                  y2={y}
-                  stroke="var(--color-mri-slice)"
-                  strokeOpacity={zero ? 0.45 : 0.16}
-                  strokeDasharray={zero ? undefined : '3 4'}
-                />
-              )
-            })}
+        <MniLayer
+          plane={plane}
+          visibility={visibility}
+          box={box}
+          grid={grid}
+          structures={structures}
+          guides={guides}
+          mriShown={mriShown}
+        />
 
-            {/* Схема среза: желудочки, мозолистое тело, ствол — фикстура тома.
-                Показывается только без реального среза: иначе поверх настоящей
-                анатомии рисовалась бы «вторая», условная. */}
-            {mriShown
-              ? null
-              : structures.map((structure) => {
-                  const ellipse = ellipsePx(plane, structure.center, structure.radius)
-                  return (
-                    <ellipse
-                      key={structure.id}
-                      data-testid={`slice-structure-${plane}-${structure.id}`}
-                      cx={ellipse.cx}
-                      cy={ellipse.cy}
-                      rx={ellipse.rx}
-                      ry={ellipse.ry}
-                      fill={structure.hollow ? 'none' : 'var(--color-mri-slice)'}
-                      fillOpacity={structure.hollow ? 0 : 0.12 * structure.alpha}
-                      stroke="var(--color-mri-slice)"
-                      strokeOpacity={0.5 * structure.alpha}
-                      strokeWidth={1.1}
-                    />
-                  )
-                })}
+        <BrodmannLayer
+          plane={plane}
+          visibility={visibility}
+          areaShapes={areaShapes}
+          demoAreas={demoAreas}
+          selectedArea={selectedArea}
+        />
 
-            {/* Следы срезов соседних проекций: только когда сосед стоит на оси */}
-            {guides.map((guide) =>
-              guide.axis === 'vertical' ? (
-                <line
-                  key={guide.label}
-                  data-testid={`guide-${plane}-${guide.orientation}`}
-                  x1={xOfNormalized(plane, guide.at)}
-                  y1={PROJECTION_PADDING}
-                  x2={xOfNormalized(plane, guide.at)}
-                  y2={box.height - PROJECTION_PADDING}
-                  stroke="var(--color-mri-slice)"
-                  strokeOpacity={0.4}
-                  strokeDasharray="6 4"
-                />
-              ) : (
-                <line
-                  key={guide.label}
-                  data-testid={`guide-${plane}-${guide.orientation}`}
-                  x1={PROJECTION_PADDING}
-                  y1={yOfNormalized(plane, guide.at)}
-                  x2={box.width - PROJECTION_PADDING}
-                  y2={yOfNormalized(plane, guide.at)}
-                  stroke="var(--color-mri-slice)"
-                  strokeOpacity={0.4}
-                  strokeDasharray="6 4"
-                />
-              ),
-            )}
-          </g>
-        ) : null}
-        {layerVisible(visibility, 'brodmann') ? (
-          <g data-testid={`layer-brodmann-${plane}`}>
-            {/*
-              Реальные поля атласа: контуры приходят полигонами в мм MNI и по ним же
-              считается попадание клика. Пока ассета нет, рисуются условные эллипсы
-              фикстуры — и это видно по подписи метода в полосе состояния раздела.
-            */}
-            {areaShapes
-              ? areaShapes.map((shape) => {
-                  const active = selectedArea === shape.id
-                  return (
-                    <path
-                      key={shape.id}
-                      data-testid={`area-${plane}-${shape.id}`}
-                      data-active={active ? 'true' : 'false'}
-                      d={contourPathPx(plane, shape)}
-                      fillRule="evenodd"
-                      fill="var(--color-mri-brodmann)"
-                      fillOpacity={active ? 0.32 : 0.13}
-                      stroke="var(--color-mri-brodmann)"
-                      strokeOpacity={active ? 0.95 : 0.5}
-                      strokeWidth={active ? 1.8 : 1}
-                    >
-                      <title>{`${shape.label} · ${shape.area_mm2} мм²`}</title>
-                    </path>
-                  )
-                })
-              : demoAreas.map((area) => {
-                  const ellipse = ellipsePx(plane, area.center, area.radius)
-                  const active = selectedArea === area.name
-                  return (
-                    <g
-                      key={area.name}
-                      data-testid={`brodmann-${plane}-${area.name}`}
-                      data-active={active ? 'true' : 'false'}
-                    >
-                      <ellipse
-                        cx={ellipse.cx}
-                        cy={ellipse.cy}
-                        rx={ellipse.rx}
-                        ry={ellipse.ry}
-                        fill="var(--color-mri-brodmann)"
-                        fillOpacity={(active ? 0.32 : 0.13) * area.alpha}
-                        stroke="var(--color-mri-brodmann)"
-                        strokeOpacity={(active ? 0.95 : 0.5) * area.alpha}
-                        strokeWidth={active ? 1.8 : 1}
-                      />
-                      <text
-                        x={ellipse.cx}
-                        y={ellipse.cy}
-                        textAnchor="middle"
-                        dominantBaseline="middle"
-                        fontSize={10}
-                        fill="var(--color-mri-brodmann)"
-                        fillOpacity={Math.max(0.35, area.alpha)}
-                      >
-                        {area.name}
-                      </text>
-                    </g>
-                  )
-                })}
-          </g>
-        ) : null}
+        <VectorLayer
+          plane={plane}
+          visibility={visibility}
+          markers={markers}
+          selectedPointId={selectedPointId}
+          rayStrokePx={rayStrokePx}
+          dim={dim}
+        />
 
-        {/*
-          Слой векторов — отдельно от позиций (срез 3.5). Луч идёт от позиции
-          диполя, поэтому он рисуется и при выключенных точках: карта направлений
-          без точек — осмысленный вид, а не «сломанный» слой.
-        */}
-        {layerVisible(visibility, 'vectors') ? (
-          <g data-testid={`layer-dipole-vectors-${plane}`}>
-            {markers.map(({ point, marker, visual }) => {
-              if (!marker.end || !marker.shaftEnd || !marker.head) return null
-              const selected = selectedPointId === point.id
-              /**
-               * Цвет луча — **приглушённый** токен (`--color-mri-dipole-vector`),
-               * а не оранжевый диполя: векторы («куда») не должны спорить с
-               * кольцами позиций («где»). Выделение остаётся акцентным, а вектор
-               * кадра анимации (`MriProjectionParts.FrameMarker`) не затрагивается:
-               * приглушение — признак облака, а не кадра.
-               */
-              const rayColor = selected ? 'var(--color-accent)' : 'var(--color-mri-dipole-vector)'
-              return (
-                <g key={point.id} data-testid={`dipole-ray-${plane}-${point.id}`}>
-                  <title>{dipolePointTitle(point)}</title>
-                  <line
-                    data-testid={`dipole-vector-${plane}-${point.id}`}
-                    x1={marker.at.x}
-                    y1={marker.at.y}
-                    x2={marker.shaftEnd.x}
-                    y2={marker.shaftEnd.y}
-                    stroke={rayColor}
-                    strokeWidth={rayStrokePx}
-                    strokeOpacity={selected ? 1 : visual.opacity * dim}
-                  />
-                  {/*
-                    Наконечник: залитый треугольник от длины луча (вдвое меньший, чем раньше),
-                    а не `<marker>` на всю проекцию. Вершина — конец луча, крылья — по сторонам
-                    от неё; размер уменьшен, поэтому заливка больше не сливается в комок.
-                  */}
-                  <polygon
-                    data-testid={`dipole-arrow-${plane}-${point.id}`}
-                    points={marker.head.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')}
-                    fill={rayColor}
-                    fillOpacity={selected ? 1 : visual.opacity * dim}
-                  />
-                </g>
-              )
-            })}
-          </g>
-        ) : null}
-
-        {layerVisible(visibility, 'dipoles') ? (
-          <g data-testid={`layer-dipoles-${plane}`}>
-            {markers.map(({ point, marker, dot }) => {
-              const selected = selectedPointId === point.id
-              /** Заливка: выделение — акцент, кратность узла — цветом кольца */
-              const filled = selected || dot.fillOpacity > 0
-              return (
-                <g
-                  key={point.id}
-                  data-testid={`dipole-${plane}-${point.id}`}
-                  data-selected={selected ? 'true' : 'false'}
-                >
-                  {/*
-                    Кольцо позиции: Ø 6 px плюс 2 px на каждый диполь в узле (кратность
-                    узла сетки), штрих 2 px — пиксели поделены на масштаб фигуры.
-                    Кольцо не растёт шире `2 · grid_mm` (центр соседнего узла): когда
-                    диполей больше, число читается заливкой от 25 % (`dipoleDotVisual`).
-                    Сила момента по-прежнему читается по лучу, а не по размеру кольца.
-                  */}
-                  <circle
-                    data-testid={`dipole-dot-${plane}-${point.id}`}
-                    cx={marker.at.x}
-                    cy={marker.at.y}
-                    r={dot.radiusUnits}
-                    fill={
-                      selected
-                        ? 'var(--color-mri-dipole)'
-                        : filled
-                          ? 'var(--color-mri-dipole-point)'
-                          : 'none'
-                    }
-                    fillOpacity={selected ? 1 : dot.fillOpacity}
-                    stroke="var(--color-mri-dipole-point)"
-                    strokeWidth={dotStrokePx}
-                    strokeOpacity={selected ? 1 : dim}
-                  />
-                  {/*
-                    Хит-зоны и `<title>` у точки больше нет: попадание и тултип
-                    считает курсорная модель фигуры (`dipoleAt` — ближайший центр,
-                    подпись узла с эпохами — в строке под фигурой). DOM-стэкинг
-                    ошибался, когда хит-зоны соседних узлов перекрывались.
-                  */}
-                </g>
-              )
-            })}
-          </g>
-        ) : null}
+        <DipoleDotsLayer
+          plane={plane}
+          visibility={visibility}
+          markers={markers}
+          selectedPointId={selectedPointId}
+          dotStrokePx={dotStrokePx}
+          dim={dim}
+        />
 
         {/* Анимация — свой слой (`layer-playback`, поправка ручной проверки):
             кадр рисуется поверх остальных слоёв и не зависит от слоёв облака */}

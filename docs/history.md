@@ -3,6 +3,25 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 29.09.2026 — 3.4: семь SVG-слоёв `MriProjection.tsx` → `MriProjectionLayers.tsx`
+
+**Из `todo.md` (дословно):**
+> - [ ] **3.4 (остаток разрезки фронтенда):** семь SVG-слоёв `MriProjection.tsx` (723 строки) по
+>       правилу `docs/rules/frontend-state.md` п.6 — перенос без изменения поведения, после каждого
+>       шага lint/typecheck/test.
+
+Закрыто: `dipoles/MriProjectionLayers.tsx` (новый файл, 490 строк) — `MriLayer`, `AnatomyLayer`,
+`HeadLayer`, `MniLayer`, `BrodmannLayer`, `VectorLayer`, `DipoleDotsLayer`. Условие включения и
+весь JSX перенесены дословно, имена пропсов = имена переменных сборки; хуков в слоях нет — сборка
+(`MriProjection.tsx`, 770 → 520 строк) держит состояние (курсор, масштаб, `failedHref`), геометрию,
+жесты и порядок слоёв в `<svg>`. `MriProjection.test.tsx` не трогали.
+
+1. **Валидация после разрезки** (п.6): `npm run lint`, `npm run typecheck` и Vitest — **854/854
+   зелёные без правок тестов**; `npm run build` собран.
+2. **Правило**: `frontend-state.md` п.6 — пример «части одного экрана» дополнен
+   `dipoles/MriProjectionLayers.tsx`.
+3. **Числа**: без изменений — Vitest **854** (75 файлов), pytest **539** (547 со всеми).
+
 ## 29.09.2026 — 3.3: дедуп `spectrum_signature` (N26)
 
 **Из `todo.md` (дословно):**
