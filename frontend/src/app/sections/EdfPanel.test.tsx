@@ -6,6 +6,7 @@ import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { EdfPanel } from './EdfPanel'
+import type { CleanReport } from '@/shared/api/types'
 import {
   EDF_PARAM_DEFAULTS,
   emptyStageSnapshot,
@@ -96,6 +97,47 @@ describe('панель раздела EDF', () => {
     expect(screen.queryByRole('button', { name: /Пересчитать/ })).not.toBeInTheDocument()
     // Пока записи нет, пересчитывать нечего — вместо статуса ясная причина
     expect(screen.getByText(/пересчитывать пока нечего/)).toBeInTheDocument()
+  })
+
+  it('зоны вклада чистки: чекбокс голосует отмену, ничего не запуская (шаг 2)', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    act(() => {
+      useEdfRecording.setState({ cleanReport: cleanReportFixture() })
+    })
+    renderWithProviders(<EdfPanel />)
+
+    const zones = await screen.findByTestId('clean-zones')
+    expect(zones).toHaveTextContent('clean-1: 4.2–5.5 с · Fp1, Fp2 · 17.2 мкВ')
+
+    const callsBefore = fetchMock.mock.calls.length
+    const zone1 = screen.getByLabelText(/^clean-1:/)
+    expect(zone1).toBeChecked() // чистка применена — по умолчанию отмен нет
+    await user.click(zone1)
+
+    expect(zone1).not.toBeChecked()
+    expect(useEdfParams.getState().params.cleanExcludeZoneIds).toEqual(['clean-1'])
+    // Правка параметра — не расчёт: ни одного нового запроса
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes('/meta'))).toBe(true)
+
+    // Снятие отмены возвращает пустой список (чистка снова целиком)
+    await user.click(zone1)
+    expect(useEdfParams.getState().params.cleanExcludeZoneIds).toEqual([])
+  })
+
+  it('метрики потерь: наводка L1, полосы L3/L4 и дисперсия L5 (шаг 2)', async () => {
+    act(() => {
+      useEdfRecording.setState({ cleanReport: cleanReportFixture() })
+    })
+    renderWithProviders(<EdfPanel />)
+
+    await screen.findByTestId('clean-loss')
+    expect(screen.getByTestId('clean-loss-l1')).toHaveTextContent('50 Гц 12 → 4.5 дБ')
+    expect(screen.getByTestId('clean-loss-band-delta')).toHaveTextContent('1.2')
+    expect(screen.getByTestId('clean-loss-band-alpha')).toHaveTextContent('0.97')
+    expect(screen.getByTestId('clean-loss-l5')).toHaveTextContent('15.5%')
+    expect(screen.getByTestId('clean-loss-l5')).toHaveTextContent('компонент ICA')
   })
 
   it('без записи (и в демо) контрола слоя нет: нечего переключать', async () => {
@@ -410,3 +452,45 @@ describe('событийный режим и блок ERP (N2/2.7)', () => {
     expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 })
+
+/** Отчёт стадии «Фильтр и референс» с зонами и метриками (шаг 2). */
+function cleanReportFixture(): CleanReport {
+  return {
+    method: 'ica',
+    notch_harmonics: 1,
+    interpolated_channels: [],
+    n_components_removed: 2,
+    removed_components: [1, 4],
+    n_projectors: 0,
+    amplitude_p95_uv_before: 12.5,
+    amplitude_p95_uv_after: 9.8,
+    warnings: [],
+    zones: [
+      {
+        id: 'clean-1',
+        onset_sec: 4.2,
+        duration_sec: 1.3,
+        channels: ['Fp1', 'Fp2'],
+        amplitude_uv: 17.2,
+        excluded: false,
+      },
+      {
+        id: 'clean-2',
+        onset_sec: 8,
+        duration_sec: 0.5,
+        channels: ['C3'],
+        amplitude_uv: 4.1,
+        excluded: false,
+      },
+    ],
+    loss: {
+      line_noise: [{ freq_hz: 50, before_db: 12, after_db: 4.5 }],
+      bands: [
+        { name: 'delta', delta_db: 1.2, correlation: 0.98 },
+        { name: 'alpha', delta_db: 0.4, correlation: 0.97 },
+      ],
+      removed_variance_percent: 15.5,
+      removed_variance_source: 'ica_components',
+    },
+  }
+}

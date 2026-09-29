@@ -216,6 +216,14 @@ class Settings(BaseSettings):
     qc_bad_channels_warn: int = Field(default=1)
     qc_bad_channels_bad: int = Field(default=3)
 
+    # Очистка сигнала (этап 4): зоны вклада чистки и метрики потерь (шаг 2
+    # плана «визуализация препроцессинга»). Пороги зон — конвенция
+    # robust-детекторов (медиана/MAD через utils/robust.py::robust_stats):
+    # зона = интервал, где diff «без очистки − с очисткой» заметно выше фона.
+    clean_zone_mad_k: float = Field(default=6.0, description="Сколько MAD над медианой diff — зона вклада")
+    clean_zone_min_duration_ms: float = Field(default=100.0, description="Короче — не зона (мусор разрезов)")
+    clean_zone_merge_gap_ms: float = Field(default=300.0, description="Промежутки короче — сшиваются в одну зону")
+
     # Нарезка эпох (без overlap) — reject-фильтр MNE отключён: отбраковка идёт
     # только по аннотациям BAD_ от наших 11 детекторов (срез артефактов).
     epoch_lengths_ms: list[float] = [250, 500, 750, 1000, 1250, 1500, 1750, 2000]

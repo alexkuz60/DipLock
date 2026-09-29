@@ -10,11 +10,12 @@
 import { act, fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SignalData } from '@/shared/lib/demoSignal'
 import { formatUvLevel } from '@/shared/lib/eegView'
 import { frameFromSignalData, type SignalFrame } from '@/shared/lib/signalFrame'
 import type { EdfViewerLayers } from '@/shared/lib/viewerLayers'
+import type { CleanReport } from '@/shared/api/types'
 import { EDF_PARAM_DEFAULTS, emptyStageSnapshot, useEdfParams } from '@/shared/state/edfParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { EEG_PARAM_DEFAULTS, useEegParams } from '@/shared/state/eegParams'
@@ -1234,6 +1235,97 @@ describe('трек ЧСС (пульс)', () => {
 
     expect(screen.queryByTestId('track-heart-rate')).not.toBeInTheDocument()
     expect(screen.queryByText(/ЧСС/)).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * Шаг 2: отменённые зоны вклада чистки подсвечиваются **только на слое `diff`** —
+ * там разность «без очистки − с очисткой» в отменённой зоне обращается в ноль.
+ * Отбор — параметр `cleanExcludeZoneIds` (голосование пользователя), координаты
+ * — из отчёта стадии `filter`.
+ */
+describe('отменённые зоны чистки на слое diff (шаг 2)', () => {
+  function cleanReportFixture(): CleanReport {
+    return {
+      method: 'ica',
+      notch_harmonics: 0,
+      interpolated_channels: [],
+      n_components_removed: 0,
+      removed_components: [],
+      n_projectors: 0,
+      amplitude_p95_uv_before: null,
+      amplitude_p95_uv_after: null,
+      warnings: [],
+      zones: [
+        {
+          id: 'clean-1',
+          onset_sec: 2,
+          duration_sec: 1,
+          channels: ['F3'],
+          amplitude_uv: 8.5,
+          excluded: true,
+        },
+        {
+          id: 'clean-2',
+          onset_sec: 6,
+          duration_sec: 0.5,
+          channels: ['C3'],
+          amplitude_uv: 3.2,
+          excluded: false,
+        },
+      ],
+      loss: null,
+    }
+  }
+
+  const layers: EdfViewerLayers = {
+    source: 'result',
+    artifacts: [],
+    rejectedEpochs: [],
+    rejectChannels: {},
+    epochLengthMs: null,
+  }
+
+  beforeEach(() => {
+    uplotCharts().length = 0
+    localStorage.clear()
+    useEdfRecording.setState({ epochMarks: [], cleanReport: cleanReportFixture() })
+  })
+
+  afterEach(() => {
+    useEdfRecording.setState({ cleanReport: null })
+  })
+
+  it('на слое diff подсвечены только отменённые зоны', () => {
+    paramsState({
+      visibleChannels: ['F3', 'F4', 'C3'],
+      signalLayer: 'diff',
+      cleanExcludeZoneIds: ['clean-1'],
+    })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layers} />)
+
+    expect(screen.getByTestId('clean-zone-clean-1')).toBeInTheDocument()
+    // clean-2 не отменена — подсветки нет
+    expect(screen.queryByTestId('clean-zone-clean-2')).not.toBeInTheDocument()
+  })
+
+  it('на сыром слое подсветки нет вовсе (даже с отменой)', () => {
+    paramsState({
+      visibleChannels: ['F3', 'F4', 'C3'],
+      signalLayer: 'raw',
+      cleanExcludeZoneIds: ['clean-1'],
+    })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layers} />)
+
+    expect(screen.queryByTestId('clean-zone-clean-1')).not.toBeInTheDocument()
+  })
+
+  it('на diff без отменённых зон подсветки нет', () => {
+    paramsState({ visibleChannels: ['F3', 'F4', 'C3'], signalLayer: 'diff' })
+    renderWithProviders(<TrackStack signal={frameFixture()} layers={layers} />)
+
+    expect(screen.queryByTestId('clean-zone-clean-1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('clean-zone-clean-2')).not.toBeInTheDocument()
   })
 })
 

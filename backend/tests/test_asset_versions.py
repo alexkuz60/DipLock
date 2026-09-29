@@ -51,10 +51,10 @@ INPUTS_SNAPSHOT = {
         "stamp_files": ("fsaverage/mri/T1.mgz", "fsaverage/mri/brainmask.mgz"),
     },
     "contours": {
-        "version": 2,
+        "version": 3,
         "params": {
             "subject": "fsaverage",
-            "source": "aparc+aseg.mgz + ribbon.mgz",
+            "source": "aparc+aseg.mgz + ribbon.mgz + seghead.mgz",
             "spacing_mm": 1.0,
             "simplify_mm": 0.6,
             "min_area_mm2": 25.0,
@@ -65,8 +65,27 @@ INPUTS_SNAPSHOT = {
             "fsaverage/mri/aparc+aseg.mgz",
             "fsaverage/mri/lh.ribbon.mgz",
             "fsaverage/mri/rh.ribbon.mgz",
+            "fsaverage/mri/seghead.mgz",
             "fsaverage/label/lh.PALS_B12_Brodmann.annot",
             "fsaverage/label/rh.PALS_B12_Brodmann.annot",
+            "fsaverage/surf/lh.white",
+            "fsaverage/surf/rh.white",
+        ),
+    },
+    "volumes": {
+        "version": 1,
+        "params": {
+            "subject": "fsaverage",
+            "files": [
+                "fsaverage/mri/T1.mgz",
+                "fsaverage/mri/seghead.mgz",
+                "fsaverage/surf/lh.white",
+                "fsaverage/surf/rh.white",
+            ],
+        },
+        "stamp_files": (
+            "fsaverage/mri/T1.mgz",
+            "fsaverage/mri/seghead.mgz",
             "fsaverage/surf/lh.white",
             "fsaverage/surf/rh.white",
         ),

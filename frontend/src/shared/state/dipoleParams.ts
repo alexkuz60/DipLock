@@ -78,7 +78,7 @@ export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
   mri: 'Реальный срез тома fsaverage: картинка квантуется шагом 1 мм, снаружи мозга прозрачна',
   anatomy:
     'Реальные структуры атласа aparc+aseg (кора, подкорка, желудочки): контуры приходят с сервера, метка подсвечивается и называется под курсором',
-  head: 'Условная граница черепа на текущем срезе',
+  head: 'Силуэт головы с сервера (маска seghead.mgz): реальный контур кожи на срезе; без ассета — условная фикстура',
   mni: 'Анатомическая схема среза и линии секущих плоскостей',
   brodmann:
     'Поля Бродмана из атласа: разметка производная (метка ближайшей вершины коры), пока ассет недоступен — условные эллипсы',
@@ -110,6 +110,13 @@ export const DIPOLE_PARAM_DEFAULTS = {
     playback: true,
   } as Record<DipoleLayerId, boolean>,
   slices: defaultSlices(),
+  /**
+   * 3D-вид (срез 3.5, Niivue) вместо трёх SVG-проекций. Это **отрисовка**:
+   * параметр не входит ни в один `STAGE_PARAM_KEYS` (своих задач у раздела
+   * «Диполи» нет — расчёт запускается кнопкой), переключение не запускает
+   * расчёт и не делает результат устаревшим.
+   */
+  view3d: false,
 }
 
 export type DipoleParams = typeof DIPOLE_PARAM_DEFAULTS
@@ -137,6 +144,17 @@ export type DipoleParamsState = {
   params: DipoleParams
   /** Последний выбор пользователя в проекциях (не персистится) */
   selection: DipoleSelection
+  /**
+   * Совместный курсор проекций и 3D-вида (срез 3.5): точка MNI под курсором
+   * мыши в любой проекции или положение кроссхейра Niivue. Состояние
+   * **сессии** (как `selection`): не персистится — после перезагрузки страницы
+   * «точка под курсором» бессмысленна.
+   */
+  projectionCursor: MniVector | null
+  /** Обновить совместный курсор (вызывается ховером проекций и Niivue) */
+  setProjectionCursor: (point: MniVector | null) => void
+  /** Вид рабочей области: проекции или 3D (Niivue) — параметр отрисовки */
+  setView3d: (view3d: boolean) => void
   /** Показать/скрыть фоновый слой */
   toggleLayer: (layer: DipoleLayerId) => void
   setLayerVisible: (layer: DipoleLayerId, visible: boolean) => void
@@ -160,6 +178,9 @@ export const useDipoleParams = create<DipoleParamsState>()(
     (set) => ({
       params: { ...DIPOLE_PARAM_DEFAULTS, slices: defaultSlices() },
       selection: EMPTY_SELECTION,
+      projectionCursor: null,
+      setProjectionCursor: (point) => set({ projectionCursor: point }),
+      setView3d: (view3d) => set((state) => ({ params: { ...state.params, view3d } })),
       toggleLayer: (layer) =>
         set((state) => ({
           params: {
@@ -204,7 +225,8 @@ export const useDipoleParams = create<DipoleParamsState>()(
     }),
     {
       name: 'diplock.dipoles',
-      // Точка клика — состояние сессии: после перезагрузки страницы она бессмысленна.
+      // Точка клика и курсор — состояние сессии: после перезагрузки страницы они
+      // бессмысленны; в localStorage уходят только params (слои, срезы, вид).
       partialize: (state) => ({ params: state.params }),
       merge: (persisted, current) => {
         const stored = (persisted ?? {}) as { params?: Partial<DipoleParams> }
@@ -212,6 +234,7 @@ export const useDipoleParams = create<DipoleParamsState>()(
         return {
           ...current,
           selection: EMPTY_SELECTION,
+          projectionCursor: null,
           params: {
             ...current.params,
             ...storedParams,

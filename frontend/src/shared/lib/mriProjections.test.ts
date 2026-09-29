@@ -19,6 +19,7 @@ import {
   applyPointToSlices,
   axisTicks,
   clampSlice,
+  cursorCross,
   defaultSlices,
   mniToNormalized,
   normalizedToMni,
@@ -205,5 +206,28 @@ describe('геометрия проекций мозга', () => {
     const coronalCenter = normalizedToPx({ u: 0, v: 0 }, 'coronal')
     expect(coronalOrigin.x).toBe(coronalCenter.x)
     expect(coronalOrigin.y).toBeGreaterThan(coronalCenter.y)
+  })
+
+  it('совместный курсор: перекрестие там же, где projectPoint, и зажато к краю', () => {
+    // Внутри фигуры курсор совпадает с проекцией точки (та же арифметика)
+    for (const plane of PROJECTION_PLANES) {
+      const cross = cursorCross(plane, POINT)
+      const at = projectPoint(plane, POINT)
+      expect(cross.x).toBe(at.x)
+      expect(cross.y).toBe(at.y)
+      // Линии не выходят за прямоугольник плоскости (viewBox не рвётся)
+      const box = projectionBox(plane)
+      expect(cross.x).toBeGreaterThanOrEqual(PROJECTION_PADDING)
+      expect(cross.x).toBeLessThanOrEqual(box.width - PROJECTION_PADDING)
+      expect(cross.y).toBeGreaterThanOrEqual(PROJECTION_PADDING)
+      expect(cross.y).toBeLessThanOrEqual(box.height - PROJECTION_PADDING)
+    }
+
+    // Точка из Niivue за границами среза — зажимается к краю фигуры.
+    // Аксиаль: x = 500 мм при радиологической раскладке (знак горизонтали −1)
+    // уходит за левый край, y = 500 мм — выше верхнего.
+    const outside = cursorCross('axial', { x: 500, y: 500, z: 0 })
+    expect(outside.x).toBe(PROJECTION_PADDING)
+    expect(outside.y).toBe(PROJECTION_PADDING)
   })
 })

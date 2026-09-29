@@ -162,6 +162,13 @@ export type EdfParams = {
   cleanMethod: CleanMethod
   /** Число компонент ICA (0 — auto, MNE выберет сам) */
   icaNComponents: number
+  /**
+   * Отменённые зоны вклада чистки (шаг 2): серверные id `clean-N`. Входит в
+   * `STAGE_PARAM_KEYS.filter` и в отпечаток слоёв `cleaned`/`diff`: смена
+   * набора отмен делает результат стадии устаревшим (пересчёт — только
+   * кнопкой).
+   */
+  cleanExcludeZoneIds: string[]
   epochLengthMs: number
   /** Режим нарезки эпох: фиксированная длина или окна вокруг событий (N2/2.7) */
   epochMode: EpochMode
@@ -218,6 +225,8 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   interpolateBads: false,
   cleanMethod: 'none',
   icaNComponents: 0,
+  // Отмены зон вклада чистки: пусто — чистка целиком применяется (шаг 2)
+  cleanExcludeZoneIds: [],
   epochLengthMs: 2000,
   // Событийный режим (N2/2.7): окна вокруг событий записи, ERP
   epochMode: 'fixed',
@@ -301,6 +310,8 @@ export const STAGE_PARAM_KEYS: Record<RecalcStage, (keyof EdfParams)[]> = {
   filter: [
     'filterPreset', 'customBand', 'notchHz', 'reference', 'edfUnits', 'visibleChannels',
     'notchHarmonics', 'badChannels', 'interpolateBads', 'cleanMethod', 'icaNComponents',
+    // Отменённые зоны — параметр сигнала стадии (шаг 2): меняют prepared-сигнал
+    'cleanExcludeZoneIds',
   ],
   artifacts: ['zScoreThreshold', 'peakToPeakUv', 'flatLineUv', 'flatLineMs', 'runIca'],
   // Пороги детекции — тоже вход нарезки: стадия «эпохи» пересчитывает детекцию

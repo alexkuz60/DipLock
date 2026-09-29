@@ -19,6 +19,7 @@ import {
   formatSecondsRange,
   isEpochBlocked,
   type ArtifactZone,
+  type CleanZoneMark,
   type EpochCell,
   type EventMark,
 } from '@/shared/lib/viewerLayers'
@@ -83,6 +84,49 @@ export function ArtifactZoneLayer({
     </>
   )
 }
+/**
+ * Отменённые зоны вклада чистки (шаг 2): видны **только на слое `diff`**, где
+ * разность «без очистки − с очисткой» в отменённой зоне обращается в ноль —
+ * глазом видно, что чистка там не применилась. Источник координат — отчёт
+ * стадии `filter` (`cleanReport.zones`), отбор — параметр `cleanExcludeZoneIds`
+ * (голосование пользователя: до пересчёта подсвечивается его выбор).
+ * Не кликабельны и не участвуют в навигации по артефактам — это не артефакт,
+ * а честный отказ от применённой чистки.
+ */
+export function CleanZoneLayer({
+  zones,
+  geometry,
+}: {
+  zones: readonly CleanZoneMark[]
+  geometry: LayerGeometry
+}) {
+  return (
+    <>
+      {zones.map((zone) => {
+        const rawLeft = timeToX(zone.onsetSec, geometry.window, geometry.trackWidth)
+        const rawRight = timeToX(
+          zone.onsetSec + zone.durationSec,
+          geometry.window,
+          geometry.trackWidth,
+        )
+        if (rawRight <= 0 || rawLeft >= geometry.trackWidth) return null
+        const left = Math.max(0, rawLeft)
+        const width = Math.max(2, Math.min(geometry.trackWidth, rawRight) - left)
+        return (
+          <div
+            key={zone.id}
+            data-testid={`clean-zone-${zone.id}`}
+            title={`${zone.id}: отменена — сырые сэмплы (чистка не применена, ${formatSecondsRange(zone.onsetSec, zone.durationSec)})`}
+            className="pointer-events-none absolute inset-y-0 rounded-[3px] border border-dashed border-amber-400/90 bg-amber-400/10"
+            style={{ left, width }}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+
 
 /**
  * Слой событий записи (N2/2.7): аннотации EDF+ и маркеры стим-каналов.

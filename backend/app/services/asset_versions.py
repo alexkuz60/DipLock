@@ -77,9 +77,20 @@ MRI_STAMP_RELATIVE: tuple[str, ...] = (
     "fsaverage/mri/brainmask.mgz",
 )
 
+# Файлы томов fsaverage «как есть» для 3D-вида Niivue (3.5): белый список
+# роута ``/surface/mri/volume/{name}``. Отпечаток по size/mtime (как у MRI).
+MRI_VOLUMES_VERSION = 1
+MRI_VOLUMES_STAMP_RELATIVE: tuple[str, ...] = (
+    "fsaverage/mri/T1.mgz",
+    "fsaverage/mri/seghead.mgz",
+    "fsaverage/surf/lh.white",
+    "fsaverage/surf/rh.white",
+)
+
 # Объёмы меток и контуры структур/полей Бродмана (``/surface/contours``).
 # 2 — разметки полушарий разведены по id (в annot обоих полушарий id совпадают).
-CONTOUR_VERSION = 2
+# 3 — к объёмам добавлен силуэт головы ``seghead.mgz`` (контур головы, 3.5).
+CONTOUR_VERSION = 3
 # Шаг сетки контуров: тот же, что у срезов МРТ (контур обязан совпасть с картинкой).
 CONTOUR_SPACING_MM = MRI_SPACING_MM
 # Упрощение контура, мм: сетка 1 мм даёт точку на пиксель, для отрисовки и
@@ -97,6 +108,7 @@ CONTOUR_STAMP_RELATIVE: tuple[str, ...] = (
     "fsaverage/mri/aparc+aseg.mgz",
     "fsaverage/mri/lh.ribbon.mgz",
     "fsaverage/mri/rh.ribbon.mgz",
+    "fsaverage/mri/seghead.mgz",
     "fsaverage/label/lh.PALS_B12_Brodmann.annot",
     "fsaverage/label/rh.PALS_B12_Brodmann.annot",
     "fsaverage/surf/lh.white",
@@ -155,7 +167,7 @@ ASSET_SPECS: dict[str, AssetSpec] = {
         version=CONTOUR_VERSION,
         params={
             "subject": "fsaverage",
-            "source": "aparc+aseg.mgz + ribbon.mgz",
+            "source": "aparc+aseg.mgz + ribbon.mgz + seghead.mgz",
             "spacing_mm": CONTOUR_SPACING_MM,
             "simplify_mm": CONTOUR_SIMPLIFY_MM,
             "min_area_mm2": MIN_SHAPE_AREA_MM2,
@@ -163,6 +175,16 @@ ASSET_SPECS: dict[str, AssetSpec] = {
             "area_id_offset": dict(CONTOUR_AREA_ID_OFFSET),
         },
         stamp_files=CONTOUR_STAMP_RELATIVE,
+    ),
+    "volumes": AssetSpec(
+        kind="volumes",
+        title="Тома fsaverage как есть (3D-вид Niivue)",
+        version=MRI_VOLUMES_VERSION,
+        params={
+            "subject": "fsaverage",
+            "files": list(MRI_VOLUMES_STAMP_RELATIVE),
+        },
+        stamp_files=MRI_VOLUMES_STAMP_RELATIVE,
     ),
 }
 

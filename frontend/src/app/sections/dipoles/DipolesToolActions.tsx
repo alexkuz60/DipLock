@@ -49,6 +49,7 @@ import {
 } from '@/shared/lib/dipoleCalcModel'
 import { api } from '@/shared/api/client'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { useDipoleParams } from '@/shared/state/dipoleParams'
 import { canPlayback, playbackSummary, PLAYBACK_SPEEDS } from '@/shared/lib/playback'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
@@ -209,6 +210,9 @@ export function DipolesToolHeaderActions() {
   const job = useDipoleCalc((state) => state.job)
   const result = useDipoleCalc((state) => state.result)
   const view = useDipoleCalc((state) => state.view)
+  // Вид рабочей области (срез 3.5): отрисовка, параметр вне STAGE_PARAM_KEYS
+  const view3d = useDipoleParams((state) => state.params.view3d)
+  const setView3d = useDipoleParams((state) => state.setView3d)
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const toggleView = useDipoleCalc((state) => state.toggleView)
@@ -317,6 +321,47 @@ export function DipolesToolHeaderActions() {
         />
         <span className="shrink-0">нАм</span>
       </label>
+
+      <span aria-hidden className="mx-0.5 h-6 w-px bg-border" />
+
+      {/*
+        Переключатель «Проекции / 3D» (срез 3.5): `view3d` — параметр отрисовки
+        раздела (в STAGE_PARAM_KEYS не входит — правка не запускает расчёт и не
+        делает результат устаревшим). Сегмент вместо выпадающего списка: вид
+        рабочей области должен читаться без клика.
+      */}
+      <div role="group" aria-label="Вид рабочей области" className="flex gap-1.5">
+        <button
+          type="button"
+          data-testid="view-projections"
+          aria-pressed={!view3d}
+          title="Три SVG-проекции (аксиаль, сагитталь, коронар) со слоями"
+          className={cx(
+            'rounded-lg border px-2.5 py-1 text-sm transition-colors',
+            !view3d
+              ? 'border-accent/60 bg-accent-soft text-fg-0'
+              : 'border-border bg-bg-2 text-fg-1 hover:bg-bg-3 hover:text-fg-0',
+          )}
+          onClick={() => setView3d(false)}
+        >
+          Проекции
+        </button>
+        <button
+          type="button"
+          data-testid="view-3d"
+          aria-pressed={view3d}
+          title="3D-вид Niivue: том T1 с диполями (узлами), мультисрез или 3D-рендер"
+          className={cx(
+            'rounded-lg border px-2.5 py-1 text-sm transition-colors',
+            view3d
+              ? 'border-accent/60 bg-accent-soft text-fg-0'
+              : 'border-border bg-bg-2 text-fg-1 hover:bg-bg-3 hover:text-fg-0',
+          )}
+          onClick={() => setView3d(true)}
+        >
+          3D
+        </button>
+      </div>
 
       <span aria-hidden className="mx-0.5 h-6 w-px bg-border" />
 

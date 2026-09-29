@@ -144,6 +144,30 @@ def test_filter_stage_without_band_warns_but_succeeds(tmp_path, edf_file):
     assert any("без band-pass" in warning for warning in result["warnings"])
 
 
+def test_filter_stage_warns_when_band_exceeds_recording_ceiling(tmp_path, edf_file):
+    """Широкая 0.5–128 на записи 250 Гц: стадия считается и честно предупреждает.
+
+    Регресс бага 29.09.2026: паспорт фильтра падал ``ValueError: h_freq
+    must be less than the Nyquist frequency`` — зажимается применение
+    (``clamped_band``), а запрошенная полоса остаётся в эхо.
+    """
+    recording = _register(tmp_path, edf_file)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="filter", filter_band=(0.5, 128.0)),
+        progress=lambda *_, **__: None,
+    )
+
+    # Эхо запрошенной полосы честное (ключ кэшей тот же), применение — зажато
+    assert result["band_hz"] == [0.5, 128.0]
+    assert result["filter_method"] == "fir"
+    assert any(
+        "предела записи" in warning and "123" in warning
+        for warning in result["warnings"]
+    )
+
+
 def test_artifacts_stage_returns_zones_with_channels(tmp_path, edf_file):
     """Низкий порог peak-to-peak делает зоны непустыми и с каналами."""
     recording = _register(tmp_path, edf_file)

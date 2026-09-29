@@ -203,11 +203,71 @@ class ChannelQcOut(BaseModel):
     )
 
 
+class CleanZoneOut(BaseModel):
+    """Зона вклада чистки (шаг 2 плана): интервал, где чистка изменила сигнал.
+
+    ``id`` серверный и стабильный между пересчётами (по порядку onset от
+    **полного** вклада): UI отменяет зоны по id, поэтому «поехавшие» id
+    превращают отмену в лотерею. ``excluded`` — зона отменена в текущей
+    конфигурации (вклада в сигнал не даёт, в списке остаётся).
+    """
+
+    id: str = Field(description="Серверный id: clean-1, clean-2… по порядку onset")
+    onset_sec: float = Field(description="Начало зоны от начала записи, с")
+    duration_sec: float = Field(description="Длительность зоны, с")
+    channels: list[str] = Field(description="Каналы с заметным вкладом в зону")
+    amplitude_uv: float = Field(description="Амплитуда вклада: p95 |diff| по каналам, мкВ")
+    excluded: bool = Field(description="Зона отменена (чистка в ней не применена)")
+
+
+class CleanLineLossOut(BaseModel):
+    """L1: остаток наводки одной линии сети до/после чистки, дБ."""
+
+    freq_hz: float
+    before_db: float
+    after_db: float
+
+
+class CleanBandLossOut(BaseModel):
+    """L3/L4 по одной полосе ``freq_bands``: Δ-спектр и сохранённая дисперсия."""
+
+    name: str = Field(description="Ключ полосы (delta…high_gamma)")
+    delta_db: float | None = Field(
+        default=None,
+        description="L3: интеграл PSD до − после, дБ (>0 — чистка срезала); None — частот не хватило",
+    )
+    correlation: float | None = Field(
+        default=None, description="L4: коherентность до/после по полосе, 0..1"
+    )
+
+
+class CleanLossOut(BaseModel):
+    """Метрики потерь чистки для текущей конфигурации (с отменами зон).
+
+    Числа считаются «до/после» уже с учётом ``exclude_zone_ids``: отменил зону
+    — метрики изменились, видно цену отмены. ``removed_variance_source`` —
+    откуда L5: ``ica_components`` (доля дисперсии удалённых компонент) или
+    ``diff`` (доля дисперсии разности — для notch/интерполяции/SSP).
+    """
+
+    line_noise: list[CleanLineLossOut] = Field(
+        default_factory=list, description="L1: остаток наводки по линиям сети (пусто — notch выключен)"
+    )
+    bands: list[CleanBandLossOut] = Field(
+        default_factory=list, description="L3/L4 по полосам freq_bands"
+    )
+    removed_variance_percent: float = Field(description="L5: удалённая дисперсия, %")
+    removed_variance_source: str = Field(
+        description="Источник L5: ica_components | diff"
+    )
+
+
 class CleanReportOut(BaseModel):
     """Отчёт очистки сигнала (стадия ``filter``, этап 4): что сделано и «до/после».
 
     Одно число амплитуды (p95 |x| по монтажу, мкВ) до и после — минимальная
-    оценка «стало ли лучше» без полного отчёта спектральных метрик (L5-lite).
+    оценка «стало ли лучше» без полного отчёта спектральных метрик (L5-lite);
+    ``zones`` и ``loss`` — полный срез 2 плана (зоны вклада + L1/L3/L4/L5).
     """
 
     method: str = Field(default="none", description="Метод очистки: none | ica | ssp")
@@ -230,6 +290,13 @@ class CleanReportOut(BaseModel):
     )
     warnings: list[str] = Field(
         default_factory=list, description="Что не применилось и почему (тексты для UI)",
+    )
+    zones: list[CleanZoneOut] = Field(
+        default_factory=list,
+        description="Зоны вклада чистки (id стабильны, excluded — отменена)",
+    )
+    loss: CleanLossOut | None = Field(
+        default=None, description="Метрики потерь L1/L3/L4/L5 (null — очистки не было)"
     )
 
 
@@ -738,6 +805,26 @@ class MriSliceRef(BaseModel):
     spacing_mm: float = Field(description="Шаг сетки срезов, мм")
 
 
+class MriVolumeRef(BaseModel):
+    """Ссылка на тома fsaverage «как есть» (3D-вид Niivue, 3.5/N33).
+
+    Сервер отдаёт файлы без перекодирования (белый список имён, ETag по
+    отпечатку файлов); ``affine`` — матрица ``T1.mgz`` (воксель → мировые
+    координаты тома) для конвертации мм MNI координатам тома на клиенте.
+    """
+
+    version: str = Field(description="Отпечаток файлов томов — ETag и `?v=` в URL")
+    url: str = Field(description="Базовый URL томов: ``{url}/{имя}`` (белый список имён)")
+    names: list[str] = Field(description="Имена из белого списка: T1.mgz, seghead.mgz, …")
+    affine: list[list[float]] | None = Field(
+        default=None,
+        description=(
+            "Affine T1.mgz 4×4 (воксель → мировые координаты тома); "
+            "`null` — том недоступен, UI не рисует 3D-вид"
+        ),
+    )
+
+
 class MriSlicesOut(BaseModel):
     """GET /api/v1/surface/mri — метаданные срезов МРТ (T1) на MNI-сетке."""
 
@@ -783,6 +870,14 @@ class ContourSliceOut(BaseModel):
     )
     structures: list[ContourShapeOut] = Field(default_factory=list)
     areas: list[ContourShapeOut] = Field(default_factory=list)
+    head: list[list[list[float]]] | None = Field(
+        default=None,
+        description=(
+            "Контуры силуэта головы (маска `seghead.mgz`) — замкнутые полигоны "
+            "в мм MNI по осям плоскости; `null` — ассета нет (UI рисует условную "
+            "фикстуру), `[]` — на срезе нет вокселей головы"
+        ),
+    )
 
 
 class ContoursRef(BaseModel):
@@ -1296,6 +1391,9 @@ class MetaResponse(BaseModel):
     cors_origins: list[str]
     mri_slices: MriSliceRef = Field(
         description="Срезы МРТ (T1) для проекций: версия, базовый URL, шаг сетки"
+    )
+    mri_volumes: MriVolumeRef = Field(
+        description="Тома fsaverage «как есть» для 3D-вида Niivue: URL, имена, affine T1"
     )
     contours: ContoursRef = Field(
         description="Контуры атласа (структуры + поля Бродмана): версия, URL, метод"

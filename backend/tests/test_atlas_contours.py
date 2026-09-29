@@ -241,6 +241,98 @@ def test_slice_contours_validates_before_building():
         ac.slice_contours(settings, "axial", float("nan"))
 
 
+# --- Контур головы (seghead.mgz, 3.5) ----------------------------------------
+
+
+def _head_volumes(head: np.ndarray | None) -> ac.ContourVolumes:
+    """Минимальный контейнер объёмов с заданной маской головы (без атласа)."""
+    empty = np.zeros(ms.mri_shape(), np.int16)
+    return ac.ContourVolumes(
+        structures=empty,
+        areas=empty,
+        structure_names={},
+        structure_labels={},
+        area_names={},
+        area_labels={},
+        version="test",
+        head=head,
+    )
+
+
+def test_head_payload_is_closed_and_rounded():
+    """Контур головы — замкнутые полигоны в десятых миллиметра (как структуры)."""
+    head = np.zeros(ms.mri_shape(), bool)
+    z = _axis_index("z", 0.0)
+    head[
+        _axis_index("x", -60.0):_axis_index("x", 60.0),
+        _axis_index("y", -80.0):_axis_index("y", 60.0),
+        z,
+    ] = True
+
+    hulls = ac._head_payload(_head_volumes(head), "axial", z)
+    assert hulls, "контур головы на аксиальном срезе обязан быть"
+    for hull in hulls:
+        assert len(hull) >= 3
+        for x, y in hull:
+            assert round(x, 1) == x and round(y, 1) == y
+        # Марширующие квадраты отдают точки без повтора первой в конце:
+        # замкнутость — это «все точки на границе маски», а не equality первой/последней.
+        assert hull[0] != hull[-1] or len(hull) > 3
+
+
+def test_head_payload_is_symmetric_across_hemispheres():
+    """Симметричная маска даёт симметричный контур (левое/правое полушарие)."""
+    head = np.zeros(ms.mri_shape(), bool)
+    z = _axis_index("z", 0.0)
+    # Эллипс, центрированный по x = 0: симметрия относительно срединной линии
+    xs = np.arange(ms.mri_shape()[0])
+    ys = np.arange(ms.mri_shape()[1])
+    x0, y0 = _axis_index("x", 0.0), _axis_index("y", -10.0)
+    mask = ((xs[:, None] - x0) / 50.0) ** 2 + ((ys[None, :] - y0) / 60.0) ** 2 <= 1.0
+    head[:, :, z] = mask
+
+    hulls = ac._head_payload(_head_volumes(head), "axial", z)
+    assert hulls
+    points = np.asarray([point for hull in hulls for point in hull])
+    # Контур лежит «на полшага» от узлов, поэтому допуск — 1 мм, а не 0.
+    assert abs(points[:, 0].min() + points[:, 0].max() - 2 * (
+        ms.MRI_BOUNDS["x"][0] + x0 * ms.MRI_SPACING_MM
+    )) <= 2.0, "контур асимметричен относительно срединной линии"
+
+
+def test_head_payload_none_without_asset_and_empty_outside_mask():
+    """``None`` — файла нет; пустой список — вокселей головы на срезе нет."""
+    assert ac._head_payload(_head_volumes(None), "axial", _axis_index("z", 0.0)) is None
+
+    head = np.zeros(ms.mri_shape(), bool)
+    z = _axis_index("z", 0.0)
+    head[_axis_index("x", -5.0):_axis_index("x", 5.0),
+         _axis_index("y", -5.0):_axis_index("y", 5.0), z] = True
+    # Срез на 100 мм выше — головы там нет (пустой список, не None)
+    empty_z = _axis_index("z", 89.0)
+    assert ac._head_payload(_head_volumes(head), "axial", empty_z) == []
+
+
+def test_head_payload_drops_dust_islands():
+    """Обрезки мельче MIN_SHAPE_AREA_MM2 отсеиваются (пыль на срезе не рисуется)."""
+    head = np.zeros(ms.mri_shape(), bool)
+    z = _axis_index("z", 0.0)
+    head[_axis_index("x", -5.0):_axis_index("x", 5.0),
+         _axis_index("y", -5.0):_axis_index("y", 5.0), z] = True
+    head[_axis_index("x", 60.0):_axis_index("x", 61.0),
+         _axis_index("y", 60.0):_axis_index("y", 61.0), z] = True  # 1 мм² пыли
+
+    hulls = ac._head_payload(_head_volumes(head), "axial", z)
+    assert hulls is not None and len(hulls) == 1, "крошечный островок должен отсеяться"
+
+
+def test_contour_slice_route_includes_head_field(client, fake_contours):
+    """Ответ среза несёт поле ``head`` (в фикстуре его нет → ``null`` в JSON)."""
+    response = client.get(f"{_PREFIX}/surface/contours/axial/0")
+    assert response.status_code == 200
+    assert "head" in response.json()
+
+
 def test_cache_roundtrip_and_broken_file(tmp_path):
     """Кэш объёмов переживает запись/чтение, а битый файл — не исключение, а ``None``."""
     ctx = ac._ContourCtx(subjects_dir="/нет", cache_dir=str(tmp_path), api_prefix=_PREFIX)
@@ -251,18 +343,33 @@ def test_cache_roundtrip_and_broken_file(tmp_path):
     structures[1, 2, 3] = 7
     areas = np.zeros((4, 5, 6), np.int16)
     areas[0, 0, 0] = 10001
-    ac._write_cache(path, structures, areas, {10001: "BA1-lh"})
+    head = np.zeros((4, 5, 6), bool)
+    head[1:3, 1:3, 1:3] = True
+    ac._write_cache(path, structures, areas, {10001: "BA1-lh"}, head)
 
     cached = ac._read_cache(path)
     assert cached is not None
     assert np.array_equal(cached[0], structures)
     assert np.array_equal(cached[1], areas)
     assert cached[2] == {10001: "BA1-lh"}
+    assert cached[3] is not None and np.array_equal(cached[3], head)
 
     broken = ac._cache_path(ctx, "broken")
     Path(broken).parent.mkdir(parents=True, exist_ok=True)
     Path(broken).write_bytes(b"not-an-npz-file")
     assert ac._read_cache(broken) is None
+
+
+def test_cache_roundtrip_without_head_asset(tmp_path):
+    """Кэш, собранный без ``seghead.mgz``: ключ ``head`` отсутствует → ``None``."""
+    ctx = ac._ContourCtx(subjects_dir="/нет", cache_dir=str(tmp_path), api_prefix=_PREFIX)
+    path = ac._cache_path(ctx, "nohead")
+    structures = np.zeros((4, 5, 6), np.int16)
+    areas = np.zeros((4, 5, 6), np.int16)
+    ac._write_cache(path, structures, areas, {})
+    cached = ac._read_cache(path)
+    assert cached is not None
+    assert cached[3] is None
 
 
 def test_cache_file_carries_asset_version():
@@ -291,6 +398,8 @@ def fake_contours(monkeypatch) -> dict:
             }
         ],
         "areas": [],
+        # Силуэт головы: сервис всегда включает ключ (null — ассета нет)
+        "head": None,
     }
     monkeypatch.setattr(
         routes, "slice_contours", lambda settings, plane, mm: {**payload, "plane": plane}
@@ -423,6 +532,87 @@ def test_real_slice_contours_lie_inside_brain_mask(client):
     assert response.status_code == 200
     assert response.headers["X-Contour-Mm"] == "0"
     assert len(response.content) > 5_000, "JSON среза подозрительно мал"
+
+
+@pytest.mark.integration
+def test_real_head_centroid_matches_affine():
+    """Маска головы на MNI-сетке стоит там же, где воксели ``seghead`` (сверка affine).
+
+    Тот же гард, что у структур: центроид raw-тома переводится матрицей
+    ``seghead.mgz`` и сравнивается с центроидом на MNI-сетке. Перепутанные оси
+    (y ↔ z) дали бы расхождение в десятки миллиметров.
+    """
+    import nibabel as nib
+
+    path = os.path.join(settings.subjects_dir, "fsaverage/mri/seghead.mgz")
+    if not os.path.exists(path):
+        pytest.skip("нет seghead.mgz (~/mne_data): интеграционный тест пропущен")
+
+    image = nib.load(path)
+    raw = np.asanyarray(image.dataobj) > 0
+    affine = np.asarray(image.affine, dtype=float)
+
+    ac.clear_contour_cache()
+    volumes = ac.load_volumes(ac._ContourCtx.from_settings(settings))
+    assert volumes.head is not None, "seghead.mgz есть, но маска головы не собралась"
+
+    # Сравнивать надо только воксели внутри MNI-сетки: силуэт головы (шея, лицо)
+    # выходит за её границы, и «срезанные» воксели смещали бы эталонный центроид.
+    voxels = np.argwhere(raw)
+    world = voxels @ affine[:3, :3].T + affine[:3, 3]
+    inside = np.ones(len(voxels), dtype=bool)
+    for position, axis in enumerate(("x", "y", "z")):
+        low, high = ms.MRI_BOUNDS[axis]
+        inside &= (world[:, position] >= low) & (world[:, position] <= high)
+    assert inside.any(), "все воксели головы вне MNI-сетки — проверка бессмысленна"
+
+    offset = np.array([ms.MRI_BOUNDS["x"][0], ms.MRI_BOUNDS["y"][0], ms.MRI_BOUNDS["z"][0]])
+    expected = world[inside].mean(axis=0)
+    actual = offset + np.argwhere(volumes.head).mean(axis=0)
+    assert np.allclose(actual, expected, atol=1.0), (
+        f"силуэт головы: сетка {np.round(actual, 1)} против тома {np.round(expected, 1)}"
+    )
+
+
+@pytest.mark.integration
+def test_real_head_contour_covers_brain_on_slice(client):
+    """Контур головы на аксиальном срезе окружает маску мозга (силуэт ≥ мозг).
+
+    Проверка смысла 3.5: силуэт головы — внешняя граница, поэтому bbox контура
+    обязан строго превышать bbox маски мозга на том же срезе, а сам контур —
+    приходить в ответе роута.
+    """
+    path = os.path.join(settings.subjects_dir, "fsaverage/mri/seghead.mgz")
+    if not os.path.exists(path):
+        pytest.skip("нет seghead.mgz (~/mne_data): интеграционный тест пропущен")
+
+    ac.clear_contour_cache()
+    payload = ac.slice_contours(settings, "axial", 0.0)
+    hulls = payload["head"]
+    assert hulls, "на срезе через AC–PC контур головы обязан быть"
+
+    points = np.asarray([point for hull in hulls for point in hull])
+    # Маска мозга на том же срезе (те же узлы, что у структур)
+    volumes = ac.load_volumes(ac._ContourCtx.from_settings(settings))
+    brain = np.argwhere(np.any(volumes.structures > 0, axis=2))
+    assert brain.size, "на срезе нет структур — проверка бессмысленна"
+    x_low = ms.MRI_BOUNDS["x"][0] + brain[:, 0].min() * ms.MRI_SPACING_MM
+    x_high = ms.MRI_BOUNDS["x"][0] + brain[:, 0].max() * ms.MRI_SPACING_MM
+    y_low = ms.MRI_BOUNDS["y"][0] + brain[:, 1].min() * ms.MRI_SPACING_MM
+    y_high = ms.MRI_BOUNDS["y"][0] + brain[:, 1].max() * ms.MRI_SPACING_MM
+
+    assert points[:, 0].min() <= x_low and points[:, 0].max() >= x_high, (
+        f"контур головы по x [{points[:, 0].min()}, {points[:, 0].max()}] "
+        f"не покрывает мозг [{x_low}, {x_high}]"
+    )
+    assert points[:, 1].min() <= y_low and points[:, 1].max() >= y_high, (
+        f"контур головы по y [{points[:, 1].min()}, {points[:, 1].max()}] "
+        f"не покрывает мозг [{y_low}, {y_high}]"
+    )
+
+    response = client.get(f"{_PREFIX}/surface/contours/axial/0")
+    assert response.status_code == 200
+    assert response.json()["head"] is not None
 
 
 @pytest.mark.integration

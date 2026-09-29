@@ -95,7 +95,7 @@ import {
   demoSliceStructures,
 } from '@/shared/lib/mriDemoShapes'
 import { MRI_SLICE_UNAVAILABLE, mriSliceRect, mriSliceUrl } from '@/shared/lib/mriSlices'
-import { shapeAtPoint } from '@/shared/lib/atlasContours'
+import { contourPointToNormalized, shapeAtPoint } from '@/shared/lib/atlasContours'
 import type { ContourSlice, MriSliceRef } from '@/shared/api/types'
 import {
   DIPOLE_DOT_STROKE_PX,
@@ -123,6 +123,7 @@ import {
   VectorLayer,
 } from './MriProjectionLayers'
 import { EdgeLabel, FrameMarker, ReferenceCross } from './MriProjectionParts'
+import { ProjectionCursor } from './ProjectionCursor'
 
 export type MriProjectionProps = {
   plane: ProjectionPlane
@@ -164,6 +165,14 @@ export type MriProjectionProps = {
   /** Референс-точка сессии: XY-линии плоскостей MNI-срезов в точке клика на всех проекциях */
   reference?: MniVector | null
   /**
+   * Совместный курсор (срез 3.5): точка MNI под ховером в **любой** проекции
+   * или положение кроссхейра Niivue. Рисуется оверлеем `ProjectionCursor`
+   * поверх слоёв (курсор — состояние просмотра, а не слой данных).
+   */
+  cursor?: MniVector | null
+  /** Ховер/выход мыши этой проекции → в стор совместного курсора */
+  onCursorChange?: (point: MniVector | null) => void
+  /**
    * Ссылка на срезы МРТ из `/meta` (срез 3.2). Без неё слой `mri` просто не
    * рисуется: раздел не догадывается о версии тома сам, её объявляет сервер.
    */
@@ -188,6 +197,8 @@ export function MriProjection({
   dimmed = false,
   onSelectPoint,
   reference = null,
+  cursor = null,
+  onCursorChange,
   mri = null,
   onPick,
   className,
@@ -249,14 +260,34 @@ export function MriProjection({
   const mriFailed = mriHref !== null && mriHref === failedHref
   const imageRect = mriSliceRect(plane)
 
-  const contour = useMemo(
-    () =>
-      demoHeadContours(plane, sliceMm)
-        .map((point) => normalizedToPx(point, plane))
-        .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
-        .join(' '),
-    [plane, sliceMm],
-  )
+  /**
+   * Силуэт головы: **реальные** полигоны `head` из ответа контуров (срез 3.5),
+   * а при `null` (ассета `seghead.mgz` нет или контуры ещё не пришли) — условная
+   * фикстура `demoHeadContours` (запасной вид, строго по паттерну полей
+   * Бродмана: `null` ≠ пустой список — пустой массив значит «на срезе нет
+   * вокселей головы», и подменять его фикстурой нельзя).
+   */
+  const headHulls = contours?.head ?? null
+  const headPolygons = useMemo(() => {
+    if (headHulls === null) {
+      return [
+        demoHeadContours(plane, sliceMm)
+          .map((point) => normalizedToPx(point, plane))
+          .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+          .join(' '),
+      ]
+    }
+    return headHulls
+      .map((hull) =>
+        hull
+          .map((point) =>
+            normalizedToPx(contourPointToNormalized(plane, point as [number, number]), plane),
+          )
+          .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+          .join(' '),
+      )
+      .filter((points) => points.length > 0)
+  }, [plane, sliceMm, headHulls])
 
   const structures = useMemo(() => demoSliceStructures(plane, sliceMm), [plane, sliceMm])
   const demoAreas = useMemo(() => demoBrodmannAreas(plane, sliceMm), [plane, sliceMm])
@@ -358,8 +389,12 @@ export function MriProjection({
 
   const handleHover = (event: MouseEvent<SVGSVGElement>) => {
     const px = pxOf(event)
-    setHover(pointFromProjectionClick(plane, sliceMm, px))
+    const point = pointFromProjectionClick(plane, sliceMm, px)
+    setHover(point)
     setHoverDipole(dipoleAt(px)?.point ?? null)
+    // Совместный курсор (срез 3.5): точка под мышью этой проекции видна
+    // перекрестием на всех трёх фигурах и как кроссхейр в 3D-виде.
+    onCursorChange?.(point)
   }
 
   /** Метка под курсором: структура атласа, иначе поле (та же геометрия, что нарисована). */
@@ -410,6 +445,8 @@ export function MriProjection({
         onMouseLeave={() => {
           setHover(null)
           setHoverDipole(null)
+          // Курсор сбрасывается: мышь покинула все проекции (Niivue держит свой)
+          onCursorChange?.(null)
         }}
       >
         {/* Наконечники векторов рисуются полигонами (см. `dipoleArrowHead`): тег
@@ -431,7 +468,7 @@ export function MriProjection({
           selectedStructure={selectedStructure}
         />
 
-        <HeadLayer plane={plane} visibility={visibility} contour={contour} />
+        <HeadLayer plane={plane} visibility={visibility} polygons={headPolygons} />
 
         <MniLayer
           plane={plane}
@@ -477,6 +514,11 @@ export function MriProjection({
             видно, какие срезы выбраны, а не только «где щёлкнули» (часть
             `ReferenceCross`). Слоям оно не подчиняется: это состояние просмотра. */}
         {referencePx ? <ReferenceCross plane={plane} at={referencePx} box={box} /> : null}
+
+        {/* Совместный курсор (срез 3.5): оверлей поверх всех слоёв — курсор это
+            состояние ховера/кроссхейра Niivue, а не фоновый слой данных, поэтому
+            в DIPOLE_LAYERS его нет и выключается он только выходом мыши. */}
+        {cursor ? <ProjectionCursor plane={plane} cursor={cursor} box={box} /> : null}
 
         {/* Края фигуры подписаны по знакам осей: L/R, A/P, S/I */}
         <EdgeLabel

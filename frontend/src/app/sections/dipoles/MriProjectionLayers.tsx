@@ -130,28 +130,42 @@ export function AnatomyLayer({
   ) : null
 }
 
-/** Силуэт головы на срезе: граница черепа (в маске МРТ её нет), а не имитация среза. */
+/**
+ * Силуэт головы на срезе: **реальный контур** `seghead.mgz` (срез 3.5), а при
+ * отсутствии ассета — условная фикстура (запасной вид, как у полей Бродмана).
+ *
+ * Проп `polygons` — уже посчитанные точки в пикселях (см. `MriProjection`):
+ * `null` — ассета нет (рисуется фикстура вызывающим), пустой массив — на срезе
+ * вокселей головы нет (слой не рисуется), иначе — полигоны контура (могут быть
+ * несколько: даже-нечётная заливка корректно вычитает дырки).
+ */
 export function HeadLayer({
   plane,
   visibility,
-  contour,
+  polygons,
 }: {
   plane: ProjectionPlane
   visibility: Record<DipoleLayerId, boolean>
-  /** Полигон силуэта в пикселях фигуры (строкой «x,y x,y …») */
-  contour: string
+  /** Полигоны в пикселях фигуры (строки «x,y x,y …»); пусто — не рисуем */
+  polygons: string[]
 }) {
-  return layerVisible(visibility, 'head') ? (
-    <polygon
-      data-testid={`layer-head-${plane}`}
-      points={contour}
-      fill="var(--color-mri-outline)"
-      fillOpacity={0.07}
-      stroke="var(--color-mri-outline)"
-      strokeOpacity={0.75}
-      strokeWidth={1.2}
-    />
-  ) : null
+  if (!layerVisible(visibility, 'head') || polygons.length === 0) return null
+  return (
+    <g data-testid={`layer-head-${plane}`}>
+      {polygons.map((points, index) => (
+        <polygon
+          key={index}
+          points={points}
+          fill="var(--color-mri-outline)"
+          fillOpacity={0.07}
+          stroke="var(--color-mri-outline)"
+          strokeOpacity={0.75}
+          strokeWidth={1.2}
+          fillRule="evenodd"
+        />
+      ))}
+    </g>
+  )
 }
 
 /**

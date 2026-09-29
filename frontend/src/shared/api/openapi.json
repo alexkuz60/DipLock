@@ -321,6 +321,24 @@
             "description": "Число компонент ICA (0 — auto, MNE выберет)"
           },
           {
+            "name": "exclude_zone_ids",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)",
+              "title": "Exclude Zone Ids"
+            },
+            "description": "Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)"
+          },
+          {
             "name": "If-None-Match",
             "in": "header",
             "required": false,
@@ -1560,6 +1578,55 @@
             "content": {
               "image/png": {}
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/surface/mri/volume/{name}": {
+      "get": {
+        "summary": "Том fsaverage как есть (3D-вид Niivue, ETag)",
+        "description": "Файл тома/поверхности FreeSurfer без перекодирования (3.5, N33).\n\nИмя берётся только из белого словаря (``services/mri_volumes.py``): чужое\nимя — 404 **до** чтения файловой системы (path traversal невозможен),\nотсутствующий файл — 503, повторный запрос с тем же ``If-None-Match`` — 304.\nETag — отпечаток файлов томов (kind ``volumes`` в ``asset_versions``).",
+        "operationId": "get_mri_volume_api_v1_surface_mri_volume__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -3081,6 +3148,18 @@
             "title": "Ica N Components",
             "description": "Компонент ICA (0 — auto)",
             "default": 0
+          },
+          "exclude_zone_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Zone Ids",
+            "description": "Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)"
           }
         },
         "type": "object",
@@ -3427,6 +3506,106 @@
         "title": "ChannelQcOut",
         "description": "QC-строка канала (шаг 0.4, расширена шагом 2.2): зоны, SNR, мёртвый.\n\nСчитается из зон стадии ``artifacts`` (слияние интервалов, без ``ica_eog``);\n``snr_db`` — SNR канала (``channel_snr_db``), ``dead`` — константный канал\n(мёртвый до референса, ``find_dead_channels``). Статус «ок/внимание/плохо»\nвыводит UI по порогам ``qc_*_share``/``qc_snr_*`` из конфига."
       },
+      "CleanBandLossOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Ключ полосы (delta…high_gamma)"
+          },
+          "delta_db": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Db",
+            "description": "L3: интеграл PSD до − после, дБ (>0 — чистка срезала); None — частот не хватило"
+          },
+          "correlation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation",
+            "description": "L4: коherентность до/после по полосе, 0..1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CleanBandLossOut",
+        "description": "L3/L4 по одной полосе ``freq_bands``: Δ-спектр и сохранённая дисперсия."
+      },
+      "CleanLineLossOut": {
+        "properties": {
+          "freq_hz": {
+            "type": "number",
+            "title": "Freq Hz"
+          },
+          "before_db": {
+            "type": "number",
+            "title": "Before Db"
+          },
+          "after_db": {
+            "type": "number",
+            "title": "After Db"
+          }
+        },
+        "type": "object",
+        "required": [
+          "freq_hz",
+          "before_db",
+          "after_db"
+        ],
+        "title": "CleanLineLossOut",
+        "description": "L1: остаток наводки одной линии сети до/после чистки, дБ."
+      },
+      "CleanLossOut": {
+        "properties": {
+          "line_noise": {
+            "items": {
+              "$ref": "#/components/schemas/CleanLineLossOut"
+            },
+            "type": "array",
+            "title": "Line Noise",
+            "description": "L1: остаток наводки по линиям сети (пусто — notch выключен)"
+          },
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/CleanBandLossOut"
+            },
+            "type": "array",
+            "title": "Bands",
+            "description": "L3/L4 по полосам freq_bands"
+          },
+          "removed_variance_percent": {
+            "type": "number",
+            "title": "Removed Variance Percent",
+            "description": "L5: удалённая дисперсия, %"
+          },
+          "removed_variance_source": {
+            "type": "string",
+            "title": "Removed Variance Source",
+            "description": "Источник L5: ica_components | diff"
+          }
+        },
+        "type": "object",
+        "required": [
+          "removed_variance_percent",
+          "removed_variance_source"
+        ],
+        "title": "CleanLossOut",
+        "description": "Метрики потерь чистки для текущей конфигурации (с отменами зон).\n\nЧисла считаются «до/после» уже с учётом ``exclude_zone_ids``: отменил зону\n— метрики изменились, видно цену отмены. ``removed_variance_source`` —\nоткуда L5: ``ica_components`` (доля дисперсии удалённых компонент) или\n``diff`` (доля дисперсии разности — для notch/интерполяции/SSP)."
+      },
       "CleanReportOut": {
         "properties": {
           "method": {
@@ -3500,11 +3679,78 @@
             "type": "array",
             "title": "Warnings",
             "description": "Что не применилось и почему (тексты для UI)"
+          },
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/CleanZoneOut"
+            },
+            "type": "array",
+            "title": "Zones",
+            "description": "Зоны вклада чистки (id стабильны, excluded — отменена)"
+          },
+          "loss": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CleanLossOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Метрики потерь L1/L3/L4/L5 (null — очистки не было)"
           }
         },
         "type": "object",
         "title": "CleanReportOut",
-        "description": "Отчёт очистки сигнала (стадия ``filter``, этап 4): что сделано и «до/после».\n\nОдно число амплитуды (p95 |x| по монтажу, мкВ) до и после — минимальная\nоценка «стало ли лучше» без полного отчёта спектральных метрик (L5-lite)."
+        "description": "Отчёт очистки сигнала (стадия ``filter``, этап 4): что сделано и «до/после».\n\nОдно число амплитуды (p95 |x| по монтажу, мкВ) до и после — минимальная\nоценка «стало ли лучше» без полного отчёта спектральных метрик (L5-lite);\n``zones`` и ``loss`` — полный срез 2 плана (зоны вклада + L1/L3/L4/L5)."
+      },
+      "CleanZoneOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Серверный id: clean-1, clean-2… по порядку onset"
+          },
+          "onset_sec": {
+            "type": "number",
+            "title": "Onset Sec",
+            "description": "Начало зоны от начала записи, с"
+          },
+          "duration_sec": {
+            "type": "number",
+            "title": "Duration Sec",
+            "description": "Длительность зоны, с"
+          },
+          "channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Channels",
+            "description": "Каналы с заметным вкладом в зону"
+          },
+          "amplitude_uv": {
+            "type": "number",
+            "title": "Amplitude Uv",
+            "description": "Амплитуда вклада: p95 |diff| по каналам, мкВ"
+          },
+          "excluded": {
+            "type": "boolean",
+            "title": "Excluded",
+            "description": "Зона отменена (чистка в ней не применена)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "onset_sec",
+          "duration_sec",
+          "channels",
+          "amplitude_uv",
+          "excluded"
+        ],
+        "title": "CleanZoneOut",
+        "description": "Зона вклада чистки (шаг 2 плана): интервал, где чистка изменила сигнал.\n\n``id`` серверный и стабильный между пересчётами (по порядку onset от\n**полного** вклада): UI отменяет зоны по id, поэтому «поехавшие» id\nпревращают отмену в лотерею. ``excluded`` — зона отменена в текущей\nконфигурации (вклада в сигнал не даёт, в списке остаётся)."
       },
       "ContourShapeOut": {
         "properties": {
@@ -3599,6 +3845,27 @@
             },
             "type": "array",
             "title": "Areas"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "type": "array"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head",
+            "description": "Контуры силуэта головы (маска `seghead.mgz`) — замкнутые полигоны в мм MNI по осям плоскости; `null` — ассета нет (UI рисует условную фикстуру), `[]` — на срезе нет вокселей головы"
           }
         },
         "type": "object",
@@ -5198,6 +5465,10 @@
             "$ref": "#/components/schemas/MriSliceRef",
             "description": "Срезы МРТ (T1) для проекций: версия, базовый URL, шаг сетки"
           },
+          "mri_volumes": {
+            "$ref": "#/components/schemas/MriVolumeRef",
+            "description": "Тома fsaverage «как есть» для 3D-вида Niivue: URL, имена, affine T1"
+          },
           "contours": {
             "$ref": "#/components/schemas/ContoursRef",
             "description": "Контуры атласа (структуры + поля Бродмана): версия, URL, метод"
@@ -5239,6 +5510,7 @@
           "max_concurrent_jobs",
           "cors_origins",
           "mri_slices",
+          "mri_volumes",
           "contours"
         ],
         "title": "MetaResponse",
@@ -5360,6 +5632,54 @@
         ],
         "title": "MriSlicesOut",
         "description": "GET /api/v1/surface/mri — метаданные срезов МРТ (T1) на MNI-сетке."
+      },
+      "MriVolumeRef": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Отпечаток файлов томов — ETag и `?v=` в URL"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "description": "Базовый URL томов: ``{url}/{имя}`` (белый список имён)"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Names",
+            "description": "Имена из белого списка: T1.mgz, seghead.mgz, …"
+          },
+          "affine": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Affine",
+            "description": "Affine T1.mgz 4×4 (воксель → мировые координаты тома); `null` — том недоступен, UI не рисует 3D-вид"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "url",
+          "names"
+        ],
+        "title": "MriVolumeRef",
+        "description": "Ссылка на тома fsaverage «как есть» (3D-вид Niivue, 3.5/N33).\n\nСервер отдаёт файлы без перекодирования (белый список имён, ETag по\nотпечатку файлов); ``affine`` — матрица ``T1.mgz`` (воксель → мировые\nкоординаты тома) для конвертации мм MNI координатам тома на клиенте."
       },
       "PipelineInfo": {
         "properties": {

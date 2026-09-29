@@ -455,6 +455,35 @@ export function projectPoint(
 }
 
 /**
+ * Совместный курсор (срез 3.5): перекрестие в точке MNI на плоскости.
+ *
+ * Чистая арифметика оверлея `ProjectionCursor.tsx`: точка — та же
+ * `projectPoint`, линии тянутся от края до края прямоугольника плоскости
+ * (как у `ReferenceCross`, но курсор — состояние ховера, а не клика).
+ * Точка вне прямоугольника (курсор из Niivue за границами среза) —
+ * зажимается к краю: линия «уходит» за фигуру только наружу, не рвёт viewBox.
+ */
+export type CursorCross = {
+  /** Вертикальная линия: x в пикселях, от верха до низа плоскости */
+  x: number
+  /** Горизонтальная линия: y в пикселях, от левого края до правого */
+  y: number
+}
+
+export function cursorCross(
+  plane: ProjectionPlane,
+  cursor: MniVector,
+  padding = PROJECTION_PADDING,
+): CursorCross {
+  const box = projectionBox(plane, padding)
+  const at = projectPoint(plane, cursor, padding)
+  return {
+    x: Math.min(box.width - padding, Math.max(padding, at.x)),
+    y: Math.min(box.height - padding, Math.max(padding, at.y)),
+  }
+}
+
+/**
  * Клик по фигуре → точка MNI на срезе этой проекции.
  *
  * Точка лежит **в плоскости текущего среза**: две координаты берутся из позиции

@@ -7,7 +7,7 @@ import numpy as np
 
 from app.services.artifact_detector import find_dead_channels
 from app.services.edf_events import attach_stim_annotations
-from app.services.filter_design import band_filter_kwargs, nyquist_ceiling_hz
+from app.services.filter_design import band_filter_kwargs, clamped_band
 
 logger = logging.getLogger(__name__)
 
@@ -167,11 +167,10 @@ def load_edf(
     # явные переходные полосы — из `filter_design` (N11): одинаково с
     # `apply_band_filter` и с `/filter-response` (АЧХ показывает ровно это).
     # Верхняя граница зажимается ниже Найквиста (сетка `freq_bands` доходит
-    # до 128 Гц, а запись может быть 250 Гц) — см. `nyquist_ceiling_hz`.
+    # до 128 Гц, а запись может быть 250 Гц) — единая точка `clamped_band`.
     if l_freq is not None or h_freq is not None:
         sfreq = float(raw.info["sfreq"])
-        if h_freq is not None:
-            h_freq = min(h_freq, nyquist_ceiling_hz(sfreq))
+        l_freq, h_freq = clamped_band(l_freq, h_freq, sfreq)
         raw.filter(
             l_freq, h_freq,
             **band_filter_kwargs(l_freq, h_freq, sfreq),

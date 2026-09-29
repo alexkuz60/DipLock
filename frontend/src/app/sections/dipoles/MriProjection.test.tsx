@@ -823,3 +823,81 @@ describe('контуры атласа в проекции', () => {
     expect(screen.getByTestId('area-axial-BA17-lh')).toBeInTheDocument()
   })
 })
+
+/**
+ * Силуэт головы (срез 3.5): реальные полигоны `head` из ответа контуров
+ * вместо условной фикстуры. Паттерн — как у полей Бродмана: `null` (ассета
+ * нет) → запасной вид, пустой список (на срезе нет вокселей) → ничего.
+ */
+describe('силуэт головы в проекции', () => {
+  /** Реальный контур: квадрат в мм MNI по осям аксиальной плоскости. */
+  const HEAD_HULLS = [
+    [
+      [-70, -90],
+      [70, -90],
+      [70, 60],
+      [-70, 60],
+    ],
+  ]
+
+  it('рисует реальный контур head из ответа контуров', () => {
+    renderProjection('axial', { contours: contourSliceFixture({ head: HEAD_HULLS }) })
+
+    const layer = screen.getByTestId('layer-head-axial')
+    const polygon = layer.querySelector('polygon')
+    expect(polygon).not.toBeNull()
+    // Полигон содержит углы квадрата (в пикселях), а не фикстурный эллипс
+    expect(polygon?.getAttribute('points')).toContain(',')
+    expect(polygon).toHaveAttribute('fill-rule', 'evenodd')
+  })
+
+  it('пустой список head — на срезе нет вокселей головы: слой не рисуется', () => {
+    renderProjection('axial', { contours: contourSliceFixture({ head: [] }) })
+
+    expect(screen.queryByTestId('layer-head-axial')).not.toBeInTheDocument()
+  })
+
+  it('head: null (ассета seghead нет) — условная фикстура, слой на месте', () => {
+    renderProjection('axial', { contours: contourSliceFixture({ head: null }) })
+
+    expect(screen.getByTestId('layer-head-axial')).toBeInTheDocument()
+  })
+
+  it('без контуров вовсе (null) — тоже фикстура (данных ещё нет)', () => {
+    renderProjection('axial')
+
+    expect(screen.getByTestId('layer-head-axial')).toBeInTheDocument()
+  })
+})
+
+/**
+ * Совместный курсор (срез 3.5): перекрестие поверх слоёв, ховер отдаёт
+ * точку наверх (`onCursorChange`), выход мыши сбрасывает курсор.
+ */
+describe('совместный курсор проекции', () => {
+  it('рисует перекрестие при заданном курсоре', () => {
+    renderProjection('axial', { cursor: { x: 0, y: -20, z: 0 } })
+
+    expect(screen.getByTestId('projection-cursor-axial')).toBeInTheDocument()
+    expect(screen.getByTestId('projection-cursor-point-axial')).toBeInTheDocument()
+  })
+
+  it('без курсора оверлея нет (в DIPOLE_LAYERS он не входит)', () => {
+    renderProjection('axial')
+
+    expect(screen.queryByTestId('projection-cursor-axial')).not.toBeInTheDocument()
+  })
+
+  it('ховер отдаёт точку наверх, выход мыши сбрасывает', () => {
+    const onCursorChange = vi.fn()
+    renderProjection('axial', { onCursorChange })
+    const svg = stubFigure('axial')
+
+    fireEvent.mouseMove(svg, { clientX: 50, clientY: 60 })
+    expect(onCursorChange).toHaveBeenCalledWith({ x: expect.any(Number), y: expect.any(Number), z: 0 })
+
+    onCursorChange.mockClear()
+    fireEvent.mouseLeave(svg)
+    expect(onCursorChange).toHaveBeenCalledWith(null)
+  })
+})

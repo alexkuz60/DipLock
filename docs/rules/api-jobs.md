@@ -39,8 +39,8 @@
 | 1 | `POST /analyze` | синхронный полный анализ EDF (legacy-ветка) |
 | 2 | `POST /recordings` | загрузка EDF для просмотра (sha256-дедуп, без обработки) |
 | 3 | `GET /recordings/{id}` | паспорт записи |
-| 4 | `GET /recordings/{id}/signals` | пирамида огибающей ×1…×16 и слои видимости `layer=raw\|cleaned\|diff` (контейнер `DPS1`, ETag включает слой и параметры подготовки) |
-| 5 | `POST /recordings/{id}/preprocess` | стадия предподготовки: `filter` / `artifacts` / `epochs` |
+| 4 | `GET /recordings/{id}/signals` | пирамида огибающей ×1…×16 и слои видимости `layer=raw\|cleaned\|diff` (контейнер `DPS1`, ETag включает слой и параметры подготовки — в т.ч. отменённые зоны `exclude_zone_ids`, шаг 2) |
+| 5 | `POST /recordings/{id}/preprocess` | стадия предподготовки: `filter` / `artifacts` / `epochs` (опции очистки формы, включая отменённые зоны вклада `exclude_zone_ids` через запятую — шаг 2; неизвестный id не 400, а warning в отчёте) |
 | 6 | `GET /recordings/{id}/preprocess/{job_id}` | результат стадии |
 | 7 | `POST /recordings/{id}/spectrum` | спектр δ…γ (Welch или multitaper PSD, `psd_method`; 1/f + пики specparam) |
 | 8 | `GET /recordings/{id}/spectrum/{job_id}` | результат спектра |
@@ -60,7 +60,8 @@
 | 22 | `GET /surface` | меш fsaverage (кэш + ETag) |
 | 22–23 | `GET /surface/brodmann`, `/surface/brodmann/{area_name}` | индексы вершин полей Бродмана |
 | 24–25 | `GET /surface/mri`, `/surface/mri/slice/{plane}/{mm}.png` | метаданные срезов и срез картинкой (ETag) |
-| 26–27 | `GET /surface/contours`, `/surface/contours/{plane}/{mm}` | метаданные и контуры структур/полей (ETag) |
+| 26 | `GET /surface/mri/volume/{name}` | том fsaverage «как есть» для Niivue (3.5): белый список имён (`T1.mgz`, `seghead.mgz`, `lh.white`, `rh.white`), байты без перекодирования, ETag по отпечатку файлов (kind `volumes`); чужое имя — 404 до чтения файловой системы |
+| 27–28 | `GET /surface/contours`, `/surface/contours/{plane}/{mm}` | метаданные и контуры структур/полей/силуэта головы (ETag; поле `head` — контур `seghead.mgz`, 3.5) |
 | 29 | `GET /brodmann-labels` | имена доступных полей Бродмана |
 | 30 | `GET /brain-surface` | устаревший алиас `/surface` |
 | 31 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты, позиции датчиков карты-силуэта (`channel_positions`) |

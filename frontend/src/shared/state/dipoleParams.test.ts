@@ -122,4 +122,28 @@ describe('состояние раздела «Диполи»', () => {
     expect(currentSlices(state)).toEqual(state.params.slices)
     expect(DIPOLE_LAYER_LABELS.dipoles).toBe('Точки диполей')
   })
+
+  it('view3d — параметр отрисовки: меняет вид, не трогает расчёт (3.5)', () => {
+    expect(DIPOLE_PARAM_DEFAULTS.view3d).toBe(false)
+    useDipoleParams.getState().setView3d(true)
+    expect(useDipoleParams.getState().params.view3d).toBe(true)
+    // Вид персистится (предпочтение просмотра), курсор сессии — нет
+    const raw = localStorage.getItem('diplock.dipoles')
+    const stored = JSON.parse(raw ?? '{}') as { state: { params: { view3d?: boolean } } }
+    expect(stored.state.params.view3d).toBe(true)
+  })
+
+  it('projectionCursor — состояние сессии: обновляется и не персистится', () => {
+    expect(useDipoleParams.getState().projectionCursor).toBeNull()
+
+    useDipoleParams.getState().setProjectionCursor({ x: 5, y: -10, z: 20 })
+    expect(useDipoleParams.getState().projectionCursor).toEqual({ x: 5, y: -10, z: 20 })
+
+    const raw = localStorage.getItem('diplock.dipoles')
+    const stored = JSON.parse(raw ?? '{}') as { state: { projectionCursor?: unknown } }
+    expect(stored.state.projectionCursor).toBeUndefined()
+
+    useDipoleParams.getState().setProjectionCursor(null)
+    expect(useDipoleParams.getState().projectionCursor).toBeNull()
+  })
 })

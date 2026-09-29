@@ -1,6 +1,8 @@
 # Памятка агенту: с чего начинать сессию
 
-> Обновляется в конце крупных срезов (последнее — **29.09.2026**: фаза B (персист + слой `band`), 3.3 (дедуп `spectrum_signature`), 3.4 (разрезка `MriProjection.tsx`), 4.1 (колонки полос `epochs`), 4.2 (alembic + генерация TS-типов из OpenAPI)).
+> Обновляется в конце крупных срезов (последнее — **29.09.2026**: 3.5 (3D — Niivue, контур
+> головы `seghead`, совместный курсор), визуализация препроцессинга 3 (независимые отмены
+> чистки + метрики L1/L3/L4/L5); ранее — фаза B, 3.3, 3.4, 4.1, 4.2).
 > Живой список задач — `todo.md`, журнал закрытого — `docs/history.md`, правила — `AGENTS.md`.
 
 ## Чек-лист старта
@@ -17,8 +19,26 @@
    правило → `docs/rules/` (+ строка в карте `AGENTS.md`), тест → рядом с кодом, закрытое →
    `docs/history.md` (дословно), открытое → `todo.md` (`docs/rules/docs.md`).
 
-## Состояние на конец 29.09.2026 (фаза B, 3.3, 3.4, 4.1 и 4.2 закрыты)
+## Состояние на конец 29.09.2026 (3.5 и визуализация препроцессинга 3 закрыты)
 
+- **3.5 (29.09.2026)**: 3D-вид **Niivue** (`@niivue/niivue` 0.69) — тома отдаются сырыми
+  (`GET /surface/mri/volume/{name}`, белый список в `services/mri_volumes.py`, ассет `volumes`),
+  affine T1 в `/meta` (`mri_volumes.affine`); диполи — connectome-узлами в мировых мм (таблица
+  `FSAVERAGE_T1_AFFINE` под защитой `test_real_t1_affine_matches_frontend_table`). Реальный
+  **контур головы** из `seghead.mgz` (ключ `head` в npz-кэше контуров, `CONTOUR_VERSION`=3;
+  `null` = ассета нет → условная фикстура, `[]` = на срезе пусто). **Совместный курсор**
+  (`projectionCursor` — сессия, не персистится; оверлей `ProjectionCursor.tsx` поверх слоёв).
+  Переключатель «Проекции / 3D» — `view3d` (отрисовка, расчёт не трогает). Правила —
+  `docs/rules/atlas-mri.md` (новый раздел), факт — `docs/history.md` 29.09.2026.
+- **Визуализация препроцессинга 3 (29.09.2026)**: зоны вклада чистки
+  (`services/clean_metrics.py`, robust-пороги в `core/config.py`: `clean_zone_mad_k`,
+  `clean_zone_min/merge_gap_ms`), отмены по серверным id (`CleanSpec.exclude_zone_ids` —
+  часть ключа кэша; восстановление сэмплов из сырого сигнала в `apply_cleaning`; форма
+  `exclude_zone_ids` в preprocess и query signals, слой `band` — 400), метрики потерь
+  L1/L3/L4/L5 в отчёте стадии (`CleanReportOut.zones/loss`; L5 — `ica_components | diff`).
+  UI: чекбоксы зон и таблица метрик в «Фильтр и референс» (`cleanExcludeZoneIds` в
+  `STAGE_PARAM_KEYS.filter`), подсветка отменённых зон — только на слое `diff`
+  (`CleanZoneLayer`). Правила — `docs/rules/artifacts.md`, факт — `docs/history.md` 29.09.2026.
 - **4.2 (29.09.2026)**: схему БД создаёт и меняет **только alembic** (`backend/alembic/`,
   ревизия `0001` терпит старые файлы и заменяет `_add_missing_columns`; `init_db` =
   `upgrade head` в `asyncio.to_thread`; индексы N37, `trajectory_json` = jsonb+GIN в PG;
@@ -50,14 +70,17 @@
   ось PSD = сетка ∩ полоса фильтра, дефолт расчёта 0.5–128 (объяснения в `docs/history.md` 28.09.2026).
 - **Фаза C — только инварианты**: `docs/rules/dipoles.md` п.6 (`band_key` для пакетного расчёта;
   вход готов — `prepared_persist.prepared_array` даёт массив без перечитывания EDF).
-- Числа: **854 Vitest / 549 pytest** (557 с `integration`), ruff/mypy (`app alembic`)/eslint/tsc чисты,
+- Числа: **885 Vitest / 582 pytest**, ruff/mypy (`app alembic`)/eslint/tsc чисты,
   бандл собран в `backend/app/static/ui` (не коммитится — `.gitignore`).
 
 ## Следующий шаг (порядок из todo.md)
 
-1. **3.5** (N25, N35: 3D — Niivue, контур головы из `seghead.mgz`, совместный курсор).
-2. Далее из todo.md: «Независимые отмены чистки с оценкой потерь» (визуализация, п.3),
-   «Тестовый EDF» (`data/edf/test.edf`, маркер `integration`).
+1. **Ручной прогон на живом сервере**: uvicorn `--reload` + `build:watch` — 3D-вид (требует
+   WebGL), контур головы, синхронизация курсора; стадия «Фильтр и референс» — зоны вклада,
+   отмены и метрики потерь на реальной записи (тысячи строк в легенде зон не рисуем — зон
+   должно быть мало).
+2. Далее из todo.md: «Тестовый EDF» (`data/edf/test.edf`, маркер `integration`), «FreeSurfer»
+   (BEM/transform на живой установке), 3.10+ (точный профиль `mne.fit_dipole`).
 
 ## Повторявшиеся ловушки
 

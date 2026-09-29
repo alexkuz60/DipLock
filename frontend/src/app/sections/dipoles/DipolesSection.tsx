@@ -68,6 +68,7 @@ import { useDipoleParams } from '@/shared/state/dipoleParams'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { Button } from '@/shared/ui/Button'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { Brain3D } from './Brain3D'
 import { MriProjection } from './MriProjection'
 import { PlaybackAnatomyLine } from './PlaybackAnatomyLine'
 import { PlaybackFrameProvider } from './PlaybackFrame'
@@ -81,8 +82,11 @@ const EMPTY_DIPOLE_LAYER = emptyDipoleLayer()
 export function DipolesSection() {
   const slices = useDipoleParams((state) => state.params.slices)
   const visibility = useDipoleParams((state) => state.params.layerVisibility)
+  const view3d = useDipoleParams((state) => state.params.view3d)
   const selection = useDipoleParams((state) => state.selection)
   const selectPoint = useDipoleParams((state) => state.selectPoint)
+  const projectionCursor = useDipoleParams((state) => state.projectionCursor)
+  const setProjectionCursor = useDipoleParams((state) => state.setProjectionCursor)
 
   const result = useDipoleCalc((state) => state.result)
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
@@ -111,15 +115,18 @@ export function DipolesSection() {
   })
   const mri = meta.data?.mri_slices ?? null
   const contoursRef = meta.data?.contours ?? null
+  /** Ссылка на тома для 3D-вида (срез 3.5): `null` — вид показывает причину. */
+  const volumesRef = meta.data?.mri_volumes ?? null
 
   /**
    * Контуры атласа по срезу каждой плоскости (срез 3.9). Это **статические
-   * ассеты**, а не обработка: запросы идут только когда слои структур/полей
-   * включены, срез квантуется к сетке атласа, а версия ассета — ключ кэша
+   * ассеты**, а не обработка: запросы идут только когда слои структур/полей/
+   * силуэта головы включены (силуэт — поле `head` того же ответа, срез 3.5),
+   * срез квантуется к сетке атласа, а версия ассета — ключ кэша
    * браузера. Пустой ответ — «на срезе метки нет», и он не подменяется фикстурой.
    */
   const contoursEnabled =
-    contoursRef !== null && (visibility.anatomy || visibility.brodmann)
+    contoursRef !== null && (visibility.anatomy || visibility.brodmann || visibility.head)
   const contourQueries = useQueries({
     queries: PROJECTION_PLANES.map((plane) => ({
       queryKey: ['contours', plane, slices[plane], contoursRef?.version ?? 'none'],
@@ -272,34 +279,49 @@ export function DipolesSection() {
         прямоугольные, и при равных колонках одна и та же анатомия вышла бы в разных
         масштабах — пропала бы та самая общая шкала мм/пиксель. Так коэффициент
         растяжения SVG (`колонка / ширина фигуры`) у всех трёх одинаков.
+
+        3D-вид (срез 3.5) — альтернатива проекциям, а не слой над ними: он
+        занимает ту же рабочую область, параметр `view3d` — отрисовка (расчёт не
+        запускает и не устаревает).
       */}
-      <PlaybackFrameProvider>
-        <div className="flex min-h-0 flex-wrap items-start gap-4">
-          {PROJECTION_PLANES.map((plane, index) => (
-            <MriProjection
-              key={plane}
-              plane={plane}
-              slices={slices}
-              visibility={visibility}
-              points={displayLayer}
-              gridMm={result?.grid_mm ?? 0}
-              dimmed={playbackActive}
-              selectedArea={selection.area}
-              selectedStructure={selection.structure}
-              contours={contourQueries[index]?.data ?? null}
-              selectedPointId={selectedPointId}
-              onSelectPoint={(id) => (id ? toggleSelectedPoint(id) : clearSelectedPoint())}
-              reference={selection.point}
-              mri={mri}
-              className="min-w-[240px]"
-              style={{ flex: `${projectionBox(plane).width} 1 0%` }}
-              onPick={(point, area, structure) =>
-                selectPoint(point, area, applyPointToSlices(point).orientations, structure)
-              }
-            />
-          ))}
-        </div>
-      </PlaybackFrameProvider>
+      {view3d ? (
+        <Brain3D
+          volumes={volumesRef}
+          layer={displayLayer}
+          cursor={projectionCursor}
+          onCursor={setProjectionCursor}
+        />
+      ) : (
+        <PlaybackFrameProvider>
+          <div className="flex min-h-0 flex-wrap items-start gap-4">
+            {PROJECTION_PLANES.map((plane, index) => (
+              <MriProjection
+                key={plane}
+                plane={plane}
+                slices={slices}
+                visibility={visibility}
+                points={displayLayer}
+                gridMm={result?.grid_mm ?? 0}
+                dimmed={playbackActive}
+                selectedArea={selection.area}
+                selectedStructure={selection.structure}
+                contours={contourQueries[index]?.data ?? null}
+                selectedPointId={selectedPointId}
+                onSelectPoint={(id) => (id ? toggleSelectedPoint(id) : clearSelectedPoint())}
+                reference={selection.point}
+                cursor={projectionCursor}
+                onCursorChange={setProjectionCursor}
+                mri={mri}
+                className="min-w-[240px]"
+                style={{ flex: `${projectionBox(plane).width} 1 0%` }}
+                onPick={(point, area, structure) =>
+                  selectPoint(point, area, applyPointToSlices(point).orientations, structure)
+                }
+              />
+            ))}
+          </div>
+        </PlaybackFrameProvider>
+      )}
     </div>
   )
 }

@@ -630,6 +630,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/surface/mri/volume/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Том fsaverage как есть (3D-вид Niivue, ETag)
+         * @description Файл тома/поверхности FreeSurfer без перекодирования (3.5, N33).
+         *
+         *     Имя берётся только из белого словаря (``services/mri_volumes.py``): чужое
+         *     имя — 404 **до** чтения файловой системы (path traversal невозможен),
+         *     отсутствующий файл — 503, повторный запрос с тем же ``If-None-Match`` — 304.
+         *     ETag — отпечаток файлов томов (kind ``volumes`` в ``asset_versions``).
+         */
+        get: operations["get_mri_volume_api_v1_surface_mri_volume__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/surface/contours": {
         parameters: {
             query?: never;
@@ -1442,6 +1467,11 @@ export interface components {
              * @default 0
              */
             ica_n_components: number;
+            /**
+             * Exclude Zone Ids
+             * @description Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)
+             */
+            exclude_zone_ids?: string | null;
         };
         /** Body_create_recording_api_v1_recordings_post */
         Body_create_recording_api_v1_recordings_post: {
@@ -1653,11 +1683,76 @@ export interface components {
             dead: boolean;
         };
         /**
+         * CleanBandLossOut
+         * @description L3/L4 по одной полосе ``freq_bands``: Δ-спектр и сохранённая дисперсия.
+         */
+        CleanBandLossOut: {
+            /**
+             * Name
+             * @description Ключ полосы (delta…high_gamma)
+             */
+            name: string;
+            /**
+             * Delta Db
+             * @description L3: интеграл PSD до − после, дБ (>0 — чистка срезала); None — частот не хватило
+             */
+            delta_db?: number | null;
+            /**
+             * Correlation
+             * @description L4: коherентность до/после по полосе, 0..1
+             */
+            correlation?: number | null;
+        };
+        /**
+         * CleanLineLossOut
+         * @description L1: остаток наводки одной линии сети до/после чистки, дБ.
+         */
+        CleanLineLossOut: {
+            /** Freq Hz */
+            freq_hz: number;
+            /** Before Db */
+            before_db: number;
+            /** After Db */
+            after_db: number;
+        };
+        /**
+         * CleanLossOut
+         * @description Метрики потерь чистки для текущей конфигурации (с отменами зон).
+         *
+         *     Числа считаются «до/после» уже с учётом ``exclude_zone_ids``: отменил зону
+         *     — метрики изменились, видно цену отмены. ``removed_variance_source`` —
+         *     откуда L5: ``ica_components`` (доля дисперсии удалённых компонент) или
+         *     ``diff`` (доля дисперсии разности — для notch/интерполяции/SSP).
+         */
+        CleanLossOut: {
+            /**
+             * Line Noise
+             * @description L1: остаток наводки по линиям сети (пусто — notch выключен)
+             */
+            line_noise?: components["schemas"]["CleanLineLossOut"][];
+            /**
+             * Bands
+             * @description L3/L4 по полосам freq_bands
+             */
+            bands?: components["schemas"]["CleanBandLossOut"][];
+            /**
+             * Removed Variance Percent
+             * @description L5: удалённая дисперсия, %
+             */
+            removed_variance_percent: number;
+            /**
+             * Removed Variance Source
+             * @description Источник L5: ica_components | diff
+             */
+            removed_variance_source: string;
+        };
+        /**
          * CleanReportOut
          * @description Отчёт очистки сигнала (стадия ``filter``, этап 4): что сделано и «до/после».
          *
          *     Одно число амплитуды (p95 |x| по монтажу, мкВ) до и после — минимальная
-         *     оценка «стало ли лучше» без полного отчёта спектральных метрик (L5-lite).
+         *     оценка «стало ли лучше» без полного отчёта спектральных метрик (L5-lite);
+         *     ``zones`` и ``loss`` — полный срез 2 плана (зоны вклада + L1/L3/L4/L5).
          */
         CleanReportOut: {
             /**
@@ -1709,6 +1804,54 @@ export interface components {
              * @description Что не применилось и почему (тексты для UI)
              */
             warnings?: string[];
+            /**
+             * Zones
+             * @description Зоны вклада чистки (id стабильны, excluded — отменена)
+             */
+            zones?: components["schemas"]["CleanZoneOut"][];
+            /** @description Метрики потерь L1/L3/L4/L5 (null — очистки не было) */
+            loss?: components["schemas"]["CleanLossOut"] | null;
+        };
+        /**
+         * CleanZoneOut
+         * @description Зона вклада чистки (шаг 2 плана): интервал, где чистка изменила сигнал.
+         *
+         *     ``id`` серверный и стабильный между пересчётами (по порядку onset от
+         *     **полного** вклада): UI отменяет зоны по id, поэтому «поехавшие» id
+         *     превращают отмену в лотерею. ``excluded`` — зона отменена в текущей
+         *     конфигурации (вклада в сигнал не даёт, в списке остаётся).
+         */
+        CleanZoneOut: {
+            /**
+             * Id
+             * @description Серверный id: clean-1, clean-2… по порядку onset
+             */
+            id: string;
+            /**
+             * Onset Sec
+             * @description Начало зоны от начала записи, с
+             */
+            onset_sec: number;
+            /**
+             * Duration Sec
+             * @description Длительность зоны, с
+             */
+            duration_sec: number;
+            /**
+             * Channels
+             * @description Каналы с заметным вкладом в зону
+             */
+            channels: string[];
+            /**
+             * Amplitude Uv
+             * @description Амплитуда вклада: p95 |diff| по каналам, мкВ
+             */
+            amplitude_uv: number;
+            /**
+             * Excluded
+             * @description Зона отменена (чистка в ней не применена)
+             */
+            excluded: boolean;
         };
         /**
          * ContourShapeOut
@@ -1780,6 +1923,11 @@ export interface components {
             structures?: components["schemas"]["ContourShapeOut"][];
             /** Areas */
             areas?: components["schemas"]["ContourShapeOut"][];
+            /**
+             * Head
+             * @description Контуры силуэта головы (маска `seghead.mgz`) — замкнутые полигоны в мм MNI по осям плоскости; `null` — ассета нет (UI рисует условную фикстуру), `[]` — на срезе нет вокселей головы
+             */
+            head?: number[][][] | null;
         };
         /**
          * ContoursOut
@@ -2714,6 +2862,8 @@ export interface components {
             cors_origins: string[];
             /** @description Срезы МРТ (T1) для проекций: версия, базовый URL, шаг сетки */
             mri_slices: components["schemas"]["MriSliceRef"];
+            /** @description Тома fsaverage «как есть» для 3D-вида Niivue: URL, имена, affine T1 */
+            mri_volumes: components["schemas"]["MriVolumeRef"];
             /** @description Контуры атласа (структуры + поля Бродмана): версия, URL, метод */
             contours: components["schemas"]["ContoursRef"];
         };
@@ -2794,6 +2944,36 @@ export interface components {
             };
             /** Slice Url */
             slice_url: string;
+        };
+        /**
+         * MriVolumeRef
+         * @description Ссылка на тома fsaverage «как есть» (3D-вид Niivue, 3.5/N33).
+         *
+         *     Сервер отдаёт файлы без перекодирования (белый список имён, ETag по
+         *     отпечатку файлов); ``affine`` — матрица ``T1.mgz`` (воксель → мировые
+         *     координаты тома) для конвертации мм MNI координатам тома на клиенте.
+         */
+        MriVolumeRef: {
+            /**
+             * Version
+             * @description Отпечаток файлов томов — ETag и `?v=` в URL
+             */
+            version: string;
+            /**
+             * Url
+             * @description Базовый URL томов: ``{url}/{имя}`` (белый список имён)
+             */
+            url: string;
+            /**
+             * Names
+             * @description Имена из белого списка: T1.mgz, seghead.mgz, …
+             */
+            names: string[];
+            /**
+             * Affine
+             * @description Affine T1.mgz 4×4 (воксель → мировые координаты тома); `null` — том недоступен, UI не рисует 3D-вид
+             */
+            affine?: number[][] | null;
         };
         /**
          * PipelineInfo
@@ -3908,6 +4088,8 @@ export interface operations {
                 clean_method?: string;
                 /** @description Число компонент ICA (0 — auto, MNE выберет) */
                 ica_n_components?: number;
+                /** @description Отменённые зоны вклада чистки через запятую (clean-1, clean-2…) */
+                exclude_zone_ids?: string | null;
             };
             header?: {
                 "If-None-Match"?: string | null;
@@ -4714,6 +4896,37 @@ export interface operations {
                 content: {
                     "image/png": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mri_volume_api_v1_surface_mri_volume__name__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

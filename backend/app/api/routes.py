@@ -79,6 +79,7 @@ from app.schemas.analysis import (
     MetaResponse,
     MriSliceRef,
     MriSlicesOut,
+    MriVolumeRef,
     PreprocessResult,
     PreprocessStage,
     RecordingMeta,
@@ -110,6 +111,7 @@ from app.services.mri_slices import (
 from app.services.mri_slices import (
     slice_ref as mri_slice_ref,
 )
+from app.services.mri_volumes import volume_bytes, volumes_ref
 from app.services.recording_signals import (
     SignalBuildError,
     build_signal_blob,
@@ -168,6 +170,11 @@ def _mri_ref() -> MriSliceRef:
 def _contours_ref() -> ContoursRef:
     """Ссылка на контуры атласа: версия по отпечатку файлов, без сборки (O(1))."""
     return ContoursRef(**contour_ref(settings))
+
+
+def _mri_volumes_ref() -> MriVolumeRef:
+    """Ссылка на тома Niivue: отпечаток файлов и affine T1, без чтения байтов."""
+    return MriVolumeRef(**volumes_ref(settings))
 
 
 @router.post("/analyze", response_model=AnalyzeResponse, summary="Синхронный анализ EDF")
@@ -303,6 +310,10 @@ async def get_recording_signals(
     interpolate_bads: bool = Query(False, description="Интерполировать bad-каналы (до ICA/SSP)"),
     clean_method: str = Query("none", description="Очистка: none | ica | ssp"),
     ica_n_components: int = Query(0, description="Число компонент ICA (0 — auto, MNE выберет)"),
+    exclude_zone_ids: str | None = Query(
+        None,
+        description="Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)",
+    ),
     if_none_match: str | None = Header(default=None, alias="If-None-Match"),
 ) -> Response:
     """Огибающая сигналов для вьюера треков (срез 2.5, docs/ui.md §8).
@@ -334,6 +345,7 @@ async def get_recording_signals(
         interpolate_bads=interpolate_bads,
         clean_method=clean_method,
         ica_n_components=ica_n_components,
+        exclude_zone_ids=exclude_zone_ids,
     )
     try:
         data, version = await asyncio.to_thread(build_signal_blob, recording, level, settings, query)
@@ -377,6 +389,10 @@ async def create_preprocess_job(
     interpolate_bads: bool = Form(False, description="Интерполировать bad-каналы (до ICA/SSP)"),
     clean_method: str = Form("none", description="Очистка артефактов: none | ica | ssp"),
     ica_n_components: int = Form(0, description="Компонент ICA (0 — auto)"),
+    exclude_zone_ids: str | None = Form(
+        None,
+        description="Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)",
+    ),
 ) -> JobCreated:
     """Предподготовка записи **по кнопке**: одна стадия = одна задача.
 
@@ -405,6 +421,7 @@ async def create_preprocess_job(
         notch_harmonics=notch_harmonics, bad_channels=bad_channels,
         interpolate_bads=interpolate_bads,
         clean_method=clean_method, ica_n_components=ica_n_components,
+        exclude_zone_ids=exclude_zone_ids,
     )
     return submit_recording_job("preprocess", recording, params, meta={"stage": stage})
 
@@ -962,6 +979,40 @@ async def get_mri_slice(
 
 
 @router.get(
+    "/surface/mri/volume/{name}",
+    response_class=Response,
+    summary="Том fsaverage как есть (3D-вид Niivue, ETag)",
+)
+async def get_mri_volume(
+    name: str,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """Файл тома/поверхности FreeSurfer без перекодирования (3.5, N33).
+
+    Имя берётся только из белого словаря (``services/mri_volumes.py``): чужое
+    имя — 404 **до** чтения файловой системы (path traversal невозможен),
+    отсутствующий файл — 503, повторный запрос с тем же ``If-None-Match`` — 304.
+    ETag — отпечаток файлов томов (kind ``volumes`` в ``asset_versions``).
+    """
+    try:
+        data, version = volume_bytes(settings, name)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Неизвестный том {name!r}: белый список имён — в /meta (mri_volumes.names)",
+        ) from exc
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
+    return asset_response(
+        data, version, if_none_match=if_none_match,
+        # Один тип на белый список: mgz — сжатый MGH, surf — бинарь FreeSurfer;
+        # Niivue определяет формат по магическим байтам, а не по Content-Type.
+        media_type="application/octet-stream",
+        cache_control=CACHE_PUBLIC_WEEK,
+    )
+
+
+@router.get(
     "/surface/contours", response_model=ContoursOut,
     summary="Метаданные контуров атласа (структуры и поля Бродмана)",
 )
@@ -1243,6 +1294,7 @@ async def get_meta() -> MetaResponse:
         max_concurrent_jobs=job_manager.max_concurrent,
         cors_origins=[o.strip() for o in settings.cors_origins.split(",") if o.strip()],
         mri_slices=_mri_ref(),
+        mri_volumes=_mri_volumes_ref(),
         contours=_contours_ref(),
     )
 

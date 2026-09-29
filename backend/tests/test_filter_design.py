@@ -11,7 +11,9 @@ import pytest
 from app.services.bandpass_filter import apply_band_filter, band_bounds
 from app.services.epoch_segmenter import EDGE_DESC, edge_annotations, segment_epochs
 from app.services.filter_design import (
+    band_ceiling_warning,
     band_filter_kwargs,
+    clamped_band,
     design_filter,
     filter_response,
     harmonic_frequencies,
@@ -81,6 +83,51 @@ def test_band_filter_kwargs_by_method():
     }
     assert band_filter_kwargs(7.58, 8.08, 500.0) == {"method": "iir"}
     assert band_filter_kwargs(None, None, 500.0) == {}
+
+
+# ---------- потолок Найквиста: дизайн и АЧХ (баг 29.09.2026) ----------
+
+
+def test_design_filter_clamps_band_above_nyquist():
+    """Широкая 0.5–128 на записи 250 Гц не роняет ``create_filter``.
+
+    Паспорт стадии считался от запрошенной границы → ``ValueError:
+    h_freq ([128.]) must be less than the Nyquist frequency 125``. Дизайн
+    зажимается потолком Найквист − 2 = 123 Гц (min переходной полосы MNE).
+    """
+    design = design_filter(0.5, 128.0, 250.0)
+
+    assert design.method == "fir"
+    assert design.filter_length_sec and design.filter_length_sec > 0
+    # Переходная полоса считается от зажатой границы: запас до Найквиста ровно 2 Гц
+    assert design.h_trans_bandwidth == 2.0
+
+    # На 500 Гц потолок 248 — сетка до 128 не зажимается
+    assert design_filter(0.5, 128.0, 500.0).h_trans_bandwidth == pytest.approx(32.0)
+
+
+def test_filter_response_clamps_band_above_nyquist():
+    """АЧХ той же полосы на 250 Гц считается, а не падает ValueError."""
+    response = filter_response(0.5, 128.0, notch_hz=50.0, notch_harmonics=1, sfreq=250.0)
+
+    # band_hz — фактически применяемая полоса (кривая показывает её же)
+    assert response.band_hz == (0.5, 123.0)
+    assert len(response.gain_db) > 300
+    assert response.notch_freqs == (50.0, 100.0)
+
+
+def test_clamped_band_and_ceiling_warning():
+    """Единая точка зажима + текст предупреждения стадии."""
+    assert clamped_band(0.5, 128.0, 250.0) == (0.5, 123.0)
+    assert clamped_band(1.0, None, 250.0) == (1.0, None)
+    assert clamped_band(1.0, 40.0, 500.0) == (1.0, 40.0)
+
+    warning = band_ceiling_warning(0.5, 128.0, 250.0)
+    assert warning is not None
+    assert "128" in warning and "123" in warning and "предела записи" in warning
+    assert band_ceiling_warning(1.0, 40.0, 250.0) is None
+    assert band_ceiling_warning(0.5, 128.0, 500.0) is None
+    assert band_ceiling_warning(None, None, 250.0) is None
 
 
 # ---------- N13: гармоники notch ----------

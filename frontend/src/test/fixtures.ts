@@ -104,6 +104,18 @@ export const metaFixture: MetaResponse = {
     slice_url: '/api/v1/surface/mri/slice',
     spacing_mm: 1,
   },
+  mri_volumes: {
+    version: 'vol12345678',
+    url: '/api/v1/surface/mri/volume',
+    names: ['T1.mgz', 'seghead.mgz', 'lh.white', 'rh.white'],
+    // Воксель → мировые координаты (fsaverage T1, коронарная укладка L, I, A)
+    affine: [
+      [-1, 0, 0, 128],
+      [0, 0, 1, -128],
+      [0, -1, 0, 128],
+      [0, 0, 0, 1],
+    ],
+  },
   contours: {
     version: 'cont12345678',
     url: '/api/v1/surface/contours',

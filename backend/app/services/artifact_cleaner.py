@@ -31,6 +31,7 @@ from numpy.typing import NDArray
 
 from app.core.config import Settings
 from app.services.cardio import ecg_proxy
+from app.services.clean_metrics import clean_loss, detect_clean_zones, zone_channels
 from app.services.filter_design import band_filter_kwargs, harmonic_frequencies
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,14 @@ class CleanSpec:
 
     ``bad_channels`` — кортеж (хешируем), ``method`` — из ``CLEAN_METHODS``,
     ``ica_n_components=0`` означает «auto» (MNE выберет сам).
+
+    ``exclude_zone_ids`` — отменённые зоны вклада чистки (шаг 2 плана): id
+    серверные (``clean-1``, …), входят в ключ кэша — сигнал с отменами это
+    **другой** сигнал, и слои ``cleaned``/``diff`` обязаны честно различаться.
+    Семантика: чистка применяется как раньше, затем в исключённых зонах
+    сэмплы восстанавливаются из сырого сигнала («чистка здесь не применена» —
+    включая bad-каналы). Не undo-стек: единственный механизм — повторный
+    запуск стадии с новым набором id.
     """
 
     notch_harmonics: int = 0
@@ -68,6 +77,7 @@ class CleanSpec:
     interpolate_bads: bool = False
     method: str = "none"
     ica_n_components: int = 0
+    exclude_zone_ids: tuple[str, ...] = ()
 
     def label(self) -> str:
         """Человекочитаемое описание для журнала/логов."""
@@ -80,12 +90,14 @@ class CleanSpec:
             parts.append("интерполяция bad")
         if self.method != "none":
             parts.append(f"очистка={self.method}")
+        if self.exclude_zone_ids:
+            parts.append(f"отмены={','.join(self.exclude_zone_ids)}")
         return ", ".join(parts) or "без очистки"
 
 
 @dataclass
 class CleanReport:
-    """Отчёт очистки «что сделано и до/после» (одно число амплитуды, L5-lite)."""
+    """Отчёт очистки «что сделано и до/после» (амплитуда + зоны + метрики)."""
 
     method: str = "none"
     notch_harmonics: int = 0
@@ -96,6 +108,14 @@ class CleanReport:
     amplitude_p95_uv_before: float | None = None
     amplitude_p95_uv_after: float | None = None
     warnings: list[str] = field(default_factory=list)
+    # Зоны вклада чистки (шаг 2): dict'ы CleanZoneOut, id — clean-1…
+    zones: list[dict[str, Any]] = field(default_factory=list)
+    # Метрики потерь L1/L3/L4/L5 для текущей конфигурации (с отменами)
+    loss: dict[str, Any] | None = None
+    # Внутренности L5: оценка компонент ICA (не отдаётся наружу отдельно —
+    # входит в loss.removed_variance_percent с подписью источника)
+    removed_variance_percent: float | None = None
+    removed_variance_source: str = "diff"
 
     def as_dict(self) -> dict[str, Any]:
         """Словарь для результата стадии (его валидирует `CleanReportOut`)."""
@@ -109,6 +129,8 @@ class CleanReport:
             "amplitude_p95_uv_before": self.amplitude_p95_uv_before,
             "amplitude_p95_uv_after": self.amplitude_p95_uv_after,
             "warnings": list(self.warnings),
+            "zones": [{k: v for k, v in zone.items() if not k.startswith("_")} for zone in self.zones],
+            "loss": self.loss,
         }
 
 
@@ -128,14 +150,21 @@ def apply_cleaning(
 ) -> CleanReport:
     """Применяет очистку к raw **на месте** (копией владеет `prepared_signal`) и возвращает отчёт.
 
-    ``settings`` резервируется под порогами будущих шагов (AGENTS.md: пороги —
-    из конфига); сейчас очистка параметризуется только ``CleanSpec``. Порядок
-    шагов зафиксирован в докстринге модуля (PDF: интерполяция bad-каналов — до
-    ICA/SSP).
+    Порядок шагов зафиксирован в докстринге модуля (PDF: интерполяция
+    bad-каналов — до ICA/SSP). Дальше — шаги среза 2 плана:
+
+    1. копия сигнала «до» (нужна и зонам, и метрикам);
+    2. чистка как раньше;
+    3. **зоны вклада** считаются от полного вклада (до отмен) — id стабильны
+       между пересчётами;
+    4. в исключённых зонах (``spec.exclude_zone_ids``) сэмплы **восстанавливаются
+       из сырого сигнала** — «чистка здесь не применена», включая bad-каналы;
+    5. **метрики потерь** L1/L3/L4/L5 считаются для текущей конфигурации
+       (после отмен): отменил зону — числа изменились.
     """
-    del settings  # пороги шагов появятся здесь же (DRY с core/config.py)
     report = CleanReport(method=spec.method)
-    report.amplitude_p95_uv_before = amplitude_p95_uv(raw.get_data())
+    before = raw.get_data().copy()
+    report.amplitude_p95_uv_before = amplitude_p95_uv(before)
 
     # 1. Гармоники сетевого фильтра (50 → 100/150/200 Гц, N13)
     if spec.notch_harmonics > 0 and notch_hz:
@@ -173,7 +202,56 @@ def apply_cleaning(
     elif spec.method == "ssp":
         _clean_ssp(raw, report)
 
-    report.amplitude_p95_uv_after = amplitude_p95_uv(raw.get_data())
+    sfreq = float(raw.info["sfreq"]) or 1.0
+    ch_names = list(raw.ch_names)
+    # Шаг 2: зоны вклада — от **полного** вклада чистки (до отмен), чтобы id
+    # clean-N не переставлялись при добавлении/снятии отмен.
+    clean_after = raw.get_data()
+    excluded = set(spec.exclude_zone_ids)
+    known_ids: set[str] = set()
+    report.zones = []
+    for index, zone in enumerate(detect_clean_zones(before, clean_after, sfreq, settings), 1):
+        start, end = zone.pop("_samples")
+        zone_id = f"clean-{index}"
+        known_ids.add(zone_id)
+        report.zones.append({
+            "id": zone_id,
+            "onset_sec": zone["onset_sec"],
+            "duration_sec": zone["duration_sec"],
+            "channels": zone_channels(before, clean_after, start, end, ch_names),
+            "amplitude_uv": zone["amplitude_uv"],
+            "excluded": zone_id in excluded,
+            "_samples": (start, end),
+        })
+    unknown = sorted(excluded - known_ids)
+    if unknown:
+        report.warnings.append(
+            f"Отменённые зоны не найдены в этом пересчёте: {', '.join(unknown)} — "
+            "снимите отмену или пересчитайте стадию заново"
+        )
+    for zone in report.zones:
+        if not zone["excluded"]:
+            continue
+        start, end = zone["_samples"]
+        # «Чистка здесь не применена» — включая bad-каналы: в зону возвращается
+        # ровно тот сигнал, что был до чистки (семантика зафиксирована в
+        # docs/rules/artifacts.md, шаг 2 плана).
+        raw[:, start:end] = before[:, start:end]
+
+    after = raw.get_data()
+    report.amplitude_p95_uv_after = amplitude_p95_uv(after)
+    # Шаг 2: метрики потерь для текущей конфигурации (с отменами)
+    report.loss = clean_loss(
+        before, after, sfreq, settings,
+        notch_hz=notch_hz,
+        notch_harmonics=spec.notch_harmonics,
+        removed_variance_percent=report.removed_variance_percent,
+        removed_variance_source=(
+            "ica_components"
+            if report.removed_variance_percent is not None
+            else report.removed_variance_source
+        ),
+    )
     return report
 
 
@@ -244,6 +322,21 @@ def _clean_ica(raw: mne.io.BaseRaw, spec: CleanSpec, report: CleanReport) -> Non
         exclude = sorted({*eog_inds, *_ica_ecg_inds(ica, raw)})
         if exclude:
             ica.exclude = exclude
+            # L5 (шаг 2): доля дисперсии удалённых компонент — считается на
+            # источниках **до** apply (после apply удалённых источников нет);
+            # если компоненты не удалены — метрика остаётся «diff» (см. шапку
+            # clean_metrics: источник подписывается честно).
+            try:
+                sources_var = np.var(ica.get_sources(raw).get_data(), axis=1)
+                total = float(sources_var.sum())
+                if total > 0.0:
+                    report.removed_variance_percent = (
+                        100.0 * float(sources_var[exclude].sum()) / total
+                    )
+                    report.removed_variance_source = "ica_components"
+            except Exception as exc:  # L5 вторична к самой очистке
+                logger.debug("L5 (компоненты ICA) не посчиталась: %s", exc)
+                # источник L5 останется «diff» — не повод ронять очистку
             ica.apply(raw, verbose=False)
         report.n_components_removed = len(exclude)
         report.removed_components = exclude

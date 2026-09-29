@@ -80,12 +80,16 @@ def signals_layer_query(
     interpolate_bads: bool = False,
     clean_method: str = "none",
     ica_n_components: int = 0,
+    exclude_zone_ids: str | None = None,
 ) -> SignalsLayerQuery:
     """Слой видимости вьюера и база подготовленных слоёв из query (шаг 2 плана).
 
     Проверки — те же, что у стадии «Фильтр и референс» (полоса парой, опции
     очистки): слой — видимость, но «после очистки» обязан строиться по честным
-    параметрам, иначе показанная обработка разошлась бы с расчётом.
+    параметрам, иначе показанная обработка разошлась бы с расчётом. Отменённые
+    зоны (``exclude_zone_ids`` через запятую) — часть опций очистки: слои
+    ``cleaned``/``diff`` обязаны совпадать со стадией, иначе вьюер показал бы
+    другой сигнал, чем расчёт.
 
     Слой ``band`` (Фаза B) адресуется ``band_key`` — ключом из
     ``freq_bands``/``functional_bands``, а не границами: это адрес персиста.
@@ -99,9 +103,10 @@ def signals_layer_query(
             detail=f"layer должен быть одним из {list(SIGNAL_LAYERS)} (получено: {layer!r})",
         )
     band = parse_filter_band(band_min, band_max)
+    excluded = parse_zone_ids(exclude_zone_ids)
     if layer_value == "band":
         _require_band_key_layer(band_key, band, notch_harmonics, bad_channels,
-                                interpolate_bads, clean_method, ica_n_components)
+                                interpolate_bads, clean_method, ica_n_components, excluded)
         return SignalsLayerQuery(
             layer="band",
             band_key=band_key,
@@ -126,8 +131,19 @@ def signals_layer_query(
             interpolate_bads=interpolate_bads,
             method=clean_method,
             ica_n_components=ica_n_components,
+            exclude_zone_ids=excluded,
         ),
     )
+
+
+def parse_zone_ids(raw: str | None) -> tuple[str, ...]:
+    """Идентификаторы отменённых зон (``clean-1,clean-2`` → кортеж id).
+
+    Серверные id стабильны между пересчётами, поэтому форма не валидирует их
+    против списка зон: неизвестный id — не отмена, а warning в отчёте стадии
+    (правило: сервер не решает за клиента, что для него «существующая зона»).
+    """
+    return tuple(part.strip() for part in (raw or "").split(",") if part.strip())
 
 
 def _require_band_key_layer(
@@ -138,6 +154,7 @@ def _require_band_key_layer(
     interpolate_bads: bool,
     clean_method: str,
     ica_n_components: int,
+    exclude_zone_ids: tuple[str, ...] = (),
 ) -> None:
     """Проверки слоя ``band``: обязателен известный ``band_key``, без числовых
     границ и опций очистки (они не входят в ключ персиста, п.16)."""
@@ -163,6 +180,7 @@ def _require_band_key_layer(
         or (bad_channels or "").strip()
         or interpolate_bads
         or ica_n_components
+        or exclude_zone_ids
     ):
         raise HTTPException(
             status_code=400,
@@ -233,6 +251,7 @@ def preprocess_params(
     interpolate_bads: bool = False,
     clean_method: str = "none",
     ica_n_components: int = 0,
+    exclude_zone_ids: str | None = None,
     epoch_mode: str = "fixed",
     event_id: str | None = None,
     epoch_pre_ms: float = 200.0,
@@ -240,9 +259,12 @@ def preprocess_params(
 ) -> PreprocessParams:
     """Параметры стадии предподготовки; длина эпохи важна только стадии ``epochs``.
 
-    Опции очистки (гармоники notch, bad-каналы, ICA/SSP) валидируются здесь же:
-    неизвестный метод — 400 с текстом для UI, а не молчаливое «none» (правило 8,
-    `docs/rules/api-jobs.md`). Событийный режим нарезки (``epoch_mode='events'``,
+    Опции очистки (гармоники notch, bad-каналы, ICA/SSP, отменённые зоны
+    ``exclude_zone_ids`` через запятую) валидируются здесь же: неизвестный
+    метод — 400 с текстом для UI, а не молчаливое «none» (правило 8,
+    `docs/rules/api-jobs.md`). Неизвестные id зон сервер не отвергает: они
+    обязаны стабильно проезжать между пересчётами — честный warning об этом
+    отдаёт отчёт стадии. Событийный режим нарезки (``epoch_mode='events'``,
     N2/2.7) требует описание события и корректное окно до/после.
     """
     if stage == "epochs":
@@ -290,6 +312,7 @@ def preprocess_params(
         interpolate_bads=interpolate_bads,
         clean_method=clean_method,
         ica_n_components=ica_n_components,
+        exclude_zone_ids=list(parse_zone_ids(exclude_zone_ids)),
         z_threshold=z_threshold,
         pp_threshold_uv=pp_threshold_uv,
         flat_line_uv=flat_line_uv,

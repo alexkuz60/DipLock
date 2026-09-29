@@ -66,6 +66,7 @@ import { useEegParams } from '@/shared/state/eegParams'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import {
   ArtifactZoneLayer,
+  CleanZoneLayer,
   EpochLayer,
   EventLayer,
   LayersLegend,
@@ -125,6 +126,25 @@ export function TrackStack({
    */
   const signalLayer = useEdfParams((state) => state.params.signalLayer)
   const captionLayer = signal.sourceId === DEMO_SOURCE_ID ? 'raw' : signalLayer
+  /** Отчёт стадии filter: зоны вклада чистки для подсветки на слое diff (шаг 2) */
+  const cleanReport = useEdfRecording((state) => state.cleanReport)
+  /**
+   * Отменённые зоны чистки — только на слое `diff`: разность «без очистки − с
+   * очисткой» в отменённой зоне обращается в ноль, и подсветка показывает глазом,
+   * что чистка там не применилась. Отбор — параметр `cleanExcludeZoneIds`
+   * (голосование пользователя до пересчёта), координаты — из отчёта стадии.
+   */
+  const cleanExcludedZones = useMemo(() => {
+    if (signalLayer !== 'diff' || !cleanReport?.zones?.length) return []
+    const excluded = new Set(params.cleanExcludeZoneIds)
+    return cleanReport.zones
+      .filter((zone) => excluded.has(zone.id))
+      .map((zone) => ({
+        id: zone.id,
+        onsetSec: zone.onset_sec,
+        durationSec: zone.duration_sec,
+      }))
+  }, [signalLayer, cleanReport, params.cleanExcludeZoneIds])
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
@@ -866,6 +886,10 @@ export function TrackStack({
                   selectedId={selectedZoneId}
                   onSelect={handleZoneSelect}
                 />
+              ) : null}
+              {/* Отменённые зоны чистки — только слой diff (шаг 2, см. выше) */}
+              {cleanExcludedZones.length ? (
+                <CleanZoneLayer zones={cleanExcludedZones} geometry={geometry} />
               ) : null}
             </div>
           ) : null}

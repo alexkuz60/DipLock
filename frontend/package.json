@@ -17,6 +17,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\""
   },
   "dependencies": {
+    "@niivue/niivue": "^0.69.0",
     "@radix-ui/react-tooltip": "^1.1.8",
     "@tanstack/react-query": "^5.62.0",
     "clsx": "^2.1.1",

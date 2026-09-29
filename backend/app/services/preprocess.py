@@ -44,7 +44,7 @@ from app.services.epoch_segmenter import (
     segment_epochs,
     segment_epochs_events,
 )
-from app.services.filter_design import design_filter
+from app.services.filter_design import band_ceiling_warning, design_filter
 from app.services.prepared_signal import prepared_raw_report
 from app.services.recordings import Recording
 
@@ -77,6 +77,9 @@ class PreprocessParams:
     interpolate_bads: bool = False
     clean_method: str = "none"  # none | ica | ssp
     ica_n_components: int = 0  # 0 — auto (MNE выберет сам)
+    # Отменённые зоны вклада чистки (шаг 2): серверные id clean-N; входят в
+    # CleanSpec, а значит и в ключ кэша — сигнал с отменами другой сигнал.
+    exclude_zone_ids: list[str] | None = None
     # Стадия `artifacts`
     z_threshold: float = 5.0
     pp_threshold_uv: float = 100.0
@@ -127,6 +130,7 @@ def _prepare_raw(
         interpolate_bads=params.interpolate_bads,
         method=params.clean_method,
         ica_n_components=params.ica_n_components,
+        exclude_zone_ids=tuple(params.exclude_zone_ids or ()),
     )
     try:
         return prepared_raw_report(
@@ -260,6 +264,11 @@ def run_preprocess(
         # показывает их рядом с формой и в подписи «треки без фильтра» (N14).
         l_freq, h_freq = params.filter_band or (None, None)
         design = design_filter(l_freq, h_freq, float(raw.info["sfreq"]))
+        # Верхняя граница формы запрошенная (эхо/ключи кэшей честные), но
+        # применённая — не выше потолка записи: сказать об этом обязаны мы.
+        ceiling_warning = band_ceiling_warning(l_freq, h_freq, float(raw.info["sfreq"]))
+        if ceiling_warning:
+            warnings.append(ceiling_warning)
         base.update({
             "band_hz": band,
             "notch_hz": params.notch_hz,

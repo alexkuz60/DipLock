@@ -11,7 +11,9 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/shared/api/client'
 import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import { defaultSlices } from '@/shared/lib/mriProjections'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { DIPOLE_PARAM_DEFAULTS, useDipoleParams } from '@/shared/state/dipoleParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { calcJobFixture, dipoleScanResultFixture, jobFixture, recordingFixture } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
@@ -333,5 +335,25 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     // После уточнения кнопка помечает эпоху как уточнённую
     await screen.findByRole('button', { name: 'Эпоха 3 уточнена точным профилем' })
+  })
+
+  it('переключатель «Проекции / 3D» меняет только вид (3.5, без запросов)', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApiFetch()
+    useDipoleParams.setState({ params: { ...DIPOLE_PARAM_DEFAULTS, slices: defaultSlices() } })
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    expect(screen.getByTestId('view-projections')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTestId('view-3d')).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(screen.getByTestId('view-3d'))
+    expect(useDipoleParams.getState().params.view3d).toBe(true)
+    expect(screen.getByTestId('view-3d')).toHaveAttribute('aria-pressed', 'true')
+
+    await user.click(screen.getByTestId('view-projections'))
+    expect(useDipoleParams.getState().params.view3d).toBe(false)
+
+    // Правка вида — отрисовка: ни одной задачи расчёта не ушло
+    expect(stateCalls(fetchSpy)).toEqual([])
   })
 })

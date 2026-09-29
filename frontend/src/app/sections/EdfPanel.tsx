@@ -295,6 +295,77 @@ export function EdfPanel() {
               : ''}
           </p>
         ) : null}
+        {cleanReport?.zones?.length ? (
+          <div className="mt-1 space-y-1" data-testid="clean-zones">
+            <p className="text-sm font-medium text-fg-2">Зоны вклада чистки</p>
+            {cleanReport.zones.map((zone) => {
+              const applied = !params.cleanExcludeZoneIds.includes(zone.id)
+              return (
+                <CheckboxRow
+                  key={zone.id}
+                  label={`${zone.id}: ${zone.onset_sec.toFixed(1)}–${(zone.onset_sec + zone.duration_sec).toFixed(1)} с · ${zone.channels.join(', ')} · ${zone.amplitude_uv} мкВ`}
+                  checked={applied}
+                  onChange={(checked) =>
+                    setParams({
+                      cleanExcludeZoneIds: checked
+                        ? params.cleanExcludeZoneIds.filter((id) => id !== zone.id)
+                        : [...params.cleanExcludeZoneIds, zone.id],
+                    })
+                  }
+                />
+              )
+            })}
+            <p className="text-xs text-fg-2">
+              Чекбокс — чистка применена. Снимите, чтобы вернуть сырые сэмплы зоны (включая
+              bad-каналы): зона останется в списке с пометкой «отменена». Правка ничего не
+              считает — «Фильтр и референс» пересчитывается кнопкой шапки.
+            </p>
+          </div>
+        ) : null}
+        {cleanReport?.loss ? (
+          <div className="mt-1 space-y-1" data-testid="clean-loss">
+            <p className="text-sm font-medium text-fg-2">Метрики потерь (с учётом отмен)</p>
+            {(cleanReport.loss.line_noise ?? []).length ? (
+              <p className="text-xs text-fg-2" data-testid="clean-loss-l1">
+                Наводка (L1):{' '}
+                {(cleanReport.loss.line_noise ?? [])
+                  .map((line) => `${line.freq_hz} Гц ${line.before_db} → ${line.after_db} дБ`)
+                  .join(', ')}
+              </p>
+            ) : null}
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-fg-2">
+                  <th className="py-0.5">Полоса</th>
+                  <th className="py-0.5">Δ спектр, дБ</th>
+                  <th className="py-0.5">Сохранение</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(cleanReport.loss.bands ?? []).map((band) => (
+                  <tr key={band.name} data-testid={`clean-loss-band-${band.name}`}>
+                    <td className="py-0.5">{bandLabel(band.name)}</td>
+                    <td className="py-0.5">{band.delta_db ?? '—'}</td>
+                    <td className="py-0.5">
+                      {band.correlation != null ? band.correlation.toFixed(2) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-xs text-fg-2" data-testid="clean-loss-l5">
+              Удалённая дисперсия (L5): {cleanReport.loss.removed_variance_percent}% —{' '}
+              {cleanReport.loss.removed_variance_source === 'ica_components'
+                ? 'доля удалённых компонент ICA'
+                : 'доля дисперсии вклада чистки (diff)'}
+            </p>
+            <p className="text-xs text-fg-2">
+              L3 — Δ-спектр «до − после» (дБ), L4 — сохранение сигнала (коherентность 0…1).
+              Числа считаются для текущей конфигурации: сняли отмену — метрики изменятся после
+              пересчёта.
+            </p>
+          </div>
+        ) : null}
         {filterDesign ? (
           <p className="mt-1 text-sm text-fg-2" data-testid="filter-passport">
             Фильтр расчёта:{' '}

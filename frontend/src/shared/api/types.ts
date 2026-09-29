@@ -64,6 +64,8 @@ export type SignalsPrepQuery = {
   interpolate_bads?: boolean
   clean_method?: string
   ica_n_components?: number
+  /** Отменённые зоны вклада чистки через запятую («clean-1, clean-2», шаг 2) */
+  exclude_zone_ids?: string
 }
 
 export type ArtifactZoneOut = Schemas['ArtifactZoneOut']
@@ -119,6 +121,9 @@ export type ArtifactThresholds = Schemas['ArtifactThresholds']
 export type MetaResponse = Schemas['MetaResponse']
 
 export type MriSliceRef = Schemas['MriSliceRef']
+
+/** Ссылка на тома fsaverage для 3D-вида Niivue — схема `MriVolumeRef` */
+export type MriVolumeRef = Schemas['MriVolumeRef']
 
 export type ContoursRef = Schemas['ContoursRef']
 

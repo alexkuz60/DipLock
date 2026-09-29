@@ -265,6 +265,31 @@ describe('слои видимости сигналов (шаг 2 плана)', (
     expect(custom.reference_channels).toBe('C3,C4')
   })
 
+  it('отменённые зоны чистки уходят в форму стадии и в слои, но не в band (шаг 2)', () => {
+    const params: EdfParams = {
+      ...EDF_PARAM_DEFAULTS,
+      cleanExcludeZoneIds: ['clean-1', 'clean-2'],
+    }
+
+    // Форма стадии «Фильтр и референс»: строка через запятую (как bad_channels)
+    const form = buildPreprocessForm('filter', params)
+    expect(form.get('exclude_zone_ids')).toBe('clean-1,clean-2')
+
+    // Слои cleaned/diff обязаны совпадать со стадией — отпечаток включает отмены
+    expect(signalsPrepQuery(params, 'cleaned').exclude_zone_ids).toBe('clean-1,clean-2')
+    expect(signalsPrepQuery(params, 'diff').exclude_zone_ids).toBe('clean-1,clean-2')
+    const signature = signalsPrepSignature(params, 'cleaned')
+    expect(signalsPrepSignature({ ...params, cleanExcludeZoneIds: ['clean-2'] }, 'cleaned'))
+      .not.toBe(signature)
+
+    // band-слой собирается без очистки (сервер отвечает 400) — отмен в нём нет
+    expect(signalsPrepQuery(params, 'band').exclude_zone_ids).toBeUndefined()
+
+    // Без отмен поле не уходит вовсе — сервер не получает мусор
+    expect(buildPreprocessForm('filter', EDF_PARAM_DEFAULTS).get('exclude_zone_ids')).toBeNull()
+    expect(signalsPrepQuery(EDF_PARAM_DEFAULTS, 'cleaned').exclude_zone_ids).toBeUndefined()
+  })
+
   it('слой band шлёт только ключ персиста: band_key + notch + референс', () => {
     const params: EdfParams = {
       ...EDF_PARAM_DEFAULTS,

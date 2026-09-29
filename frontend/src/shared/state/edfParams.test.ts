@@ -174,6 +174,8 @@ describe('слой параметров EDF', () => {
         [{ reference: 'custom' }],
         [{ edfUnits: 'uV' }],
         [{ visibleChannels: ['Fp1'] }],
+        // Отменённая зона вклада чистки — параметр сигнала стадии (шаг 2)
+        [{ cleanExcludeZoneIds: ['clean-1'] }],
       ],
       artifacts: [
         [{ zScoreThreshold: 7 }],

@@ -126,6 +126,10 @@ export function buildPreprocessForm(stage: RecalcStage, params: EdfParams): Form
   form.set('interpolate_bads', String(params.interpolateBads))
   form.set('clean_method', params.cleanMethod)
   form.set('ica_n_components', String(params.icaNComponents))
+  // Отменённые зоны вклада чистки (шаг 2): серверные id через запятую
+  if (params.cleanExcludeZoneIds.length) {
+    form.set('exclude_zone_ids', params.cleanExcludeZoneIds.join(','))
+  }
 
   if (stage === 'artifacts' || stage === 'epochs') {
     // Пороги детекции — вход и стадии «нарезка эпох» тоже: она пересчитывает
@@ -186,6 +190,10 @@ export function signalsPrepQuery(params: EdfParams, layer: SignalLayer): Signals
   query.interpolate_bads = params.interpolateBads
   query.clean_method = params.cleanMethod
   query.ica_n_components = params.icaNComponents
+  // Отмены зон (шаг 2): слои обязаны совпадать со стадией «Фильтр и референс»
+  if (params.cleanExcludeZoneIds.length) {
+    query.exclude_zone_ids = params.cleanExcludeZoneIds.join(',')
+  }
   return query
 }
 

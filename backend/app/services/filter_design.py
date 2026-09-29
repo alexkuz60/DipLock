@@ -56,10 +56,54 @@ def nyquist_ceiling_hz(sfreq: float) -> float:
 
     Запас равен минимуму переходной полосы MNE (``max(0.25 * h_freq, 2.0)``),
     поэтому на записи 250 Гц «широкий 0.5–128» и ``high_gamma`` фильтруются до
-    123 Гц. Зажимается только **применение**: запрошенные границы (эхо
-    результата, ключи кэшей подготовленного сигнала) остаются честными.
+    123 Гц. Зажимается **применение и дизайн** (паспорт фильтра, АЧХ — иначе
+    ``create_filter`` падает на 250 Гц, баг 29.09.2026); запрошенные границы
+    (эхо результата, ключи кэшей подготовленного сигнала) остаются честными.
+    Потолок **−2, а не −1**: запас 1 Гц меньше минимума переходной полосы MNE —
+    тот же ``MemoryError``.
     """
     return float(sfreq) / 2.0 - _MIN_TRANSITION_HZ
+
+
+def clamped_band(
+    l_freq: float | None,
+    h_freq: float | None,
+    sfreq: float,
+) -> tuple[float | None, float | None]:
+    """Полоса, зажатая потолком ``nyquist_ceiling_hz`` — для ``raw.filter``.
+
+    Единая точка зажима для вызовов MNE: `load_edf`/`apply_band_filter` уже
+    зажимали сами, `filter_response` (АЧХ) падал `ValueError` на записи 250 Гц
+    (баг 29.09.2026). Нижняя граница не зажимается: high-pass всегда ниже
+    Найквиста на представимых формах.
+    """
+    if h_freq is None:
+        return l_freq, None
+    return l_freq, min(float(h_freq), nyquist_ceiling_hz(sfreq))
+
+
+def band_ceiling_warning(
+    l_freq: float | None,
+    h_freq: float | None,
+    sfreq: float,
+) -> str | None:
+    """Warning стадии ``filter``: верхняя граница зажата пределом записи.
+
+    Полоса формы — запрошенная (эхо и ключи кэшей честные), но применённая
+    выше потолка — иначе пользователь не узнал бы, что фильтр усечён.
+    ``None`` — зажим не понадобился (или high-pass без верхней границы).
+    """
+    del l_freq  # нижняя граница потолоком не ограничена
+    if h_freq is None:
+        return None
+    ceiling = nyquist_ceiling_hz(sfreq)
+    if float(h_freq) <= ceiling:
+        return None
+    return (
+        f"Верхняя граница {float(h_freq):g} Гц выше предела записи "
+        f"(Найквист − 2 = {ceiling:g} Гц для sfreq {float(sfreq):g} Гц) — "
+        f"фильтр применён до {ceiling:g} Гц"
+    )
 
 
 def resolve_filter_method(
@@ -152,7 +196,14 @@ def design_filter(
     sfreq: float,
     cfg: Settings | None = None,
 ) -> FilterDesign:
-    """Дизайн полосового фильтра для границ полосы и частоты дискретизации."""
+    """Дизайн полосового фильтра для границ полосы и частоты дискретизации.
+
+    Верхняя граница зажимается потолком ``nyquist_ceiling_hz`` **до** расчёта
+    ядра: паспорт стадии и АЧХ считаются от фактической полосы, а не от
+    запрошенной — иначе ``create_filter`` падает ``ValueError`` на записи
+    250 Гц с полосой «широкий 0.5–128» (баг 29.09.2026).
+    """
+    l_freq, h_freq = clamped_band(l_freq, h_freq, sfreq)
     method = resolve_filter_method(l_freq, h_freq, cfg)
     if method == "none":
         return FilterDesign(method="none")
@@ -247,8 +298,13 @@ def filter_response(
     Целевая сетка: 0.05 Гц до 20 Гц (узкие полосы и обрез видны детально),
     0.5 Гц выше; интерполяция по спектру с шагом ≤ 0.01 Гц даёт погрешность,
     ничтожную относительно читаемости графика.
+
+    Верхняя граница зажимается потолком ``nyquist_ceiling_hz``: кривая
+    показывает **фактически применяемый** фильтр (баг 29.09.2026: полоса
+    «широкий 0.5–128» на записи 250 Гц падала ``ValueError`` от MNE).
     """
     sfreq = float(sfreq)
+    l_freq, h_freq = clamped_band(l_freq, h_freq, sfreq)
     design = design_filter(l_freq, h_freq, sfreq, cfg)
     # Шаг FFT ≤ 0.01 Гц: узкая полоса 0.5 Гц должна попадать в десятки бинов.
     n_fft = 1 << max(10, math.ceil(math.log2(max(sfreq / 0.01, 1024))))
