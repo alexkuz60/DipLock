@@ -13,7 +13,9 @@ import {
   channelLabel,
   channelOptions,
   channelSourceChannels,
+  electrodeOptions,
   isMixChannel,
+  mixOptions,
   resolveChannel,
 } from './eegChannels'
 import { recordingFixture } from '@/test/fixtures'
@@ -58,6 +60,23 @@ describe('каналы раздела «ЭЭГ»', () => {
       { value: 'Fp1', label: 'Fp1' },
       { value: 'Fp2', label: 'Fp2' },
     ])
+  })
+
+  it('разделяет списки для тулс-хедера: электроды и миксы — отдельно', () => {
+    const electrodes = electrodeOptions(recordingFixture)
+    const mixes = mixOptions(recordingFixture)
+
+    // Электроды не содержат виртуальных каналов, миксы — только их
+    expect(electrodes.every((option) => !option.value.startsWith(MIX_PREFIX))).toBe(true)
+    expect(mixes.length).toBeGreaterThan(0)
+    expect(mixes.every((option) => option.value.startsWith(MIX_PREFIX))).toBe(true)
+    // Общая сборка — та же конкатенация в том же порядке (панель и resolveChannel)
+    expect([...electrodes, ...mixes].map((option) => option.value)).toEqual(
+      channelOptions(recordingFixture).map((option) => option.value),
+    )
+    // Демо-режим: миксов считать не из чего, электроды — как есть
+    expect(mixOptions(null)).toEqual([])
+    expect(electrodeOptions(null, ['Fp1'])).toEqual([{ value: 'Fp1', label: 'Fp1' }])
   })
 
   it('откатывает сохранённый канал, которого нет в записи, на первый доступный', () => {

@@ -7,10 +7,11 @@ import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/shared/api/client'
-import { useEegParams } from '@/shared/state/eegParams'
-import { spectrogramJobFixture } from '@/test/fixtures'
+import { EEG_PARAM_DEFAULTS, useEegParams } from '@/shared/state/eegParams'
+import { useEdfRecording } from '@/shared/state/edfRecording'
+import { recordingFixture, spectrogramJobFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
-import { EegCalcProgress } from './EegToolActions'
+import { EegCalcProgress, EegToolHeaderActions } from './EegToolActions'
 
 describe('отмена спектрограммы из UI (3.2)', () => {
   beforeEach(() => {
@@ -54,5 +55,64 @@ describe('отмена спектрограммы из UI (3.2)', () => {
     expect(
       screen.queryByRole('progressbar', { name: 'Прогресс расчёта спектрограммы' }),
     ).toBeNull()
+  })
+})
+
+describe('тулс-хедер ЭЭГ: два селектора канала и кнопка-иконка расчёта (30.09.2026)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useEegParams.setState({
+      params: { ...EEG_PARAM_DEFAULTS, filter: { ...EEG_PARAM_DEFAULTS.filter } },
+      job: null,
+      result: null,
+      grid: null,
+      error: null,
+      gridError: null,
+    })
+    useEdfRecording.setState({ recording: recordingFixture, demo: null })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('миксы вынесены в отдельное комбо и не числятся среди электродов', () => {
+    renderWithProviders(<EegToolHeaderActions />)
+
+    const electrodes = screen.getByLabelText('Канал спектрограммы') as HTMLSelectElement
+    const electrodeValues = Array.from(electrodes.options).map((option) => option.value)
+    expect(electrodeValues).toContain('C3')
+    // Пункты миксов в списке электродов не живут — только в своём комбо
+    expect(electrodeValues.some((value) => value.startsWith('mix:'))).toBe(false)
+    expect(electrodes.value).toBe('Fp1')
+
+    const mixes = screen.getByLabelText('Виртуальный канал (микс)') as HTMLSelectElement
+    const mixValues = Array.from(mixes.options).map((option) => option.value)
+    expect(mixValues).toContain('mix:frontal')
+    // Микс не выбран: в неактивном селекторе стоит «—»
+    expect(mixes.value).toBe('')
+  })
+
+  it('выбор микса переключает канал, выбор электрода — возвращает обратно', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<EegToolHeaderActions />)
+
+    await user.selectOptions(screen.getByLabelText('Виртуальный канал (микс)'), 'mix:frontal')
+    expect(useEegParams.getState().params.channel).toBe('mix:frontal')
+    // Активен микс: селектор электродов показывает «—», а не чужое значение
+    expect((screen.getByLabelText('Канал спектрограммы') as HTMLSelectElement).value).toBe('')
+
+    await user.selectOptions(screen.getByLabelText('Канал спектрограммы'), 'C3')
+    expect(useEegParams.getState().params.channel).toBe('C3')
+  })
+
+  it('расчёт — кнопка-иконка: имя остаётся текстом для a11y, без записи выключена', () => {
+    useEdfRecording.setState({ recording: null })
+    renderWithProviders(<EegToolHeaderActions />)
+
+    const button = screen.getByRole('button', { name: 'Рассчитать спектрограмму' })
+    expect(button).toBeDisabled()
+    // Тултип-объяснение на месте (раньше было title у текстовой кнопки)
+    expect(button.title).toContain('загрузите EDF')
+    // Селекторов канала без записи нет
+    expect(screen.queryByLabelText('Канал спектрограммы')).toBeNull()
+    expect(screen.queryByLabelText('Виртуальный канал (микс)')).toBeNull()
   })
 })

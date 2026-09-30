@@ -1,5 +1,5 @@
 /**
- * Тулс-хедер раздела «ЭЭГ»: канал, запуск расчёта спектрограммы, прогресс, справка.
+ * Тулс-хедер раздела «ЭЭГ»: канал/микс, запуск расчёта спектрограммы, прогресс.
  *
  * Правила те же, что в «Диполях» и EDF:
  * * расчёт стартует **только кнопкой** — правка параметров в панели ничего не
@@ -8,19 +8,24 @@
  *   (`epochs_done`/`epochs_total` — сервер считает их по окнам);
  * * без записи кнопка выключена с объяснением: расчёт идёт по файлу на сервере,
  *   а не по демо-сигналу;
- * * канал выбирается здесь же: переключение канала — тоже правка параметра, и
- *   спектрограмма другого канала считается отдельной задачей.
+ * * «Рассчитать спектрограмму» — **кнопка-иконка** (просьба владельца 30.09.2026:
+ *   экономия ширины шапки; единый стиль с «Диполями» — `AudioWaveform`/`Loader2`,
+ *   текстовое имя кнопки для a11y и тестов остаётся);
+ * * канал и микс — **два комбо-селектора**: виртуальный микс не ссылается на
+ *   данные одного отвода препроцессинга EDF (это среднее группы), поэтому он
+ *   вынесен из списка электродов в отдельный селектор (просьба владельца
+ *   30.09.2026). Выбор в любом из двух переключает общий параметр `channel`.
  *
- * Справа — кнопка «Справка»: пояснения к картинке читают по запросу, а не
- * держат абзацем над графиками (как в разделе «Диполи»).
+ * Справки в шапке больше нет: пояснения переехали в Wiki («Работа со страницей
+ * ЭЭГ/Спектр») — читаются по запросу и не держат место над графиками.
  */
-import { useState } from 'react'
-import { CircleHelp, Loader2, Play } from 'lucide-react'
+import { AudioWaveform, Loader2 } from 'lucide-react'
 import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
 import {
   channelLabel,
-  channelOptions,
+  electrodeOptions,
   isMixChannel,
+  mixOptions,
   resolveChannel,
 } from '@/shared/lib/eegChannels'
 import {
@@ -29,12 +34,10 @@ import {
   useEegParams,
 } from '@/shared/state/eegParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
-import { Button } from '@/shared/ui/Button'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { IconButton } from '@/shared/ui/IconButton'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { Tooltip } from '@/shared/ui/Tooltip'
-import { EegHelpDialog } from './EegHelpDialog'
 
 /** Пояснение к выключенной кнопке, когда записи ещё нет */
 const NO_RECORDING_HINT =
@@ -85,10 +88,10 @@ export function EegToolHeaderActions() {
   const grid = useEegParams((state) => state.grid)
   const runSpectrogram = useEegParams((state) => state.runSpectrogram)
   const setChannel = useEegParams((state) => state.setChannel)
-  const [helpOpen, setHelpOpen] = useState(false)
 
   const demoChannels = demo?.channels ?? []
-  const options = channelOptions(recording, demoChannels)
+  const electrodes = electrodeOptions(recording, demoChannels)
+  const mixes = mixOptions(recording)
   const channel = resolveChannel(recording, demoChannels, params.channel)
   const mixSelected = isMixChannel(channel)
   const running = job?.status === 'running'
@@ -109,23 +112,29 @@ export function EegToolHeaderActions() {
               ? 'Рассчитать спектрограмму микса: сервер усреднит каналы группы и посчитает STFT'
               : 'Рассчитать спектрограмму: STFT по одному каналу, окно и перекрытие — из панели'
 
+  const selectClass = 'rounded-lg border border-border bg-bg-2 px-2 py-1.5 text-sm text-fg-0'
+
   return (
     <>
-      {options.length > 1 ? (
+      {electrodes.length > 0 ? (
         <label className="flex items-center gap-2 text-sm text-fg-2">
           <span className="shrink-0">Канал</span>
           <select
             aria-label="Канал спектрограммы"
             title={
               mixSelected
-                ? 'Виртуальный канал: среднее сигналов группы. Считается отдельной задачей, как и электрод'
+                ? 'Сейчас показан микс — выберите электрод, чтобы вернуться к одному отводу'
                 : 'Канал трека и спектрограммы: расчёт считается по одному каналу'
             }
-            value={channel}
-            onChange={(event) => setChannel(event.target.value)}
-            className="rounded-lg border border-border bg-bg-2 px-2 py-1.5 text-sm text-fg-0"
+            value={mixSelected ? '' : channel}
+            onChange={(event) => {
+              if (event.target.value) setChannel(event.target.value)
+            }}
+            className={selectClass}
           >
-            {options.map((option) => (
+            {/* Микс активен: показываем «—», вернуться к электроду — выбором ниже */}
+            {mixSelected ? <option value="" disabled>—</option> : null}
+            {electrodes.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -134,15 +143,39 @@ export function EegToolHeaderActions() {
         </label>
       ) : null}
 
-      <Button
-        variant={canRun ? 'primary' : 'secondary'}
-        disabled={!canRun}
+      {mixes.length > 0 ? (
+        <label className="flex items-center gap-2 text-sm text-fg-2">
+          <span className="shrink-0">Микс</span>
+          <select
+            aria-label="Виртуальный канал (микс)"
+            title="Виртуальный канал: среднее сигналов группы. Своих данных отвода у него нет — поэтому он живёт отдельно от электродов; спектрограмма считается отдельной задачей"
+            value={mixSelected ? channel : ''}
+            onChange={(event) => {
+              if (event.target.value) setChannel(event.target.value)
+            }}
+            className={selectClass}
+          >
+            {/* Электрод активен: показываем «—», выбрать микс — любым пунктом ниже */}
+            {!mixSelected ? <option value="" disabled>—</option> : null}
+            {mixes.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      <IconButton
+        icon={
+          running ? <Loader2 className="size-5 animate-spin" /> : <AudioWaveform className="size-5" />
+        }
+        label={result ? 'Пересчитать спектрограмму' : 'Рассчитать спектрограмму'}
+        tooltip={runTooltip}
         title={runTooltip}
+        disabled={!canRun}
         onClick={() => void runSpectrogram(recording?.recording_id ?? null, channel)}
-        icon={running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
-      >
-        {running ? 'Расчёт…' : result ? 'Пересчитать спектрограмму' : 'Рассчитать спектрограмму'}
-      </Button>
+      />
 
       <EegCalcProgress />
 
@@ -152,19 +185,6 @@ export function EegToolHeaderActions() {
         </StatusPill>
       ) : null}
       {stale ? <StatusPill tone="warn">параметры изменены</StatusPill> : null}
-
-      {/* Распорка: «Справка» прижата к правому краю полосы действий */}
-      <div className="flex-1" />
-
-      <IconButton
-        icon={<CircleHelp className="size-5" />}
-        label="Справка"
-        tooltip="Справка раздела: половины и курсор, линейки, расчёт спектрограммы, палитра и фильтр"
-        active={helpOpen}
-        onClick={() => setHelpOpen(true)}
-      />
-
-      <EegHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </>
   )
 }

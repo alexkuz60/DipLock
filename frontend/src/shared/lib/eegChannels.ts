@@ -50,17 +50,30 @@ export function channelLabel(recording: RecordingMeta | null, channel: string): 
  * Список вариантов канала: сначала электроды записи (порядок монтажа всегда
  * привычен), затем виртуальные миксы. Миксы не смешиваются с электродами —
  * «микс» в подписи говорит, что это среднее, а не один отвод.
+ *
+ * Раздельные сборщики `electrodeOptions`/`mixOptions` нужны тулс-хедеру: там
+ * электроды и миксы — два комбо (микс не ссылается на данные одного отвода
+ * препроцессинга EDF). `channelOptions` остаётся общей сборкой для `resolveChannel`
+ * и панели — порядок и подписи обязаны совпадать у всех троих.
  */
-export function channelOptions(
+export function electrodeOptions(
   recording: RecordingMeta | null,
   demoChannels: readonly string[] = [],
 ): ChannelOption[] {
   const channels = recording?.channels ?? [...demoChannels]
-  const options: ChannelOption[] = channels.map((name) => ({ value: name, label: name }))
-  for (const mix of recording?.mixes ?? []) {
-    options.push({ value: mix.id, label: `Микс: ${mix.label}` })
-  }
-  return options
+  return channels.map((name) => ({ value: name, label: name }))
+}
+
+/** Пункты виртуальных каналов: в паспорте записи, с явной подписью «Микс: …» */
+export function mixOptions(recording: RecordingMeta | null): ChannelOption[] {
+  return (recording?.mixes ?? []).map((mix) => ({ value: mix.id, label: `Микс: ${mix.label}` }))
+}
+
+export function channelOptions(
+  recording: RecordingMeta | null,
+  demoChannels: readonly string[] = [],
+): ChannelOption[] {
+  return [...electrodeOptions(recording, demoChannels), ...mixOptions(recording)]
 }
 
 /**

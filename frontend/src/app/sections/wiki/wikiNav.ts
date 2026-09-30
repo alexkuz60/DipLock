@@ -8,6 +8,7 @@
  */
 import { createContext, useContext } from 'react'
 import {
+  Activity,
   BookMarked,
   Brain,
   Calculator,
@@ -33,6 +34,7 @@ export type WikiArticleId =
   | 'dipoles'
   | 'dipole-calc'
   | 'dipole-playback'
+  | 'eeg-screen'
   | 'glossary'
 
 export type WikiArticle = {
@@ -117,6 +119,13 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'Диполи: кадр',
     hint: 'Кадр по эпохам, скорость, шлейф, анатомия кадра',
     icon: Play,
+  },
+  {
+    id: 'eeg-screen',
+    title: 'Работа со страницей ЭЭГ/Спектр',
+    short: 'ЭЭГ/Спектр',
+    hint: 'Две половины и курсор, шапка с зумами, расчёт спектрограммы, палитра',
+    icon: Activity,
   },
   {
     id: 'glossary',

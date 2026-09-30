@@ -14,9 +14,11 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { EegSection } from './EegSection'
 import { demoSpectrogramGrid } from '@/shared/lib/eegSpectrogram'
+import type { SignalFrame } from '@/shared/lib/signalFrame'
 import { formatUvLevel, yToAmplitudeUv } from '@/shared/lib/eegView'
 import { EEG_PARAM_DEFAULTS, useEegParams } from '@/shared/state/eegParams'
-import { useEdfRecording } from '@/shared/state/edfRecording'
+import { EDF_PARAM_DEFAULTS, useEdfParams } from '@/shared/state/edfParams'
+import { signalsPrepSignature, useEdfRecording } from '@/shared/state/edfRecording'
 import { mockApiFetch } from '@/test/apiMocks'
 import { recordingFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
@@ -291,6 +293,31 @@ describe('рабочая область раздела «ЭЭГ»', () => {
     expect(screen.queryByText(/курсор \d+\.\d\d с/)).not.toBeInTheDocument()
   })
 
+  it('шагает шкалу от мелких движений курсора (браузерный поток pointermove)', async () => {
+    // Регресс 30.09.2026: раньше шаг считался от предыдущего события — браузер
+    // шлёт pointermove по 1–8 px, `trunc(dy/24)` всегда 0 и шкала «залипала».
+    // Один прыжок в старом тесте это не ловил: здесь суммарный ход ≥ 24 px,
+    // разбитый на мелкие движения
+    const user = userEvent.setup()
+    mockApiFetch()
+    openRecording()
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    const canvas = screen.getByTestId('eeg-track-canvas')
+    await user.pointer([
+      { keys: '[MouseLeft>]', target: canvas, coords: { clientX: 1000, clientY: 20 } },
+      { coords: { clientX: 1000, clientY: 26 } },
+      { coords: { clientX: 1000, clientY: 33 } },
+      { coords: { clientX: 1000, clientY: 41 } },
+      { coords: { clientX: 1000, clientY: 46 } },
+      { keys: '[/MouseLeft]', coords: { clientX: 1000, clientY: 46 } },
+    ])
+
+    // 26 px вниз от захвата → ровно один шаг вверх по ряду: 50 → 100 мкВ/дел
+    expect(useEegParams.getState().params.amplitudeUv).toBe(100)
+  })
+
   it('двигает разделитель с клавиатуры и перетаскиванием', async () => {
     const user = userEvent.setup()
     mockApiFetch()
@@ -392,6 +419,114 @@ describe('рабочая область раздела «ЭЭГ»', () => {
 
     expect(screen.getByText('артефакты не рассчитаны')).toBeInTheDocument()
     expect(screen.queryByLabelText('Легенда слоёв')).not.toBeInTheDocument()
+  })
+})
+
+/** Кадр того же формата, что кладёт в кэш `loadSignals` (EDF уже посчитал уровень). */
+function cachedFrame(level = 1): SignalFrame {
+  const channels = recordingFixture.channels ?? []
+  const n = 60
+  const duration = recordingFixture.duration_sec
+  const min: Record<string, Float32Array> = {}
+  const max: Record<string, Float32Array> = {}
+  for (const name of channels) {
+    min[name] = Float32Array.from({ length: n }, (_, i) => -20 + Math.sin(i / 3))
+    max[name] = Float32Array.from({ length: n }, (_, i) => 20 + Math.cos(i / 3))
+  }
+  return {
+    sourceId: recordingFixture.recording_id,
+    channels: [...channels],
+    durationSec: duration,
+    times: Float32Array.from({ length: n }, (_, i) => (i + 0.5) * (duration / n)),
+    min,
+    max,
+    decimated: true,
+    level,
+  }
+}
+
+describe('переиспользование кэшей EDF и честность уровня (30.09.2026)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useEegParams.setState({
+      params: { ...EEG_PARAM_DEFAULTS, filter: { ...EEG_PARAM_DEFAULTS.filter } },
+      job: null,
+      result: null,
+      grid: null,
+      error: null,
+      gridError: null,
+      eegNav: null,
+    })
+    // Слой видимости — параметр EDF: сбрасываем, чтобы тесты не текли друг на друга
+    useEdfParams.setState({ params: { ...EDF_PARAM_DEFAULTS } })
+    useEdfRecording.setState({
+      recording: recordingFixture,
+      uploadProgress: null,
+      uploadError: null,
+      demo: null,
+      signalFrames: {},
+      signalsPending: 0,
+      signalsError: null,
+      layers: null,
+    })
+  })
+
+  it('берёт тёплый кэш EDF: рендер без единого запроса /signals', async () => {
+    const fetchMock = mockApiFetch()
+    useEdfRecording.setState({
+      signalFrames: { raw: { sig: '', frames: { 1: cachedFrame() } } },
+    })
+
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    const urls = fetchMock.mock.calls.map(([input]) => String(input))
+    expect(urls.filter((url) => url.includes('/signals'))).toEqual([])
+  })
+
+  it('то же для слоя «после очистки»: кэш с совпадающим отпечатком не перезапрашивается', async () => {
+    const fetchMock = mockApiFetch()
+    const sig = signalsPrepSignature(useEdfParams.getState().params, 'cleaned')
+    useEdfParams.getState().setParams({ signalLayer: 'cleaned' })
+    useEdfRecording.setState({
+      signalFrames: { cleaned: { sig, frames: { 1: cachedFrame() } } },
+    })
+
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    const urls = fetchMock.mock.calls.map(([input]) => String(input))
+    expect(urls.filter((url) => url.includes('/signals'))).toEqual([])
+  })
+
+  it('ошибка догрузки уровня видна пользователю, а не проглатывается', async () => {
+    mockApiFetch()
+    useEdfRecording.setState({
+      signalFrames: { raw: { sig: '', frames: { 1: cachedFrame() } } },
+    })
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    act(() => {
+      useEdfRecording.setState({
+        signalsError: 'Уровень 16 не поддерживается (доступны: 1, 2, 4, 8)',
+      })
+    })
+
+    expect(screen.getByText(/Уровень ×1 не догрузился/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Повторить' })).toBeInTheDocument()
+  })
+
+  it('раздел только читает: ни одного POST — данные препроцессинга неприкасаемы', async () => {
+    const fetchMock = mockApiFetch()
+    openRecording()
+    renderWithProviders(<EegSection />)
+    await waitFor(() => expect(screen.getByTestId('eeg-track-canvas')).toBeInTheDocument())
+
+    const postCalls = fetchMock.mock.calls.filter(
+      ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
+    )
+    expect(postCalls).toEqual([])
   })
 })
 

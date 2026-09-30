@@ -191,9 +191,56 @@ export function stepAmplitudeUv(value: number, steps: number): number {
 /**
  * Перетаскивание линейки амплитуды: вниз — крупнее деление (шкала «растягивается»).
  * Шаг — одна позиция ряда на каждые 24 px, чтобы мелкое движение не «перескакивало».
+ *
+ * `startUv` — шкала на момент захвата, а не текущая: браузер шлёт `pointermove`
+ * пачками по 1–3 px, и каждый шаг считается от точки захвата (`dyPx` — сумма
+ * смещений за весь жест). Считать от текущего значения на каждом событии нельзя —
+ * шаги бы «складывались» и шкала уезжала бы вдвое быстрее.
  */
 export function dragAmplitudeUv(startUv: number, dyPx: number): number {
   return stepAmplitudeUv(startUv, Math.trunc(dyPx / 24))
+}
+
+/**
+ * Максимум |значения| огибающей внутри окна — вход автозума шкалы трека.
+ *
+ * Точки сканируются целиком (кадр ≤ десятки тысяч точек, окно — подмножество):
+ * пик окна должен быть точным — от него зависит, поместится ли сигнал в шкалу.
+ */
+export function windowMaxAbsUv(
+  times: ArrayLike<number>,
+  min: ArrayLike<number>,
+  max: ArrayLike<number>,
+  window: TimeWindow,
+): number {
+  let peak = 0
+  for (let i = 0; i < times.length; i++) {
+    const time = times[i]
+    if (time < window.t0 || time > window.t1) continue
+    const low = Math.abs(min[i] as number)
+    const high = Math.abs(max[i] as number)
+    if (low > peak) peak = low
+    if (high > peak) peak = high
+  }
+  return peak
+}
+
+/**
+ * Автозум шкалы трека: ближайшая сверху ступень ряда, вмещающая сигнал в ±2
+ * деления (`amplitudeRangeUv(step) = step × AMPLITUDE_DIVISIONS / 2 = step × 2`).
+ *
+ * Шкала симметрична относительно нуля, поэтому берётся максимум по |min| и |max|
+ * (`windowMaxAbsUv`) — смещённый вверх сигнал растянул бы нижнюю половину.
+ * Нет данных (maxAbs ≤ 0) — дефолт шкалы; за пределом ряда — крупнейшая ступень.
+ */
+export function fitAmplitudeUv(maxAbsUv: number): number {
+  // Нет данных — дефолт шкалы (`EEG_PARAM_DEFAULTS.amplitudeUv`)
+  if (!(maxAbsUv > 0)) return 50
+  const needed = maxAbsUv / (AMPLITUDE_DIVISIONS / 2)
+  for (const step of AMPLITUDE_UV_PER_DIV) {
+    if (step >= needed) return step
+  }
+  return AMPLITUDE_UV_PER_DIV[AMPLITUDE_UV_PER_DIV.length - 1] as number
 }
 
 

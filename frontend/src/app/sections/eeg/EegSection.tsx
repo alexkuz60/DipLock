@@ -92,7 +92,9 @@ export function EegSection() {
   if (demo) {
     // Демо-сигнал (синтетика) — отладка отрисовки: расчёта на сервере у него нет,
     // и раздел это честно показывает (в полосе состояния — «демо-сигнал»).
-    return <EegWorkspace frame={demo} recording={null} demo />
+    // `level` — уровень кадра (0 = полноразрешённый): догрузки у демо нет,
+    // поэтому блок ошибки уровня здесь не показывается вовсе.
+    return <EegWorkspace frame={demo} recording={null} demo level={demo.level} />
   }
   if (!recording) {
     return (
@@ -160,6 +162,11 @@ function EegRecording({ recording, levels }: { recording: RecordingMeta; levels:
       frame={frame}
       recording={recording}
       demo={false}
+      level={level}
+      // Ошибка догрузки при уже показанном кадре: без неё раздел молча продолжал
+      // бы показывать уровень пониже — «штрихи, как у всей сессии», без объяснения
+      levelError={signalsError}
+      onRetryLevel={() => void loadSignals(level, layer)}
       pendingLevel={pending > 0 && !frames[level] ? level : null}
     />
   )
@@ -170,11 +177,20 @@ function EegWorkspace({
   frame,
   recording,
   demo,
+  level,
+  levelError = null,
+  onRetryLevel,
   pendingLevel = null,
 }: {
   frame: SignalFrame
   recording: RecordingMeta | null
   demo: boolean
+  /** Уровень пирамиды, который раздел пытается показать (для текста ошибки) */
+  level: number
+  /** Ошибка догрузки уровня при уже показанном кадре (null — ошибки нет) */
+  levelError?: string | null
+  /** Повторить догрузку уровня */
+  onRetryLevel?: () => void
   pendingLevel?: number | null
 }) {
   const params = useEegParams((state) => state.params)
@@ -418,9 +434,14 @@ function EegWorkspace({
     })
   }
 
-  /** Перетаскивание правой линейки трека: мкВ на деление (шкала «растягивается») */
-  function handleAmplitudeDrag(dyPx: number) {
-    setAmplitudeUv(dragAmplitudeUv(params.amplitudeUv, dyPx))
+  /**
+   * Перетаскивание правой линейки трека: мкВ на деление (шкала «растягивается»).
+   * `startUv` — шкала на момент захвата, `dyPx` — сумма смещений за весь жест:
+   * так шаг накапливается поверх мелких `pointermove` браузера (порог 24 px
+   * относится к жесту, а не к отдельному событию).
+   */
+  function handleAmplitudeDrag(dyPx: number, startUv: number) {
+    setAmplitudeUv(dragAmplitudeUv(startUv, dyPx))
   }
 
   /** Перетаскивание правой линейки спектрограммы: окно частот (крупнее/мельче) */
@@ -503,6 +524,15 @@ function EegWorkspace({
       ) : null}
       {error ? <ErrorBlock title="Спектрограмма не рассчитана" message={error} /> : null}
       {gridError ? <ErrorBlock title="Сетка спектрограммы не загрузилась" message={gridError} /> : null}
+      {/* Уровень пирамиды не догрузился (422/сеть): кадр показан, но это уровень
+          пониже — честно называем причину и даём повторить, как в EDF */}
+      {levelError ? (
+        <ErrorBlock
+          title={`Уровень ×${level} не догрузился — показывается уровень пониже`}
+          message={levelError}
+          onRetry={onRetryLevel}
+        />
+      ) : null}
 
       <div
         ref={wrapRef}

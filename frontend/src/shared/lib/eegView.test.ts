@@ -22,6 +22,7 @@ import {
   dragAmplitudeUv,
   dragFreqWindow,
   eegWindow,
+  fitAmplitudeUv,
   fmaxToY,
   formatAxisTime,
   formatHzTick,
@@ -41,6 +42,7 @@ import {
   timeTicks,
   valueToY,
   windowFrame,
+  windowMaxAbsUv,
   yToAmplitudeUv,
   yToFreq,
   yToValue,
@@ -174,6 +176,28 @@ describe('линейка амплитуды', () => {
     expect(stepAmplitudeUv(50, -1)).toBe(20)
     const last = AMPLITUDE_UV_PER_DIV[AMPLITUDE_UV_PER_DIV.length - 1] as number
     expect(stepAmplitudeUv(last, 3)).toBe(last)
+  })
+
+  it('автозум подбирает ступень ряда, вмещающую сигнал в ±2 деления', () => {
+    // Нет данных — дефолт шкалы
+    expect(fitAmplitudeUv(0)).toBe(50)
+    // Пик 10 → нужно деление ≥ 5 (полуразмах = деление × 2) → ступень 5
+    expect(fitAmplitudeUv(10)).toBe(5)
+    // Пик 45 → нужно ≥ 22.5 → ступень 50 (20 мельче)
+    expect(fitAmplitudeUv(45)).toBe(50)
+    expect(fitAmplitudeUv(120)).toBe(100)
+    // За пределом ряда — крупнейшая ступень, а не «улетевшая» шкала
+    expect(fitAmplitudeUv(10_000)).toBe(500)
+  })
+
+  it('пики для автозума берутся только по точкам внутри окна', () => {
+    const times = new Float32Array([1, 2, 3, 4])
+    const min = new Float32Array([-5, -40, -6, -500])
+    const max = new Float32Array([5, 40, 6, 500])
+    // Пик 500 лежит вне окна (t=4) — подгонка его не видит
+    expect(windowMaxAbsUv(times, min, max, { t0: 1, t1: 3.5 })).toBe(40)
+    expect(windowMaxAbsUv(times, min, max, { t0: 0, t1: 10 })).toBe(500)
+    expect(windowMaxAbsUv(times, min, max, { t0: 5, t1: 6 })).toBe(0)
   })
 
   it('при перетаскивании вниз деление крупнеет, вверх — мельчает', () => {

@@ -24,6 +24,7 @@ import {
   canvasScale,
   canvasTheme,
   drawArtifactZones,
+  drawEnvelope,
   drawFreqMarker,
   drawLevelMarker,
   drawNullLine,
@@ -210,6 +211,59 @@ describe('холсты раздела «ЭЭГ»', () => {
     expect(calls.lineTo).toEqual([[1200 - EEG_VALUE_W, 138.5]])
     // Пунктир отличает опорную линию от сплошных линий сетки (аргумент — массив)
     expect(calls.setLineDash).toEqual([[[5, 4]]])
+  })
+
+  it('ведёт огибающую связно: соединители от точки к точке плюс вертикали min/max', () => {
+    const { ctx, calls } = fakeContext()
+    const window = { t0: 0, t1: 4 }
+    const yOf = (value: number) => 100 - value
+    // Три корзины с разным min/max: между ними должны быть **наклонные** переходы,
+    // а не отдельные вертикали с пробелами (жалоба 30.09.2026 на «штрихи»)
+    drawEnvelope(
+      ctx,
+      {
+        times: new Float32Array([1, 2, 3]),
+        min: new Float32Array([-10, -5, -8]),
+        max: new Float32Array([12, 6, 9]),
+      },
+      window,
+      1200,
+      yOf,
+      canvasTheme(),
+    )
+    // 2 перехода × две цепочки (max и min) = 4 соединителя + 3 вертикали min↔max
+    expect(calls.moveTo.length).toBe(7)
+    expect(calls.lineTo.length).toBe(7)
+    // Первый соединитель — по цепочке max от точки 1 к точке 2, а не вертикаль
+    const first = calls.moveTo[0] as number[]
+    const firstLine = calls.lineTo[0] as number[]
+    expect(firstLine[0]).toBeGreaterThan(first[0] as number)
+    expect(first[1]).not.toBe(firstLine[1])
+  })
+
+  it('кадр без прореживания (min ≡ max) рисуется сплошной линией, а не пустотой', () => {
+    const { ctx, calls } = fakeContext()
+    // Уровень зума, где сервер отдаёт исходные отсчёты: min и max — один массив.
+    // Раньше такой кадр давал нулевые вертикали и трек был пустым (×16/×8)
+    drawEnvelope(
+      ctx,
+      {
+        times: new Float32Array([1, 2, 3]),
+        min: new Float32Array([4, -2, 7]),
+        max: new Float32Array([4, -2, 7]),
+      },
+      { t0: 0, t1: 4 },
+      1200,
+      (value) => 100 - value,
+      canvasTheme(),
+    )
+    // Вырожденных вертикалей нет (min ≡ max пропускаются), но линия ведётся
+    expect(calls.moveTo.length).toBe(4)
+    expect(calls.lineTo.length).toBe(4)
+    // Пустой кадр — без единого движения
+    const empty = fakeContext()
+    drawEnvelope(empty.ctx, { times: new Float32Array(0), min: [], max: [] }, { t0: 0, t1: 4 }, 1200, (v) => v, canvasTheme())
+    expect(empty.calls.moveTo).toEqual([])
   })
 
   it('приглушает всё вне рамки окна трека и подписывает саму рамку', () => {

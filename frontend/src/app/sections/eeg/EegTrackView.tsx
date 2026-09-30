@@ -37,6 +37,7 @@ import {
   drawArtifactZones,
   drawCursor,
   drawEmptyMessage,
+  drawEnvelope,
   drawGridLines,
   drawLeftLabel,
   drawLevelMarker,
@@ -70,8 +71,12 @@ export type EegTrackViewProps = {
   onPick: (timeSec: number, levelUv: number) => void
   /** Двойной клик по области: снять метки точки клика */
   onClear: () => void
-  /** Перетаскивание правой линейки: смещение вниз по вертикали, px */
-  onAmplitudeDrag: (dyPx: number) => void
+  /**
+   * Перетаскивание правой линейки: `dyPx` — сумма смещений за весь жест от точки
+   * захвата (браузер шлёт мелкие `pointermove` — порог 24 px на каждом событии
+   * не накапливался бы), `startUv` — шкала на момент захвата (база шага).
+   */
+  onAmplitudeDrag: (dyPx: number, startUv: number) => void
   /** Перетаскивание области: сдвиг окна по горизонтали, px */
   onPan: (dxPx: number) => void
 }
@@ -94,12 +99,23 @@ export function EegTrackView({
   onPan,
 }: EegTrackViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  /** Где началось перетаскивание: различаем «клик — курсор» и «drag — панорама» */
-  const dragRef = useRef<{ mode: 'none' | 'axis' | 'pan'; x: number; y: number; moved: boolean }>({
+  /**
+   * Где началось перетаскивание: различаем «клик — курсор» и «drag — панорама».
+   * `y` для режима `axis` остаётся точкой захвата на весь жест (шаг шкалы
+   * считается от неё), `startUv` — шкала на момент захвата (база `dragAmplitudeUv`)
+   */
+  const dragRef = useRef<{
+    mode: 'none' | 'axis' | 'pan'
+    x: number
+    y: number
+    moved: boolean
+    startUv: number
+  }>({
     mode: 'none',
     x: 0,
     y: 0,
     moved: false,
+    startUv: 0,
   })
 
   useEffect(() => {
@@ -140,18 +156,10 @@ export function EegTrackView({
     )
     const yOf = (value: number) => height / 2 - (value / half) * (height / 2)
 
-    ctx.save()
-    ctx.strokeStyle = theme.accent
-    ctx.lineWidth = 1
-    // Огибающая min/max — вертикальные штрихи: пики не срезаются прореживанием
-    ctx.beginPath()
-    for (let i = 0; i < envelope.times.length; i++) {
-      const x = plotTimeX(envelope.times[i] as number, window, width)
-      ctx.moveTo(x, yOf(envelope.max[i] as number))
-      ctx.lineTo(x, yOf(envelope.min[i] as number))
-    }
-    ctx.stroke()
-    ctx.restore()
+    // Огибающая связная: штрихи min/max + наклонные соединители от точки к
+    // точке — иначе разреженные уровни читаются штрихами с пробелами, а кадр
+    // без прореживания (min ≡ max) не виден вовсе (`drawEnvelope`)
+    drawEnvelope(ctx, envelope, window, width, yOf, theme)
 
     if (markerUv !== null && Math.abs(markerUv) <= half) {
       // Уровень — по той же шкале, что нарисована: `valueToY` обратна `yToAmplitudeUv`
@@ -181,6 +189,8 @@ export function EegTrackView({
       x: event.clientX,
       y: event.clientY,
       moved: false,
+      // Шкала фиксируется в момент захвата: шаг линейки считается от неё
+      startUv: amplitudeUv,
     }
     // Захват указателя — необязательное улучшение (в jsdom этих методов нет)
     event.currentTarget.setPointerCapture?.(event.pointerId)
@@ -194,8 +204,10 @@ export function EegTrackView({
     if (Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true
     if (!drag.moved) return
     if (drag.mode === 'axis') {
-      onAmplitudeDrag(dy)
-      dragRef.current = { ...drag, y: event.clientY }
+      // Шаг — от точки захвата: браузер шлёт pointermove по 1–3 px, и порог 24 px
+      // на каждом отдельном событии не накапливался бы — шкала «не двигалась»
+      // (правка 30.09.2026: тест с одним прыжком этого не видел)
+      onAmplitudeDrag(event.clientY - drag.y, drag.startUv)
       return
     }
     onPan(dx)
@@ -204,7 +216,7 @@ export function EegTrackView({
 
   function handlePointerUp(event: ReactPointerEvent<HTMLCanvasElement>) {
     const drag = dragRef.current
-    dragRef.current = { mode: 'none', x: 0, y: 0, moved: false }
+    dragRef.current = { mode: 'none', x: 0, y: 0, moved: false, startUv: 0 }
     event.currentTarget.releasePointerCapture?.(event.pointerId)
     // Клик (без перетаскивания) и не по линейке — курсор и уровень в точке клика
     if (drag.mode !== 'pan' || drag.moved) return

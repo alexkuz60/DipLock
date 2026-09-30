@@ -16,6 +16,7 @@ import { CleanArticle } from './articles/CleanArticle'
 import { DipoleCalcArticle } from './articles/DipoleCalcArticle'
 import { DipolePlaybackArticle } from './articles/DipolePlaybackArticle'
 import { DipolesOverviewArticle } from './articles/DipolesOverviewArticle'
+import { EegScreenArticle } from './articles/EegScreenArticle'
 import { EpochsArticle } from './articles/EpochsArticle'
 import { FilterArticle } from './articles/FilterArticle'
 import { GlossaryArticle } from './articles/GlossaryArticle'
@@ -43,6 +44,7 @@ const ARTICLE_COMPONENTS: Record<WikiArticleId, ComponentType> = {
   dipoles: DipolesOverviewArticle,
   'dipole-calc': DipoleCalcArticle,
   'dipole-playback': DipolePlaybackArticle,
+  'eeg-screen': EegScreenArticle,
   glossary: GlossaryArticle,
 }
 

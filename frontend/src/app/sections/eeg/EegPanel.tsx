@@ -26,7 +26,14 @@ import {
   notchFromOption,
 } from '@/shared/lib/calcFilter'
 import { EEG_PALETTES, hopMs } from '@/shared/lib/eegSpectrogram'
-import { channelLabel, channelOptions, isMixChannel, resolveChannel } from '@/shared/lib/eegChannels'
+import {
+  channelLabel,
+  channelOptions,
+  electrodeOptions,
+  isMixChannel,
+  mixOptions,
+  resolveChannel,
+} from '@/shared/lib/eegChannels'
 import { AMPLITUDE_UV_PER_DIV } from '@/shared/lib/eegView'
 import { BAND_LABELS } from '@/shared/lib/spectrum'
 import {
@@ -83,7 +90,18 @@ export function EegPanel() {
   const freqBands = meta.data?.freq_bands ?? {}
   const functionalBands = meta.data?.functional_bands ?? {}
   const demoChannels = demo?.channels ?? []
-  const channelOptionsList = channelOptions(recording, demoChannels)
+  // Список тот же, что в тулс-хедере (`eegChannels` — единственный источник):
+  // есть миксы — группируем optgroup'ами «Электроды»/«Миксы», без них — плоско
+  const mixes = mixOptions(recording)
+  const channelOptionsList = mixes.length
+    ? [
+        ...electrodeOptions(recording, demoChannels).map((option) => ({
+          ...option,
+          group: 'Электроды',
+        })),
+        ...mixes.map((option) => ({ ...option, group: 'Миксы' })),
+      ]
+    : channelOptions(recording, demoChannels)
   const channel = resolveChannel(recording, demoChannels, params.channel)
   const presets = filterPresetOptions(freqBands, functionalBands)
   const stale = result !== null && !eegResultMatchesParams(result, params)

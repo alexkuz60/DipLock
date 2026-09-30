@@ -370,6 +370,58 @@ export function drawGridLines(
 /** Прозрачность заливки зон: сигнал и картинка спектрограммы остаются читаемыми */
 export const ARTIFACT_FILL_ALPHA = 0.18
 
+/**
+ * Сигнал трека: вертикальные штрихи min/max **плюс наклонные соединители** между
+ * соседними точками.
+ *
+ * Одних вертикалей мало: на разреженных уровнях зума бины не смыкаются по
+ * пикселям и трек читается штрихами с пробелами, а кадр без прореживания
+ * (`decimated=false` — уровень ×N короткой записи, где сервер отдаёт исходные
+ * отсчёты и min ≡ max) давал нулевые штрихи и не рисовался вовсе. uPlot в EDF
+ * соединяет точки линией, поэтому обе секции показывают один и тот же кадр
+ * одинаково связно (жалоба 30.09.2026: «штрихи с пробелами», пустой ×16).
+ *
+ * Цепочки две — max и min: так читается и полоса огибающей, и линия отсчётов
+ * (при min ≡ max они сливаются в сплошную линию сигнала). Вертикали между
+ * цепочками сохраняют extremum корзины. Рисуется одним `stroke`.
+ */
+export function drawEnvelope(
+  ctx: CanvasRenderingContext2D,
+  envelope: {
+    times: ArrayLike<number>
+    min: ArrayLike<number>
+    max: ArrayLike<number>
+  },
+  window: TimeWindow,
+  width: number,
+  yOf: (value: number) => number,
+  theme: CanvasTheme,
+): void {
+  const count = envelope.times.length
+  if (count === 0) return
+  const xOf = (index: number) => plotTimeX(envelope.times[index] as number, window, width)
+  ctx.save()
+  ctx.strokeStyle = theme.accent
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  // Соединители от точки к точке: по цепочке max и по цепочке min
+  for (let i = 1; i < count; i++) {
+    ctx.moveTo(xOf(i - 1), yOf(envelope.max[i - 1] as number))
+    ctx.lineTo(xOf(i), yOf(envelope.max[i] as number))
+    ctx.moveTo(xOf(i - 1), yOf(envelope.min[i - 1] as number))
+    ctx.lineTo(xOf(i), yOf(envelope.min[i] as number))
+  }
+  // Вертикальные штрихи min↔max — между соединителями виден размах корзины;
+  // при min ≡ max штрих вырожден, его рисовать не нужно (линию уже ведут цепочки)
+  for (let i = 0; i < count; i++) {
+    if (envelope.min[i] === envelope.max[i]) continue
+    ctx.moveTo(xOf(i), yOf(envelope.max[i] as number))
+    ctx.lineTo(xOf(i), yOf(envelope.min[i] as number))
+  }
+  ctx.stroke()
+  ctx.restore()
+}
+
 /** Высота цветной полоски типа артефакта у верхнего края половины, px */
 export const ARTIFACT_STRIPE_PX = 3
 
