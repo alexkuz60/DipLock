@@ -7,6 +7,7 @@
  */
 import {
   Activity,
+  BookOpen,
   House,
   Layers,
   Radar,
@@ -17,7 +18,16 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
-export type SectionId = 'home' | 'edf' | 'eeg' | 'dipoles' | 'table' | 'group' | 'settings' | 'server'
+export type SectionId =
+  | 'home'
+  | 'edf'
+  | 'eeg'
+  | 'dipoles'
+  | 'table'
+  | 'group'
+  | 'wiki'
+  | 'settings'
+  | 'server'
 
 export type SectionConfig = {
   id: SectionId
@@ -110,6 +120,18 @@ export const SECTIONS: SectionConfig[] = [
     hasToolHeader: true,
     hasRightPanel: true,
     group: 'main',
+  },
+  {
+    id: 'wiki',
+    title: 'Wiki — документация',
+    shortTitle: 'Wiki',
+    hint: 'Wiki: руководство по препроцессингу EDF',
+    hotkey: '',
+    icon: BookOpen,
+    route: '/wiki',
+    hasToolHeader: true,
+    hasRightPanel: false,
+    group: 'utility',
   },
   {
     id: 'settings',

@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { MAIN_SECTIONS, SECTIONS, UTILITY_SECTIONS, getSection } from './registry'
 
 describe('реестр разделов', () => {
-  it('содержит 6 рабочих и 2 служебных раздела', () => {
-    expect(SECTIONS).toHaveLength(8)
+  it('содержит 6 рабочих и 3 служебных раздела', () => {
+    expect(SECTIONS).toHaveLength(9)
     expect(MAIN_SECTIONS).toHaveLength(6)
-    expect(UTILITY_SECTIONS).toHaveLength(2)
-    expect(UTILITY_SECTIONS.map((section) => section.id)).toEqual(['settings', 'server'])
+    expect(UTILITY_SECTIONS).toHaveLength(3)
+    expect(UTILITY_SECTIONS.map((section) => section.id)).toEqual(['wiki', 'settings', 'server'])
   })
 
   it('идентификаторы и маршруты уникальны', () => {

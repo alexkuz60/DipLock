@@ -22,6 +22,7 @@ import { DipolesToolHeaderActions } from './dipoles/DipolesToolActions'
 import { HomeSection } from './HomeSection'
 import { ServerStatusSection } from './ServerStatusSection'
 import { SettingsSection } from './SettingsSection'
+import { WikiSection } from './wiki/WikiSection'
 import { LocalizationTablePanel } from './table/LocalizationTablePanel'
 import { LocalizationTableSection } from './table/LocalizationTableSection'
 import { GroupAnalysisPanel, GroupAnalysisSection } from './Stubs'
@@ -61,6 +62,7 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
   },
   table: { Component: LocalizationTableSection, Panel: LocalizationTablePanel },
   group: { Component: GroupAnalysisSection, Panel: GroupAnalysisPanel },
+  wiki: { Component: WikiSection },
   settings: { Component: SettingsSection },
   server: { Component: ServerStatusSection },
 }
