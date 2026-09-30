@@ -144,6 +144,29 @@ describe('рабочая область раздела EDF', () => {
     expect(await screen.findByTestId(`track-${recordingFixture.channels?.[0]}`)).toBeInTheDocument()
   })
 
+  it('комбо слоя и полосы — в подзаголовке «Треки записи», параметр общий с панелью (30.09.2026)', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    stubUpload()
+    renderWithProviders(<EdfSection />)
+
+    await user.upload(screen.getByLabelText('Выбрать файл EDF'), edfFile())
+    expect(await screen.findByTestId('track-stack')).toBeInTheDocument()
+
+    // Слой читается и пишется в тот же параметр, что секция «Отображение» панели
+    const layer = await screen.findByLabelText('Слой сигнала')
+    expect(layer).toHaveValue('raw')
+    // «Полоса» показывается только у слоя «По полосе» — как и в панели
+    expect(screen.queryByLabelText('Полоса слоя')).not.toBeInTheDocument()
+
+    await user.selectOptions(layer, 'band')
+    expect(useEdfParams.getState().params.signalLayer).toBe('band')
+
+    const band = await screen.findByLabelText('Полоса слоя')
+    await user.selectOptions(band, 'theta')
+    expect(useEdfParams.getState().params.signalBandKey).toBe('theta')
+  })
+
   it('сообщает об ошибке сервера и не оставляет запись', async () => {
     const user = userEvent.setup()
     mockApiFetch()
@@ -185,8 +208,9 @@ describe('рабочая область раздела EDF', () => {
     expect(await screen.findByText(/Демо-сигнал \(синтетика\)/)).toBeInTheDocument()
     expect(screen.getByTestId('track-stack')).toBeInTheDocument()
     // Демо-режим — единственное место со слоями-фикстурой: зоны и легенда видны
+    // (пиуля «слои:» живёт в секции «Справка» панели опций, здесь её нет)
     expect(useEdfRecording.getState().layers?.source).toBe('demo')
-    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
+    expect(screen.getByTestId('track-stack')).toBeInTheDocument()
     expect(screen.getAllByTestId(/^legend-/)).toHaveLength(11)
     const urls = fetchMock.mock.calls.map(([url]) => String(url))
     expect(urls.every((url) => url.includes('/meta'))).toBe(true)

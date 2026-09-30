@@ -70,7 +70,7 @@
   ось PSD = сетка ∩ полоса фильтра, дефолт расчёта 0.5–128 (объяснения в `docs/history.md` 28.09.2026).
 - **Фаза C — только инварианты**: `docs/rules/dipoles.md` п.6 (`band_key` для пакетного расчёта;
   вход готов — `prepared_persist.prepared_array` даёт массив без перечитывания EDF).
-- Числа: **885 Vitest / 582 pytest**, ruff/mypy (`app alembic`)/eslint/tsc чисты,
+- Числа: **889 Vitest / 573 pytest** (без `integration`), ruff/mypy (`app alembic`)/eslint/tsc чисты,
   бандл собран в `backend/app/static/ui` (не коммитится — `.gitignore`).
 
 ## Следующий шаг (порядок из todo.md)

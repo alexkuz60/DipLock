@@ -37,6 +37,7 @@
  * прокручивает стек (вьюер его не перехватывает, см. ниже).
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import {
   clampCenter,
@@ -64,6 +65,7 @@ import { channelQcStatus, channelQcTooltip } from '@/shared/lib/channelQc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useEegParams } from '@/shared/state/eegParams'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { usePanelActionsHost } from '@/shared/ui/panelActions'
 import {
   ArtifactZoneLayer,
   CleanZoneLayer,
@@ -76,7 +78,6 @@ import { ExportActions } from './ExportActions'
 import { HEART_RATE_TRACK_NAME, HeartRateTrack } from './HeartRateTrack'
 import { EPOCH_RULER_HEIGHT, EpochRuler, TimeRuler } from './TrackRulers'
 import { TrackRow } from './TrackRow'
-import { ViewerSignalCaption } from './ViewerSignalCaption'
 
 export type TrackStackProps = {
   signal: SignalFrame
@@ -93,12 +94,6 @@ export type TrackStackProps = {
    * загрузкой файла, а не результатом стадий.
    */
   events?: readonly EventMark[]
-  /**
-   * Слой «после очистки»/«разница» собран по прежним параметрам «Фильтр и
-   * референс» (правки после загрузки): подпись в шапке честно это говорит
-   * (шаг 2 плана «слои видимости»).
-   */
-  signalsStale?: boolean
 }
 
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */
@@ -106,7 +101,6 @@ export function TrackStack({
   signal,
   layers: layersProp,
   events = [],
-  signalsStale = false,
 }: TrackStackProps) {
   const params = useEdfParamsValue()
   const navigate = useNavigate()
@@ -118,14 +112,11 @@ export function TrackStack({
   const channelQc = useEdfRecording((state) => state.channelQc)
   const qcThresholds = useEdfRecording((state) => state.channelQcThresholds)
   const artifactTypes = useEdfRecording((state) => state.artifactTypes)
-  /** Паспорт фильтра стадии «Фильтр и референс» (подпись N14: треки без фильтра) */
-  const filterDesign = useEdfRecording((state) => state.filterDesign)
   /**
-   * Слой видимости (шаг 2 плана «слои видимости»): демо-кадр всегда «сырой» —
-   * у фикстуры сервера и параметров подготовки нет.
+   * Слой видимости (шаг 2 плана «слои видимости»): подпись «треки: …» показывает
+   * секция «Справка» панели опций (демо-кадр там всегда «сырой» — см. `EdfPanel`).
    */
   const signalLayer = useEdfParams((state) => state.params.signalLayer)
-  const captionLayer = signal.sourceId === DEMO_SOURCE_ID ? 'raw' : signalLayer
   /** Отчёт стадии filter: зоны вклада чистки для подсветки на слое diff (шаг 2) */
   const cleanReport = useEdfRecording((state) => state.cleanReport)
   /**
@@ -639,7 +630,13 @@ export function TrackStack({
     () => (expandedChannel ? zonesForChannel(visibleZoneList, expandedChannel) : []),
     [visibleZoneList, expandedChannel],
   )
-  /** Клик по развёрнутому треку: уровень под курсором ставит линию уровня (п. 3) */
+  /**
+   * Клик по развёрнутому треку — **только** линия уровня (п. 3): масштаб и режим
+   * амплитуды клик не трогает. Заполнение поля «Масштаб» по клику и 3-й режим
+   * «Трек» (вертикальный зум канала по точке измерения) отклонены владельцем
+   * 30.09.2026 — в мультитрекере это неоправданное усложнение, вертикальный
+   * зум канала будет в разделе «ЭЭГ»/Спектр (todo.md, Этап 3).
+   */
   const handlePickLevel = useCallback((mark: { yPx: number; levelUv: number }) => {
     setLevelMark(mark)
   }, [])
@@ -654,101 +651,79 @@ export function TrackStack({
   /**
    * Трек ЧСС (пульс): ряд стадии `artifacts` — снизу стека, последним (общая
    * ось времени у него). `layers.heartRate === null` — стадия считалась, но
-   * ритм не извлечён: трека нет, в шапке — честная плашка.
+   * ритм не извлечён: трека нет (подробности — в тутипе подписи трека).
    */
   const heartRate = layers?.heartRate ?? null
   const showHeartRate = Boolean(
     params.heartRateTrack && heartRate && heartRate.timesSec.length > 0,
   )
 
-  const pointsPerChannel = signal.times.length
+  /**
+   * Слот в заголовке секции «Треки записи» (панель опций): кнопки экспорта
+   * поднимаются в подзаголовок через portal. Вне панели (демо-режим, тесты)
+   * слота нет — кнопки остаются в инфо-строке, как раньше.
+   */
+  const actionsHost = usePanelActionsHost()
+  const exportActions = (
+    <ExportActions
+      frame={signal}
+      window={window}
+      channels={visible}
+      trackWidth={width}
+      canvases={canvasesRef.current}
+      zones={visibleZoneList}
+      epochs={epochs}
+      showEpochBoundaries={params.epochBoundaries}
+      showDroppedEpochs={params.droppedEpochsHatched}
+      amplitudeMode={params.amplitudeMode}
+      amplitudeScaleUv={params.amplitudeScaleUv}
+      extraTracks={showHeartRate ? [HEART_RATE_TRACK_NAME] : []}
+    />
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="track-stack">
-      <div className="tnum flex items-center gap-3 px-2 py-1 text-xs text-fg-2">
-        <span>
-          Окно {window.t0.toFixed(2)}–{window.t1.toFixed(2)} с
-        </span>
-        <span>×{factor}</span>
-        <span data-testid="signal-source">
-          {signal.level > 0 ? `огибающая, ${pointsPerChannel} т/канал` : 'полный сигнал'}
-        </span>
-        <ViewerSignalCaption
-          filterDesign={filterDesign}
-          layer={captionLayer}
-          stale={signalsStale}
-        />
-        {layers ? (
-          <StatusPill
-            tone="neutral"
-            title={
-              layers.source === 'demo'
-                ? 'Демо-режим: зоны и штриховка — детерминированная фикстура (срез 2.6), а не расчёт. У записи слои появятся после кнопок стадий в шапке раздела.'
-                : 'Слои из результата задачи предподготовки: зоны артефактов и отброшенные эпохи (срез 2.7)'
-            }
-          >
-            слои: {layers.source === 'demo' ? 'демо-фикстура' : 'результат расчёта'}
-          </StatusPill>
-        ) : null}
-        {staleEpochGrid ? (
-          <StatusPill
-            tone="warn"
-            title={
-              layers?.epochStartsSec
-                ? `Разметка эпох построена по событиям «${layers.eventId}» (окно −${layers.epochPreMs}/${layers.epochPostMs} мс от события); параметры панели не совпадают. Нажмите «Нарезка эпох» в шапке, чтобы пересчитать и разложить эпохи заново.`
-                : `Разметка эпох построена по нарезке результата — ${layers?.epochLengthMs} мс; в панели выбрано ${params.epochLengthMs} мс. Нажмите «Нарезка эпох» в шапке, чтобы пересчитать и разложить эпохи заново.`
-            }
-          >
-            {layers?.epochStartsSec
-              ? `разметка: по событиям «${layers.eventId}»`
-              : `разметка эпох: ${layers?.epochLengthMs} мс`}
-          </StatusPill>
-        ) : null}
-        {manualMarkCount > 0 ? (
-          <StatusPill
-            tone="warn"
-            title="Пометки пользователя: интервалы на таймлайне записи (клик по шкале эпох или секунд и Ctrl+двойной клик по треку переключают блокировку эпохи). Пометка живёт на таймлайне, поэтому после смены длины эпохи она накрывает несколько эпох новой нарезки — штриховок может быть больше, чем пометок. «Снять» — в панели «Эпохи»."
-          >
-            ручных пометок: {manualMarkCount}
-          </StatusPill>
-        ) : null}
-        {layers && params.heartRateTrack && layers.heartRate !== undefined ? (
-          layers.heartRate ? (
-            <StatusPill
-              tone="neutral"
-              title={`ЧСС извлечена из височных отведений (${layers.heartRate.channels.join(', ')}): ${layers.heartRate.nBeats} QRS-пиков, ${layers.heartRate.coveragePercent} % окон ряда с данными. Ряд — результат стадии «Поиск артефактов», не медицинская ЭКГ.`}
-            >
-              ЧСС: {layers.heartRate.medianBpm ?? '—'} уд/мин
-            </StatusPill>
-          ) : (
+      {/*
+        Окно времени читается с таймлайна и подписи курсора — надпись над треками
+        убрана (правка 29.09.2026). Скрытый дубль остаётся в DOM: тесты навигации
+        (листание/панорама) проверяют по нему положение окна, jsdom не считает layout.
+      */}
+      <span data-testid="viewer-window" className="hidden">
+        Окно {window.t0.toFixed(2)}–{window.t1.toFixed(2)} с
+      </span>
+      {/*
+        Инфо-строка: только предупреждения, которые должны быть рядом с треками.
+        Слои/подпись слоя и подсказка жестов — секция «Справка» панели опций,
+        кнопки экспорта — в подзаголовке секции (portal).
+      */}
+      {staleEpochGrid || manualMarkCount > 0 || !actionsHost ? (
+        <div className="tnum flex items-center gap-3 px-2 py-1 text-xs text-fg-2">
+          {staleEpochGrid ? (
             <StatusPill
               tone="warn"
-              title="Сердечный ритм не извлечён: в записи нет височных каналов (T7/T8) либо QRS-пики нерегулярны. Подробности — предупреждения стадии «Поиск артефактов»."
+              title={
+                layers?.epochStartsSec
+                  ? `Разметка эпох построена по событиям «${layers.eventId}» (окно −${layers.epochPreMs}/${layers.epochPostMs} мс от события); параметры панели не совпадают. Нажмите «Нарезка эпох» в шапке, чтобы пересчитать и разложить эпохи заново.`
+                  : `Разметка эпох построена по нарезке результата — ${layers?.epochLengthMs} мс; в панели выбрано ${params.epochLengthMs} мс. Нажмите «Нарезка эпох» в шапке, чтобы пересчитать и разложить эпохи заново.`
+              }
             >
-              ЧСС не извлечена
+              {layers?.epochStartsSec
+                ? `разметка: по событиям «${layers.eventId}»`
+                : `разметка эпох: ${layers?.epochLengthMs} мс`}
             </StatusPill>
-          )
-        ) : null}
-        <ExportActions
-          frame={signal}
-          window={window}
-          channels={visible}
-          trackWidth={width}
-          canvases={canvasesRef.current}
-          zones={visibleZoneList}
-          epochs={epochs}
-          showEpochBoundaries={params.epochBoundaries}
-          showDroppedEpochs={params.droppedEpochsHatched}
-          amplitudeMode={params.amplitudeMode}
-          amplitudeScaleUv={params.amplitudeScaleUv}
-          extraTracks={showHeartRate ? [HEART_RATE_TRACK_NAME] : []}
-        />
-        <span className="ml-auto truncate">
-          Колесо — прокрутка треков · зум — селект «Зум отрисовки ЭЭГ» · drag — панорама · клик —
-          курсор · клик по названию — канал в разделе «ЭЭГ» · стрелка у названия — развернуть
-          трек · клик по шкале эпох/секунд — блокировка эпохи · Ctrl+двойной клик — то же
-        </span>
-      </div>
+          ) : null}
+          {manualMarkCount > 0 ? (
+            <StatusPill
+              tone="warn"
+              title="Пометки пользователя: интервалы на таймлайне записи (клик по шкале эпох или секунд и Ctrl+двойной клик по треку переключают блокировку эпохи). Пометка живёт на таймлайне, поэтому после смены длины эпохи она накрывает несколько эпох новой нарезки — штриховок может быть больше, чем пометок. «Снять» — в панели «Эпохи»."
+            >
+              ручных пометок: {manualMarkCount}
+            </StatusPill>
+          ) : null}
+          {actionsHost ? null : exportActions}
+        </div>
+      ) : null}
+      {actionsHost ? createPortal(exportActions, actionsHost) : null}
 
       {showLegend ? (
         <LayersLegend

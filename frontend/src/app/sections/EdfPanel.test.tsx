@@ -203,6 +203,18 @@ describe('панель раздела EDF', () => {
     expect(screen.queryByText(/Загрузка EDF — в рабочей области раздела/)).not.toBeInTheDocument()
   })
 
+  it('секции «Единицы EDF» в опциях нет: единицы показывает диалог «Паспорт»', () => {
+    mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+
+    // Секция убрана (правка 30.09.2026): в формы предподготовки параметр не
+    // входил, показ и правка единиц — в диалоге «Паспорт» сессии
+    expect(screen.queryByText('Единицы EDF')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Единицы')).not.toBeInTheDocument()
+    // Переключатель «Амплитуда» при этом остался в панели «Отображение»
+    expect(screen.getByRole('group', { name: 'Амплитуда' })).toBeInTheDocument()
+  })
+
   it('легенда артефактов: цветные метки типов и тумблер видимости без запросов', async () => {
     const user = userEvent.setup()
     const fetchMock = mockApiFetch()
@@ -315,6 +327,34 @@ describe('панель раздела EDF', () => {
     await user.click(screen.getByRole('button', { name: 'Снять' }))
     expect(useEdfRecording.getState().epochMarks).toEqual([])
     expect(screen.getByText('Ручных пометок: 0')).toBeInTheDocument()
+  })
+
+  // Секция «Справка» (правка 29.09.2026): подпись слоя «треки:», пометка источника
+  // слоёв «слои:» и расшифровка жестов переехали из инфо-строки над треками
+  it('секция «Справка»: подпись слоя, пометка слоёв и расшифровка жестов', async () => {
+    mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    expect(screen.getByText('треки: исходный сигнал без фильтра')).toBeInTheDocument()
+    expect(screen.getByText(/Колесо — прокрутка треков/)).toBeInTheDocument()
+    expect(screen.getByText(/зум — селект «Зум отрисовки ЭЭГ»/)).toBeInTheDocument()
+    // Слоёв пока нет — пометки «слои:» нет
+    expect(screen.queryByText(/^слои:/)).not.toBeInTheDocument()
+
+    // После расчёта пиуля называет источник зон и штриховки
+    act(() => {
+      useEdfRecording.setState({
+        layers: {
+          source: 'result',
+          artifacts: [],
+          rejectedEpochs: [],
+          rejectChannels: {},
+          epochLengthMs: null,
+        },
+      })
+    })
+    expect(screen.getByText('слои: результат расчёта')).toBeInTheDocument()
   })
 })
 

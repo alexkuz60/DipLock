@@ -21,6 +21,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type RefObject } 
 import { api } from '@/shared/api/client'
 import type { RecordingMeta } from '@/shared/api/types'
 import { DEMO_CHANNELS } from '@/shared/lib/demoSignal'
+import { bandKeyOptions, type BandKeyOption } from '@/shared/lib/bandOptions'
 import { selectFrame, resolveSignalLevel } from '@/shared/lib/signalFrame'
 import { eventMarks } from '@/shared/lib/viewerLayers'
 import { acceptEdfFile, useEdfRecording, useSignalLayerFrames } from '@/shared/state/edfRecording'
@@ -29,6 +30,7 @@ import { Button } from '@/shared/ui/Button'
 import { cx } from '@/shared/ui/cx'
 import { Panel } from '@/shared/ui/Panel'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
+import { TrackHeaderControls } from './viewer/TrackHeaderControls'
 import { TrackStack } from './viewer/TrackStack'
 
 /** Скрытый input записи: открывается кнопкой тулс-хедера или зоны загрузки. */
@@ -150,12 +152,15 @@ function Dropzone({
 function RecordingTracks({
   recording,
   levels,
+  bandOptions,
 }: {
   recording: RecordingMeta
   /** Доступные уровни пирамиды (множители зума из `/meta`) */
   levels: number[]
+  /** Пункты селекта «Полоса» слоя «По полосе» (общий `bandKeyOptions`) */
+  bandOptions: BandKeyOption[]
 }) {
-  const { layer, frames, stale } = useSignalLayerFrames()
+  const { layer, frames } = useSignalLayerFrames()
   const pending = useEdfRecording((state) => state.signalsPending)
   const signalsError = useEdfRecording((state) => state.signalsError)
   const loadSignals = useEdfRecording((state) => state.loadSignals)
@@ -187,7 +192,15 @@ function RecordingTracks({
   const loaded = Boolean(frames[level])
 
   return (
-    <Panel title="Треки записи" className="flex min-h-0 flex-1 flex-col">
+    <Panel
+      title="Треки записи"
+      className="flex min-h-0 flex-1 flex-col"
+      actions={
+        (recording.channels?.length ?? 0) > 0 ? (
+          <TrackHeaderControls bandOptions={bandOptions} />
+        ) : null
+      }
+    >
       {signalsError && !frame ? (
         <ErrorBlock
           title="Не удалось получить сигналы записи"
@@ -209,13 +222,14 @@ function RecordingTracks({
             signal={frame}
             layers={layers ?? undefined}
             events={events}
-            signalsStale={stale}
           />
-          <p className="tnum px-2 pb-1 text-xs text-fg-2">
-            {pending > 0 && !loaded
-              ? `Уровень ×${level} догружается — пока показывается ${frame.level > 0 ? `уровень ×${frame.level}` : 'полный сигнал'}`
-              : `Уровень ×${level}: ${frame.times.length} точек на канал, огибающая min/max`}
-          </p>
+          {/* Догрузка уровня — временное состояние; статичная подпись «Уровень ×N:
+              N точек на канал» убрана (число видно в выборе зума) — правка 29.09.2026 */}
+          {pending > 0 && !loaded ? (
+            <p className="tnum px-2 pb-1 text-xs text-fg-2">
+              {`Уровень ×${level} догружается — пока показывается ${frame.level > 0 ? `уровень ×${frame.level}` : 'полный сигнал'}`}
+            </p>
+          ) : null}
         </>
       )}
     </Panel>
@@ -242,6 +256,8 @@ export function EdfSection() {
   const demoChannels = recording?.channels ?? meta.data?.standard_channels ?? DEMO_CHANNELS
   // Уровни пирамиды сигналов: источник — /meta, фолбэк — дискретные ×1…×16 UI
   const signalLevels = meta.data?.signal_levels?.length ? meta.data.signal_levels : [...TIME_LEVELS]
+  /** Пункты «Полоса» слоя: одни и те же для подзаголовка и панели «Отображение» */
+  const bandOptions = bandKeyOptions(meta.data)
 
   if (demo) {
     return (
@@ -268,7 +284,7 @@ export function EdfSection() {
       {uploadError ? <ErrorBlock title="Загрузка не удалась" message={uploadError} /> : null}
 
       {recording ? (
-        <RecordingTracks recording={recording} levels={signalLevels} />
+        <RecordingTracks recording={recording} levels={signalLevels} bandOptions={bandOptions} />
       ) : (
         <Dropzone channels={demoChannels} uploading={uploadProgress} inputRef={inputRef} />
       )}

@@ -8,6 +8,7 @@
  * фильтра (метод, ядро, краевой буфер) приходят из результата стадии.
  */
 import type { SignalLayer } from '@/shared/api/types'
+import type { EdfViewerLayers } from '@/shared/lib/viewerLayers'
 import type { FilterDesign } from '@/shared/state/edfRecording'
 import { StatusPill } from '@/shared/ui/StatusPill'
 
@@ -18,6 +19,11 @@ export type ViewerSignalCaptionProps = {
   layer?: SignalLayer
   /** Слой собран по прежним параметрам «Фильтр и референс» (правки после загрузки) */
   stale?: boolean
+  /**
+   * Слои результата вьюера: пиуля «слои:» говорит, что на экране — результат
+   * расчёта или демо-фикстура (`null`/`undefined` — слоёв нет, пиули нет).
+   */
+  layers?: EdfViewerLayers | null
 }
 
 /** Тексты трёх слоёв: подпись всегда называет, что именно на экране. */
@@ -53,6 +59,7 @@ export function ViewerSignalCaption({
   filterDesign,
   layer = 'raw',
   stale = false,
+  layers = null,
 }: ViewerSignalCaptionProps) {
   const detail =
     filterDesign && filterDesign.method !== 'none'
@@ -75,6 +82,18 @@ export function ViewerSignalCaption({
           title="Параметры «Фильтр и референс» изменились после загрузки слоя — показаны прежние данные. Обновится при переключении слоя или уровня зума."
         >
           слой по прежним параметрам
+        </StatusPill>
+      ) : null}
+      {layers ? (
+        <StatusPill
+          tone="neutral"
+          title={
+            layers.source === 'demo'
+              ? 'Демо-режим: зоны и штриховка — детерминированная фикстура (срез 2.6), а не расчёт. У записи слои появятся после кнопок стадий в шапке раздела.'
+              : 'Слои из результата задачи предподготовки: зоны артефактов и отброшенные эпохи (срез 2.7)'
+          }
+        >
+          слои: {layers.source === 'demo' ? 'демо-фикстура' : 'результат расчёта'}
         </StatusPill>
       ) : null}
     </>

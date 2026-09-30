@@ -25,6 +25,13 @@ export type SelectFieldProps<T extends string> = {
   onChange: (value: T) => void
   hint?: string
   disabled?: boolean
+  /**
+   * Раскладка: `field` (по умолчанию) — строка панели опций через `FieldRow`
+   * (подпись слева); `inline` — только сам `<select>` с `aria-label` — для
+   * подзаголовков секций, где место не позволяет строку параметра (правка
+   * 30.09.2026).
+   */
+  layout?: 'field' | 'inline'
 }
 
 /** Сплит опций на блоки: подряд идущие опции одной группы — один `<optgroup>`. */
@@ -50,8 +57,44 @@ export function SelectField<T extends string>({
   onChange,
   hint,
   disabled = false,
+  layout = 'field',
 }: SelectFieldProps<T>) {
   const id = useId()
+  const items = optionBlocks(options).map((block, index) =>
+    block.group !== undefined ? (
+      <optgroup key={block.group} label={block.group}>
+        {block.options.map((option) => (
+          <option key={option.value} value={option.value} disabled={option.disabled}>
+            {option.label}
+          </option>
+        ))}
+      </optgroup>
+    ) : (
+      <Fragment key={index}>
+        {block.options.map((option) => (
+          <option key={option.value} value={option.value} disabled={option.disabled}>
+            {option.label}
+          </option>
+        ))}
+      </Fragment>
+    ),
+  )
+
+  // Inline: без строки параметра — только список с `aria-label` (метка снаружи
+  // решает вызывающая сторона текстом, например «Слой» в подзаголовке секции)
+  if (layout === 'inline') {
+    return (
+      <select
+        aria-label={label}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as T)}
+        className="cursor-pointer rounded-lg border border-border bg-bg-2 px-2 py-1 text-sm text-fg-0 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {items}
+      </select>
+    )
+  }
 
   return (
     <FieldRow label={label} htmlFor={id} hint={hint}>
@@ -62,25 +105,7 @@ export function SelectField<T extends string>({
         onChange={(event) => onChange(event.target.value as T)}
         className="w-full rounded-lg border border-border bg-bg-2 px-2.5 py-1.5 text-sm text-fg-0 disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {optionBlocks(options).map((block, index) =>
-          block.group !== undefined ? (
-            <optgroup key={block.group} label={block.group}>
-              {block.options.map((option) => (
-                <option key={option.value} value={option.value} disabled={option.disabled}>
-                  {option.label}
-                </option>
-              ))}
-            </optgroup>
-          ) : (
-            <Fragment key={index}>
-              {block.options.map((option) => (
-                <option key={option.value} value={option.value} disabled={option.disabled}>
-                  {option.label}
-                </option>
-              ))}
-            </Fragment>
-          ),
-        )}
+        {items}
       </select>
     </FieldRow>
   )

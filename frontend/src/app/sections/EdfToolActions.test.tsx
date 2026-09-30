@@ -5,7 +5,7 @@
  * Рендерится весь раздел через `SectionRoute` — так проверяется связка
  * «действие в шапке → рабочая область/панель», а не компонент в вакууме.
  */
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -73,6 +73,26 @@ describe('тулс-хедер раздела EDF', () => {
     // Диалог открывает тот же скрытый input, что и кнопка зоны загрузки
     expect(screen.getByLabelText('Выбрать файл EDF')).toBeInTheDocument()
     expect(clickSpy).toHaveBeenCalled()
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('переключатель «Амплитуда» в шапке меняет масштаб, не запуская расчёт', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderSection()
+
+    const header = screen.getByRole('banner')
+    const callsBefore = fetchMock.mock.calls.length
+    expect(within(header).getByRole('button', { name: 'Общий' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    await user.click(within(header).getByRole('button', { name: 'Авто' }))
+
+    // Тот же параметр `amplitudeMode`, что и в панели «Отображение» (30.09.2026)
+    expect(useEdfParams.getState().params.amplitudeMode).toBe('per_channel')
+    // Правка отрисовки — не расчёт: ни одного нового запроса
     expect(fetchMock.mock.calls.length).toBe(callsBefore)
   })
 

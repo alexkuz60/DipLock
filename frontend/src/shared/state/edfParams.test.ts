@@ -172,7 +172,6 @@ describe('слой параметров EDF', () => {
         [{ customBand: [2, 30] }],
         [{ notchHz: 50 }],
         [{ reference: 'custom' }],
-        [{ edfUnits: 'uV' }],
         [{ visibleChannels: ['Fp1'] }],
         // Отменённая зона вклада чистки — параметр сигнала стадии (шаг 2)
         [{ cleanExcludeZoneIds: ['clean-1'] }],

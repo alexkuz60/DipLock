@@ -12,14 +12,16 @@ import { useQuery } from '@tanstack/react-query'
 import { RotateCcw } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { RecalcProgress } from './EdfToolActions'
-import { filterBandText, FUNCTIONAL_GROUP } from '@/shared/lib/calcFilter'
+import { bandKeyOptions } from '@/shared/lib/bandOptions'
+import { DEMO_SOURCE_ID } from '@/shared/lib/signalFrame'
 import { bandLabel } from '@/shared/lib/spectrum'
 import {
   ARTIFACT_COLORS,
   ARTIFACT_KINDS,
+  AMPLITUDE_MODE_OPTIONS,
+  AMPLITUDE_SCALE_LIMITS,
   ARTIFACT_LABELS,
   CLEAN_METHOD_OPTIONS,
-  EDF_UNITS_OPTIONS,
   FILTER_PRESETS,
   RECALC_STAGES,
   RECALC_STAGE_LABELS,
@@ -28,13 +30,12 @@ import {
   useEdfParams,
   useEdfParamsValue,
   useEdfRecalcStatus,
-  type AmplitudeMode,
   type EpochMode,
   type ErpBaselineMode,
   type FilterPresetId,
   type ReferenceMode,
 } from '@/shared/state/edfParams'
-import { filterBandOf, useEdfRecording } from '@/shared/state/edfRecording'
+import { filterBandOf, useEdfRecording, useSignalLayerFrames } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
@@ -48,11 +49,7 @@ import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { TextField } from '@/shared/ui/TextField'
-
-const AMPLITUDE_MODES: { value: AmplitudeMode; label: string; title: string }[] = [
-  { value: 'shared', label: 'Общий', title: 'Одна шкала мкВ/дел для всех каналов' },
-  { value: 'per_channel', label: 'Авто', title: 'Своя шкала у каждого канала' },
-]
+import { ViewerSignalCaption } from './viewer/ViewerSignalCaption'
 
 const REFERENCE_MODES: { value: ReferenceMode; label: string; title: string }[] = [
   { value: 'average', label: 'Средний', title: 'Average reference по всем каналам' },
@@ -108,6 +105,15 @@ export function EdfPanel() {
   const cleanReport = useEdfRecording((state) => state.cleanReport)
   /** Паспорт фильтра стадии filter (шаг 2.5): метод/ядро/буфер краёв (N11/N12) */
   const filterDesign = useEdfRecording((state) => state.filterDesign)
+  /**
+   * Слои результата и слой видимости — пиули секции «Справка»: подпись «треки:»
+   * и «слои:» переехали из инфо-строки вьюера (правка 29.09.2026).
+   */
+  const layers = useEdfRecording((state) => state.layers)
+  const signalLayer = useEdfParams((state) => state.params.signalLayer)
+  const { stale: signalsStale } = useSignalLayerFrames()
+  /** Демо-кадр всегда «сырой» — у фикстуры сервера и параметров подготовки нет */
+  const captionLayer = demo?.sourceId === DEMO_SOURCE_ID ? 'raw' : signalLayer
   const clearEpochMarks = useEdfRecording((state) => state.clearEpochMarks)
   const recalc = useEdfRecalcStatus()
   /** Задача ERP (шаг 2.7): считает только кнопка, правка параметров — нет */
@@ -133,23 +139,8 @@ export function EdfPanel() {
     ? availableChannels
     : (meta.data?.standard_channels ?? [])
   const epochLengths = meta.data?.epoch_lengths_ms ?? []
-  /**
-   * Пункты селекта «Полоса слоя» (Фаза B): ключи `freq_bands`/`functional_bands`
-   * `/meta` с подписями и границами. Ключ стабилен = адрес персиста, поэтому в
-   * `value` уходит именно он, а не границы; отсутствующие в метаданных ключи
-   * пункта не имеют (как в списках пресетов фильтра).
-   */
-  const bandKeyOptions = [
-    ...Object.entries(meta.data?.freq_bands ?? {}).map(([key, band]) => ({
-      value: key,
-      label: `${bandLabel(key)} ${filterBandText(band)}`,
-    })),
-    ...Object.entries(meta.data?.functional_bands ?? {}).map(([key, band]) => ({
-      value: key,
-      label: `${bandLabel(key)} ${filterBandText(band)}`,
-      group: FUNCTIONAL_GROUP,
-    })),
-  ]
+  /** Пункты «Полоса слоя» — общий `bandKeyOptions` (панель + подзаголовок вьюера) */
+  const bandOptions = bandKeyOptions(meta.data)
   /** Канал графика ERP: свой выбор, иначе первый видимый канал */
   const erpChannel = params.erpChannel || params.visibleChannels[0] || channels[0] || ''
   const channelOptions = channels.map((name) => ({ value: name, label: name }))
@@ -649,7 +640,7 @@ export function EdfPanel() {
           <SelectField
             label="Полоса слоя"
             value={params.signalBandKey}
-            options={bandKeyOptions}
+            options={bandOptions}
             onChange={(value) => setParams({ signalBandKey: value })}
             hint="Именованная полоса (δ … γ-high, μ … ψ) — адрес подготовленного массива на диске. Кадр обновится лениво при следующей загрузке (переключение слоя/уровня), правка стадии не требуется."
           />
@@ -663,15 +654,15 @@ export function EdfPanel() {
         <SegmentedControl
           label="Амплитуда"
           value={params.amplitudeMode}
-          options={AMPLITUDE_MODES}
+          options={AMPLITUDE_MODE_OPTIONS}
           onChange={(value) => setParams({ amplitudeMode: value })}
         />
         {params.amplitudeMode === 'shared' ? (
           <NumberField
             label="Масштаб"
             value={params.amplitudeScaleUv}
-            min={1}
-            max={1000}
+            min={AMPLITUDE_SCALE_LIMITS.min}
+            max={AMPLITUDE_SCALE_LIMITS.max}
             step={5}
             unit="мкВ/дел"
             onChange={(value) => setParams({ amplitudeScaleUv: value })}
@@ -689,18 +680,9 @@ export function EdfPanel() {
         />
       </Panel>
 
-      <Panel
-        title="Единицы EDF"
-        hint="Файлы без physical dimension MNE читает как «вольты» (в 1e6 раз больше). Авто-детект исправляет масштаб; ручной выбор нужен, если он ошибается."
-      >
-        <SelectField
-          label="Единицы"
-          value={params.edfUnits}
-          options={EDF_UNITS_OPTIONS}
-          onChange={(value) => setParams({ edfUnits: value })}
-        />
-      </Panel>
-
+      {/* Единицы EDF убраны из опций (правка 30.09.2026): показываются в диалоге
+          «Паспорт» (InfoRow «Единицы» + select «Единицы в БД»), а в формы
+          предподготовки параметр не входил — секция была мёртвым декором */}
       <Panel
         title="Легенда артефактов"
         hint="Цвет зоны и число совпадают с легендой над треками. Чекбоксы управляют видимостью слоёв и расчёт не запускают; у записи зоны появятся после стадии «Поиск артефактов», в демо-режиме это фикстура."
@@ -843,6 +825,27 @@ export function EdfPanel() {
           </Button>
         </div>
         <p className="mt-2 text-sm text-fg-2">{RECALC_HINT}</p>
+      </Panel>
+
+      {/*
+        Справка вьюера: подпись слоя «треки:», пометка источника слоёв «слои:» и
+        расшифровка жестов переехали из инфо-строки над треками (правка 29.09.2026) —
+        рабочая область отдана трекам, место под чтение есть в панели опций.
+      */}
+      <Panel title="Справка">
+        <div className="flex flex-wrap items-center gap-2">
+          <ViewerSignalCaption
+            filterDesign={filterDesign}
+            layer={captionLayer}
+            stale={signalsStale}
+            layers={layers}
+          />
+        </div>
+        <p className="mt-2 text-sm text-fg-2">
+          Колесо — прокрутка треков · зум — селект «Зум отрисовки ЭЭГ» · drag — панорама · клик —
+          курсор · клик по названию — канал в разделе «ЭЭГ» · стрелка у названия — развернуть
+          трек · клик по шкале эпох/секунд — блокировка эпохи · Ctrl+двойной клик — то же
+        </p>
       </Panel>
     </>
   )

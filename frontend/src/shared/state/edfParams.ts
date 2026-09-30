@@ -39,6 +39,16 @@ export {
 /** Как масштабировать треки: одна шкала на все каналы или своя у каждого */
 export type AmplitudeMode = 'shared' | 'per_channel'
 
+/**
+ * Варианты режима для контролов «Амплитуда»: секция «Отображение» панели опций
+ * и переключатель в тулс-хедере раздела (правка 30.09.2026) — один источник
+ * подписей, чтобы два контрола не разошлись.
+ */
+export const AMPLITUDE_MODE_OPTIONS: { value: AmplitudeMode; label: string; title: string }[] = [
+  { value: 'shared', label: 'Общий', title: 'Одна шкала мкВ/дел для всех каналов' },
+  { value: 'per_channel', label: 'Авто', title: 'Своя шкала у каждого канала' },
+]
+
 export type ReferenceMode = 'average' | 'custom'
 
 /** Режим навигатора зума в шапке: листание окон или прыжки по номеру артефакта */
@@ -99,7 +109,7 @@ export const CLEAN_METHOD_OPTIONS: { value: CleanMethod; label: string; title: s
 /** Единицы EDF: 'auto' — авто-детект масштаба на бэкенде (см. EDF_UNITS) */
 export type EdfUnits = 'auto' | 'V' | 'mV' | 'uV'
 
-/** Варианты единиц для селектов (панель и паспорт сессии) — один источник */
+/** Варианты единиц для селекта диалога паспорта сессии — один источник */
 export const EDF_UNITS_OPTIONS: { value: EdfUnits; label: string }[] = [
   { value: 'auto', label: 'Авто (по масштабу файла)' },
   { value: 'V', label: 'Вольты (V)' },
@@ -129,6 +139,12 @@ export const MAX_TIME_LEVEL = TIME_LEVELS.length - 1
 
 /** Шкалы амплитуды для режима «общий масштаб», мкВ на деление */
 export const AMPLITUDE_SCALES_UV = [10, 25, 50, 100, 200]
+
+/**
+ * Границы поля «Масштаб» (мкВ/дел): NumberField панели и заполнение значения
+ * по клику по вертикальной шкале развёрнутого трека обязаны зажимать одно и то же.
+ */
+export const AMPLITUDE_SCALE_LIMITS = { min: 1, max: 1000 } as const
 
 export type EdfParams = {
   /** Каналы, отображаемые в рабочей области (порядок — как в монтаже) */
@@ -195,7 +211,6 @@ export type EdfParams = {
   erpChannel: string
   /** Baseline ERP-усреднения */
   erpBaseline: ErpBaselineMode
-  edfUnits: EdfUnits
   artifactVisibility: Record<ArtifactKind, boolean>
   epochBoundaries: boolean
   droppedEpochsHatched: boolean
@@ -244,7 +259,6 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   signalBandKey: 'alpha',
   erpChannel: '',
   erpBaseline: 'minus200',
-  edfUnits: 'auto',
   artifactVisibility: {
     zscore_outlier: true,
     peak_to_peak: true,
@@ -308,7 +322,7 @@ export const RECALC_STAGE_LABELS: Record<RecalcStage, string> = {
  */
 export const STAGE_PARAM_KEYS: Record<RecalcStage, (keyof EdfParams)[]> = {
   filter: [
-    'filterPreset', 'customBand', 'notchHz', 'reference', 'edfUnits', 'visibleChannels',
+    'filterPreset', 'customBand', 'notchHz', 'reference', 'visibleChannels',
     'notchHarmonics', 'badChannels', 'interpolateBads', 'cleanMethod', 'icaNComponents',
     // Отменённые зоны — параметр сигнала стадии (шаг 2): меняют prepared-сигнал
     'cleanExcludeZoneIds',

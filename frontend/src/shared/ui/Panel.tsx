@@ -20,10 +20,17 @@
  * `docs/rules/frontend-perf.md` п. 3.7).
  */
 import { ChevronRight } from 'lucide-react'
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useUiStore } from '@/shared/state/uiStore'
 import { cx } from './cx'
 import { usePanelNavRegistry } from './panelNav'
+import { PanelActionsHostContext } from './panelActions'
 import { usePanelScope } from './panelScope'
 
 export type PanelProps = {
@@ -35,6 +42,13 @@ export type PanelProps = {
   collapsible?: boolean
   /** Открыта ли секция, пока пользователь её не трогал. */
   defaultOpen?: boolean
+  /**
+   * Содержимое подзаголовка слева от слота действий: комбо слоёв/полосы
+   * секции «Треки записи» (правка 30.09.2026). Portal кнопок экспорта
+   * (`usePanelActionsHost`) монтируется следом — экспорта и контролы делят
+   * одну строку заголовка.
+   */
+  actions?: ReactNode
 }
 
 export function Panel({
@@ -44,6 +58,7 @@ export function Panel({
   className,
   collapsible,
   defaultOpen = true,
+  actions,
 }: PanelProps) {
   const scope = usePanelScope()
   const contentId = useId()
@@ -64,13 +79,15 @@ export function Panel({
    */
   const navRegistry = usePanelNavRegistry()
   const sectionRef = useRef<HTMLElement>(null)
+  /** Слот действий в заголовке (portal кнопок экспорта вьюера, см. контекст выше) */
+  const [actionsHost, setActionsHost] = useState<HTMLElement | null>(null)
   useEffect(() => {
     if (scope === null || navRegistry === null) return
     const el = sectionRef.current
     if (!el) return
     return navRegistry.register({ key: panelKey, title, el, defaultOpen })
   }, [scope, navRegistry, panelKey, title, defaultOpen])
-  const header = <span className="block">{title}</span>
+  const header = <span className="block truncate">{title}</span>
   const content = (
     <>
       {children}
@@ -79,46 +96,53 @@ export function Panel({
   )
 
   return (
-    <section
-      ref={sectionRef}
-      data-panel-key={panelKey}
-      data-collapsed={hidden ? 'true' : 'false'}
-      className={cx('rounded-lg border border-border bg-bg-2 p-3', className)}
-    >
-      <h3
-        className={cx(
-          'text-sm font-semibold tracking-wide text-fg-2 uppercase',
-          hidden ? undefined : 'mb-2',
-        )}
+    <PanelActionsHostContext.Provider value={actionsHost}>
+      <section
+        ref={sectionRef}
+        data-panel-key={panelKey}
+        data-collapsed={hidden ? 'true' : 'false'}
+        className={cx('rounded-lg border border-border bg-bg-2 p-3', className)}
       >
+        <h3
+          className={cx(
+            'flex items-center gap-2 text-sm font-semibold tracking-wide text-fg-2 uppercase',
+            hidden ? undefined : 'mb-2',
+          )}
+        >
+          {isCollapsible ? (
+            <button
+              type="button"
+              aria-expanded={!hidden}
+              aria-controls={contentId}
+              title={hidden ? 'Развернуть секцию' : 'Свернуть секцию'}
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 text-left uppercase hover:text-fg"
+              onClick={() => setPanelCollapsed(panelKey, !collapsed)}
+            >
+              <ChevronRight
+                aria-hidden
+                className={cx('size-4 shrink-0 transition-transform', hidden ? undefined : 'rotate-90')}
+              />
+              {header}
+            </button>
+          ) : (
+            <span className="min-w-0 flex-1">{header}</span>
+          )}
+          {actions ? (
+            <span className="flex shrink-0 items-center gap-1">{actions}</span>
+          ) : null}
+          {/* Слот действий подзаголовка: сюда portal'ятся кнопки содержимого */}
+          <span ref={setActionsHost} className="flex shrink-0 items-center gap-1" />
+        </h3>
         {isCollapsible ? (
-          <button
-            type="button"
-            aria-expanded={!hidden}
-            aria-controls={contentId}
-            title={hidden ? 'Развернуть секцию' : 'Свернуть секцию'}
-            className="flex w-full cursor-pointer items-center gap-1 text-left uppercase hover:text-fg"
-            onClick={() => setPanelCollapsed(panelKey, !collapsed)}
-          >
-            <ChevronRight
-              aria-hidden
-              className={cx('size-4 shrink-0 transition-transform', hidden ? undefined : 'rotate-90')}
-            />
-            {header}
-          </button>
+          // Раскрытая обёртка прозрачна для раскладки (`contents`), свёрнутая скрыта `hidden`
+          <div id={contentId} hidden={hidden} className={hidden ? undefined : 'contents'}>
+            {content}
+          </div>
         ) : (
-          header
+          content
         )}
-      </h3>
-      {isCollapsible ? (
-        // Раскрытая обёртка прозрачна для раскладки (`contents`), свёрнутая скрыта `hidden`
-        <div id={contentId} hidden={hidden} className={hidden ? undefined : 'contents'}>
-          {content}
-        </div>
-      ) : (
-        content
-      )}
-    </section>
+      </section>
+    </PanelActionsHostContext.Provider>
   )
 }
 

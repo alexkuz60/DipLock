@@ -185,7 +185,6 @@ describe('вьюер треков', () => {
     renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     expect(screen.getByText('Окно 3.75–6.25 с')).toBeInTheDocument()
-    expect(screen.getByText('×4')).toBeInTheDocument()
   })
 
   /**
@@ -512,16 +511,6 @@ describe('вьюер треков', () => {
     expect(call[0][2].length).toBe(6)
     expect(Math.max(...call[0][2])).toBe(60)
   })
-
-  it('подписывает источник: огибающая с числом точек против полного сигнала', () => {
-    paramsState({ visibleChannels: ['F3'] })
-    const { unmount } = renderWithProviders(<TrackStack signal={frameFixture()} />)
-    expect(screen.getByTestId('signal-source')).toHaveTextContent('полный сигнал')
-    unmount()
-
-    renderWithProviders(<TrackStack signal={decimatedFrameFixture()} />)
-    expect(screen.getByTestId('signal-source')).toHaveTextContent('огибающая, 100 т/канал')
-  })
 })
 
 /**
@@ -559,7 +548,7 @@ describe('слои результата вьюера', () => {
     }
   }
 
-  it('рисует зоны, легенду с числом зон по типам и помечает источник фикстурой', () => {
+  it('рисует зоны и легенду с числом зон по типам', () => {
     paramsState({ visibleChannels: ['F3', 'F4', 'C3'] })
     renderWithProviders(<TrackStack signal={frameFixture()} layers={layersFixture()} />)
 
@@ -569,7 +558,8 @@ describe('слои результата вьюера', () => {
     expect(screen.getByTestId('legend-zscore_outlier')).toHaveTextContent('1')
     expect(screen.getByTestId('legend-peak_to_peak')).toHaveTextContent('0')
     expect(screen.getByTestId('legend-ica_eog')).toHaveTextContent('0')
-    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
+    // Пометка источника слоёв («слои: …») переехала в секцию «Справка» панели опций
+    expect(screen.queryByText(/^слои:/)).not.toBeInTheDocument()
   })
 
   it('границы эпох: первая совпадает с краем записи и не рисуется, штриховка — только отброшенные', () => {
@@ -723,7 +713,6 @@ describe('слои результата вьюера', () => {
     renderWithProviders(<TrackStack signal={frameFixture()} />)
 
     expect(screen.getByTestId('track-layers')).toBeInTheDocument()
-    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
     // Фикстура даёт минимум две зоны каждого типа — легенда не пустая; ICA —
     // информационный чип (зона контрактом не создаётся, счётчик компонент = 0)
     expect(screen.getByTestId('legend-zscore_outlier').textContent).toMatch(/[2-4]/)
@@ -742,14 +731,6 @@ describe('слои результата вьюера', () => {
     expect(screen.queryByText(/^слои:/)).not.toBeInTheDocument()
     // Сетка эпох — геометрия по параметру панели, а не результат: она остаётся
     expect(screen.getByTestId('epoch-edge-1')).toBeInTheDocument()
-  })
-
-  it('результат расчёта помечается в подписи иначе, чем фикстура', () => {
-    paramsState({ visibleChannels: ['F3'] })
-    const layers: EdfViewerLayers = { ...layersFixture(), source: 'result' }
-    renderWithProviders(<TrackStack signal={frameFixture()} layers={layers} />)
-
-    expect(screen.getByText('слои: результат расчёта')).toBeInTheDocument()
   })
 
   it('Ctrl+двойной клик блокирует эпоху под курсором, повторный — снимает правку', () => {
@@ -1119,6 +1100,32 @@ describe('оверлеи развёрнутого трека (срез 5)', () =
     // Полоса зоны — кнопка: клик по кнопке уровнем не считается
     expect(screen.queryByTestId('level-line')).not.toBeInTheDocument()
   })
+
+  it('клик измеряет уровень, но масштаб и режим амплитуды не трогает (откат 30.09.2026)', async () => {
+    const user = userEvent.setup()
+    paramsState({ visibleChannels: ['F3'], timeLevel: 2, amplitudeMode: 'per_channel' })
+    renderWithProviders(<TrackStack signal={frameFixture()} />)
+
+    const plot = screen.getByTestId('track-plot-F3')
+    plot.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 960, height: 512, right: 960, bottom: 512 }) as DOMRect
+
+    // Свёрнутый трек не измеряется вовсе — ни линии уровня, ни правок параметров
+    await user.pointer({ keys: '[MouseLeft]', target: plot, coords: { clientX: 300, clientY: 51 } })
+    expect(screen.queryByTestId('level-line')).not.toBeInTheDocument()
+    expect(useEdfParams.getState().params.amplitudeMode).toBe('per_channel')
+    expect(useEdfParams.getState().params.amplitudeScaleUv).toBe(50)
+
+    await user.click(screen.getByTestId('track-expand-F3'))
+
+    // Клик развёрнутого трека ставит линию уровня, но заполнять масштаб «Общий»
+    // не должен: вертикальный зум канала отложен к разделу «ЭЭГ»/Спектр
+    await user.pointer({ keys: '[MouseLeft]', target: plot, coords: { clientX: 300, clientY: 51 } })
+    expect(screen.getByTestId('level-line')).toBeInTheDocument()
+    const params = useEdfParams.getState().params
+    expect(params.amplitudeMode).toBe('per_channel')
+    expect(params.amplitudeScaleUv).toBe(50)
+  })
 })
 
 describe('слой событий записи (N2/2.7)', () => {
@@ -1195,7 +1202,7 @@ describe('трек ЧСС (пульс)', () => {
     })
   })
 
-  it('ряд из результата стадии — трек «ЧСС» последним и плашка со значением', () => {
+  it('ряд из результата стадии — трек «ЧСС» последним', () => {
     renderWithProviders(<TrackStack signal={frameFixture()} layers={layersWith(heartRate)} />)
 
     expect(screen.getByTestId('track-heart-rate')).toBeInTheDocument()
@@ -1205,7 +1212,8 @@ describe('трек ЧСС (пульс)', () => {
       .getAllByTestId(/^track-label-/)
       .map((node) => node.textContent)
     expect(labels).toEqual(['F3', 'ЧСС'])
-    expect(screen.getByText(/ЧСС: 73 уд\/мин/)).toBeInTheDocument()
+    // Инфо-пиуля ЧСС убрана из шапки (правка 29.09.2026): значение — в тутипе трека
+    expect(screen.queryByText(/ЧСС:/)).not.toBeInTheDocument()
   })
 
   it('чекбокс «Трек ЧСС» выключает отрисовку (отрисовка — расчёт не трогает)', () => {
@@ -1213,14 +1221,13 @@ describe('трек ЧСС (пульс)', () => {
     renderWithProviders(<TrackStack signal={frameFixture()} layers={layersWith(heartRate)} />)
 
     expect(screen.queryByTestId('track-heart-rate')).not.toBeInTheDocument()
-    expect(screen.queryByText(/ЧСС: 73 уд\/мин/)).not.toBeInTheDocument()
   })
 
-  it('ритм не извлечён (null) — трека нет, плашка «ЧСС не извлечена»', () => {
+  it('ритм не извлечён (null) — трека нет, инфо-плашки в шапке больше нет', () => {
     renderWithProviders(<TrackStack signal={frameFixture()} layers={layersWith(null)} />)
 
     expect(screen.queryByTestId('track-heart-rate')).not.toBeInTheDocument()
-    expect(screen.getByText('ЧСС не извлечена')).toBeInTheDocument()
+    expect(screen.queryByText('ЧСС не извлечена')).not.toBeInTheDocument()
   })
 
   it('слот не заполнялся (не было стадии artifacts) — ни трека, ни плашек', () => {

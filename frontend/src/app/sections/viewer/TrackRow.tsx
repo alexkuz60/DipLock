@@ -68,7 +68,7 @@ export type TrackRowProps = {
   epochFrames?: EpochCell[]
   /** Линия уровня: yPx — CSS-пиксели от верха чарта, levelUv — уровень в мкВ */
   levelMark?: { yPx: number; levelUv: number } | null
-  /** Клик по развёрнутому треку отдаёт уровень сигнала под курсором */
+  /** Клик по развёрнутому треку отдаёт уровень сигнала под курсором (линия уровня) */
   onPickLevel?: (mark: { yPx: number; levelUv: number }) => void
   /** Тянули ли окно: клик после drag не ставит линию уровня (как и курсор) */
   wasDragged?: () => boolean

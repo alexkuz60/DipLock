@@ -8,26 +8,39 @@
  * стор записи (`artifactNav`, `requestNav`), потому что центр окна — локальное
  * состояние вьюера (`TrackStack`), а не панели.
  */
-import { useEdfParams } from '@/shared/state/edfParams'
+import { AMPLITUDE_MODE_OPTIONS, useEdfParams } from '@/shared/state/edfParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { ZoomNavControls } from '@/shared/ui/ZoomNavControls'
 
 export function EdfZoomSelect() {
   const level = useEdfParams((state) => state.params.timeLevel)
   const navMode = useEdfParams((state) => state.params.navMode)
+  const amplitudeMode = useEdfParams((state) => state.params.amplitudeMode)
   const setParams = useEdfParams((state) => state.setParams)
   const requestNav = useEdfRecording((state) => state.requestNav)
   const artifactNav = useEdfRecording((state) => state.artifactNav)
 
   return (
-    <ZoomNavControls
-      timeLevel={level}
-      navMode={navMode}
-      step={artifactNav}
-      onTimeLevel={(next) => setParams({ timeLevel: next })}
-      onNav={requestNav}
-      zoomLabel="Зум отрисовки ЭЭГ"
-      zoomTitle="Масштаб по времени: ×1 — вся сессия, ×16 — максимальное приближение"
-    />
+    <div className="flex flex-wrap items-center gap-3">
+      <ZoomNavControls
+        timeLevel={level}
+        navMode={navMode}
+        step={artifactNav}
+        onTimeLevel={(next) => setParams({ timeLevel: next })}
+        onNav={requestNav}
+        zoomLabel="Зум отрисовки ЭЭГ"
+        zoomTitle="Масштаб по времени: ×1 — вся сессия, ×16 — максимальное приближение"
+      />
+      {/* Шкала амплитуды — тот же параметр, что и секция «Отображение» панели
+          (просьба владельца 30.09.2026: быстрый доступ к «Общий/Авто») */}
+      <SegmentedControl
+        layout="inline"
+        label="Амплитуда"
+        value={amplitudeMode}
+        options={AMPLITUDE_MODE_OPTIONS}
+        onChange={(value) => setParams({ amplitudeMode: value })}
+      />
+    </div>
   )
 }

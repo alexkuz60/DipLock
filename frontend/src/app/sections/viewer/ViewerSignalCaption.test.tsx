@@ -91,4 +91,45 @@ describe('ViewerSignalCaption', () => {
     renderWithProviders(<ViewerSignalCaption filterDesign={null} layer="raw" stale />)
     expect(screen.queryByText('слой по прежним параметрам')).not.toBeInTheDocument()
   })
+
+  // Пиуля «слои:» переехала сюда из инфо-строки вьюера (правка 29.09.2026):
+  // секция «Справка» панели опций называет источник зон и штриховки
+  it('пиуля «слои:» называет источник: результат расчёта или демо-фикстура', () => {
+    const { unmount } = renderWithProviders(
+      <ViewerSignalCaption
+        filterDesign={null}
+        layers={{
+          source: 'result',
+          artifacts: [],
+          rejectedEpochs: [],
+          rejectChannels: {},
+          epochLengthMs: null,
+        }}
+      />,
+    )
+    const pill = screen.getByText('слои: результат расчёта')
+    expect(pill.closest('span[title]')?.getAttribute('title')).toContain(
+      'результата задачи предподготовки',
+    )
+    unmount()
+
+    const demo = renderWithProviders(
+      <ViewerSignalCaption
+        filterDesign={null}
+        layers={{
+          source: 'demo',
+          artifacts: [],
+          rejectedEpochs: [],
+          rejectChannels: {},
+          epochLengthMs: null,
+        }}
+      />,
+    )
+    expect(screen.getByText('слои: демо-фикстура')).toBeInTheDocument()
+    demo.unmount()
+
+    // Слоёв нет (запись до первого расчёта) — пометки нет
+    renderWithProviders(<ViewerSignalCaption filterDesign={null} />)
+    expect(screen.queryByText(/^слои:/)).not.toBeInTheDocument()
+  })
 })
