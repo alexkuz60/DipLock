@@ -33,6 +33,7 @@ from app.services.evoked import EvokedParams, run_evoked
 from app.services.job_manager import ProgressCallback, job_manager
 from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recordings import Recording, recording_registry
+from app.services.report import ReportParams, run_report
 from app.services.spectral import SpectrumParams, compute_spectrum
 from app.services.spectrogram import SpectrogramParams, compute_spectrogram
 
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 # Виды задач, чей результат лежит рядом с записью, а не в `/jobs/{id}/result`
 RECORDING_JOB_KINDS: tuple[str, ...] = (
     "preprocess", "spectrum", "dipoles", "spectrogram", "dipole_refine", "evoked",
+    "report",
 )
 
 
@@ -100,6 +102,13 @@ def worker_dipole_refine(
     return refine_dipole_point(recording, settings, params, progress)
 
 
+def worker_report(
+    progress: ProgressCallback, recording: Recording, params: ReportParams,
+) -> dict[str, Any]:
+    """Воркер автоотчёта (поток): часть 1 (стадии) + пакет диполей + MNE.Report."""
+    return run_report(recording, settings, params, progress)
+
+
 WORKERS: dict[str, Callable[..., dict[str, Any]]] = {
     "dipole_refine": worker_dipole_refine,
     "preprocess": worker_preprocess,
@@ -107,6 +116,7 @@ WORKERS: dict[str, Callable[..., dict[str, Any]]] = {
     "spectrogram": worker_spectrogram,
     "dipoles": worker_dipole_scan,
     "evoked": worker_evoked,
+    "report": worker_report,
 }
 
 

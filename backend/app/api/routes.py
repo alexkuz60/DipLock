@@ -44,6 +44,7 @@ from app.api.params import (
     evoked_params,
     parse_filter_band,
     preprocess_params,
+    report_params,
     signals_layer_query,
     spectrogram_params,
     spectrum_params,
@@ -84,6 +85,7 @@ from app.schemas.analysis import (
     PreprocessStage,
     RecordingMeta,
     RecordingSignalsHeader,
+    ReportResult,
     SpectrogramGridHeader,
     SpectrogramResult,
     SpectrumResult,
@@ -117,6 +119,7 @@ from app.services.recording_signals import (
     build_signal_blob,
 )
 from app.services.recordings import Recording, ensure_record_events, recording_registry
+from app.services.report import read_report_html
 from app.services.spectral import cached_topomap, head_map_positions
 from app.services.spectrogram import (
     cached_grid as cached_spectrogram_grid,
@@ -689,6 +692,117 @@ async def get_dipole_refine_result(recording_id: str, job_id: str) -> DipoleRefi
     """«Было/стало»: узел сетки и уточнённая BEM-точка. 409 — задача идёт/упала."""
     job = recording_job_result(recording_id, job_id, "dipole_refine")
     return DipoleRefineResult(**job.result)
+
+
+@router.post(
+    "/recordings/{recording_id}/report", status_code=202, response_model=JobCreated,
+    summary="Собрать сквозной автоотчёт (MNE.Report + пакет диполей по полосам)",
+)
+async def create_report_job(
+    recording_id: str,
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
+    z_threshold: float = Form(5.0),
+    pp_threshold_uv: float = Form(100.0),
+    flat_line_uv: float = Form(5.0),
+    flat_line_ms: float = Form(200.0),
+    run_ica: bool = Form(False, description="ICA-ветка детекции (тяжёлая — по умолчанию выключена)"),
+    epoch_length_ms: float = Form(1000.0, description="Длина эпохи (часть 1 и пакет)"),
+    notch_harmonics: int = Form(0, description="Гармоники notch (100/150/200 Гц), 0–4"),
+    bad_channels: str | None = Form(None, description="Плохие каналы через запятую"),
+    interpolate_bads: bool = Form(False, description="Интерполировать bad-каналы (до ICA/SSP)"),
+    clean_method: str = Form("none", description="Очистка артефактов: none | ica | ssp"),
+    ica_n_components: int = Form(0, description="Компонент ICA (0 — auto)"),
+    exclude_zone_ids: str | None = Form(
+        None, description="Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)",
+    ),
+    grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг объёмной сетки поиска, мм"),
+    bands: str | None = Form(
+        None,
+        description="Ключи полос пакета через запятую (δ,θ,…); пусто — все полосы /meta",
+    ),
+) -> JobCreated:
+    """Автоотчёт раздела «Итоги» — одна задача в три ступени.
+
+    Ступени: три стадии препроцессинга (часть 1 — **те же** параметры и числа,
+    что раздел EDF: форма здесь повторяет форму стадий; нарезка только
+    ``fixed``) → пакетный быстрый расчёт диполей по полосам (часть 2,
+    агрегаты структур/BA) → сборка самодостаточного ``mne.Report`` в
+    дисковый кэш. Результат задачи — агрегаты и ссылка ``html_url``;
+    сам HTML — отдельный ассет с ETag ниже.
+    """
+    recording = require_recording(recording_id)
+    params = report_params(
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
+        z_threshold=z_threshold, pp_threshold_uv=pp_threshold_uv,
+        flat_line_uv=flat_line_uv, flat_line_ms=flat_line_ms,
+        run_ica=run_ica, epoch_length_ms=epoch_length_ms,
+        notch_harmonics=notch_harmonics, bad_channels=bad_channels,
+        interpolate_bads=interpolate_bads,
+        clean_method=clean_method, ica_n_components=ica_n_components,
+        exclude_zone_ids=exclude_zone_ids,
+        grid_mm=grid_mm, bands=bands,
+    )
+    return submit_recording_job(
+        "report", recording, params, meta={"bands": params.band_keys},
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/report/{job_id}", response_model=ReportResult,
+    summary="Результат автоотчёта (агрегаты полос и ссылка на HTML)",
+)
+async def get_report_result(recording_id: str, job_id: str) -> ReportResult:
+    """Сводка отчёта: QC, эпохи, агрегаты по полосам. 409 — задача идёт/упала.
+
+    ``html_url`` собирается здесь, а не в воркере: воркер не знает ``job_id``
+    (задача создаётся после него), а ссылка адресуется именно задаче.
+    """
+    job = recording_job_result(recording_id, job_id, "report")
+    result = dict(job.result)
+    result["html_url"] = (
+        f"{settings.api_prefix}/recordings/{recording_id}/report/{job_id}/html"
+    )
+    return ReportResult(**result)
+
+
+@router.get(
+    "/recordings/{recording_id}/report/{job_id}/html",
+    response_class=Response,
+    responses={200: {"content": {"text/html": {}}}},
+    summary="HTML автоотчёта: самодостаточный MNE.Report (ETag)",
+)
+async def get_report_html(
+    recording_id: str,
+    job_id: str,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """HTML отчёта из дискового кэша с ETag/304 (единая отдача — ``assets.py``).
+
+    Печать попадает в результат задачи (``html_sig``): ассет соответствует
+    ровно тому расчёту, который показан на экране. Кэш очищается вместе с
+    записью — тогда ответ 404 с просьбой собрать отчёт заново.
+    """
+    job = recording_job_result(recording_id, job_id, "report")
+    signature = str((job.result or {}).get("html_sig") or "")
+    cached = await asyncio.to_thread(read_report_html, settings, recording_id, signature)
+    if cached is None:
+        raise HTTPException(
+            status_code=404,
+            detail="HTML автоотчёта очищен — соберите отчёт заново",
+        )
+    data, version = cached
+    return asset_response(
+        data,
+        version,
+        if_none_match=if_none_match,
+        media_type="text/html",
+        cache_control=CACHE_PRIVATE_DAY,
+    )
 
 
 @router.post(

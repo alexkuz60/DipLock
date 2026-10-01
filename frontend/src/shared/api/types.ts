@@ -140,6 +140,15 @@ export type ContourSlice = Schemas['ContourSliceOut']
  */
 export type SpectrogramResult = Schemas['SpectrogramResult']
 
+/**
+ * Сквозной автоотчёт («Итоги», `GET /recordings/{id}/report/{job}`): агрегаты
+ * QC/эпох и по каждой полосе пакета; сам HTML — отдельный ассет `html_url`.
+ */
+export type ReportResult = Schemas['ReportResult']
+
+/** Агрегаты одной полосы пакета в части 2 отчёта */
+export type ReportBandSummary = Schemas['ReportBandSummaryOut']
+
 /** Статусы проверок готовности (GET /init-status) */
 export type CheckStatus = 'ready' | 'pending' | 'loading' | 'error' | 'unknown'
 

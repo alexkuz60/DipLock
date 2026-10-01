@@ -86,7 +86,7 @@ def test_sweep_removes_orphan_caches_and_keeps_live_ones(isolated, edf_file):
     assert not os.path.exists(os.path.join(cache, "spectra", "ghost"))
     assert os.path.isfile(os.path.join(cache, "surface", "surface-abc.json"))
     assert os.path.isfile(os.path.join(cache, "journal.jsonl"))
-    assert RECORDING_CACHE_SUBDIRS == ("signals", "spectra", "spectrograms", "prepared")
+    assert RECORDING_CACHE_SUBDIRS == ("signals", "spectra", "spectrograms", "prepared", "reports")
 
 
 def test_sweep_removes_stale_upload_dirs_and_keeps_root_file(isolated, edf_file):

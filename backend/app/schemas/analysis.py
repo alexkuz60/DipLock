@@ -1306,6 +1306,104 @@ class ArtifactThresholds(BaseModel):
     )
 
 
+# --- Сквозной автоотчёт (раздел «Итоги», задача ``kind=report``) ---------------
+
+
+class ReportQcSummaryOut(BaseModel):
+    """Числа QC части 1 отчёта — те же, что стадия ``artifacts`` раздела EDF."""
+
+    status: RecordStatus = Field(description="Светофор записи: ok | warn | bad")
+    reasons: list[str] = Field(default_factory=list, description="Причины вердикта")
+    good_data_percent: float = Field(description="Доля чистых данных, %")
+    line_noise_level: float | None = Field(
+        default=None, description="Сетевой шум: пик 50/60 Гц к фону (≥1); None — не измерен",
+    )
+    snr_db_median: float | None = Field(default=None, description="Медиана SNR по каналам, дБ")
+    bad_channels: list[str] = Field(default_factory=list, description="Плохие каналы (авто)")
+    dead_channels: list[str] = Field(default_factory=list, description="Мёртвые каналы")
+    artifact_types: dict[str, int] = Field(
+        default_factory=dict, description="Счётчики зон по видам (ключи — ArtifactKind)",
+    )
+    artifact_share_by_kind: dict[str, float] = Field(
+        default_factory=dict, description="Средняя по каналам доля времени по видам, 0..1",
+    )
+    n_channels: int = Field(description="Каналов после монтажа 10-20")
+
+
+class ReportNameCountOut(BaseModel):
+    """Строка «название | эпох активно | доля | медианный GOF» одной полосы."""
+
+    name: str = Field(description="Анатомическая структура или поле Бродмана")
+    count: int = Field(description="Эпох, чья лучшая точка локализована сюда")
+    share: float = Field(description="Доля от числа точек полосы, 0..1")
+    median_gof: float | None = Field(
+        default=None,
+        description=(
+            "Медиана GOF по точкам названия **внутри своей полосы**: между полосами "
+            "GOF не сравним (docs/rules/dipoles.md, принцип 3), RIV — сравним"
+        ),
+    )
+
+
+class ReportDynamicsOut(BaseModel):
+    """Динамика активности структуры: доля эпох по 5 равным бинам времени."""
+
+    name: str
+    shares: list[float] = Field(
+        description="Доля эпох бина, где структура была лучшей локацией, 0..1 (5 бинов)",
+    )
+
+
+class ReportBandSummaryOut(BaseModel):
+    """Агрегаты одной полосы пакета в части 2 отчёта."""
+
+    band_key: str = Field(description="Ключ полосы: freq_bands / functional_bands")
+    band_hz: list[float] = Field(description="Границы полосы, Гц")
+    n_epochs_used: int = Field(description="Эпох прошло отбраковку")
+    n_points: int = Field(description="Точек расчёта (одна на эпоху)")
+    n_no_attribution: int = Field(description="Точек без названной структуры")
+    median_gof: float | None = None
+    median_riv: float | None = Field(
+        default=None, description="Медиана RIV — единственный кросс-полосной фильтр (2.6/N23)",
+    )
+    top_structures: list[ReportNameCountOut] = Field(default_factory=list)
+    top_brodmann: list[ReportNameCountOut] = Field(default_factory=list)
+    dynamics: list[ReportDynamicsOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ReportResult(BaseModel):
+    """Результат задачи автоотчёта (``kind=report``).
+
+    HTML отчёта — отдельный ассет по ``html_url`` (ETag из ``report_version``):
+    документ самодостаточный и тяжёлый, поэтому в JSON идут только агрегаты
+    для шапки раздела и ссылка.
+    """
+
+    recording_id: str
+    filename: str = Field(description="Имя файла записи (в заголовке отчёта)")
+    html_sig: str = Field(description="Отпечаток параметров — имя HTML в дисковом кэше")
+    report_version: str = Field(description="ETag HTML (хеш содержимого)")
+    html_url: str = Field(
+        default="", description="GET HTML отчёта (заполняется роутом по job_id)",
+    )
+    qc: ReportQcSummaryOut = Field(description="Числа QC части 1 (светофор, каналы, виды)")
+    filter_band_hz: list[float] | None = Field(
+        default=None, description="Полоса пропускания части 1; None — без band-pass",
+    )
+    notch_hz: float | None = None
+    reference: str = "average"
+    filter_method: str = Field(default="none", description="Метод полосового фильтра")
+    n_epochs_total: int = Field(description="Эпох нарезано")
+    n_epochs_used: int = Field(description="Эпох прошло отбраковку")
+    rejected_epochs: int = Field(description="Эпох отброшено (BAD_)")
+    bands: list[ReportBandSummaryOut] = Field(
+        default_factory=list, description="Агрегаты пакета по полосам (часть 2)",
+    )
+    warnings: list[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
+
+
 class MetaResponse(BaseModel):
     """GET /api/v1/meta — версия схемы, окружение и параметры (для UI и provenance)."""
 

@@ -1012,6 +1012,165 @@
         }
       }
     },
+    "/api/v1/recordings/{recording_id}/report": {
+      "post": {
+        "summary": "Собрать сквозной автоотчёт (MNE.Report + пакет диполей по полосам)",
+        "description": "Автоотчёт раздела «Итоги» — одна задача в три ступени.\n\nСтупени: три стадии препроцессинга (часть 1 — **те же** параметры и числа,\nчто раздел EDF: форма здесь повторяет форму стадий; нарезка только\n``fixed``) → пакетный быстрый расчёт диполей по полосам (часть 2,\nагрегаты структур/BA) → сборка самодостаточного ``mne.Report`` в\nдисковый кэш. Результат задачи — агрегаты и ссылка ``html_url``;\nсам HTML — отдельный ассет с ETag ниже.",
+        "operationId": "create_report_job_api_v1_recordings__recording_id__report_post",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_report_job_api_v1_recordings__recording_id__report_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/report/{job_id}": {
+      "get": {
+        "summary": "Результат автоотчёта (агрегаты полос и ссылка на HTML)",
+        "description": "Сводка отчёта: QC, эпохи, агрегаты по полосам. 409 — задача идёт/упала.\n\n``html_url`` собирается здесь, а не в воркере: воркер не знает ``job_id``\n(задача создаётся после него), а ссылка адресуется именно задаче.",
+        "operationId": "get_report_result_api_v1_recordings__recording_id__report__job_id__get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/report/{job_id}/html": {
+      "get": {
+        "summary": "HTML автоотчёта: самодостаточный MNE.Report (ETag)",
+        "description": "HTML отчёта из дискового кэша с ETag/304 (единая отдача — ``assets.py``).\n\nПечать попадает в результат задачи (``html_sig``): ассет соответствует\nровно тому расчёту, который показан на экране. Кэш очищается вместе с\nзаписью — тогда ответ 404 с просьбой собрать отчёт заново.",
+        "operationId": "get_report_html_api_v1_recordings__recording_id__report__job_id__html_get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/recordings/{recording_id}/spectrogram": {
       "post": {
         "summary": "Запустить расчёт спектрограммы канала (STFT)",
@@ -3181,6 +3340,166 @@
           "file"
         ],
         "title": "Body_create_recording_api_v1_recordings_post"
+      },
+      "Body_create_report_job_api_v1_recordings__recording_id__report_post": {
+        "properties": {
+          "band_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Min",
+            "description": "Нижняя граница полосы, Гц; без пары — без фильтра"
+          },
+          "band_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Max",
+            "description": "Верхняя граница полосы, Гц"
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz",
+            "description": "Сетевой фильтр 50/60 Гц (None — выключен)"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference",
+            "description": "average | custom",
+            "default": "average"
+          },
+          "reference_channels": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Channels",
+            "description": "Каналы референса через запятую"
+          },
+          "z_threshold": {
+            "type": "number",
+            "title": "Z Threshold",
+            "default": 5.0
+          },
+          "pp_threshold_uv": {
+            "type": "number",
+            "title": "Pp Threshold Uv",
+            "default": 100.0
+          },
+          "flat_line_uv": {
+            "type": "number",
+            "title": "Flat Line Uv",
+            "default": 5.0
+          },
+          "flat_line_ms": {
+            "type": "number",
+            "title": "Flat Line Ms",
+            "default": 200.0
+          },
+          "run_ica": {
+            "type": "boolean",
+            "title": "Run Ica",
+            "description": "ICA-ветка детекции (тяжёлая — по умолчанию выключена)",
+            "default": false
+          },
+          "epoch_length_ms": {
+            "type": "number",
+            "title": "Epoch Length Ms",
+            "description": "Длина эпохи (часть 1 и пакет)",
+            "default": 1000.0
+          },
+          "notch_harmonics": {
+            "type": "integer",
+            "title": "Notch Harmonics",
+            "description": "Гармоники notch (100/150/200 Гц), 0–4",
+            "default": 0
+          },
+          "bad_channels": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bad Channels",
+            "description": "Плохие каналы через запятую"
+          },
+          "interpolate_bads": {
+            "type": "boolean",
+            "title": "Interpolate Bads",
+            "description": "Интерполировать bad-каналы (до ICA/SSP)",
+            "default": false
+          },
+          "clean_method": {
+            "type": "string",
+            "title": "Clean Method",
+            "description": "Очистка артефактов: none | ica | ssp",
+            "default": "none"
+          },
+          "ica_n_components": {
+            "type": "integer",
+            "title": "Ica N Components",
+            "description": "Компонент ICA (0 — auto)",
+            "default": 0
+          },
+          "exclude_zone_ids": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Zone Ids",
+            "description": "Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)"
+          },
+          "grid_mm": {
+            "type": "number",
+            "maximum": 20.0,
+            "minimum": 2.0,
+            "title": "Grid Mm",
+            "description": "Шаг объёмной сетки поиска, мм",
+            "default": 7.0
+          },
+          "bands": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bands",
+            "description": "Ключи полос пакета через запятую (δ,θ,…); пусто — все полосы /meta"
+          }
+        },
+        "type": "object",
+        "title": "Body_create_report_job_api_v1_recordings__recording_id__report_post"
       },
       "Body_create_spectrogram_job_api_v1_recordings__recording_id__spectrogram_post": {
         "properties": {
@@ -6357,6 +6676,375 @@
         ],
         "title": "RecordingSignalsHeader",
         "description": "Заголовок бинарного ответа ``GET /recordings/{id}/signals``.\n\nОтвет — не JSON, а компактный контейнер float32 (иначе 64k точек × 18\nканалов не влезают в разумный payload):\n\n``magic 'DPS1'`` | ``uint32 LE len(header)`` | ``header`` (JSON UTF-8) |\n``payload`` float32 LE, channel-major: для каждого канала из ``channels``\nсначала ``min`` (только при ``decimated``), затем ``max``.\n\nМинимумы и максимумы считаются по временным корзинам (огибающая), поэтому\nпики артефактов не теряются при прореживании — это требование вьюера\n(docs/ui.md §8). При ``decimated=false`` каждая корзина содержит один\nотсчёт и ``min`` не передаётся: ``min == max``.\n\n``layer`` — слой видимости вьюера (шаг 2 плана): ``raw`` (сырая пирамида,\nN14) | ``cleaned`` (подготовленный сигнал расчётов) | ``diff`` (вклад\nочистки: без очистки − с очисткой). Старые кэшированные ответы поля не\nсодержат — клиент читает его как ``raw``."
+      },
+      "ReportBandSummaryOut": {
+        "properties": {
+          "band_key": {
+            "type": "string",
+            "title": "Band Key",
+            "description": "Ключ полосы: freq_bands / functional_bands"
+          },
+          "band_hz": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Band Hz",
+            "description": "Границы полосы, Гц"
+          },
+          "n_epochs_used": {
+            "type": "integer",
+            "title": "N Epochs Used",
+            "description": "Эпох прошло отбраковку"
+          },
+          "n_points": {
+            "type": "integer",
+            "title": "N Points",
+            "description": "Точек расчёта (одна на эпоху)"
+          },
+          "n_no_attribution": {
+            "type": "integer",
+            "title": "N No Attribution",
+            "description": "Точек без названной структуры"
+          },
+          "median_gof": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Gof"
+          },
+          "median_riv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Riv",
+            "description": "Медиана RIV — единственный кросс-полосной фильтр (2.6/N23)"
+          },
+          "top_structures": {
+            "items": {
+              "$ref": "#/components/schemas/ReportNameCountOut"
+            },
+            "type": "array",
+            "title": "Top Structures"
+          },
+          "top_brodmann": {
+            "items": {
+              "$ref": "#/components/schemas/ReportNameCountOut"
+            },
+            "type": "array",
+            "title": "Top Brodmann"
+          },
+          "dynamics": {
+            "items": {
+              "$ref": "#/components/schemas/ReportDynamicsOut"
+            },
+            "type": "array",
+            "title": "Dynamics"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "band_key",
+          "band_hz",
+          "n_epochs_used",
+          "n_points",
+          "n_no_attribution"
+        ],
+        "title": "ReportBandSummaryOut",
+        "description": "Агрегаты одной полосы пакета в части 2 отчёта."
+      },
+      "ReportDynamicsOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "shares": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Shares",
+            "description": "Доля эпох бина, где структура была лучшей локацией, 0..1 (5 бинов)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "shares"
+        ],
+        "title": "ReportDynamicsOut",
+        "description": "Динамика активности структуры: доля эпох по 5 равным бинам времени."
+      },
+      "ReportNameCountOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Анатомическая структура или поле Бродмана"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Эпох, чья лучшая точка локализована сюда"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share",
+            "description": "Доля от числа точек полосы, 0..1"
+          },
+          "median_gof": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Gof",
+            "description": "Медиана GOF по точкам названия **внутри своей полосы**: между полосами GOF не сравним (docs/rules/dipoles.md, принцип 3), RIV — сравним"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "count",
+          "share"
+        ],
+        "title": "ReportNameCountOut",
+        "description": "Строка «название | эпох активно | доля | медианный GOF» одной полосы."
+      },
+      "ReportQcSummaryOut": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "warn",
+              "bad"
+            ],
+            "title": "Status",
+            "description": "Светофор записи: ok | warn | bad"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons",
+            "description": "Причины вердикта"
+          },
+          "good_data_percent": {
+            "type": "number",
+            "title": "Good Data Percent",
+            "description": "Доля чистых данных, %"
+          },
+          "line_noise_level": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Noise Level",
+            "description": "Сетевой шум: пик 50/60 Гц к фону (≥1); None — не измерен"
+          },
+          "snr_db_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snr Db Median",
+            "description": "Медиана SNR по каналам, дБ"
+          },
+          "bad_channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Bad Channels",
+            "description": "Плохие каналы (авто)"
+          },
+          "dead_channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dead Channels",
+            "description": "Мёртвые каналы"
+          },
+          "artifact_types": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Artifact Types",
+            "description": "Счётчики зон по видам (ключи — ArtifactKind)"
+          },
+          "artifact_share_by_kind": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Artifact Share By Kind",
+            "description": "Средняя по каналам доля времени по видам, 0..1"
+          },
+          "n_channels": {
+            "type": "integer",
+            "title": "N Channels",
+            "description": "Каналов после монтажа 10-20"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "good_data_percent",
+          "n_channels"
+        ],
+        "title": "ReportQcSummaryOut",
+        "description": "Числа QC части 1 отчёта — те же, что стадия ``artifacts`` раздела EDF."
+      },
+      "ReportResult": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Имя файла записи (в заголовке отчёта)"
+          },
+          "html_sig": {
+            "type": "string",
+            "title": "Html Sig",
+            "description": "Отпечаток параметров — имя HTML в дисковом кэше"
+          },
+          "report_version": {
+            "type": "string",
+            "title": "Report Version",
+            "description": "ETag HTML (хеш содержимого)"
+          },
+          "html_url": {
+            "type": "string",
+            "title": "Html Url",
+            "description": "GET HTML отчёта (заполняется роутом по job_id)",
+            "default": ""
+          },
+          "qc": {
+            "$ref": "#/components/schemas/ReportQcSummaryOut",
+            "description": "Числа QC части 1 (светофор, каналы, виды)"
+          },
+          "filter_band_hz": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Band Hz",
+            "description": "Полоса пропускания части 1; None — без band-pass"
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference",
+            "default": "average"
+          },
+          "filter_method": {
+            "type": "string",
+            "title": "Filter Method",
+            "description": "Метод полосового фильтра",
+            "default": "none"
+          },
+          "n_epochs_total": {
+            "type": "integer",
+            "title": "N Epochs Total",
+            "description": "Эпох нарезано"
+          },
+          "n_epochs_used": {
+            "type": "integer",
+            "title": "N Epochs Used",
+            "description": "Эпох прошло отбраковку"
+          },
+          "rejected_epochs": {
+            "type": "integer",
+            "title": "Rejected Epochs",
+            "description": "Эпох отброшено (BAD_)"
+          },
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/ReportBandSummaryOut"
+            },
+            "type": "array",
+            "title": "Bands",
+            "description": "Агрегаты пакета по полосам (часть 2)"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "duration_sec_calc": {
+            "type": "number",
+            "title": "Duration Sec Calc",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "filename",
+          "html_sig",
+          "report_version",
+          "qc",
+          "n_epochs_total",
+          "n_epochs_used",
+          "rejected_epochs"
+        ],
+        "title": "ReportResult",
+        "description": "Результат задачи автоотчёта (``kind=report``).\n\nHTML отчёта — отдельный ассет по ``html_url`` (ETag из ``report_version``):\nдокумент самодостаточный и тяжёлый, поэтому в JSON идут только агрегаты\nдля шапки раздела и ссылка."
       },
       "SpectrogramGridHeader": {
         "properties": {

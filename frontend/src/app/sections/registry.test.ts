@@ -3,11 +3,14 @@ import { describe, expect, it } from 'vitest'
 import { MAIN_SECTIONS, SECTIONS, UTILITY_SECTIONS, getSection } from './registry'
 
 describe('реестр разделов', () => {
-  it('содержит 6 рабочих и 3 служебных раздела', () => {
-    expect(SECTIONS).toHaveLength(9)
-    expect(MAIN_SECTIONS).toHaveLength(6)
+  it('содержит 9 рабочих и 3 служебных раздела', () => {
+    expect(SECTIONS).toHaveLength(12)
+    expect(MAIN_SECTIONS).toHaveLength(9)
     expect(UTILITY_SECTIONS).toHaveLength(3)
     expect(UTILITY_SECTIONS.map((section) => section.id)).toEqual(['wiki', 'settings', 'server'])
+    expect(MAIN_SECTIONS.map((section) => section.id)).toEqual([
+      'home', 'edf', 'eeg', 'dipoles', 'table', 'group', 'summary', 'emolab', 'neuroaudio',
+    ])
   })
 
   it('идентификаторы и маршруты уникальны', () => {
@@ -15,8 +18,8 @@ describe('реестр разделов', () => {
     expect(new Set(SECTIONS.map((section) => section.route)).size).toBe(SECTIONS.length)
   })
 
-  it('у рабочих разделов хоткеи 1…6, у служебных — нет', () => {
-    expect(MAIN_SECTIONS.map((section) => section.hotkey)).toEqual(['1', '2', '3', '4', '5', '6'])
+  it('у рабочих разделов хоткеи 1…9, у служебных — нет', () => {
+    expect(MAIN_SECTIONS.map((section) => section.hotkey)).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9'])
     expect(UTILITY_SECTIONS.every((section) => section.hotkey === '')).toBe(true)
   })
 

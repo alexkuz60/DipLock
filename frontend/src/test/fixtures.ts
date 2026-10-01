@@ -15,6 +15,8 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  ReportBandSummary,
+  ReportResult,
   SpectrogramResult,
   SpectrumBandOut,
   SpectrumResult,
@@ -731,4 +733,48 @@ export const spectrogramJobFixture: JobStatus = {
   error: null,
   error_traceback: null,
   result_url: `/api/v1/recordings/${recordingFixture.recording_id}/spectrogram/job-spec-1`,
+}
+
+/** Агрегат одной полосы пакета в части 2 отчёта (топ структур/BA + динамика). */
+export function reportBandFixture(bandKey: string): ReportBandSummary {
+  const bounds = bandKey === 'alpha' ? [8, 16] : bandKey === 'beta' ? [16, 32] : [4, 8]
+  return {
+    band_key: bandKey,
+    band_hz: bounds,
+    n_epochs_used: 9,
+    n_points: 9,
+    n_no_attribution: 0,
+    median_gof: 0.82,
+    top_structures: [{ name: 'Precuneus', count: 5, share: 5 / 9, median_gof: 0.85 }],
+    top_brodmann: [{ name: 'BA7-lh', count: 5, share: 5 / 9, median_gof: 0.85 }],
+    dynamics: [{ name: 'Precuneus', shares: [0.2, 0.4, 0.6, 0.4, 0.2] }],
+    warnings: [],
+  }
+}
+
+/** Сквозной автоотчёт (раздел «Итоги»): агрегаты QC, эпох и полос пакета. */
+export function reportResultFixture(overrides: Partial<ReportResult> = {}): ReportResult {
+  return {
+    recording_id: recordingFixture.recording_id,
+    filename: 'probe.edf',
+    html_sig: 'sig1234abcd0000',
+    report_version: 'rep1234abcd0000',
+    html_url: `/api/v1/recordings/${recordingFixture.recording_id}/report/job-report-1/html`,
+    qc: {
+      status: 'ok',
+      reasons: [],
+      good_data_percent: 98.5,
+      snr_db_median: 12.5,
+      n_channels: 3,
+    },
+    reference: 'average',
+    filter_method: 'fir',
+    n_epochs_total: 10,
+    n_epochs_used: 9,
+    rejected_epochs: 1,
+    bands: [reportBandFixture('theta'), reportBandFixture('alpha')],
+    warnings: ['[Фильтр и референс] Переходный процесс FIR-фильтра: ±0.42 с у краёв записи'],
+    duration_sec_calc: 12.3,
+    ...overrides,
+  }
 }

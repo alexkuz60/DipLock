@@ -296,6 +296,13 @@ def _drop_signal_cache(recording_id: str) -> None:
         return
     clear_persist_cache(settings, recording_id)
 
+    # HTML автоотчёта (раздел «Итоги»): производный кэш записи, чистится вместе
+    try:
+        from app.services.report import clear_report_cache
+    except ImportError:  # pragma: no cover — модуль всегда есть
+        return
+    clear_report_cache(settings, recording_id)
+
 
 class RecordingRegistry:
     """In-memory реестр записей с TTL-очисткой каталогов и лимитом истории."""

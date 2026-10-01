@@ -25,6 +25,7 @@ from app.services.recording_signals import (
     SIGNAL_LAYERS,
     SignalsLayerQuery,
 )
+from app.services.report import ReportParams, report_band_catalog
 from app.services.spectral import SPECTRUM_PSD_METHODS, SpectrumParams
 from app.services.spectrogram import SpectrogramParams
 from app.services.spectrogram import validate_params as _validate_spectrogram_params
@@ -548,4 +549,74 @@ def dipole_refine_params(
         scan=scan,
         epoch_index=epoch_index,
         halfwin_ms=require_halfwin_ms(halfwin_ms),
+    )
+
+
+def report_band_keys(raw: str | None) -> list[str]:
+    """Ключи полос пакета из формы: пусто — все полосы, опечатка — 400.
+
+    Список — через запятую («δ,θ,α»); порядок и дубли сохраняются как есть
+    (сервис дедуплицирует, порядок читается в отчёте сверху вниз).
+    """
+    if not raw or not raw.strip():
+        return []
+    catalog = report_band_catalog(settings)
+    keys = [key.strip() for key in raw.split(",") if key.strip()]
+    unknown = [key for key in keys if key not in catalog]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Неизвестные полосы: {', '.join(unknown)}. "
+                f"Доступны: {', '.join(catalog)}"
+            ),
+        )
+    return keys
+
+
+def report_params(
+    *,
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
+    reference: str,
+    reference_channels: str | None,
+    z_threshold: float,
+    pp_threshold_uv: float,
+    flat_line_uv: float,
+    flat_line_ms: float,
+    run_ica: bool,
+    epoch_length_ms: float,
+    notch_harmonics: int = 0,
+    bad_channels: str | None = None,
+    interpolate_bads: bool = False,
+    clean_method: str = "none",
+    ica_n_components: int = 0,
+    exclude_zone_ids: str | None = None,
+    grid_mm: float = 7.0,
+    bands: str | None = None,
+) -> ReportParams:
+    """Параметры автоотчёта: часть 1 — те же параметры стадий EDF, часть 2 — пакет.
+
+    Разбор и проверки — общие с ``preprocess_params`` (пара границ, чистка,
+    длина эпохи из настроек): отчёт не изобретает своих правил. Нарезка —
+    только ``fixed``: событийный режим (ERP) в сквозной отчёт не входит и
+    поля формы ``epoch_mode``/``event_id`` здесь не читаются.
+    """
+    base = preprocess_params(
+        stage="epochs",
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
+        z_threshold=z_threshold, pp_threshold_uv=pp_threshold_uv,
+        flat_line_uv=flat_line_uv, flat_line_ms=flat_line_ms,
+        run_ica=run_ica,
+        epoch_length_ms=epoch_length_ms,
+        notch_harmonics=notch_harmonics, bad_channels=bad_channels,
+        interpolate_bads=interpolate_bads,
+        clean_method=clean_method, ica_n_components=ica_n_components,
+        exclude_zone_ids=exclude_zone_ids,
+        epoch_mode="fixed",
+    )
+    return ReportParams(
+        preprocess=base, grid_mm=grid_mm, band_keys=report_band_keys(bands),
     )

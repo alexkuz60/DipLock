@@ -18,6 +18,7 @@ import type {
   MetaResponse,
   PreprocessResult,
   RecordingMeta,
+  ReportResult,
   SignalLayer,
   SignalsPrepQuery,
   SpectrogramResult,
@@ -105,6 +106,7 @@ export type RecordingJobKind =
   | 'spectrogram'
   | 'dipole_refine'
   | 'evoked'
+  | 'report'
 
 /**
  * Пара запросов «запустить задачу / прочитать результат» (A10).
@@ -282,6 +284,13 @@ export const api = {
    * Сетку чисел (`DPS2`) читает отдельный запрос — `api.spectrogramGrid`.
    */
   spectrogram: recordingJob<SpectrogramResult>('spectrogram'),
+
+  /**
+   * Сквозной автоотчёт («Итоги»): форма повторяет стадии EDF (фильтр, пороги,
+   * очистка, длина эпохи) плюс `bands` (ключи пакета через запятую) и `grid_mm`;
+   * результат — агрегаты + `html_url` (самодостаточный MNE.Report).
+   */
+  report: recordingJob<ReportResult>('report'),
 
   /**
    * Сетка спектрограммы: бинарный контейнер float32 (``DPS2``, частото-мажорно).

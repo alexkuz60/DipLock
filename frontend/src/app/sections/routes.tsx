@@ -25,7 +25,17 @@ import { SettingsSection } from './SettingsSection'
 import { WikiSection } from './wiki/WikiSection'
 import { LocalizationTablePanel } from './table/LocalizationTablePanel'
 import { LocalizationTableSection } from './table/LocalizationTableSection'
-import { GroupAnalysisPanel, GroupAnalysisSection } from './Stubs'
+import { SummaryPanel } from './summary/SummaryPanel'
+import { SummarySection } from './summary/SummarySection'
+import { SummaryToolActions } from './summary/SummaryToolActions'
+import {
+  EmoLabPanel,
+  EmoLabSection,
+  GroupAnalysisPanel,
+  GroupAnalysisSection,
+  NeuroAudioPanel,
+  NeuroAudioSection,
+} from './Stubs'
 import { getSection, type SectionId } from './registry'
 
 type SectionModule = {
@@ -62,6 +72,13 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
   },
   table: { Component: LocalizationTableSection, Panel: LocalizationTablePanel },
   group: { Component: GroupAnalysisSection, Panel: GroupAnalysisPanel },
+  summary: {
+    Component: SummarySection,
+    Panel: SummaryPanel,
+    ToolActions: SummaryToolActions,
+  },
+  emolab: { Component: EmoLabSection, Panel: EmoLabPanel },
+  neuroaudio: { Component: NeuroAudioSection, Panel: NeuroAudioPanel },
   wiki: { Component: WikiSection },
   settings: { Component: SettingsSection },
   server: { Component: ServerStatusSection },

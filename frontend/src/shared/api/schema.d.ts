@@ -365,6 +365,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recordings/{recording_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Собрать сквозной автоотчёт (MNE.Report + пакет диполей по полосам)
+         * @description Автоотчёт раздела «Итоги» — одна задача в три ступени.
+         *
+         *     Ступени: три стадии препроцессинга (часть 1 — **те же** параметры и числа,
+         *     что раздел EDF: форма здесь повторяет форму стадий; нарезка только
+         *     ``fixed``) → пакетный быстрый расчёт диполей по полосам (часть 2,
+         *     агрегаты структур/BA) → сборка самодостаточного ``mne.Report`` в
+         *     дисковый кэш. Результат задачи — агрегаты и ссылка ``html_url``;
+         *     сам HTML — отдельный ассет с ETag ниже.
+         */
+        post: operations["create_report_job_api_v1_recordings__recording_id__report_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/report/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Результат автоотчёта (агрегаты полос и ссылка на HTML)
+         * @description Сводка отчёта: QC, эпохи, агрегаты по полосам. 409 — задача идёт/упала.
+         *
+         *     ``html_url`` собирается здесь, а не в воркере: воркер не знает ``job_id``
+         *     (задача создаётся после него), а ссылка адресуется именно задаче.
+         */
+        get: operations["get_report_result_api_v1_recordings__recording_id__report__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/report/{job_id}/html": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * HTML автоотчёта: самодостаточный MNE.Report (ETag)
+         * @description HTML отчёта из дискового кэша с ETag/304 (единая отдача — ``assets.py``).
+         *
+         *     Печать попадает в результат задачи (``html_sig``): ассет соответствует
+         *     ровно тому расчёту, который показан на экране. Кэш очищается вместе с
+         *     записью — тогда ответ 404 с просьбой собрать отчёт заново.
+         */
+        get: operations["get_report_html_api_v1_recordings__recording_id__report__job_id__html_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recordings/{recording_id}/spectrogram": {
         parameters: {
             query?: never;
@@ -1477,6 +1551,112 @@ export interface components {
         Body_create_recording_api_v1_recordings_post: {
             /** File */
             file: string;
+        };
+        /** Body_create_report_job_api_v1_recordings__recording_id__report_post */
+        Body_create_report_job_api_v1_recordings__recording_id__report_post: {
+            /**
+             * Band Min
+             * @description Нижняя граница полосы, Гц; без пары — без фильтра
+             */
+            band_min?: number | null;
+            /**
+             * Band Max
+             * @description Верхняя граница полосы, Гц
+             */
+            band_max?: number | null;
+            /**
+             * Notch Hz
+             * @description Сетевой фильтр 50/60 Гц (None — выключен)
+             */
+            notch_hz?: number | null;
+            /**
+             * Reference
+             * @description average | custom
+             * @default average
+             */
+            reference: string;
+            /**
+             * Reference Channels
+             * @description Каналы референса через запятую
+             */
+            reference_channels?: string | null;
+            /**
+             * Z Threshold
+             * @default 5
+             */
+            z_threshold: number;
+            /**
+             * Pp Threshold Uv
+             * @default 100
+             */
+            pp_threshold_uv: number;
+            /**
+             * Flat Line Uv
+             * @default 5
+             */
+            flat_line_uv: number;
+            /**
+             * Flat Line Ms
+             * @default 200
+             */
+            flat_line_ms: number;
+            /**
+             * Run Ica
+             * @description ICA-ветка детекции (тяжёлая — по умолчанию выключена)
+             * @default false
+             */
+            run_ica: boolean;
+            /**
+             * Epoch Length Ms
+             * @description Длина эпохи (часть 1 и пакет)
+             * @default 1000
+             */
+            epoch_length_ms: number;
+            /**
+             * Notch Harmonics
+             * @description Гармоники notch (100/150/200 Гц), 0–4
+             * @default 0
+             */
+            notch_harmonics: number;
+            /**
+             * Bad Channels
+             * @description Плохие каналы через запятую
+             */
+            bad_channels?: string | null;
+            /**
+             * Interpolate Bads
+             * @description Интерполировать bad-каналы (до ICA/SSP)
+             * @default false
+             */
+            interpolate_bads: boolean;
+            /**
+             * Clean Method
+             * @description Очистка артефактов: none | ica | ssp
+             * @default none
+             */
+            clean_method: string;
+            /**
+             * Ica N Components
+             * @description Компонент ICA (0 — auto)
+             * @default 0
+             */
+            ica_n_components: number;
+            /**
+             * Exclude Zone Ids
+             * @description Отменённые зоны вклада чистки через запятую (clean-1, clean-2…)
+             */
+            exclude_zone_ids?: string | null;
+            /**
+             * Grid Mm
+             * @description Шаг объёмной сетки поиска, мм
+             * @default 7
+             */
+            grid_mm: number;
+            /**
+             * Bands
+             * @description Ключи полос пакета через запятую (δ,θ,…); пусто — все полосы /meta
+             */
+            bands?: string | null;
         };
         /** Body_create_spectrogram_job_api_v1_recordings__recording_id__spectrogram_post */
         Body_create_spectrogram_job_api_v1_recordings__recording_id__spectrogram_post: {
@@ -3438,6 +3618,232 @@ export interface components {
             layout: "channel-major";
         };
         /**
+         * ReportBandSummaryOut
+         * @description Агрегаты одной полосы пакета в части 2 отчёта.
+         */
+        ReportBandSummaryOut: {
+            /**
+             * Band Key
+             * @description Ключ полосы: freq_bands / functional_bands
+             */
+            band_key: string;
+            /**
+             * Band Hz
+             * @description Границы полосы, Гц
+             */
+            band_hz: number[];
+            /**
+             * N Epochs Used
+             * @description Эпох прошло отбраковку
+             */
+            n_epochs_used: number;
+            /**
+             * N Points
+             * @description Точек расчёта (одна на эпоху)
+             */
+            n_points: number;
+            /**
+             * N No Attribution
+             * @description Точек без названной структуры
+             */
+            n_no_attribution: number;
+            /** Median Gof */
+            median_gof?: number | null;
+            /**
+             * Median Riv
+             * @description Медиана RIV — единственный кросс-полосной фильтр (2.6/N23)
+             */
+            median_riv?: number | null;
+            /** Top Structures */
+            top_structures?: components["schemas"]["ReportNameCountOut"][];
+            /** Top Brodmann */
+            top_brodmann?: components["schemas"]["ReportNameCountOut"][];
+            /** Dynamics */
+            dynamics?: components["schemas"]["ReportDynamicsOut"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * ReportDynamicsOut
+         * @description Динамика активности структуры: доля эпох по 5 равным бинам времени.
+         */
+        ReportDynamicsOut: {
+            /** Name */
+            name: string;
+            /**
+             * Shares
+             * @description Доля эпох бина, где структура была лучшей локацией, 0..1 (5 бинов)
+             */
+            shares: number[];
+        };
+        /**
+         * ReportNameCountOut
+         * @description Строка «название | эпох активно | доля | медианный GOF» одной полосы.
+         */
+        ReportNameCountOut: {
+            /**
+             * Name
+             * @description Анатомическая структура или поле Бродмана
+             */
+            name: string;
+            /**
+             * Count
+             * @description Эпох, чья лучшая точка локализована сюда
+             */
+            count: number;
+            /**
+             * Share
+             * @description Доля от числа точек полосы, 0..1
+             */
+            share: number;
+            /**
+             * Median Gof
+             * @description Медиана GOF по точкам названия **внутри своей полосы**: между полосами GOF не сравним (docs/rules/dipoles.md, принцип 3), RIV — сравним
+             */
+            median_gof?: number | null;
+        };
+        /**
+         * ReportQcSummaryOut
+         * @description Числа QC части 1 отчёта — те же, что стадия ``artifacts`` раздела EDF.
+         */
+        ReportQcSummaryOut: {
+            /**
+             * Status
+             * @description Светофор записи: ok | warn | bad
+             * @enum {string}
+             */
+            status: "ok" | "warn" | "bad";
+            /**
+             * Reasons
+             * @description Причины вердикта
+             */
+            reasons?: string[];
+            /**
+             * Good Data Percent
+             * @description Доля чистых данных, %
+             */
+            good_data_percent: number;
+            /**
+             * Line Noise Level
+             * @description Сетевой шум: пик 50/60 Гц к фону (≥1); None — не измерен
+             */
+            line_noise_level?: number | null;
+            /**
+             * Snr Db Median
+             * @description Медиана SNR по каналам, дБ
+             */
+            snr_db_median?: number | null;
+            /**
+             * Bad Channels
+             * @description Плохие каналы (авто)
+             */
+            bad_channels?: string[];
+            /**
+             * Dead Channels
+             * @description Мёртвые каналы
+             */
+            dead_channels?: string[];
+            /**
+             * Artifact Types
+             * @description Счётчики зон по видам (ключи — ArtifactKind)
+             */
+            artifact_types?: {
+                [key: string]: number;
+            };
+            /**
+             * Artifact Share By Kind
+             * @description Средняя по каналам доля времени по видам, 0..1
+             */
+            artifact_share_by_kind?: {
+                [key: string]: number;
+            };
+            /**
+             * N Channels
+             * @description Каналов после монтажа 10-20
+             */
+            n_channels: number;
+        };
+        /**
+         * ReportResult
+         * @description Результат задачи автоотчёта (``kind=report``).
+         *
+         *     HTML отчёта — отдельный ассет по ``html_url`` (ETag из ``report_version``):
+         *     документ самодостаточный и тяжёлый, поэтому в JSON идут только агрегаты
+         *     для шапки раздела и ссылка.
+         */
+        ReportResult: {
+            /** Recording Id */
+            recording_id: string;
+            /**
+             * Filename
+             * @description Имя файла записи (в заголовке отчёта)
+             */
+            filename: string;
+            /**
+             * Html Sig
+             * @description Отпечаток параметров — имя HTML в дисковом кэше
+             */
+            html_sig: string;
+            /**
+             * Report Version
+             * @description ETag HTML (хеш содержимого)
+             */
+            report_version: string;
+            /**
+             * Html Url
+             * @description GET HTML отчёта (заполняется роутом по job_id)
+             * @default
+             */
+            html_url: string;
+            /** @description Числа QC части 1 (светофор, каналы, виды) */
+            qc: components["schemas"]["ReportQcSummaryOut"];
+            /**
+             * Filter Band Hz
+             * @description Полоса пропускания части 1; None — без band-pass
+             */
+            filter_band_hz?: number[] | null;
+            /** Notch Hz */
+            notch_hz?: number | null;
+            /**
+             * Reference
+             * @default average
+             */
+            reference: string;
+            /**
+             * Filter Method
+             * @description Метод полосового фильтра
+             * @default none
+             */
+            filter_method: string;
+            /**
+             * N Epochs Total
+             * @description Эпох нарезано
+             */
+            n_epochs_total: number;
+            /**
+             * N Epochs Used
+             * @description Эпох прошло отбраковку
+             */
+            n_epochs_used: number;
+            /**
+             * Rejected Epochs
+             * @description Эпох отброшено (BAD_)
+             */
+            rejected_epochs: number;
+            /**
+             * Bands
+             * @description Агрегаты пакета по полосам (часть 2)
+             */
+            bands?: components["schemas"]["ReportBandSummaryOut"][];
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Duration Sec Calc
+             * @default 0
+             */
+            duration_sec_calc: number;
+        };
+        /**
          * SpectrogramGridHeader
          * @description Заголовок бинарного ответа ``GET /recordings/{id}/spectrogram/{job}/grid.bin``.
          *
@@ -4489,6 +4895,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DipoleRefineResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_report_job_api_v1_recordings__recording_id__report_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_report_job_api_v1_recordings__recording_id__report_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_report_result_api_v1_recordings__recording_id__report__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_report_html_api_v1_recordings__recording_id__report__job_id__html_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
+                recording_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": unknown;
                 };
             };
             /** @description Validation Error */

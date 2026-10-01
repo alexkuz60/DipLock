@@ -8,11 +8,14 @@
 import {
   Activity,
   BookOpen,
+  ClipboardList,
+  Headphones,
   House,
   Layers,
   Radar,
   ServerCog,
   Settings,
+  Smile,
   Table2,
   Waves,
   type LucideIcon,
@@ -25,6 +28,9 @@ export type SectionId =
   | 'dipoles'
   | 'table'
   | 'group'
+  | 'summary'
+  | 'emolab'
+  | 'neuroaudio'
   | 'wiki'
   | 'settings'
   | 'server'
@@ -117,6 +123,42 @@ export const SECTIONS: SectionConfig[] = [
     hotkey: '6',
     icon: Layers,
     route: '/group',
+    hasToolHeader: true,
+    hasRightPanel: true,
+    group: 'main',
+  },
+  {
+    id: 'summary',
+    title: 'Итоги — автоотчёт пайплайна',
+    shortTitle: 'Итоги',
+    hint: 'Итоги: автоотчёт записи — QC, препроцессинг, диполи по полосам',
+    hotkey: '7',
+    icon: ClipboardList,
+    route: '/summary',
+    hasToolHeader: true,
+    hasRightPanel: true,
+    group: 'main',
+  },
+  {
+    id: 'emolab',
+    title: 'ЕмоЛаб — психоэмоциональный фон',
+    shortTitle: 'ЕмоЛаб',
+    hint: 'ЕмоЛаб: анализ психоэмоционального фона (заглушка)',
+    hotkey: '8',
+    icon: Smile,
+    route: '/emolab',
+    hasToolHeader: true,
+    hasRightPanel: true,
+    group: 'main',
+  },
+  {
+    id: 'neuroaudio',
+    title: 'Нейроаудио — аудиовход и ритмы',
+    shortTitle: 'Нейроаудио',
+    hint: 'Нейроаудио: анализ аудиостимуляции (заглушка)',
+    hotkey: '9',
+    icon: Headphones,
+    route: '/neuroaudio',
     hasToolHeader: true,
     hasRightPanel: true,
     group: 'main',

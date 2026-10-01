@@ -14,6 +14,7 @@ import {
   preprocessJobFixture,
   preprocessResultFixture,
   recordingFixture,
+  reportResultFixture,
   spectrogramResultFixture,
   spectrumResultFixture,
 } from './fixtures'
@@ -32,6 +33,7 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  ReportResult,
   SpectrogramResult,
   SpectrumResult,
 } from '@/shared/api/types'
@@ -46,7 +48,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 /** 202-ответ запуска задачи расчёта (срез 3.4): id задачи и адреса поллинга. */
 function calcJobCreated(
   jobId: string,
-  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine' | 'evoked',
+  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine' | 'evoked' | 'report',
 ): Record<string, string> {
   return {
     job_id: jobId,
@@ -126,6 +128,8 @@ export type MockApiOptions = {
   spectrogramResult?: SpectrogramResult
   /** Статус задачи спектрограммы (поллинг) */
   spectrogramJob?: JobStatus
+  /** Явный результат автоотчёта (раздел «Итоги») */
+  reportResult?: ReportResult
   /** АЧХ фильтра (`GET /filter-response`, шаг 2.5) */
   filterResponse?: FilterResponse
   /** Сигнал сетевого фона (`GET /recordings/{id}/mains`) */
@@ -226,6 +230,23 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'dipoles'), 202)
       }
       return jsonResponse(options.dipoleScanResult ?? dipoleScanResultFixture())
+    }
+    if (url.includes('/report')) {
+      // Автоотчёт (раздел «Итоги»): 202 + задача, результат — агрегаты;
+      // HTML-ассет в тестах никто не запрашивает (iframe в jsdom не грузит src)
+      if (method === 'POST') {
+        if (options.calcStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(calcJobCreated('job-report-1', 'report'), 202)
+      }
+      if (url.endsWith('/html')) {
+        return new Response('<html><body>Автоотчёт</body></html>', {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      }
+      return jsonResponse(options.reportResult ?? reportResultFixture())
     }
     if (url.includes('/evoked')) {
       // ERP-усреднение (шаг 2.7): 202 + задача, результат — усреднённая волна

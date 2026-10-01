@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **36 роутов**, префикс `/api/v1` из `settings.api_prefix`.
+- `backend/app/api/routes.py` — **40 роутов**, префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
   - `api/params.py` — формы → параметры сервисов и проверки с текстом для UI (400);
@@ -25,14 +25,14 @@
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
-  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **41 HTTP-путь** (36 в `routes.py` + 5 уровня приложения).
+  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **45 HTTP-путей** (40 в `routes.py` + 5 уровня приложения).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/schema.d.ts` (`npm run gen:api`;
   выгрузка `openapi.json` — `venv/bin/python -m scripts.export_openapi`, свежесть — pytest
   `test_openapi_json_is_up_to_date` и CI-шаг `git diff`, 4.2).
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (36 в `routes.py`)
+## Инвентарь эндпоинтов (40 в `routes.py`, порядок файла)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -42,34 +42,37 @@
 | 4 | `GET /recordings/{id}/signals` | пирамида огибающей ×1…×16 и слои видимости `layer=raw\|cleaned\|diff` (контейнер `DPS1`, ETag включает слой и параметры подготовки — в т.ч. отменённые зоны `exclude_zone_ids`, шаг 2) |
 | 5 | `POST /recordings/{id}/preprocess` | стадия предподготовки: `filter` / `artifacts` / `epochs` (опции очистки формы, включая отменённые зоны вклада `exclude_zone_ids` через запятую — шаг 2; неизвестный id не 400, а warning в отчёте) |
 | 6 | `GET /recordings/{id}/preprocess/{job_id}` | результат стадии |
-| 7 | `POST /recordings/{id}/spectrum` | спектр δ…γ (Welch или multitaper PSD, `psd_method`; 1/f + пики specparam) |
-| 8 | `GET /recordings/{id}/spectrum/{job_id}` | результат спектра |
-| 9 | `GET /recordings/{id}/spectrum/topomap/{band}.png` | топокарта диапазона (PNG, ETag) |
-| 10 | `POST /recordings/{id}/dipoles` | быстрый расчёт диполей (перебор сетки; одна точка на эпоху) |
-| 11 | `GET /recordings/{id}/dipoles/{job_id}` | результат быстрого расчёта |
-| 12 | `POST /recordings/{id}/spectrogram` | спектрограмма канала (STFT) |
-| 13 | `GET /recordings/{id}/spectrogram/{job_id}` | метаданные сетки |
-| 14 | `GET /recordings/{id}/spectrogram/{job_id}/grid.bin` | сетка дБ (float32, контейнер `DPS2`, ETag) |
-| 15 | `POST /recordings/{id}/dipole_refine` | точное уточнение одной эпохи (BEM fit_dipole, F19) |
-| 16 | `GET /recordings/{id}/dipole_refine/{job_id}` | результат уточнения («было/стало») |
-| 17 | `POST /jobs` | анализ фоновой задачей (legacy, с прогрессом) |
-| 18 | `GET /jobs` | история задач |
-| 19 | `GET /jobs/{job_id}` | состояние задачи |
-| 20 | `DELETE /jobs/{job_id}` | отмена задачи (3.2): 404 — не найдена, 409 — уже завершена, иначе 200 со статусом `cancelled` |
-| 21 | `GET /jobs/{job_id}/result` | результат завершённой задачи |
-| 22 | `GET /surface` | меш fsaverage (кэш + ETag) |
-| 22–23 | `GET /surface/brodmann`, `/surface/brodmann/{area_name}` | индексы вершин полей Бродмана |
-| 24–25 | `GET /surface/mri`, `/surface/mri/slice/{plane}/{mm}.png` | метаданные срезов и срез картинкой (ETag) |
-| 26 | `GET /surface/mri/volume/{name}` | том fsaverage «как есть» для Niivue (3.5): белый список имён (`T1.mgz`, `seghead.mgz`, `lh.white`, `rh.white`), байты без перекодирования, ETag по отпечатку файлов (kind `volumes`); чужое имя — 404 до чтения файловой системы |
-| 27–28 | `GET /surface/contours`, `/surface/contours/{plane}/{mm}` | метаданные и контуры структур/полей/силуэта головы (ETag; поле `head` — контур `seghead.mgz`, 3.5) |
-| 29 | `GET /brodmann-labels` | имена доступных полей Бродмана |
-| 30 | `GET /brain-surface` | устаревший алиас `/surface` |
-| 31 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты, позиции датчиков карты-силуэта (`channel_positions`) |
-| 32 | `GET /journal` | журнал шагов: последние замеры (`limit` 1–2000, фильтр `pipeline`) |
-| 33 | `GET /filter-response` | АЧХ применяемого фильтра (полоса + notch с гармониками; шаг 2.5, лёгкий расчёт без задачи и ETag) |
-| 34 | `POST /recordings/{id}/evoked` | ERP-усреднение по событиям (шаг 2.7: стимул → эпоха → усреднение) |
-| 35 | `GET /recordings/{id}/evoked/{job_id}` | результат ERP: усреднённая волна [канал][время] + `n_used`/`n_total` |
-| 36 | `GET /recordings/{id}/mains` | сигнал сетевого фона: уровни линий L1 и вырезанная notch-компонентная за окно (`notch_hz`, `notch_harmonics`, `start_sec`, `duration_sec`; лёгкий расчёт без задачи и ETag) |
+| 7 | `POST /recordings/{id}/evoked` | ERP-усреднение по событиям (шаг 2.7: стимул → эпоха → усреднение) |
+| 8 | `GET /recordings/{id}/evoked/{job_id}` | результат ERP: усреднённая волна [канал][время] + `n_used`/`n_total` |
+| 9 | `POST /recordings/{id}/spectrum` | спектр δ…γ (Welch или multitaper PSD, `psd_method`; 1/f + пики specparam) |
+| 10 | `GET /recordings/{id}/spectrum/{job_id}` | результат спектра |
+| 11 | `GET /recordings/{id}/spectrum/topomap/{band}.png` | топокарта диапазона (PNG, ETag) |
+| 12 | `POST /recordings/{id}/dipoles` | быстрый расчёт диполей (перебор сетки; одна точка на эпоху) |
+| 13 | `GET /recordings/{id}/dipoles/{job_id}` | результат быстрого расчёта |
+| 14 | `POST /recordings/{id}/dipole_refine` | точное уточнение одной эпохи (BEM fit_dipole, F19) |
+| 15 | `GET /recordings/{id}/dipole_refine/{job_id}` | результат уточнения («было/стало») |
+| 16 | `POST /recordings/{id}/report` | **автоотчёт** (раздел «Итоги», §3.9): три стадии EDF (часть 1, `fixed`-нарезка) → пакет диполей по полосам (`bands` через запятую, `grid_mm`) → HTML `mne.Report` в кэш |
+| 17 | `GET /recordings/{id}/report/{job_id}` | агрегаты отчёта (QC, эпохи, полосы) + `html_url` |
+| 18 | `GET /recordings/{id}/report/{job_id}/html` | HTML отчёта из дискового кэша (самодостаточный MNE.Report, ETag/304) |
+| 19 | `POST /recordings/{id}/spectrogram` | спектрограмма канала (STFT) |
+| 20 | `GET /recordings/{id}/spectrogram/{job_id}` | метаданные сетки |
+| 21 | `GET /recordings/{id}/spectrogram/{job_id}/grid.bin` | сетка дБ (float32, контейнер `DPS2`, ETag) |
+| 22 | `POST /jobs` | анализ фоновой задачей (legacy, с прогрессом) |
+| 23 | `GET /jobs` | история задач |
+| 24 | `GET /jobs/{job_id}` | состояние задачи |
+| 25 | `DELETE /jobs/{job_id}` | отмена задачи (3.2): 404 — не найдена, 409 — уже завершена, иначе 200 со статусом `cancelled` |
+| 26 | `GET /jobs/{job_id}/result` | результат завершённой задачи |
+| 27 | `GET /surface` | меш fsaverage (кэш + ETag) |
+| 28–29 | `GET /surface/brodmann`, `/surface/brodmann/{area_name}` | индексы вершин полей Бродмана |
+| 30–31 | `GET /surface/mri`, `/surface/mri/slice/{plane}/{mm}.png` | метаданные срезов и срез картинкой (ETag) |
+| 32 | `GET /surface/mri/volume/{name}` | том fsaverage «как есть» для Niivue (3.5): белый список имён (`T1.mgz`, `seghead.mgz`, `lh.white`, `rh.white`), байты без перекодирования, ETag по отпечатку файлов (kind `volumes`); чужое имя — 404 до чтения файловой системы |
+| 33–34 | `GET /surface/contours`, `/surface/contours/{plane}/{mm}` | метаданные и контуры структур/полей/силуэта головы (ETag; поле `head` — контур `seghead.mgz`, 3.5) |
+| 35 | `GET /brodmann-labels` | имена доступных полей Бродмана |
+| 36 | `GET /brain-surface` | устаревший алиас `/surface` |
+| 37 | `GET /filter-response` | АЧХ применяемого фильтра (полоса + notch с гармониками; шаг 2.5, лёгкий расчёт без задачи и ETag) |
+| 38 | `GET /recordings/{id}/mains` | сигнал сетевого фона: уровни линий L1 и вырезанная notch-компонентная за окно (`notch_hz`, `notch_harmonics`, `start_sec`, `duration_sec`; лёгкий расчёт без задачи и ETag) |
+| 39 | `GET /meta` | версии, окружение, параметры расчёта, ссылки на ассеты, позиции датчиков карты-силуэта (`channel_positions`) |
+| 40 | `GET /journal` | журнал шагов: последние замеры (`limit` 1–2000, фильтр `pipeline`) |
 
 **Чего в API нет осознанно:** листинга и удаления записей. «Закрыть запись» — **клиентское**
 действие (сброс состояния UI), файл остаётся на диске и сносится TTL-обходом реестра;
