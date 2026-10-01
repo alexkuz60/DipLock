@@ -1,11 +1,15 @@
 """Тесты эндпоинтов записей (срез 2.2): загрузка → метаданные, без обработки."""
+import asyncio
 import os
 import shutil
 
 import numpy as np
 import pytest
+from sqlalchemy import func, select
 
 from app.core.config import settings
+from app.models import db as db_module
+from app.models.db import RecordingRecord, Session, init_db
 from app.services.recordings import (
     RecordingRegistry,
     file_digest,
@@ -208,21 +212,30 @@ def test_upload_other_file_creates_new_recording(client, edf_file, tmp_path):
 
 
 def test_sidecar_keeps_digest_and_passport(client, edf_file):
-    """Отпечаток и паспорт лежат рядом с файлом — дедуп переживает рестарт."""
+    """Отпечаток и паспорт лежат рядом с файлом — дедуп переживает рестарт.
+
+    ``digest`` — sha256 **исходной** загрузки (дедуп сравнивает повторные
+    загрузки исходника), а файл на диске после 4.4 анонимизирован, поэтому его
+    собственный sha256 отпечатку не равен; в паспорте — псевдоним PHI.
+    """
     meta = _upload(client, edf_file).json()
     recording = recording_registry.get(meta["recording_id"])
 
     payload = read_sidecar(recording.upload_dir)
     assert payload is not None
-    assert payload["digest"] == file_digest(recording.path)
+    assert payload["digest"] == file_digest(str(edf_file))
     assert payload["filename"] == "probe.edf"
     assert payload["meta"]["sfreq"] == 250.0
+    assert payload["meta"]["patient_alias"] == meta["patient_alias"]
+    assert payload["meta"]["patient_alias"].startswith("Patient-")
 
 
 def test_dedup_survives_new_registry(client, edf_file):
     """Новый процесс (dev `--reload`) находит отпечаток в сайдкарах каталогов."""
     meta = _upload(client, edf_file).json()
-    digest = file_digest(recording_registry.get(meta["recording_id"]).path)
+    # Отпечаток — sha256 исходника (ровно то, что посчитает повторная загрузка);
+    # файл на диске анонимизирован (4.4) и хешируется иначе.
+    digest = file_digest(str(edf_file))
 
     restarted = RecordingRegistry(
         max_recordings=10, ttl_hours=24, upload_dir=settings.upload_dir,
@@ -242,7 +255,7 @@ def test_restore_does_not_delete_adopted_dir(client, edf_file):
     restarted = RecordingRegistry(
         max_recordings=10, ttl_hours=24, upload_dir=settings.upload_dir,
     )
-    restarted.find_by_digest(file_digest(recording.path), settings)
+    restarted.find_by_digest(file_digest(str(edf_file)), settings)
     restarted.clear()
 
     assert os.path.isdir(recording.upload_dir)
@@ -259,7 +272,9 @@ def test_clear_after_dedup_keeps_adopted_dir(tmp_path, edf_file):
     """
     first = RecordingRegistry(max_recordings=10, ttl_hours=24, upload_dir=str(tmp_path))
     created = _register_copy(first, edf_file, tmp_path, "orig")
-    digest = file_digest(created.path)
+    # Отпечаток — sha256 исходника: регистрация записала его в сайдкар до
+    # анонимизации сохранённой копии (4.4), хеш самого файла на диске другой.
+    digest = file_digest(str(edf_file))
 
     again_dir = tmp_path / "again"
     again_dir.mkdir()
@@ -299,4 +314,53 @@ def test_prune_orphans_removes_old_dir_and_keeps_root_file(tmp_path, edf_file):
     assert not old.exists()
     assert fresh.is_dir()
     assert (root / "test.edf").exists()
+
+
+def _db_count(model, **filters) -> int:
+    """Число строк модели в тестовой БД (синхронный обёртка над async-сессией)."""
+    async def _run() -> int:
+        await init_db()
+        query = select(func.count()).select_from(model)
+        for name, value in filters.items():
+            query = query.where(getattr(model, name) == value)
+        async with db_module.AsyncSessionLocal() as session:
+            return int(await session.scalar(query) or 0)
+
+    return asyncio.run(_run())
+
+
+def test_delete_recording_removes_file_and_cascades_rows(client, edf_file):
+    """DELETE /recordings/{id} (4.4): файл, паспорт и строки БД уходят вместе.
+
+    TTL выключен по умолчанию («записи — не 24 ч») — это явное удаление;
+    дочерние строки уходят каскадом (§8.4.3), повторный DELETE — 404.
+    """
+    meta = _upload(client, edf_file).json()
+    recording_id = meta["recording_id"]
+    recording = recording_registry.get(recording_id)
+    assert recording is not None
+    # Строка записи появилась при загрузке (write-API шага ①)
+    assert _db_count(RecordingRecord, recording_id=recording_id) == 1
+
+    # Дочерняя строка прогона UI (шаг ②) — её обязана забрать очистка
+    async def _seed_session() -> None:
+        await init_db()
+        async with db_module.AsyncSessionLocal() as session:
+            session.add(Session(
+                id=f"del-test-{recording_id}", recording_id=recording_id,
+                kind="dipoles",
+            ))
+            await session.commit()
+
+    asyncio.run(_seed_session())
+    assert _db_count(Session, recording_id=recording_id) == 1
+
+    r = client.delete(f"/api/v1/recordings/{recording_id}")
+    assert r.status_code == 204
+    assert not os.path.isdir(recording.upload_dir), "каталог записи должен уйти"
+    assert client.get(f"/api/v1/recordings/{recording_id}").status_code == 404
+    assert _db_count(RecordingRecord, recording_id=recording_id) == 0
+    assert _db_count(Session, recording_id=recording_id) == 0
+    # Повторный DELETE идемпотентности не обещает — 404
+    assert client.delete(f"/api/v1/recordings/{recording_id}").status_code == 404
 

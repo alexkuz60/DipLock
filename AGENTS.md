@@ -67,6 +67,9 @@ backend/app/
 │   ├── filter_design.py # дизайн фильтра: FIR/IIR, переходные полосы, буферы края, АЧХ (2.5)
 │   ├── dipole_fitter.py     # точный фитинг (эксперим.): mne.fit_dipole по эпохам, цена в /meta
 │   ├── recordings.py      # реестр записей просмотра: паспорт, TTL, дедуп (2.2)
+│   ├── edf_phi.py     # PHI-псевдоним заголовка EDF при регистрации (4.4, шаг ①)
+│   ├── recording_store.py # строки recordings: upsert, каскад «TTL строки = TTL записи» (4.4)
+│   ├── results_store.py   # write-API задач UI в БД: sessions/epochs/dipoles + analyses/report_* (4.4)
 │   ├── recording_signals.py # пирамида сигналов вьюера: огибающая ×1…×16, кэш (2.5)
 │   ├── preprocess.py      # стадии предподготовки записи: filter/artifacts/epochs (2.7)
 │   ├── edf_events.py      # события записи: аннотации EDF+ и маркеры стим-каналов (2.7)
@@ -128,7 +131,8 @@ docs/ui.md             # спецификация UI и дорожная кар�
 - Кэшируйте ресурсоёмкие объекты (поверхности FSAverage, transform, labels).
 - **Данные — только через свои сервисы:** кэши — `cache_store.py`, подготовленный сигнал —
   `prepared_signal.py`, версии ассетов — `asset_versions.py`, результат задачи — `job_store.py`,
-  сироты — `orphans.py`; инварианты — `docs/rules/data-and-caches.md`.
+  сироты — `orphans.py`, **строки БД результатов — `recording_store.py`/`results_store.py`**;
+  инварианты — `docs/rules/data-and-caches.md` и `docs/rules/results-db.md`.
 - **Frontend**: новый раздел UI = запись в `frontend/src/app/sections/registry.ts` + компонент в
   `routes.tsx`; тексты — на русском; ожидание и отмена задач — общие (`shared/lib/jobPolling.ts`), адреса —
   парами (`recordingJob(kind)`); контролы — из `shared/ui/` (`FieldRow`, `SegmentedControl`,
@@ -170,9 +174,10 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/api-jobs.md` | инвентарь роутов, правило «задача = job», ETag/304, ошибки |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
+| `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (952 Vitest / 619 pytest, без `integration` — 603), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (952 Vitest / 643 pytest, без `integration` — 627), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

@@ -3,6 +3,91 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 01.10.2026 (поздний срез) — 4.4: alembic + write-API (порядок §8.4: ① → ② → ③)
+
+**Текст задачи из `todo.md` (дословно):** «**4.4 (N36, P0* ↔ write-API остаток F21):** таблица
+`recordings`, TTL-политика (записи — не 24 ч), анонимизация PHI заголовка EDF при загрузке;
+результаты UI-разделов (быстрый расчёт, спектрограммы, точный фитинг по кнопке) →
+`sessions`/`epochs`/`dipoles`. **Схема утверждена 01.10.2026** (делегированное решение:
+`docs/data-blocks.md` §8.1–§8.4, открытых вопросов нет); порядок шагов — §8.4: ①
+`recordings`+TTL+PHI → ② `sessions`/`epochs`/`dipoles` → ③ `analyses`/`dipole_points`+`report_*`.»
+
+**ЗАКРЫТ 01.10.2026 (поздний срез)** — весь цепной шаг §8.4 одним срезом, каждая ступень со
+своей миграцией и тестами.
+
+**Шаг ① `recordings` + TTL + PHI** (миграция `0002_recordings`):
+
+* таблица `recordings` (кирпич B1): паспорт из сайдкара в мини-виде, `digest` с
+  unique-индексом (дедуп), `patient_alias`, `created_at`/`accessed_at` (метрика TTL);
+  upsert при `POST /recordings` (`services/recording_store.py`);
+* **TTL-политика «записи — не 24 ч»**: `RECORDINGS_TTL_HOURS` default **24 → 0**
+  (не истекают; ветка `ttl_sec <= 0` в реестре уже была) — удаление вручную через новый
+  **`DELETE /recordings/{id}`** (204: файл + кэши + строки БД каскадом, повторный — 404)
+  или вытеснением по `RECORDINGS_HISTORY_LIMIT`; результаты переживают прежний 24-часовый TTL;
+* **PHI**: `services/edf_phi.py` — поля «patient»/«recording» заголовка EDF (имя пациента,
+  техник) заменяются псевдонимом `Patient-<6 hex от sha256 исходника>` (B1 «человек
+  (псевдоним)»), патч ровно 160 байт **сохранённой копии** после чтения паспорта; исходные
+  значения не сохраняются ни в сайдкар, ни в БД, ни в ответ API; сбой обезличивания —
+  отказ регистрации (fail closed, каталог удаляется); `RecordingMeta.patient_alias`
+  (OpenAPI + `schema.d.ts`);
+* **сироты строк** — `drop_orphan_rows`: на старте приложения и в `POST /recordings`
+  **перед** upsert (строка умершей записи с тем же sha256 упёрлась бы в unique-индекс);
+* **семантика дайджеста уточнена**: sha256 в сайдкаре/БД — **исходной загрузки** (дедуп
+  сравнивает повторы исходника), хеш анонимизированного файла на диске другой — тесты
+  `test_recordings.py` обновлены под это правило.
+
+**Шаг ② `sessions`/`epochs`/`dipoles` — write-API UI-разделов, остаток F21**
+(миграция `0003_sessions_recording`):
+
+* `sessions` + `recording_id` (FK → `recordings`, `ondelete=CASCADE`), `kind`
+  (`legacy`/`preprocess`/`dipoles`/`dipole_refine`/`spectrogram`), `job_id`, `params_json`;
+  `dipoles` + `method` (`fast_grid`/`bem_fit`, NULL у legacy);
+* write-API `services/results_store.py`: задача оставляет строку через `on_success`
+  `job_manager` — ошибки записи логируются и не меняют статус (расчёт важнее БД, как у
+  `save_analysis_to_db`): `preprocess` (стадия `epochs`) → сессия + сетка эпох с флагами
+  отбраковки (мощности полос — NULL: стадия PSD не считает — честное «не измерено»);
+  быстрый расчёт → сессия + эпохи по точкам + строки диполей с **настоящим** `epoch_id`;
+  точный фитинг → отдельный прогон `method='bem_fit'` («было/стало» не теряется, история);
+  спектрограмма → строка прогона (сетка — в кэше); `spectrum`/`evoked` **не пишутся**
+  (осознанный предел 4.4);
+* инвариант §8.4.2: история, не UPSERT — повторный расчёт = новая строка.
+
+**Шаг ③ `analyses`/`analysis_bands`/`dipole_points` + `report_*` — кирпичный слой
+B6/B7/B13** (миграция `0004_analyses_report`):
+
+* таблицы по §8.3: `analyses` (паспорт + `params_sig` = отпечаток отчёта), `analysis_bands`
+  (статус полосы, `n_kd_passed`, `moment_max_nam` — база КД внутри полосы), `dipole_points`
+  (UNIQUE «эпоха × поддиапазон», индекс `(band_key, kd_passed)` — вход 4.5), `report_runs`
+  (FK `analyses_id` — вариант (а): одна истина на прогон; `html_path` **относительно**
+  `cache_dir`), `report_band_summaries`, `report_name_counts`, `report_dynamics` (5 бинов —
+  гранулярность HTML);
+* пишет прогон автоотчёта: `run_report` кладёт точки пакета под внутренним ключом
+  `_package_points`, `summarize_band` возвращает **полный счёт имён** рядом с `top_*`
+  (§8.4.4: в БД — весь словарь, в HTML — срезы); `results_store` потребляет оба ключа
+  (`pop`) **до** записи файла задачи — в job-файле и ответе UI только агрегаты;
+* **КД**: `kd_basis = {moment_share_x, gof_min, moment_max_nam}` (нормировка на максимум
+  момента **своего** поддиапазона, concept.md §3); пороги — новые настройки
+  `KD_MOMENT_SHARE`/`KD_GOF_MIN`, по умолчанию `None`: методика (C0) их не задала, поэтому
+  `kd_passed` = NULL («не оценено»), а не 0.
+
+**Тесты: pytest 619 → 643 (+24)** — `test_edf_phi.py` (6), `test_recording_store.py` (3),
+`test_results_store.py` (8), `test_report_store.py` (6), `DELETE` в `test_recordings.py` (1);
+страж `test_migrations.py` расширен всеми таблицами 4.4; `test_report.py` +ассерт
+`name_counts`. Тестовая БД изолирована (`DATABASE_URL` → tmp в `tests/conftest.py` — write-API
+пишет при POST/задачах). ruff/mypy чисты, OpenAPI/`schema.d.ts` перегенерированы,
+Vitest — 952.
+
+**Документация:** новое правило `docs/rules/results-db.md` (+ строка в карте `AGENTS.md`),
+правило 13 и строка `DELETE` в инвентаре `docs/rules/api-jobs.md` (42 роута; старый запрет
+«DELETE ради кнопки» переписан — жизненный цикл изменён решением 4.4), `docs/data_map.md`
+(БД/PHI/TTL), числа в `docs/rules/tests.md`.
+
+**Решения, принятые за владельца** (делегирование 01.10.2026, критерий «как лучше для
+эффективной помощи»): TTL default 0 + явный DELETE; автозапись строки при успехе задачи
+(отдельные POST-endpoints не вводились); `spectrogram` → только строка прогона, `spectrum`/
+`evoked` не пишутся; полный счёт имён — в БД, без раздувания API/UI; пороги КД — `None`,
+пока методика не задана.
+
 ## 01.10.2026 — `mne-icalabel` внедрён как вторая разметка ICA (решение владельца)
 
 **Текст задачи (дословно, решение владельца 01.10.2026):** «2. `mne-icalabel` — внедрять как

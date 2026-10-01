@@ -41,8 +41,12 @@ class Settings(BaseSettings):
 
     # Загруженные для просмотра записи: лимит истории и TTL (устаревшие
     # каталоги удаляются с диска при обращении к реестру).
+    # TTL = 0 — записи **не истекают** (4.4, «записи — не 24 ч»): удаление только
+    # вручную (DELETE /recordings/{id}) или по лимиту истории; > 0 — часы до
+    # вытеснения (прежний режим 24). Дочерние строки БД уходят каскадно вместе
+    # с записью (§8.4.3 docs/data-blocks.md).
     recordings_history_limit: int = Field(default=10)
-    recordings_ttl_hours: int = Field(default=24)
+    recordings_ttl_hours: int = Field(default=0)
 
     # Кэш подготовленного сигнала (A4, этап 2): сколько наборов «запись + полоса +
     # notch + референс» держать в RAM. Один набор — float64-данные записи
@@ -160,6 +164,15 @@ class Settings(BaseSettings):
     # те же числа, что записаны в `docs/rules/dipoles.md` (замер 20.09.2026).
     dipole_refine_sec_fixed: float = Field(default=0.5)
     dipole_refine_sec_per_sample: float = Field(default=7.0)
+
+    # КД — критерий годности диполя (концепция §3): момент ≥ kd_moment_share ×
+    # максимума момента **в своём поддиапазоне** И GOF ≥ kd_gof_min. Значения
+    # задаёт методика; в проекте «своих» дефолтов нет (concept.md §3, C0), поэтому
+    # по умолчанию оба None — write-API (4.4) хранит базис КД в kd_basis, а
+    # вердикт kd_passed оставляет NULL («не оценено»), пока пороги не заданы
+    # (env: KD_MOMENT_SHARE / KD_GOF_MIN).
+    kd_moment_share: float | None = Field(default=None)
+    kd_gof_min: float | None = Field(default=None)
 
     # Артефакты
     z_score_threshold: float = 5.0

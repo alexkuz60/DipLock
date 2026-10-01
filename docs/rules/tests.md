@@ -650,3 +650,19 @@ reject-виды N6). Итог: pytest — **616** (без `integration` — **60
 не объявляет). Vitest **+1** — `EdfPanel.test` (сводка «ICLabel (вторая разметка): …» и
 advisory-строка: компонент уже в `removed` не предлагается). Итог: pytest — **619** (без
 `integration` — **603**), Vitest — **952**.
+
+База результатов (4.4, 01.10.2026): pytest **+24** —
+`test_edf_phi.py` (+6: чтение/замена PHI-полей заголовка, файл читается MNE после патча,
+«Startdate» сохраняется, короткий файл → `ValueError`, псевдоним детерминирован от sha256),
+`test_recording_store.py` (+3: upsert без дублей с освежением `accessed_at`, каскад §8.4.3
+по всем таблицам с сохранением соседней записи, сироты/каталог-защита),
+`test_results_store.py` (+8: шаг ② — scan/refine/preprocess/spectrogram, история не UPSERT,
+настоящий FK `epoch_id`, предел `spectrum`/`evoked`, колбэк `on_success`),
+`test_report_store.py` (+6: шаг ③ — `analyses`+паспорт+отпечаток, UNIQUE «эпоха ×
+поддиапазон», `report_runs`+сводки+**полный счёт** §8.4.4, потребление внутренних ключей
+до файла задачи, вердикт КД с порогами методики, повтор → новая строка, каскад записанных
+строк), `test_recordings.py` (+1: `DELETE /recordings/{id}` — файл + каскад строк,
+повторный → 404), страж миграций расширен таблицами 4.4, `test_report.py` (+ассерт
+`name_counts` у `summarize_band`). Тестовая БД изолирована: `DATABASE_URL` в `conftest.py`
+(write-API пишет при POST/задачах — в рабочую базу тесты не ходят). Итог: pytest — **643**
+(без `integration` — **627**), Vitest — **952**.

@@ -261,13 +261,18 @@ def _median(values: Sequence[float]) -> float | None:
 
 
 def _top_rows(
-    counts: Counter, by_name: dict[str, list[dict[str, Any]]], limit: int,
+    counts: Counter, by_name: dict[str, list[dict[str, Any]]],
+    n_points: int, limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Топ строк «имя | точек | доля | медианный GOF» по убыванию числа точек.
+    """Строки «имя | точек | доля | медианный GOF» по убыванию числа точек.
 
     GOF считается медианой по точкам этой структуры **внутри своей полосы**:
     сравнивать его между полосами нельзя (принцип 3 в ``docs/rules/dipoles.md``),
     поэтому в отчёте он идёт с колонкой доли эпох, а не как общий ранжир.
+
+    ``limit=None`` — весь словарь: полный счёт нужен write-API (§8.4.4
+    ``docs/data-blocks.md`` — в БД идут все имена, а не топ-N); срезы
+    ``top_*`` — вопрос отображения HTML.
     """
     rows: list[dict[str, Any]] = []
     for name, count in counts.most_common(limit):
@@ -275,7 +280,7 @@ def _top_rows(
             {
                 "name": str(name),
                 "count": int(count),
-                "share": 0.0,  # заполняется вызывающим: доля от числа точек
+                "share": int(count) / n_points if n_points else 0.0,
                 "median_gof": _median([float(p["gof"]) for p in by_name.get(name, [])]),
             }
         )
@@ -313,10 +318,10 @@ def summarize_band(
             ba_counts[str(area)] += 1
             by_ba.setdefault(str(area), []).append(point)
 
-    top_structures = _top_rows(struct_counts, by_struct, TOP_STRUCTURES)
-    top_brodmann = _top_rows(ba_counts, by_ba, TOP_BRODMANN)
-    for row in (*top_structures, *top_brodmann):
-        row["share"] = row["count"] / n_points if n_points else 0.0
+    name_structures = _top_rows(struct_counts, by_struct, n_points)
+    name_brodmann = _top_rows(ba_counts, by_ba, n_points)
+    top_structures = name_structures[:TOP_STRUCTURES]
+    top_brodmann = name_brodmann[:TOP_BRODMANN]
 
     # Динамика: бины по индексам эпох (0..max_epoch), доля активности структуры
     max_epoch = max((int(p.get("epoch_index", 0)) for p in points), default=0)
@@ -355,6 +360,9 @@ def summarize_band(
         "median_riv": _median(rives),
         "top_structures": top_structures,
         "top_brodmann": top_brodmann,
+        # Полный счёт всех имён словаря (§8.4.4): в БД пишутся целиком, в HTML —
+        # только срезы top_*; потребляет write-API (results_store) и убирает.
+        "name_counts": {"structure": name_structures, "brodmann": name_brodmann},
         "dynamics": dynamics,
         "warnings": [f"{band_key}: {w}" for w in (result.get("warnings") or [])],
     }
@@ -995,6 +1003,7 @@ def run_report(
     # Часть 2: пакетный быстрый расчёт по полосам + агрегаты структур/BA
     summaries: list[dict[str, Any]] = []
     warnings: list[str] = []
+    package_points: dict[str, list[dict[str, Any]]] = {}
     n_bands = max(1, len(band_keys))
     for index, key in enumerate(band_keys):
         low, high = catalog[key]
@@ -1011,6 +1020,9 @@ def run_report(
         scan_result = compute_dipole_scan(
             recording, cfg, scan, progress=_BandWindow(report, lo, hi, key),
         )
+        # Точки пакета — для кирпича dipole_points (4.4, шаг ③): в контракт
+        # ReportResult они не входят, write-API потребляет ключ и убирает.
+        package_points[key] = list(scan_result.get("points") or [])
         summary = summarize_band(key, (low, high), scan_result)
         summaries.append(summary)
         warnings.extend(summary.get("warnings") or [])
@@ -1059,6 +1071,7 @@ def run_report(
         "n_epochs_used": int(epochs.get("n_epochs_used", 0)),
         "rejected_epochs": len(epochs.get("rejected_epochs") or []),
         "bands": summaries,
+        "_package_points": package_points,  # внутренний ключ write-API (4.4)
         "warnings": warnings,
         "duration_sec_calc": round(elapsed, 3),
     }

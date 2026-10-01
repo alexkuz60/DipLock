@@ -85,6 +85,37 @@
       }
     },
     "/api/v1/recordings/{recording_id}": {
+      "delete": {
+        "summary": "Удалить запись и её результаты",
+        "description": "Удаляет запись целиком (4.4): файл, кэши и строки БД каскадом (§8.4.3).\n\nTTL выключен по умолчанию («записи — не 24 ч») — это явное удаление\nвместе со всеми результатами: строками ``sessions``/``analyses``/``report_*``.\n404 — запись неизвестна или уже удалена; 204 — удалена.",
+        "operationId": "delete_recording_api_v1_recordings__recording_id__delete",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "get": {
         "summary": "Паспорт записи",
         "description": "Метаданные загруженной записи. 404 — неизвестна, устарела (TTL) или удалена.",
@@ -6541,6 +6572,18 @@
           "filename": {
             "type": "string",
             "title": "Filename"
+          },
+          "patient_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patient Alias",
+            "description": "Псевдоним вместо PHI заголовка EDF (4.4): имя пациента/техник заменены при загрузке, исходные значения не хранятся. None — запись загружена до шага 4.4"
           },
           "n_channels": {
             "type": "integer",

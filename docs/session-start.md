@@ -1,6 +1,11 @@
 # Памятка агенту: с чего начинать сессию
 
-> Обновляется в конце крупных срезов (последнее — **01.10.2026 (поздний срез)**: п.4 закрыт —
+> Обновляется в конце крупных срезов (последнее — **01.10.2026, срез 4.4**: alembic + write-API
+> в порядке §8.4 — ① `recordings`+TTL(«записи — не 24 ч»)+PHI-псевдоним → ② write-API
+> `sessions`/`epochs`/`dipoles` (остаток F21) → ③ `analyses`/`dipole_points`+`report_*`;
+> миграции `0002`–`0004`, `DELETE /recordings/{id}`, правило `docs/rules/results-db.md`,
+> pytest **643** / Vitest **952**);
+> ранее тот же день (поздний срез): п.4 закрыт —
 > авто-длина эпохи «короче для высоких» + предупреждения «≥ 2 периодов»/«≥ 3C» у «Длины эпохи»
 > (EDF/Диполи) и «Окно STFT»; спайк `mne-icalabel`/`autoreject` → **`mne-icalabel` внедрён как
 > вторая разметка ICA** (autoreject отклонён); сверка кирпичей B6/B7/B13 → `docs/data-blocks.md`
@@ -28,6 +33,31 @@
 4. Перед закрытием среза: `ruff`/`mypy`/`pytest` + `eslint`/`tsc`/`Vitest` + `npm run build`;
    правило → `docs/rules/` (+ строка в карте `AGENTS.md`), тест → рядом с кодом, закрытое →
    `docs/history.md` (дословно), открытое → `todo.md` (`docs/rules/docs.md`).
+
+## Состояние на конец 01.10.2026 (срез 4.4: alembic + write-API, §8.4 ① → ② → ③)
+
+- **4.4 ЗАКРЫТ целиком** (текст задачи и детали — `docs/history.md`, запись 01.10.2026
+  «срез 4.4»): три миграции (`0002_recordings` → `0003_sessions_recording` →
+  `0004_analyses_report`, страж паритета — `tests/test_migrations.py`) и write-API:
+  * **①** таблица `recordings` (upsert при `POST /recordings`), TTL default **24 → 0**
+    («записи — не 24 ч»: удаление — новый **`DELETE /recordings/{id}`** или лимит истории),
+    **PHI** заголовка EDF → псевдоним `Patient-<6 hex sha256 исходника>`
+    (`services/edf_phi.py`, `RecordingMeta.patient_alias`; дайджест = sha256 **исходной**
+    загрузки — дедуп сравнивает повторы исходника);
+  * **②** `sessions.recording_id`/`kind`/`job_id`/`params_json` + `dipoles.method`;
+    `services/results_store.py` пишет задачи UI через `on_success` `job_manager`
+    (preprocess/диполи/уточнение/спектрограмма; `spectrum`/`evoked` — предел 4.4);
+    история, не UPSERT (§8.4.2);
+  * **③** `analyses`/`analysis_bands`/`dipole_points` (UNIQUE «эпоха × поддиапазон») +
+    `report_*` — пишет прогон отчёта; точки пакета (`_package_points`) и **полный счёт имён**
+    (§8.4.4, `name_counts`) потребляются до файла задачи; КД — `kd_basis`, пороги
+    `KD_MOMENT_SHARE`/`KD_GOF_MIN` = `None` (методика C0 не задана → `kd_passed` NULL);
+  * **инварианты** — `docs/rules/results-db.md` (новое правило + строка в карте `AGENTS.md`),
+    роуты — `docs/rules/api-jobs.md` (42, правило 13), носители — `docs/data_map.md`.
+- Схема БД в `data_map.md`/`AGENTS.md` обновлена: 11 таблиц, пишут legacy **и** write-API;
+  тестовая БД изолирована (`DATABASE_URL` → tmp в `tests/conftest.py`).
+- Итог среза: **pytest 619 → 643** (без `integration` — 627), Vitest 952, ruff/mypy/eslint/tsc
+  чисты, OpenAPI/`schema.d.ts` перегенерированы.
 
 ## Состояние на конец 01.10.2026 (поздний срез: п.4, спайк и сверка БД закрыты)
 
@@ -140,10 +170,10 @@
 1. **Ручной прогон на живом сервере**: uvicorn `--reload` + `build:watch` — 3D-вид (требует
    WebGL), контур головы, синхронизация курсора; стадия «Фильтр и референс» — зоны вклада,
    отмены и метрики потерь на реальной записи (тысячи строк в легенде зон не рисуем — зон
-   должно быть мало).
+   должно быть мало); после 4.4 — `DELETE /recordings/{id}` на живой записи (каскад файл/БД).
 2. Далее из todo.md: «FreeSurfer» (BEM/transform на живой установке), 3.10+ (точный профиль
-   `mne.fit_dipole`), п.4 «авто-длина эпох» (вердикт зафиксирован 01.10.2026 — реализуется
-   только направление «короче для высоких», механику уточнить).
+   `mne.fit_dipole`), развитие «Итоги» (часть 3, кросс-проверки §3.9.4), 4.5 (ROI — на
+   записанных `dipole_points`/`report_name_counts`), 4.7 (read-API сессий).
 
 ## Повторявшиеся ловушки
 

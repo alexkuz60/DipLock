@@ -94,7 +94,7 @@ from app.schemas.analysis import (
 )
 from app.schemas.journal import JournalEntry, JournalOut
 from app.schemas.server import ServerRestartOut
-from app.services import analysis_pipeline, journal, server_control
+from app.services import analysis_pipeline, journal, recording_store, server_control
 from app.services.atlas_contours import (
     contours_meta,
     slice_contours,
@@ -276,7 +276,40 @@ async def create_recording(
         logger.info(
             "Загрузка %s: открыта существующая запись %s", safe_name, recording.recording_id,
         )
+
+    # Строка записи в БД (4.4, шаг ①): сначала сироты — строка умершей записи
+    # с тем же sha256 (каталог уже удалён) упёрлась бы в unique-индекс дедупа,
+    # — затем upsert регистрации/дедупа (accessed_at — метрика TTL).
+    # Best-effort: просмотр важнее БД (как у save_analysis_to_db).
+    try:
+        await recording_store.drop_orphan_rows()
+        await recording_store.upsert_recording(recording)
+    except Exception:
+        logger.exception(
+            "Не удалось обновить строку записи %s в БД", recording.recording_id,
+        )
     return _meta_out(recording, recording.deduplicated)
+
+
+@router.delete(
+    "/recordings/{recording_id}", status_code=204,
+    summary="Удалить запись и её результаты",
+)
+async def delete_recording(recording_id: str) -> Response:
+    """Удаляет запись целиком (4.4): файл, кэши и строки БД каскадом (§8.4.3).
+
+    TTL выключен по умолчанию («записи — не 24 ч») — это явное удаление
+    вместе со всеми результатами: строками ``sessions``/``analyses``/``report_*``.
+    404 — запись неизвестна или уже удалена; 204 — удалена.
+    """
+    require_recording(recording_id)
+    await asyncio.to_thread(recording_registry.delete, recording_id)
+    try:
+        await recording_store.drop_recording_rows(recording_id)
+    except Exception:
+        # Файл уже удалён: строки уберёт обход сирот при следующем старте.
+        logger.exception("Строки записи %s в БД не удалены", recording_id)
+    return Response(status_code=204)
 
 
 @router.get(

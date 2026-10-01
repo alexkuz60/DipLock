@@ -73,7 +73,15 @@ export interface paths {
         get: operations["get_recording_api_v1_recordings__recording_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Удалить запись и её результаты
+         * @description Удаляет запись целиком (4.4): файл, кэши и строки БД каскадом (§8.4.3).
+         *
+         *     TTL выключен по умолчанию («записи — не 24 ч») — это явное удаление
+         *     вместе со всеми результатами: строками ``sessions``/``analyses``/``report_*``.
+         *     404 — запись неизвестна или уже удалена; 204 — удалена.
+         */
+        delete: operations["delete_recording_api_v1_recordings__recording_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3514,6 +3522,11 @@ export interface components {
             /** Filename */
             filename: string;
             /**
+             * Patient Alias
+             * @description Псевдоним вместо PHI заголовка EDF (4.4): имя пациента/техник заменены при загрузке, исходные значения не хранятся. None — запись загружена до шага 4.4
+             */
+            patient_alias?: string | null;
+            /**
              * N Channels
              * @description Число каналов в файле
              */
@@ -4518,6 +4531,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["RecordingMeta"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_recording_api_v1_recordings__recording_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

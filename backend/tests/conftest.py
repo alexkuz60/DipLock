@@ -15,6 +15,9 @@ _TMP_DATA = tempfile.mkdtemp(prefix="diplock-tests-")
 os.environ["UPLOAD_DIR"] = os.path.join(_TMP_DATA, "edf")
 os.environ["CACHE_DIR"] = os.path.join(_TMP_DATA, "cache")
 os.environ["RESULTS_DIR"] = os.path.join(_TMP_DATA, "results")
+# БД тоже изолируем: write-API (4.4) пишет строки при POST/задачах, а
+# DATABASE_URL из .env (backend/diplock.db) вёл бы тесты в рабочую базу.
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP_DATA}/diplock.db"
 for _sub in ("edf", "cache", "results"):
     os.makedirs(os.path.join(_TMP_DATA, _sub), exist_ok=True)
 atexit.register(shutil.rmtree, _TMP_DATA, True)

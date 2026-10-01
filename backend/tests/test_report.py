@@ -159,6 +159,11 @@ def test_summarize_band_counts_shares_and_dynamics():
     assert top["share"] == pytest.approx(6 / 11)
     assert summary["median_gof"] is not None
     assert summary["median_riv"] == pytest.approx(0.3)
+    # §8.4.4: полный счёт имён рядом с топом (в БД уходит целиком, не топ-5)
+    full = summary["name_counts"]["structure"]
+    assert [row["name"] for row in full] == ["Precuneus", "Cingulate"]
+    assert full[0]["count"] == 6 and full[0]["share"] == pytest.approx(6 / 11)
+    assert len(summary["top_structures"]) <= 5
     assert len(summary["dynamics"]) >= 1
     for row in summary["dynamics"]:
         assert len(row["shares"]) == TIME_BINS

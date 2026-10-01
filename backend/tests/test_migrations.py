@@ -49,11 +49,17 @@ def _migrate(tmp_path, monkeypatch, *, name: str = "migrated.db"):
 
 
 def test_init_db_creates_schema_and_version(tmp_path, monkeypatch):
-    """Свежий файл: три таблицы схемы + alembic_version на head."""
+    """Свежий файл: все таблицы схемы (вкл. 4.4) + alembic_version на head."""
     path = _migrate(tmp_path, monkeypatch)
 
     tables = {row[0] for row in _rows(path, "select name from sqlite_master where type='table'")}
-    assert {"sessions", "epochs", "dipoles", "alembic_version"} <= tables
+    assert {
+        "sessions", "epochs", "dipoles",
+        # 4.4: шаг ① записи, шаг ③ кирпичный слой (шаг ② добавляет колонки)
+        "recordings", "analyses", "analysis_bands", "dipole_points",
+        "report_runs", "report_band_summaries", "report_name_counts", "report_dynamics",
+        "alembic_version",
+    } <= tables
     assert _rows(path, "select version_num from alembic_version") == [(_alembic_head(),)]
 
 

@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router as api_router
 from app.core.config import settings
+from app.services import recording_store
 from app.services.job_manager import job_manager
 from app.services.orphans import sweep_orphans
 from app.utils.versions import code_freshness, library_versions
@@ -59,6 +60,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     report = sweep_orphans(settings)
     if report.total:
         logger.info("Уборка сирот при старте: %s", report.as_dict())
+    # Строки таблицы recordings без живой записи — БД-дубль того же обхода (4.4):
+    # «TTL строки = TTL записи» (§8.4.3), сироты не переживают каталог на диске.
+    try:
+        await recording_store.drop_orphan_rows()
+    except Exception:
+        logger.exception("Не удалось подчистить строки записей-сирот в БД")
     restored = job_manager.restore(settings)
     if restored:
         logger.info("Поднято задач из файлов на диске: %d", restored)

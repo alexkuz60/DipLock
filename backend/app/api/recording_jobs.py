@@ -23,6 +23,7 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.schemas.analysis import JobCreated, JobStatus
+from app.services import results_store
 from app.services.dipole_scanner import (
     DipoleRefineParams,
     DipoleScanParams,
@@ -127,9 +128,15 @@ def submit_recording_job(
     *,
     meta: dict[str, Any] | None = None,
 ) -> JobCreated:
-    """Ставит задачу записи в очередь и собирает ``JobCreated`` (202 + ``job_id``)."""
+    """Ставит задачу записи в очередь и собирает ``JobCreated`` (202 + ``job_id``).
+
+    ``on_success`` — write-API (4.4): успешная задача оставляет строку в БД
+    (``sessions``/``epochs``/``dipoles`` или ``analyses``/``report_*``); сбой
+    записи перехватывает ``job_manager`` и не меняет статус задачи.
+    """
     job = job_manager.submit(
         kind, recording.filename, WORKERS[kind], recording, params,
+        on_success=results_store.on_success_callback(kind, recording, params),
         meta={"recording_id": recording.recording_id, **(meta or {})},
     )
     logger.info("Создана задача %s %s (%s)", kind, job.job_id, recording.recording_id)

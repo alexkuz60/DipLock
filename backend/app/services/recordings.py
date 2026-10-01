@@ -6,7 +6,14 @@
 
 Реестр — in-memory + каталог на диске (``data/edf/<recording_id>/<имя>.edf``).
 Записи старше TTL и сверх лимита истории удаляются с диска и из реестра
-при обращении (ленивая очистка, без фоновых потоков).
+при обращении (ленивая очистка, без фоновых потоков). TTL по умолчанию
+выключен (0): «записи — не 24 ч» (4.4) — удаление вручную через
+``DELETE /recordings/{id}`` или по лимиту истории; строки таблицы ``recordings``
+и их дочерние результаты уходят каскадно (``services/recording_store.py``).
+
+При регистрации PHI заголовка EDF (имя пациента, техник) заменяется
+псевдонимом (``services/edf_phi.py``, B1 «человек (псевдоним)»): исходные
+значения не сохраняются ни в сайдкар, ни в БД.
 
 Дубликаты не хранятся: содержимое загрузки опознаётся отпечатком sha256, и
 повторная загрузка того же файла **открывает существующую запись**
@@ -32,6 +39,7 @@ from typing import Any
 import mne
 
 from app.core.config import Settings, settings
+from app.services import edf_phi
 from app.services.edf_events import EVENTS_CAP, attach_stim_annotations, record_events
 from app.services.edf_loader import looks_unscaled, normalize_channel_name
 
@@ -431,8 +439,22 @@ class RecordingRegistry:
                 logger.warning("Не удалось посчитать отпечаток %s", path)
 
         meta = read_recording_meta(path, cfg, filename)
+
+        # PHI заголовка EDF (4.4, шаг ①): пациент/техник → псевдоним в паспорте,
+        # копия на диске обезличивается (после чтения паспорта: битый файл
+        # падает с привычным «Не удалось прочитать EDF», а не на размере
+        # заголовка). Сбой — ValueError: вызывающий удаляет каталог, файл с PHI
+        # не остаётся (fail closed). Отпечаток выше — sha256 **до** обработки:
+        # дедуп сравнивает повторные загрузки исходника.
+        alias = edf_phi.patient_alias(digest)
+        try:
+            edf_phi.anonymize_edf_header(path, alias)
+        except OSError as exc:
+            raise ValueError(f"Не удалось обезличить заголовок EDF: {exc}") from exc
+
         recording_id = os.path.basename(upload_dir)
         meta["recording_id"] = recording_id
+        meta["patient_alias"] = alias
         recording = Recording(
             recording_id, filename, path, upload_dir, time.time(), meta, digest=digest,
         )
@@ -516,6 +538,22 @@ class RecordingRegistry:
         self._items.clear()
         self._created_ids.clear()
         self._indexed = False  # следующее обращение перечитает сайдкары с диска
+
+    def delete(self, recording_id: str) -> bool:
+        """Удаляет запись по явному требованию пользователя (4.4, DELETE-роут).
+
+        В отличие от вытеснения (``_drop``), каталог удаляется **всегда**:
+        пользователь просил удалить запись, а не «отпустить» её для TTL.
+        Строки БД и файлы задач убирает вызывающий код (роут →
+        ``recording_store.drop_recording_rows``, сироты → ``orphans``).
+        """
+        rec = self._items.pop(recording_id, None)
+        if rec is None:
+            return False
+        shutil.rmtree(rec.upload_dir, ignore_errors=True)
+        _drop_signal_cache(rec.recording_id)
+        self._created_ids.discard(recording_id)
+        return True
 
     def _drop(self, recording_id: str) -> None:
         rec = self._items.pop(recording_id, None)

@@ -616,6 +616,14 @@ class RecordingMeta(BaseModel):
 
     recording_id: str
     filename: str
+    patient_alias: str | None = Field(
+        default=None,
+        description=(
+            "Псевдоним вместо PHI заголовка EDF (4.4): имя пациента/техник "
+            "заменены при загрузке, исходные значения не хранятся. "
+            "None — запись загружена до шага 4.4"
+        ),
+    )
     n_channels: int = Field(description="Число каналов в файле")
     channels: list[str] = Field(
         default_factory=list,
