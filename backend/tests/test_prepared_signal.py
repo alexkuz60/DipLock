@@ -17,12 +17,13 @@ import pytest
 
 from app.core.config import settings
 from app.services import prepared_signal
-from app.services.edf_loader import load_edf
+from app.services.edf_loader import apply_reference, load_edf
 from app.services.epoch_segmenter import segment_epochs
 from app.services.prepared_signal import (
     clear_prepared_cache,
     prepared_cache_stats,
     prepared_raw,
+    prepared_raw_report,
 )
 from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recordings import Recording, recording_registry
@@ -89,6 +90,9 @@ def test_other_band_is_a_miss_and_keeps_its_own_filter(edf_file, counting_loads)
         str(edf_file), settings.standard_channels,
         l_freq=8.0, h_freq=13.0, units=settings.edf_units,
     )
+    # prepared_raw отдаёт сигнал с applied average reference (пачка B: референс
+    # применяется к копии из кэша) — эталону нужен тот же шаг.
+    apply_reference(expected)
     np.testing.assert_allclose(banded.get_data(), expected.get_data(), atol=1e-12)
     assert not np.allclose(banded.get_data(), baseline.get_data())
 
@@ -197,3 +201,25 @@ def test_evicting_recording_clears_prepared_cache(edf_file, client):
     recording_registry.clear()
 
     assert prepared_cache_stats()["entries"] == 0
+
+
+def test_cache_stores_signal_before_reference_and_delivers_after(edf_file, counting_loads):
+    """Пачка B: кэш хранит сигнал **до** референса, референс — на копии вызывающего.
+
+    Стадия ``artifacts`` зовёт с ``apply_ref=False`` и видит сырой сигнал
+    (детекторы и QC), остальные потребители получают applied average reference
+    (требование ``fit_dipole``). Оба варианта делят один сигнал в кэше —
+    промаха при смене ``apply_ref`` быть не должно.
+    """
+    recording = _recording(edf_file)
+
+    raw_unref, _ = prepared_raw_report(recording, settings, apply_ref=False)
+    raw_ref, _ = prepared_raw_report(recording, settings)
+
+    assert len(counting_loads) == 1, "оба варианта обязаны делить один сигнал в кэше"
+    # fixture: каждый канал смещён на i мкВ (DC сохранён — фильтра нет), поэтому
+    # без референса среднее по каналам не нулевое, а после average — ровно ноль.
+    assert float(np.max(np.abs(raw_unref.get_data().mean(axis=0)))) > 1e-7
+    np.testing.assert_allclose(raw_ref.get_data().mean(axis=0), 0.0, atol=1e-12)
+    # Копии независимы: референс второй выдачи не «протёк» в первую
+    assert float(np.max(np.abs(raw_unref.get_data().mean(axis=0)))) > 1e-7

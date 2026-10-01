@@ -94,6 +94,11 @@ ANNOTATION_DESC: dict[str, str] = {
     "electrode_pop": f"{BAD_PREFIX}electrode_pop",
 }
 
+# Значимость пика 50/60 Гц относительно сильнейшего бина канала (см.
+# `_significant` в `line_noise_zones`): пыль Welch ~1e-43 против пыли — не
+# сетевой шум, а числовой артефакт (пачка B, разбор 01.10.2026).
+_PEAK_MIN_SHARE = 1e-6
+
 # Прокси-каналы для окулярного детектора (10-20; T3/T4 — старые имена)
 _FRONTAL = ("FP1", "FP2", "FPZ")
 
@@ -312,6 +317,21 @@ def line_noise_zones(
     duration = round(n_times / sfreq, 3)
     zones: list[dict[str, Any]] = []
     max_ratio = 0.0
+    psd_top = psd.max(axis=1)
+
+    def _significant(i: int, idx: int) -> bool:
+        """Пик заметен на фоне **собственного** спектра канала, а не пыль Welch.
+
+        Локальная медиана фона вырождается на «идеально чистых» синусоидах
+        (Welch даёт ~1e-43 у бинов 44–62 Гц): отношение пыль/пыль — это ratio
+        ~1e23 и ложная зона ``line_noise`` на всю запись. Так пачка B (детекторы
+        на сыром, неотреференсированном сигнале — средний референс раньше
+        «подмешивал» соседние каналы и маскировал вырождение) ловила
+        синусоидальные фикстуры (разбор 01.10.2026). Порог 1e-6: реальная
+        μV-наводка заметна на фоне собственного спектра, числовая пыль — нет.
+        """
+        top = float(psd_top[i])
+        return top > 0.0 and float(psd[i, idx]) >= _PEAK_MIN_SHARE * top
 
     def _ratio(i: int, idx: int) -> float:
         """Пик/фон: медиана PSD в ±3…12 Гц от гармоники — «уровень шума»."""
@@ -331,16 +351,23 @@ def line_noise_zones(
     for i, name in enumerate(names):
         if f0 >= nyquist - 1.0:
             break
-        ratio = _ratio(i, round(f0 / df))
-        max_ratio = max(max_ratio, ratio)
-        if ratio >= ratio_thr:
-            fundamental.append((i, name))
+        idx = round(f0 / df)
+        ratio = _ratio(i, idx)
+        # Уровень (QC) и зоны считаем только по значимым пикам: пылевые
+        # отношения вроде 1e23 отравили бы и `line_noise_level`.
+        if _significant(i, idx):
+            max_ratio = max(max_ratio, ratio)
+            if ratio >= ratio_thr:
+                fundamental.append((i, name))
     for k in range(1, 5):  # 50/100/150/200 Гц (или 60/120/180/240)
         f_peak = f0 * k
         if f_peak >= nyquist - 1.0:
             break
         idx = round(f_peak / df)
-        affected = [name for i, name in fundamental if _ratio(i, idx) >= ratio_thr]
+        affected = [
+            name for i, name in fundamental
+            if _ratio(i, idx) >= ratio_thr and _significant(i, idx)
+        ]
         if affected:
             zones.append({
                 "kind": "line_noise",

@@ -194,7 +194,15 @@ def test_artifacts_stage_returns_zones_with_channels(tmp_path, edf_file):
 
 
 def test_artifacts_stage_uses_flat_line_params(tmp_path, edf_file):
-    """Порог flat-line приходит из параметров стадии, а не из конфига сервера."""
+    """Порог flat-line приходит из параметров стадии, а не из конфига сервера.
+
+    Сигнал фикстуры — чистые синусы **без референса** (пачка B: стадия грузит
+    сырой сигнал): каждое окно 200 мс содержит глобальный максимум, и зона уходит
+    в ветку ``clipping``, а не ``flat_line`` (rails = край диапазона данных,
+    ``clipping_share`` 5%; раньше average reference «смешивал» волны каналов и
+    маскировал это). Оба вида даёт один детектор от того же ``flat_line_uv``
+    (``clip_mask ⊂ flat_mask``), поэтому проверяются вместе.
+    """
     recording = _register(tmp_path, edf_file)
 
     result = run_preprocess(
@@ -203,8 +211,11 @@ def test_artifacts_stage_uses_flat_line_params(tmp_path, edf_file):
         progress=lambda *_, **__: None,
     )
 
-    flat = [zone for zone in result["artifacts"] if zone["kind"] == "flat_line"]
-    assert flat, "при пороге 1000 мкВ весь сигнал — плоская линия"
+    flat = [
+        zone for zone in result["artifacts"]
+        if zone["kind"] in ("flat_line", "clipping")
+    ]
+    assert flat, "при пороге 1000 мкВ весь сигнал — «почти константа» (flat/clipping)"
     assert {name for zone in flat for name in zone["channels"]} == set(result["channels"])
 
 
@@ -307,11 +318,10 @@ def test_artifacts_stage_qc_marks_flat_recording(tmp_path):
     """Запись «замирает» на секунду (нули 1 с из 4): у всех каналов доля ≥ 0.2.
 
     Проверяется связка «детектор → зоны → по-канальная сводка». По-канальная
-    избирательность покрыта юнит-тестом ``channel_qc_summary``; на уровне стадии
-    её не проверяем, потому что средний референс (всегда применяется в
-    предподготовке) превращает один «мёртвый» канал в минус-среднее живых —
-    flat-line после референса его уже не увидит (известное ограничение: искать
-    отвалившийся электрод надо до референса).
+    избирательность (один мёртвый канал среди живых) проверяется отдельным
+    тестом ``test_artifacts_stage_sees_dead_channel_without_reference``: пачка B
+    убрала старое ограничение «референс маскирует константу» — детекторы стадии
+    считаются без референса, на сыром сигнале.
     """
     path = tmp_path / "dead.edf"
     sfreq = 250.0
@@ -338,6 +348,46 @@ def test_artifacts_stage_qc_marks_flat_recording(tmp_path):
         assert row["by_kind"].get("flat_line", 0.0) > 0
 
 
+def test_artifacts_stage_sees_dead_channel_without_reference(tmp_path):
+    """Пачка B: детекторы стадии считаются без референса — мёртвый электрод виден.
+
+    С референсом, применённым до детекторов, константный канал становился
+    «−средним живых», и flat-line его больше не находил (§2 п.1
+    `docs/strategy/01-signal-quality.md`). Стадия грузит сигнал с
+    ``apply_ref=False``, поэтому константа остаётся константой и попадает
+    и в зоны ``flat_line``, и в ``dead_channels`` QC.
+    """
+    path = tmp_path / "dead_channel.edf"
+    sfreq = 250.0
+    t = np.arange(int(4 * sfreq)) / sfreq
+    data = np.vstack(
+        [np.sin(2 * np.pi * (6 + i) * t) * 20 for i in range(5)]
+    )
+    data[2] = 3.0  # третий канал мёртв: константа 3 мкВ (живые — синусы 20 мкВ)
+    from tests.conftest import write_minimal_edf
+
+    write_minimal_edf(path, list(settings.standard_channels[:5]), data, sfreq)
+    recording = _register(tmp_path, path)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="artifacts", run_ica=False),
+        progress=lambda *_, **__: None,
+    )
+
+    dead_name = list(settings.standard_channels[:5])[2]
+    flat_channels = {
+        channel
+        for zone in result["artifacts"]
+        if zone["kind"] == "flat_line"
+        for channel in zone["channels"]
+    }
+    assert dead_name in flat_channels, (
+        "мёртвый канал обязан быть виден детекторам: стадия работает без референса"
+    )
+    assert dead_name in result["dead_channels"]
+
+
 def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
     """Инвариант N6: отброшены эпохи с всплеском И пересекающие зоны детектора.
 
@@ -348,6 +398,8 @@ def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
     """
     recording = _register(tmp_path, spike_edf)
 
+    from app.services.artifact_detector import EPOCH_REJECT_KINDS
+
     artifacts = run_preprocess(
         recording, settings,
         PreprocessParams(stage="artifacts", pp_threshold_uv=100.0, run_ica=False),
@@ -356,6 +408,9 @@ def test_epochs_stage_reports_rejected_indices(tmp_path, spike_edf):
     zones = [
         (zone["onset_sec"], zone["onset_sec"] + zone["duration_sec"])
         for zone in artifacts["artifacts"]
+        # В инвариант N6 «зоны ↔ drop_log» входят только reject-виды: информационные
+        # (line_noise/ocular/muscle) аннотаций BAD_ не дают и эпох не роняют.
+        if zone["kind"] in EPOCH_REJECT_KINDS
     ]
     assert zones, "всплеск 250 мкВ обязан дать зоны peak_to_peak"
 

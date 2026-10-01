@@ -16,6 +16,12 @@
   каналы-виновники отброшенных эпох приходят в UI (штриховка, причины
   блокировки и рамки в треках каналов-виновников).
 
+**Референс (пачка B, решение 22.09.2026):** стадии грузят сигнал из кэша
+**без** референса (``apply_ref=False``) — детекторы и QC считаются на сыром
+сигнале; референс (``apply_reference``) применяется только в стадии
+``epochs`` — после чистки и детекторов, но до нарезки (``mne.fit_dipole``
+требует applied average reference). Порядок: «чистка → референс → нарезка».
+
 Стадии раздельные: пересчёт фильтра не обесценивает найденные артефакты, а
 правка порогов не заставляет пересчитывать эпохи. Но каждая стадия считает
 свой результат **на свежем** предподготовленном сигнале — иначе артефакты
@@ -41,6 +47,7 @@ from app.services.artifact_detector import (
     qc_summary,
     record_qc_status,
 )
+from app.services.edf_loader import apply_reference
 from app.services.epoch_segmenter import (
     EDGE_DESC,
     segment_epochs,
@@ -111,8 +118,9 @@ def _reject_channels(log: tuple[str, ...] | list[str], ch_names: list[str]) -> l
 
 def _prepare_raw(
     recording: Recording, cfg: Settings, params: PreprocessParams,
+    apply_ref: bool = True,
 ) -> tuple[Any, dict[str, Any]]:
-    """Читает запись и применяет предподготовку (монтаж, референс, фильтры).
+    """Читает запись и применяет предподготовку (монтаж, фильтры, чистку).
 
     Полоса фильтра — из параметров стадии `filter`; ``None`` означает «без
     фильтра» (пользователь выбрал пресет «Без фильтра»). Единицы берутся из
@@ -120,6 +128,11 @@ def _prepare_raw(
 
     Сигнал приходит из кэша подготовленного сигнала (A4): стадии `artifacts` и
     `epochs` с теми же параметрами не читают EDF заново.
+
+    ``apply_ref=False`` (пачка B) — отдать сигнал **без референса**: стадия
+    ``artifacts`` и широкополосный срез ``flat_line``/``clipping`` считают
+    детекторы и QC на сыром сигнале. Референс для нарезки применяется отдельно —
+    см. :func:`run_preprocess` («чистка → референс → нарезка»).
     """
     l_freq: float | None = None
     h_freq: float | None = None
@@ -147,6 +160,7 @@ def _prepare_raw(
             # Пустая очистка — прежний ключ кэша: без опций сигнал общий со
             # спектром/спектрограммой/диполями (A4/N5)
             clean=spec if spec != CleanSpec() else None,
+            apply_ref=apply_ref,
         )
     except ValueError as exc:
         raise PreprocessError(str(exc)) from exc
@@ -167,6 +181,10 @@ def _detect(
     (разбор находки 29.09.2026: на δ 0.5–4 Гц все зоны ложные, `docs/history.md`).
     При «без фильтра» широкополосный срез — это сам ``raw`` (кэш
     подготовленного сигнала отдаёт его без нового чтения EDF).
+
+    Оба среза (основной и широкополосный) приходят **без референса**
+    (``apply_ref=False``, пачка B): детекторы видят сырой сигнал — константный
+    электрод остаётся константой, а не «−средним остальных».
     """
     progress("artifacts", message="Детекция артефактов")
     stage_cfg = cfg.model_copy(update={
@@ -175,7 +193,9 @@ def _detect(
     })
     flat_raw = None
     if params.filter_band is not None:
-        flat_raw, _ = _prepare_raw(recording, cfg, replace(params, filter_band=None))
+        flat_raw, _ = _prepare_raw(
+            recording, cfg, replace(params, filter_band=None), apply_ref=False,
+        )
     return detect_artifacts(
         raw, stage_cfg,
         z_threshold=params.z_threshold,
@@ -256,7 +276,11 @@ def run_preprocess(
             epochs=epochs,
         )
 
-    raw, clean_report = _prepare_raw(recording, cfg, params)
+    # Пачка B: стадия работает на сигнале **без референса** — детекторы, QC и
+    # мёртвые каналы считаются на сыром сигнале (решение 22.09.2026, §6.1
+    # `docs/strategy/01-signal-quality.md`); референс применяется ниже, только
+    # перед нарезкой эпох.
+    raw, clean_report = _prepare_raw(recording, cfg, params, apply_ref=False)
     warnings: list[str] = []
 
     base: dict[str, Any] = {
@@ -383,6 +407,10 @@ def run_preprocess(
     # Стадия `epochs`: нарезка (фиксированная или по событиям, N2/2.7). Отброшенные
     # эпохи (по аннотациям BAD_ от наших детекторов) нужны UI для штриховки,
     # поэтому вместо одного числа отдаём индексы (порядок событий).
+    # Референс — после чистки и детекторов, но до нарезки (пачка B, решение
+    # 22.09.2026): mne.fit_dipole требует applied average reference, а зоны выше
+    # уже посчитаны на сыром сигнале.
+    apply_reference(raw, params.reference_channels)
     if params.epoch_mode == "events":
         tmin = -params.epoch_pre_ms / 1000.0
         tmax = params.epoch_post_ms / 1000.0

@@ -15,7 +15,11 @@ reference, полосовой и сетевой фильтры. Кнопка «�
 1. **Наружу отдаётся копия** (``raw.copy()``). ``segment_epochs`` мутирует
    полученный сигнал (``raw.set_annotations(...)``), а разные потребители ставят
    разные аннотации — артефакты в предподготовке, пустые в спектре. Общий объект
-   означал бы, что аннотации одной задачи «протекают» в другую.
+   означал бы, что аннотации одной задачи «протекают» в другую. Кэш хранит
+   сигнал **до референса** (пачка B): референс применяется к копии вызывающего
+   в ``prepared_raw_report`` (``apply_ref``), поэтому детекторы стадии
+   ``artifacts`` получают сырой сигнал, а нарезка и ``fit_dipole`` — applied
+   reference.
 2. **Ключ — ``recording_id``, без sha256 файла.** Идентификатор записи уже
    адресует содержимое через дедуп (``docs/rules/data-and-caches.md`` п.1);
    считать отпечаток файла в ключе — платить за промах без выигрыша.
@@ -42,7 +46,7 @@ import mne
 from app.core.config import Settings
 from app.services import journal
 from app.services.artifact_cleaner import CleanSpec, apply_cleaning
-from app.services.edf_loader import load_edf
+from app.services.edf_loader import apply_reference, load_edf
 from app.services.recordings import Recording
 
 logger = logging.getLogger(__name__)
@@ -56,7 +60,9 @@ class _SignalKey:
     ``reference`` из формы (``average``/``custom``): пустой список и «average»
     дают одинаковый сигнал, и разные ключи на них — лишние промахи кэша.
     ``reference_mode`` вынесен отдельно: ``"none"`` (миксы каналов «ЭЭГ») даёт
-    **другой** сигнал, чем «average» с тем же пустым списком каналов.
+    **другой отдаваемый** сигнал, чем «average» с тем же пустым списком каналов
+    (само кэшируемое содержимое — до референса, пачка B; референс применяет
+    ``_deliver`` к копии вызывающего).
     """
 
     recording_id: str
@@ -168,8 +174,6 @@ def _load(
     l_freq: float | None,
     h_freq: float | None,
     notch_hz: float | None,
-    reference_channels: list[str] | None,
-    reference_mode: str,
     clean: CleanSpec | None = None,
 ) -> tuple[mne.io.BaseRaw, dict[str, Any]]:
     """Читает EDF, применяет предподготовку и очистку (промах кэша).
@@ -177,6 +181,10 @@ def _load(
     Очистка (``CleanSpec``: гармоники notch, bad-каналы, ICA/SSP) применяется
     здесь, до закладки в кэш: все потребители ключа получают один и тот же
     очищенный сигнал, а отчёт очистки едет вместе с ним.
+
+    **Референс не применяется** (пачка B): кэш хранит сигнал до референса,
+    референс ставит :func:`prepared_raw_report` на отданной копии (``apply_ref``)
+    — после чистки, но до нарезки эпох и ``fit_dipole``.
     """
     raw = load_edf(
         recording.path,
@@ -185,8 +193,6 @@ def _load(
         h_freq=h_freq,
         units=cfg.edf_units,
         notch_hz=notch_hz,
-        reference_channels=reference_channels,
-        reference_mode=reference_mode,
     )
     if clean is None or clean == CleanSpec():
         return raw, {}
@@ -211,6 +217,7 @@ def prepared_raw_report(
     reference_mode: str = "average",
     pipeline: str | None = None,
     clean: CleanSpec | None = None,
+    apply_ref: bool = True,
 ) -> tuple[mne.io.BaseRaw, dict[str, Any]]:
     """Подготовленный сигнал записи: ``load_edf`` с кэшем по параметрам расчёта.
 
@@ -220,6 +227,12 @@ def prepared_raw_report(
     ``reference_mode`` — ``"average"`` (по умолчанию) или ``"none"``: вторым
     пользуются миксы каналов раздела «ЭЭГ» (``services/channel_mix.py``),
     которым референс не нужен — среднее по группе само является ссылкой.
+
+    **Референс (пачка B):** кэш хранит сигнал **до** референса; референс
+    применяется к копии вызывающего после получения из кэша — так детекторы
+    стадии ``artifacts`` видят сырой сигнал (``apply_ref=False``), а остальные
+    потребители получают applied reference (требование ``fit_dipole``).
+    Порядок «чистка → референс» соблюдён: чистка — внутри ``_load``, до кэша.
 
     ``pipeline`` — имя пайплайна для журнала шагов (`docs/data_map.md` §9):
     попадание в этот кэш — главный ответ на «почему повторный расчёт стоит как
@@ -245,6 +258,20 @@ def prepared_raw_report(
             note=key.label(),
         )
 
+    def _deliver(
+        raw: mne.io.BaseRaw, report: dict[str, Any],
+    ) -> tuple[mne.io.BaseRaw, dict[str, Any]]:
+        """Отдаёт сигнал вызывающему: референс применяется к копии, после кэша.
+
+        Кэш хранит сигнал **до** референса (пачка B): ``apply_ref=False``
+        (стадия ``artifacts``) отдаёт сырой сигнал детекторам и QC, иначе
+        референс применяется здесь — до нарезки эпох и ``fit_dipole``, которые
+        требуют applied average reference.
+        """
+        if apply_ref:
+            apply_reference(raw, reference_channels, reference_mode)
+        return raw, report
+
     with _LOCK:
         # Лимит мог быть понижен между вызовами (в т.ч. до нуля — «кэш выключен»):
         # приводим размер к текущему лимиту до поиска.
@@ -259,15 +286,13 @@ def prepared_raw_report(
             )
             hit_raw, hit_report = cached[0].copy(), dict(cached[1])
             _report(True, hit_raw)
-            return hit_raw, hit_report
+            return _deliver(hit_raw, hit_report)
 
     if limit <= 0:
         logger.info("Подготовленный сигнал: кэш выключен, читаю EDF (%s)", key.label())
-        raw, clean_report = _load(
-            recording, cfg, l_freq, h_freq, notch_hz, reference_channels, reference_mode, clean,
-        )
+        raw, clean_report = _load(recording, cfg, l_freq, h_freq, notch_hz, clean)
         _report(False, raw)
-        return raw, clean_report
+        return _deliver(raw, clean_report)
 
     with _build_lock(key):
         # Пока ждали лок, сигнал мог построить соседний поток — второй раз
@@ -279,14 +304,14 @@ def prepared_raw_report(
                 _STATS["hits"] += 1
                 hit_raw, hit_report = cached[0].copy(), dict(cached[1])
                 _report(True, hit_raw)
-                return hit_raw, hit_report
+                return _deliver(hit_raw, hit_report)
 
-        raw, clean_report = _load(
-            recording, cfg, l_freq, h_freq, notch_hz, reference_channels, reference_mode, clean,
-        )
+        raw, clean_report = _load(recording, cfg, l_freq, h_freq, notch_hz, clean)
         _report(False, raw)
         with _LOCK:
             _STATS["misses"] += 1
+            # В кэш — сигнал до референса: референс применяет _deliver уже на
+            # копии вызывающего (пачка B), копия в кэше остаётся сырой.
             _CACHE[key] = (raw.copy(), dict(clean_report))
             _CACHE.move_to_end(key)
             _evict(limit)
@@ -295,7 +320,7 @@ def prepared_raw_report(
             recording.recording_id, key.label(),
             float(raw.n_times) / float(raw.info["sfreq"] or 1.0),
         )
-        return raw, clean_report
+        return _deliver(raw, clean_report)
 
 
 def prepared_cache_stats(cfg: Settings | None = None) -> dict[str, int]:

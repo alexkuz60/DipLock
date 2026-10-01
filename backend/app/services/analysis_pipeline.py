@@ -64,13 +64,13 @@ def run_analysis(
         fit_summary,
         localize_dipoles,
     )
-    from app.services.edf_loader import load_edf
+    from app.services.edf_loader import apply_reference, load_edf
     from app.services.epoch_segmenter import epoch_records, make_epoch_events, segment_epochs
 
     started = time.perf_counter()
     session_id = str(uuid.uuid4())
 
-    progress("load_edf", message="Чтение EDF, монтаж 10-20, average reference")
+    progress("load_edf", message="Чтение EDF, монтаж 10-20")
     with journal.step(
         "analyze", "load_edf", bytes_in=_file_size(filepath), note=filename,
     ) as entry:
@@ -80,6 +80,8 @@ def run_analysis(
     # Детекция идёт ДО полосовой фильтрации пользователя: load-сигнал 1–40 Гц
     # шире любой пользовательской полосы, поэтому flat_line/clipping здесь уже
     # «не по полосе» (контракт разбора 01.10.2026 — см. detect_artifacts).
+    # Референс load_edf не ставит вовсе (пачка B): детекторы видят сырой
+    # неотреференсированный сигнал — как и стадия `artifacts` предподготовки.
     progress("artifacts", message="Детекция артефактов")
     with journal.step(
         "analyze", "artifacts",
@@ -106,6 +108,10 @@ def run_analysis(
                 bandwidth_hz=settings.default_single_freq_bandwidth_hz,
             )
 
+    # Пачка B: референс — после детекторов и чистки (здесь чистки нет), но до
+    # нарезки эпох и fit_dipole: MNE требует applied average reference
+    # (решение 22.09.2026, §6.1 docs/strategy/01-signal-quality.md).
+    apply_reference(raw)
     progress("epochs", message=f"Нарезка эпох по {epoch_length_ms:.0f} мс")
     with journal.step(
         "analyze", "epochs",

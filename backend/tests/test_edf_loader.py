@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from app.core.config import settings
-from app.services.edf_loader import load_edf, normalize_channel_name
+from app.services.edf_loader import apply_reference, load_edf, normalize_channel_name
 
 # DipLock/data/edf/test.edf (backend/tests -> backend -> DipLock)
 _REAL_EDF = os.path.abspath(
@@ -77,3 +77,26 @@ def test_load_edf_explicit_units_respected():
     raw = load_edf(_REAL_EDF, settings.standard_channels, units="uV")
     median_std_v = float(np.median(np.std(raw.get_data(verbose=False), axis=1)))
     assert 1e-6 < median_std_v < 1e-3
+
+
+def test_load_edf_does_not_apply_reference(edf_file):
+    """Пачка B: ``load_edf`` отдаёт сырой сигнал, референс — отдельный шаг.
+
+    Раньше референс применялся сразу после монтажа, и детекторы видели уже
+    отреференсированный сигнал (константный электрод маскировался «−средним
+    остальных»). Теперь QC и детекторы считаются на сыром сигнале, а
+    ``apply_reference`` ставит референс после чистки — до нарезки и
+    ``fit_dipole`` (§6.1 `docs/strategy/01-signal-quality.md`).
+    """
+    raw = load_edf(str(edf_file), settings.standard_channels, l_freq=None, h_freq=None)
+
+    # fixture: каждый канал смещён на i мкВ — без референса среднее по каналам
+    # на каждом отсчёте не нулевое (порядка 2 мкВ).
+    assert float(np.max(np.abs(raw.get_data(verbose=False).mean(axis=0)))) > 1e-7
+
+    apply_reference(raw, None, "average")
+
+    np.testing.assert_allclose(
+        raw.get_data(verbose=False).mean(axis=0), 0.0, atol=1e-12,
+        err_msg="average reference обязана дать нулевое среднее по каналам",
+    )

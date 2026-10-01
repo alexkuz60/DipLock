@@ -17,6 +17,7 @@ from typing import Any
 
 from app.core.config import Settings
 from app.services import journal
+from app.services.edf_loader import apply_reference
 from app.services.epoch_segmenter import segment_epochs_events
 from app.services.preprocess import PreprocessError, PreprocessParams, _detect, _prepare_raw
 from app.services.recordings import Recording
@@ -64,8 +65,11 @@ def run_evoked(
 
     progress("evoked", message=f"Усреднение по событиям «{prep.event_id}»")
     try:
-        raw, _clean_report = _prepare_raw(recording, cfg, prep)
+        # Пачка B: детекторы — на сыром сигнале (без референса), референс —
+        # после чистки/детекции, но до нарезки — как в `run_preprocess`.
+        raw, _clean_report = _prepare_raw(recording, cfg, prep, apply_ref=False)
         annotations, _stats = _detect(raw, recording, cfg, prep, progress)
+        apply_reference(raw, prep.reference_channels)
         epochs, events = segment_epochs_events(
             raw, annotations,
             event_id=prep.event_id,

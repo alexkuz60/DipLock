@@ -246,6 +246,30 @@ def test_line_noise_zones_and_level():
     assert stats["line_noise_level"] >= settings.line_noise_ratio
 
 
+def test_line_noise_ignored_on_pure_tones_without_noise_floor():
+    """Чистые синусоиды без широкополосного фона — не «сетевой шум».
+
+    На «идеально чистом» сигнале Welch даёт фон ~1e-43 у бинов 44–62 Гц:
+    отношение пыль/пыль давало ratio ~1e23 при пороге 4 и ложную зону
+    ``line_noise`` на всю запись. Пачка B (детекторы на сыром сигнале) ловила
+    именно так синусоидальные фикстуры — раньше средний референс «подмешивал»
+    соседние каналы и маскировал вырождение (разбор 01.10.2026). Пик обязан
+    быть значим на фоне собственного спектра канала.
+    """
+    t = np.arange(int(_SFREQ * 20.0)) / _SFREQ
+    data = np.vstack([
+        np.sin(2 * np.pi * (6 + ch) * t) * 20e-6 for ch in range(len(_CHANNELS))
+    ])
+
+    _, stats = detect_artifacts(_raw(data), settings, run_ica=False)
+
+    assert not [z for z in stats["zones"] if z["kind"] == "line_noise"], (
+        "пыль Welch на чистых синусоидах не должна давать зону line_noise"
+    )
+    level = stats["line_noise_level"]
+    assert level is None or level < settings.line_noise_ratio
+
+
 def test_ocular_blink_detected_on_frontal():
     """Моргание (медленная волна 300 мс на Fp1) — зона ocular без аннотаций."""
     n = int(_SFREQ * 10.0)

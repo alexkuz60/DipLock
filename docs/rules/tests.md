@@ -618,3 +618,15 @@ Vitest **+3** — `ServerStatusSection.test` (подтверждение с чи
 фаза «Перезапускаем бэкенд»; текст 409 от сервера; «Отмена» без POST; обновлён текст
 stale-подсказки «перезапустите его кнопкой ниже»). Итог: pytest — **612** (без
 `integration` — **596**), Vitest — **927**.
+
+Пачка B — референс после чистки (01.10.2026): pytest **+4** —
+`test_load_edf_does_not_apply_reference` (`load_edf` отдаёт сырой сигнал, после
+`apply_reference` среднее по каналам ≈ 0), `test_cache_stores_signal_before_reference_and_delivers_after`
+(кэш хранит сигнал до референса, `apply_ref=False` и по умолчанию делят один промах),
+`test_artifacts_stage_sees_dead_channel_without_reference` (мёртвый электрод виден
+стадии `artifacts`), `test_line_noise_ignored_on_pure_tones_without_noise_floor`
+(пыль Welch чистых синусоид не даёт зону `line_noise`). Обновлены
+`test_other_band_is_a_miss_and_keeps_its_own_filter` (эталон + `apply_reference`),
+`test_artifacts_stage_uses_flat_line_params` (сырой синус — ветка `clipping`, оба вида
+от `flat_line_uv`) и `test_epochs_stage_reports_rejected_indices` (`zone_core` — только
+reject-виды N6). Итог: pytest — **616** (без `integration` — **600**), Vitest — **927**.

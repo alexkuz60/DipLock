@@ -111,19 +111,17 @@ def load_edf(
     h_freq: float | None = 40.0,
     units: str | None = None,
     notch_hz: float | None = None,
-    reference_channels: list[str] | None = None,
-    reference_mode: str = "average",
 ) -> mne.io.BaseRaw:
-    """Читает EDF, ставит монтаж 10-20, референс и применяет фильтры.
+    """Читает EDF, ставит монтаж 10-20 и применяет фильтры.
 
     ``l_freq``/``h_freq`` — границы полосового фильтра; ``None`` в обоих —
     «без фильтра» (пресет «Без фильтра» в UI предподготовки, срез 2.7).
     ``notch_hz`` — сетевой фильтр (50/60 Гц), ``None`` — выключен.
-    ``reference_channels`` — референс по выбранным каналам вместо average.
-    ``reference_mode`` — ``"average"`` (по умолчанию) или ``"none"``: миксы
-    каналов раздела «ЭЭГ» считаются **без** референса, потому что среднее по
-    группе само является ссылкой (``services/channel_mix.py``); с average
-    reference «Все каналы» показывали бы пустую линию.
+
+    **Референс здесь не применяется** (пачка B, решение 22.09.2026): QC и
+    детекторы считаются на сыром неотреференсированном сигнале; референс ставит
+    вызывающий через :func:`apply_reference` — после чистки, но до нарезки эпох
+    и ``fit_dipole`` (MNE требует applied average reference).
     """
     raw = _read_raw_edf(filepath, units)
     raw = _ensure_physical_units(raw, units)
@@ -146,22 +144,18 @@ def load_edf(
         )
 
     raw.pick(available)
-    # Мёртвые электроды ищем ДО референса (шаг 2.2): средний референс маскирует
-    # константный канал (он становится «−средним остальных») — flat-line его уже
-    # не видит (стратегия `01-signal-quality` §2 п.1). Найденные помечаются в
-    # `info['bads']` стандартным механизмом MNE: интерполяция bad-каналов чинит
-    # их наравне с bad-каналами формы очистки.
+    # Мёртвые электроды ищем на сыром сигнале (шаг 2.2): средний референс
+    # маскирует константный канал (он становится «−средним остальных») — flat-line
+    # его уже не видит (стратегия `01-signal-quality` §2 п.1). Референс в
+    # `load_edf` не применяется вовсе (пачка B): его ставит вызывающий через
+    # `apply_reference` после чистки. Найденные помечаются в `info['bads']`
+    # стандартным механизмом MNE: интерполяция bad-каналов чинит их наравне с
+    # bad-каналами формы очистки.
     dead = find_dead_channels(raw)
     if dead:
         raw.info["bads"] = sorted(set(raw.info["bads"]) | set(dead))
         logger.warning("Мёртвые каналы (до референса): %s", ", ".join(dead))
     _apply_standard_montage(raw)
-    # Референс применяем сразу (projection=False): mne.fit_dipole требует
-    # applied average reference, а не отложенную проекцию. «Без референса» —
-    # только для миксов каналов: среднее по группе само является ссылкой.
-    if reference_mode != "none":
-        refs = [ch for ch in (reference_channels or []) if ch in raw.ch_names]
-        raw.set_eeg_reference(refs if refs else "average", projection=False)
     # Полосовой фильтр — только если заданы границы; нарезка эпох и артефакты
     # идут после, чтобы фильтр работал на continuous-сигнале. Метод FIR/IIR и
     # явные переходные полосы — из `filter_design` (N11): одинаково с
@@ -182,3 +176,29 @@ def load_edf(
         raw.resample(500.0)
 
     return raw
+
+
+def apply_reference(
+    raw: mne.io.BaseRaw,
+    reference_channels: list[str] | None = None,
+    reference_mode: str = "average",
+) -> None:
+    """Применяет референс к ``raw`` **на месте** (шаг протокола, пачка B).
+
+    Порядок протокола (решение 22.09.2026, `docs/strategy/01-signal-quality.md`
+    §6.1): QC и детекторы считаются на сыром неотреференсированном сигнале
+    (:func:`load_edf` референс не ставит), чистка идёт дальше, а референс
+    применяется **после чистки**, но до нарезки эпох и ``fit_dipole``.
+
+    ``reference_mode`` — ``"average"`` (по умолчанию) или ``"none"``: миксы
+    каналов раздела «ЭЭГ» считаются без референса, потому что среднее по
+    группе само является ссылкой (``services/channel_mix.py``); с average
+    reference «Все каналы» показывали бы пустую линию.
+
+    ``projection=False`` обязателен: mne.fit_dipole требует **applied** average
+    reference, а не отложенную проекцию (audit #13).
+    """
+    if reference_mode == "none":
+        return
+    refs = [ch for ch in (reference_channels or []) if ch in raw.ch_names]
+    raw.set_eeg_reference(refs if refs else "average", projection=False)
