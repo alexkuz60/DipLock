@@ -298,6 +298,24 @@ class CleanReportOut(BaseModel):
     loss: CleanLossOut | None = Field(
         default=None, description="Метрики потерь L1/L3/L4/L5 (null — очистки не было)"
     )
+    iclabel_labels: list[str] | None = Field(
+        default=None,
+        description=(
+            "Вторая разметка ICA (ICLabel): класс модели на каждый компонент "
+            "(null — не считалась, причина в warnings)"
+        ),
+    )
+    iclabel_probabilities: list[float] | None = Field(
+        default=None,
+        description="Вероятность метки ICLabel по компонентам (0…1)",
+    )
+    iclabel_recommended: list[int] = Field(
+        default_factory=list,
+        description=(
+            "Компоненты, которые ICLabel рекомендует удалить "
+            "(классы eye/heart, proba ≥ 0.5); advisory — на ica.apply не влияет"
+        ),
+    )
 
 
 class FilterResponseOut(BaseModel):

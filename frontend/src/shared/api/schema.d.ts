@@ -2018,6 +2018,21 @@ export interface components {
             zones?: components["schemas"]["CleanZoneOut"][];
             /** @description Метрики потерь L1/L3/L4/L5 (null — очистки не было) */
             loss?: components["schemas"]["CleanLossOut"] | null;
+            /**
+             * Iclabel Labels
+             * @description Вторая разметка ICA (ICLabel): класс модели на каждый компонент (null — не считалась, причина в warnings)
+             */
+            iclabel_labels?: string[] | null;
+            /**
+             * Iclabel Probabilities
+             * @description Вероятность метки ICLabel по компонентам (0…1)
+             */
+            iclabel_probabilities?: number[] | null;
+            /**
+             * Iclabel Recommended
+             * @description Компоненты, которые ICLabel рекомендует удалить (классы eye/heart, proba ≥ 0.5); advisory — на ica.apply не влияет
+             */
+            iclabel_recommended?: number[];
         };
         /**
          * CleanZoneOut

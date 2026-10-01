@@ -148,6 +148,42 @@ describe('состояние расчёта диполей', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
+  it('авто-длина: смена пресета подставляет длину, ручная правка не блокируется (п.4)', () => {
+    const freqBands = { delta: [0.5, 2], theta: [4, 8], alpha: [8, 16] }
+    const auto = { lengths: [250, 500, 1000, 2000] }
+
+    // α: ≥ 2 периодов 8 Гц = 250 мс — кратчайшая подходящая («короче для высоких»)
+    useDipoleCalc.getState().setFilterPreset('alpha', freqBands, {}, auto)
+    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(250)
+
+    // Ручная правка после подстановки живёт — контрол не «залипает»
+    useDipoleCalc.getState().setEpochLengthMs(1000)
+    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(1000)
+
+    // Следующая смена пресета снова подставляет: θ (4 Гц) → 500 мс
+    useDipoleCalc.getState().setFilterPreset('theta', freqBands, {}, auto)
+    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(500)
+
+    // «Без фильтра» — полосы нет: авто-подстановки не происходит
+    useDipoleCalc.getState().setFilterPreset('none', freqBands, {}, auto)
+    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(500)
+
+    // Без списка длин (метаданные не переданы) длина тоже остаётся прежней
+    useDipoleCalc.getState().setFilterPreset('alpha', freqBands)
+    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(500)
+  })
+
+  it('авто-длина учитывает N ≥ 3C по записи — подставляется длина, прошедшая обе половины', () => {
+    // 60 каналов при 250 Гц: 3C = 180 отсчётов → 720 мс; период α просит 250
+    useDipoleCalc.getState().setFilterPreset(
+      'alpha',
+      { alpha: [8, 16] },
+      {},
+      { lengths: [250, 500, 750, 1000, 2000], signal: { sfreq: 250, nChannels: 60 } },
+    )
+    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(750)
+  })
+
   it('поднимает параметры прежней версии UI с дефолтами формы фильтра (срез 3.6)', async () => {
     // Так выглядело сохранённое состояние до среза 3.6: полей одиночной частоты нет
     localStorage.setItem(

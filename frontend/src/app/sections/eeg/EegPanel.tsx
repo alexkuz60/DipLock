@@ -51,6 +51,7 @@ import {
   useEegJobSummary,
 } from '@/shared/state/eegParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import { epochRuleWarnings, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { FieldRow } from '@/shared/ui/FieldRow'
@@ -60,6 +61,7 @@ import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { InfoRow } from '@/shared/ui/StateViews'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { WarnList } from '@/shared/ui/WarnList'
 
 /** dB-окно палитры: шаг 5 дБ, диапазон — от пола шкалы до потолка расчёта */
 const DB_RANGE_STEP = 5
@@ -80,6 +82,12 @@ export function EegPanel() {
   const setBandwidth = useEegParams((state) => state.setBandwidth)
   const recording = useEdfRecording((state) => state.recording)
   const demo = useEdfRecording((state) => state.demo)
+  // sfreq/каналы записи — половина правила N ≥ 3C для окна спектра (п.4):
+  // в демо и без записи она молчит, период-правило работает по полосе фильтра
+  const signal: EpochSignalInfo =
+    recording && !demo
+      ? { sfreq: recording.sfreq, nChannels: recording.channels?.length || recording.n_channels }
+      : {}
 
   const meta = useQuery({
     queryKey: ['meta'],
@@ -176,6 +184,17 @@ export function EegPanel() {
           hint={`Длинное окно различает частоты, короткое — моменты времени. Шаг сетки по времени: ${
             grid ? Math.round(hopMs(grid)) : '—'
           } мс.`}
+        />
+        {/* Окно спектра подчиняется тому же правилу, что и длина эпохи (§8.3):
+            ≥ 2 периодов нижней частоты полосы и ≥ 3C отсчётов — предупреждением */}
+        <WarnList
+          testId="window-rule-warnings"
+          items={epochRuleWarnings({
+            lengthMs: params.spectrogram.windowMs,
+            bandLoHz: params.filter.filterBandHz?.[0] ?? null,
+            subject: 'Окно',
+            ...signal,
+          })}
         />
         <NumberField
           label="Перекрытие"

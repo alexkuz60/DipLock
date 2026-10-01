@@ -172,7 +172,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (927 Vitest / 616 pytest, без `integration` — 600), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (952 Vitest / 619 pytest, без `integration` — 603), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

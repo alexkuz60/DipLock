@@ -140,6 +140,28 @@ describe('панель раздела EDF', () => {
     expect(screen.getByTestId('clean-loss-l5')).toHaveTextContent('компонент ICA')
   })
 
+  it('вторая разметка ICLabel в отчёте очистки: сводка и advisory-рекомендация (01.10.2026)', async () => {
+    act(() => {
+      useEdfRecording.setState({
+        cleanReport: {
+          ...cleanReportFixture(),
+          iclabel_labels: ['brain', 'brain', 'eye blink', 'brain', 'brain', 'other'],
+          iclabel_probabilities: [0.9, 0.85, 0.71, 0.9, 0.8, 0.6],
+          iclabel_recommended: [2, 4],
+        },
+      })
+    })
+    renderWithProviders(<EdfPanel />)
+
+    const summary = await screen.findByTestId('iclabel-summary')
+    expect(summary).toHaveTextContent('ICLabel (вторая разметка): brain 4, eye blink 1, other 1')
+    // Advisory: #2 не удалён нами — показываем с вероятностью; #4 уже в
+    // removed_components, «ещё» его не предлагаем (решение за пользователем)
+    const recommend = screen.getByTestId('iclabel-recommend')
+    expect(recommend).toHaveTextContent('#2 eye blink (0.71)')
+    expect(recommend).not.toHaveTextContent('#4')
+  })
+
   it('без записи (и в демо) контрола слоя нет: нечего переключать', async () => {
     mockApiFetch()
     renderWithProviders(<EdfPanel />)
@@ -356,6 +378,36 @@ describe('панель раздела EDF', () => {
     })
     expect(screen.getByText('слои: результат расчёта')).toBeInTheDocument()
   })
+
+  it('авто-длина: смена полосы подставляет длину эпохи в фиксированном режиме (п.4)', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    // «Свой диапазон» с нижней границей 8 Гц: ≥ 2 периодов = 250 мс
+    useEdfParams.setState({ params: { ...EDF_PARAM_DEFAULTS, customBand: [8, 40] } })
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    await user.selectOptions(screen.getByLabelText('Полоса'), 'custom')
+
+    // Кратчайшая длина списка (/meta), прошедшая правило периодов — «короче для высоких»
+    expect(useEdfParams.getState().params.epochLengthMs).toBe(250)
+    expect(screen.getByLabelText('Длина эпохи')).toHaveValue('250')
+  })
+
+  it('две половины правила (≥ 2 периодов и ≥ 3C) видны у длины эпохи (п.4)', async () => {
+    // Запись: 10 каналов монтажа при 100 Гц → 3C = 30 отсчётов → минимум 300 мс
+    useEdfRecording.setState({ recording: { ...recordingFixture, sfreq: 100 } })
+    useEdfParams.setState({ params: { ...EDF_PARAM_DEFAULTS, epochLengthMs: 250 } })
+    mockApiFetch()
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    const warnings = await screen.findByTestId('epoch-rule-warnings')
+    // Полоса по умолчанию 1–40 Гц: 250 мс < 2 периодов 1 Гц (минимум 2000 мс)
+    expect(warnings).toHaveTextContent('двух периодов нижней частоты полосы')
+    // 250 мс при 100 Гц = 25 отсчётов — меньше 3C (3 × 10 = 30 отсчётов)
+    expect(warnings).toHaveTextContent('3 × 10 = 30 отсчётов')
+  })
 })
 
 describe('событийный режим и блок ERP (N2/2.7)', () => {
@@ -411,6 +463,28 @@ describe('событийный режим и блок ERP (N2/2.7)', () => {
     expect(screen.getByLabelText('До события')).toHaveValue(200)
     expect(screen.getByLabelText('После события')).toHaveValue(800)
     expect(screen.queryByLabelText('Длина эпохи')).not.toBeInTheDocument()
+  })
+
+  it('в режиме «По событиям» авто-длина не трогает окна ERP (п.4)', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    // Свой диапазон 8–40 Гц: в фиксированном режиме подставил бы 250 мс
+    useEdfParams.getState().setParams({
+      epochMode: 'events',
+      customBand: [8, 40],
+    })
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('Fp1')
+
+    await user.selectOptions(screen.getByLabelText('Полоса'), 'custom')
+
+    // Длина эпохи скрыта (ERP режется окнами до/после) и не подставляется
+    expect(screen.queryByLabelText('Длина эпохи')).not.toBeInTheDocument()
+    expect(useEdfParams.getState().params.epochLengthMs).toBe(
+      EDF_PARAM_DEFAULTS.epochLengthMs,
+    )
+    expect(useEdfParams.getState().params.epochPreMs).toBe(EDF_PARAM_DEFAULTS.epochPreMs)
+    expect(useEdfParams.getState().params.epochPostMs).toBe(EDF_PARAM_DEFAULTS.epochPostMs)
   })
 
   it('кнопка ERP disabled без события и включается с выбранным событием', async () => {

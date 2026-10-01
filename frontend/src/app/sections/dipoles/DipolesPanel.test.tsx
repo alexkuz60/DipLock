@@ -17,7 +17,8 @@ import {
 } from '@/shared/state/dipoleParams'
 import { CALC_PARAM_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
-import { dipoleScanResultFixture } from '@/test/fixtures'
+import { useEdfRecording } from '@/shared/state/edfRecording'
+import { dipoleScanResultFixture, recordingFixture } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { DipolesPanel } from './DipolesPanel'
@@ -385,5 +386,35 @@ describe('панель раздела «Диполи»', () => {
     expect(screen.queryByText('Параметры расчёта изменены — результат не пересчитан')).toBeNull()
     const urls = fetchSpy.mock.calls.map(([input]) => String(input))
     expect(urls.filter((url) => !url.includes('/meta'))).toEqual([])
+  })
+
+  it('авто-длина: смена пресета полосы подставляет длину эпохи (п.4)', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApiFetch()
+    renderWithProviders(<DipolesPanel />)
+
+    await waitFor(() => expect(screen.getByLabelText('Длина эпохи')).not.toBeDisabled())
+    await user.selectOptions(screen.getByLabelText('Фильтр расчёта'), 'alpha')
+
+    // ≥ 2 периодов 8 Гц → кратчайшая из списка /meta = 250 мс («короче для высоких»)
+    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(250)
+    expect(screen.getByLabelText('Длина эпохи')).toHaveValue('250')
+    // Подстановка — правка, а не запуск: по-прежнему только метаданные
+    const urls = fetchSpy.mock.calls.map(([input]) => String(input))
+    expect(urls.every((url) => url.includes('/meta'))).toBe(true)
+  })
+
+  it('две половины правила (≥ 2 периодов и ≥ 3C) видны у длины эпохи (п.4)', async () => {
+    // Запись: 10 каналов монтажа при 100 Гц → 3C = 30 отсчётов → минимум 300 мс
+    useEdfRecording.setState({ recording: { ...recordingFixture, sfreq: 100 } })
+    useDipoleCalc.setState({ params: { ...CALC_PARAM_DEFAULTS, epochLengthMs: 250 } })
+    mockApiFetch()
+    renderWithProviders(<DipolesPanel />)
+
+    const warnings = await screen.findByTestId('epoch-rule-warnings')
+    // Широкая полоса расчёта 0.5–128 Гц: 250 мс < 2 периодов (минимум 2000 мс)
+    expect(warnings).toHaveTextContent('двух периодов нижней частоты полосы')
+    // 250 мс при 100 Гц = 25 отсчётов — меньше 3C (3 × 10 = 30 отсчётов)
+    expect(warnings).toHaveTextContent('3 × 10 = 30 отсчётов')
   })
 })

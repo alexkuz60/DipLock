@@ -68,6 +68,7 @@ import {
   type PlaybackState,
 } from '@/shared/lib/dipoleCalcModel'
 import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
+import { recommendedEpochLengthMs, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import { canPlayback, clampEpochIndex, normalizePlaybackSpeed } from '@/shared/lib/playback'
 import type { DipoleRefineResult, DipoleScanResult, SpectrumResult } from '@/shared/api/types'
@@ -151,11 +152,20 @@ export type DipoleCalcState = {
   setGridMm: (value: number) => void
   /** Метод PSD спектра (N17): только задача спектра, диполи не пересчитываются */
   setPsdMethod: (value: 'welch' | 'multitaper') => void
-  /** Выбор пресета фильтра: полоса пресета — данные (ритмы идут из `/meta`) */
+  /**
+   * Выбор пресета фильтра: полоса пресета — данные (ритмы идут из `/meta`).
+   *
+   * `autoLength` — авто-длина эпохи (п.4): при смене пресета длина
+   * подставляется по полосе («короче для высоких», правило ≥ 2 периодов и
+   * N ≥ 3C — `shared/lib/epochRules.ts`). Параметр необязателен: без него
+   * (нет списка длин из `/meta`) длина не меняется; ручная правка после
+   * подстановки остаётся до следующей смены пресета.
+   */
   setFilterPreset: (
     preset: CalcFilterPresetId,
     freqBands: Record<string, number[]>,
     functionalBands?: Record<string, number[]>,
+    autoLength?: { lengths: readonly number[]; signal?: EpochSignalInfo },
   ) => void
   /** Полоса фильтра числом (поля «свой диапазон»): границы нормализуются */
   setFilterBand: (band: readonly number[] | null) => void
@@ -302,14 +312,25 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       // Окно уточнения — только варианты списка: произвольное число здесь значило
       // бы «случайные 40 секунд счёта», а не выбор точности (шаг 1.5)
       setRefineHalfwinMs: (value) => set({ refineHalfwinMs: normalizeRefineHalfwin(value) }),
-      setFilterPreset: (preset, freqBands, functionalBands = {}) =>
-        set((state) => ({
-          params: {
-            ...state.params,
-            filterPreset: preset,
-            filterBandHz: bandForPreset(state.params, preset, freqBands, functionalBands),
-          },
-        })),
+      setFilterPreset: (preset, freqBands, functionalBands = {}, autoLength) =>
+        set((state) => {
+          const filterBandHz = bandForPreset(state.params, preset, freqBands, functionalBands)
+          // Авто-длина (п.4): смена пресета подставляет кратчайшую длину,
+          // прошедшую обе половины правила (периоды полосы + N ≥ 3C по записи).
+          // «Без фильтра» (полосы нет) и пустой список длин — длину не трогаем;
+          // ручная правка после подстановки живёт до следующей смены пресета.
+          const auto = autoLength
+            ? recommendedEpochLengthMs(filterBandHz?.[0] ?? null, autoLength.lengths, autoLength.signal)
+            : null
+          return {
+            params: {
+              ...state.params,
+              filterPreset: preset,
+              filterBandHz,
+              ...(auto !== null ? { epochLengthMs: auto } : {}),
+            },
+          }
+        }),
       // Полосу правят поля «своего диапазона»: выбор становится «своим», а если
       // границы совпали (полоса пустая) — фильтра нет вовсе
       setFilterBand: (band) =>

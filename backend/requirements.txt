@@ -33,3 +33,11 @@ scikit-learn>=1.5.0
 # гауссовые пики над ней. Стабильного 2.0 ещё нет — на PyPI только rc-сборки,
 # API зафиксирован тестами (`tests/test_spectral.py`), как у MNE.
 specparam>=2.0.0rc7
+# Вторая разметка ICA (ICLabel, вердикт 01.10.2026 — «внедрять как вторую
+# разметку», `docs/rules/artifacts.md`): ML-метки компонент рядом с нашим
+# корреляционным путём. `onnxruntime` ставим **явно**: mne-icalabel его
+# зависимостью НЕ объявляет (находка спайка 01.10.2026), а без него модель
+# ICLabel (`iclabel/network/assets/ICLabelNet.onnx`, веса вшиты в пакет) не
+# поднимается.
+mne-icalabel>=0.9.0
+onnxruntime>=1.30.0

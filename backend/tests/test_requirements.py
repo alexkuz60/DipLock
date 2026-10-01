@@ -27,3 +27,14 @@ def test_sqlalchemy_asyncio_extra_declared() -> None:
 def test_aiosqlite_declared() -> None:
     """Локальный `DATABASE_URL=sqlite+aiosqlite://…` — драйвер заявлен явно (F3)."""
     assert "aiosqlite" in _requirements()
+
+
+def test_mne_icalabel_declared() -> None:
+    """Вторая разметка ICA (`artifact_cleaner.iclabel_second_opinion`) — обе части заявлены.
+
+    `onnxruntime` — отдельно: mne-icalabel его зависимостью не объявляет
+    (находка спайка 01.10.2026), а без него модель ICLabel не поднимается.
+    """
+    text = _requirements()
+    assert "mne-icalabel" in text
+    assert "onnxruntime" in text

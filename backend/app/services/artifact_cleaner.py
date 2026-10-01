@@ -1,7 +1,7 @@
 """Очистка сигнала MNE-only: гармоники notch, bad-каналы, ICA-apply, SSP (этап 4).
 
-Базовое удаление артефактов без новых зависимостей (asrpy/autoreject/
-mne-icalabel — вне скоупа, N12/N13). Золотой порядок (PDF «Артефакты ЭЭГ»):
+Базовое удаление артефактов MNE + вторая разметка ICLabel (asrpy — вне скоупа,
+autoreject — отклонён спайком 01.10.2026). Золотой порядок (PDF «Артефакты ЭЭГ»):
 
 1. гармоники сетевого фильтра (notch 50/60 → 100/150/200 Гц);
 2. пометка bad-каналов (список пользователя);
@@ -15,6 +15,15 @@ EOG-компоненты ищутся по EOG-каналам записи, а �
 — на исходном сигнале (``fit_ica``). Теми же хелперами пользуется детекция
 артефактов (ветка ``run_ica`` стадии ``artifacts``).
 
+**Вторая разметка ICLabel** (вердикт владельца 01.10.2026: «внедрять как вторую
+разметку»): после корреляционного пути компоненты дополнительно размечает ML-модель
+ICLabel (``iclabel_second_opinion`` — метки + вероятности + рекомендация удалить
+eye/heart), результат уходит в отчёт чистки. **Advisory**: ``ica.apply`` решает по
+нашему пути (адресность, пороги, отчёт), ICLabel — второе мнение для пользователя;
+считается на average-referenced копии (модель обучена на референсированных данных,
+пачка B грузит ICA до референса) и **до** ``ica.apply`` — после удалённых
+источников нет. Сбой модели — предупреждение в отчёте, чистка не страдает.
+
 Шаг живёт в кэше подготовленного сигнала (``prepared_signal``, ключ A4/N5
 включает ``CleanSpec``): стадии `artifacts`/`epochs` с теми же параметрами
 получают уже очищенный сигнал. Отчёт «до/после» — одно число амплитуды
@@ -22,8 +31,9 @@ EOG-компоненты ищутся по EOG-каналам записи, а �
 результате стадии `filter`.
 """
 import logging
+import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypedDict
 
 import mne
 import numpy as np
@@ -54,6 +64,22 @@ FRONTAL_PROXY: tuple[str, ...] = ("FP1", "FP2", "FPZ")
 # 24.09.2026), поэтому прокси-путь идёт явной корреляцией; для нативных
 # EOG-каналов порог MNE остаётся дефолтным.
 _PROXY_CORR_THRESHOLD = 0.5
+
+# Вторая разметка ICA — ICLabel (вердикт 01.10.2026): классы модели, означающие
+# артефакт (кандидаты на удаление); остальные классы (brain/muscle/line noise/
+# channel noise/other) — не рекомендация снимать компонент.
+_ICLABEL_ARTIFACT_LABELS: tuple[str, ...] = ("eye blink", "heart beat")
+
+# Порог вероятности метки, с которого рекомендация ICLabel считается серьёзной
+_ICLABEL_PROBA_THRESHOLD = 0.5
+
+
+class _IclabelOpinion(TypedDict):
+    """Результат ``iclabel_second_opinion``: метки, вероятности, рекомендация."""
+
+    labels: list[str]
+    probabilities: list[float]
+    recommended: list[int]
 
 
 @dataclass(frozen=True)
@@ -116,6 +142,13 @@ class CleanReport:
     # входит в loss.removed_variance_percent с подписью источника)
     removed_variance_percent: float | None = None
     removed_variance_source: str = "diff"
+    # Вторая разметка ICA (ICLabel, вердикт 01.10.2026): advisory — на
+    # решение ``ica.apply`` не влияет. ``None`` — не считалась (сбоя модели
+    # в warnings)
+    iclabel_labels: list[str] | None = None
+    iclabel_probabilities: list[float] | None = None
+    # Компоненты, которые ICLabel рекомендует удалить (eye/heart, proba ≥ 0.5)
+    iclabel_recommended: list[int] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         """Словарь для результата стадии (его валидирует `CleanReportOut`)."""
@@ -131,6 +164,13 @@ class CleanReport:
             "warnings": list(self.warnings),
             "zones": [{k: v for k, v in zone.items() if not k.startswith("_")} for zone in self.zones],
             "loss": self.loss,
+            "iclabel_labels": list(self.iclabel_labels) if self.iclabel_labels is not None else None,
+            "iclabel_probabilities": (
+                list(self.iclabel_probabilities)
+                if self.iclabel_probabilities is not None
+                else None
+            ),
+            "iclabel_recommended": list(self.iclabel_recommended),
         }
 
 
@@ -303,6 +343,59 @@ def find_eog_component_inds(
         return list(inds), "proxy"
 
 
+def iclabel_second_opinion(
+    raw: mne.io.BaseRaw, ica: mne.preprocessing.ICA,
+) -> _IclabelOpinion:
+    """Вторая разметка компонентов ICA — ICLabel (`mne-icalabel`), advisory.
+
+    Возвращает ``{"labels", "probabilities", "recommended"}``: метку модели и
+    её вероятность для каждого компонента плюс индексы, которые модель
+    рекомендует удалить (классы eye/heart с ``proba >= 0.5``).
+
+    Модель обучена на **average-referenced** данных 1–100 Гц, а в пайплайне ICA
+    фитится и применяется до референса (пачка B) — разметка считается на копии raw
+    с average reference и фильтром 1–100 Гц (спайк 01.10.2026: без референса метки
+    расходятся, heart → brain). Рекомендация **не** участвует в ``ica.apply``: вторая
+    разметка — второе мнение для пользователя (`docs/rules/artifacts.md`), а не
+    замена корреляционного пути ``find_eog_component_inds``/QRS-прокси. Известное
+    расхождение: ``fit_ica`` — fastica, а ICLabel обучен на extended infomax
+    (предупреждение модели фильтруется, факт — в правиле).
+
+    Вызывается до ``ica.apply`` (после удалённых источников модель считает
+    вырожденные признаки). Любая ошибка (нет ``mne-icalabel``/``onnxruntime``,
+    отказ модели) — кинет исключение: вызывающий превращает его в
+    предупреждение отчёта, чистка не страдает.
+    """
+    from mne_icalabel import label_components
+
+    labeled = raw.copy()
+    # Прямо `set_eeg_reference` (та же строка, что в `apply_reference`): импорт
+    # `edf_loader` сюда замкнул бы цикл (edf_loader → artifact_detector → этот
+    # модуль)
+    labeled.set_eeg_reference("average", projection=False)
+    # Модель обучена на данных 1–100 Гц (mne-icalabel предупреждает без фильтра):
+    # копию фильтруем под спецификацию — сигнал чистки не трогаем
+    nyquist = float(raw.info["sfreq"]) / 2.0
+    if nyquist > 1.0:
+        labeled.filter(1.0, min(100.0, nyquist), verbose=False)
+    with warnings.catch_warnings():
+        # Документированное расхождение advisory-пути: fit_ica — fastica, а ICLabel
+        # обучен на extended infomax (смена алгоритма чистки — отдельное решение
+        # владельца; факт зафиксирован в docs/rules/artifacts.md)
+        warnings.filterwarnings("ignore", message="The provided ICA instance")
+        result = label_components(labeled, ica, method="iclabel")
+    labels = [str(name) for name in result["labels"]]
+    probabilities = [float(value) for value in result["y_pred_proba"]]
+    recommended = [
+        index
+        for index, (name, proba) in enumerate(zip(labels, probabilities, strict=True))
+        if name in _ICLABEL_ARTIFACT_LABELS and proba >= _ICLABEL_PROBA_THRESHOLD
+    ]
+    return _IclabelOpinion(
+        labels=labels, probabilities=probabilities, recommended=recommended,
+    )
+
+
 def _clean_ica(raw: mne.io.BaseRaw, spec: CleanSpec, report: CleanReport) -> None:
     """ICA + ``ica.apply``: удаляет EOG- и ЭКГ-подобные компоненты (MNE-only).
 
@@ -320,6 +413,15 @@ def _clean_ica(raw: mne.io.BaseRaw, spec: CleanSpec, report: CleanReport) -> Non
             report.warnings.append(f"EOG-компоненты не найдены: {exc}")
             eog_inds = []
         exclude = sorted({*eog_inds, *_ica_ecg_inds(ica, raw)})
+        # Вторая разметка ICLabel (вердикт 01.10.2026): считается до ica.apply
+        # (удалённых источников ещё нет) и не влияет на exclude — advisory
+        try:
+            opinion = iclabel_second_opinion(raw, ica)
+            report.iclabel_labels = opinion["labels"]
+            report.iclabel_probabilities = opinion["probabilities"]
+            report.iclabel_recommended = opinion["recommended"]
+        except Exception as exc:
+            report.warnings.append(f"ICLabel (вторая разметка) не посчитался: {exc}")
         if exclude:
             ica.exclude = exclude
             # L5 (шаг 2): доля дисперсии удалённых компонент — считается на

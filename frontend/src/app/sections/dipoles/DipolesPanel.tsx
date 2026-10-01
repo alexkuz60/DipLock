@@ -44,6 +44,8 @@ import {
   resultMatchesParams,
 } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { useEdfRecording } from '@/shared/state/edfRecording'
+import { epochRuleWarnings, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import {
   BANDWIDTH_RANGE,
   BAND_RANGE,
@@ -64,6 +66,7 @@ import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { SliceScrubber } from '@/shared/ui/SliceScrubber'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { WarnList } from '@/shared/ui/WarnList'
 
 /** Слой диполей пуст: панель объясняет это, а не выглядит «сломанной». */
 const EMPTY_DIPOLE_LAYER = emptyDipoleLayer()
@@ -93,6 +96,14 @@ export function DipolesPanel() {
   const refineHalfwinMs = useDipoleCalc((state) => state.refineHalfwinMs)
   const setRefineHalfwinMs = useDipoleCalc((state) => state.setRefineHalfwinMs)
   const resetCalc = useDipoleCalc((state) => state.reset)
+  // Паспорт записи — sfreq и каналы для правила N ≥ 3C (п.4): без загруженной
+  // записи и в демо эта половина правила молчит, период-правило работает по полосе
+  const recording = useEdfRecording((state) => state.recording)
+  const demo = useEdfRecording((state) => state.demo)
+  const signal: EpochSignalInfo =
+    recording && !demo
+      ? { sfreq: recording.sfreq, nChannels: recording.channels?.length || recording.n_channels }
+      : {}
 
   // Длины эпох приходят из `/meta` (единственный источник — конфиг сервера):
   // тот же запрос уже делает раздел EDF, поэтому кэш react-query общий
@@ -251,8 +262,10 @@ export function DipolesPanel() {
           label="Фильтр расчёта"
           value={filterPreset}
           options={presetOptions.map(({ value, label, group }) => ({ value, label, group }))}
-          onChange={(value) => setFilterPreset(value, freqBands, functionalBands)}
-          hint="Полоса уходит в задачу как band_min/band_max. Диапазоны ритмов приходят с сервера (/meta), одиночная частота — узкая полоса f ± bw/2. Правка ничего не запускает."
+          onChange={(value) =>
+            setFilterPreset(value, freqBands, functionalBands, { lengths: epochLengths, signal })
+          }
+          hint="Полоса уходит в задачу как band_min/band_max. Диапазоны ритмов приходят с сервера (/meta), одиночная частота — узкая полоса f ± bw/2. Смена пресета подставляет длину эпохи по полосе (авто-длина, п.4). Правка ничего не запускает."
         />
         {filterPreset === 'single' ? (
           <>
@@ -319,7 +332,17 @@ export function DipolesPanel() {
           options={epochOptions}
           disabled={epochLengths.length === 0}
           onChange={(value) => setEpochLengthMs(Number(value))}
-          hint="Длины эпох задаёт сервер (список нарезки): правка помечает расчёт устаревшим, но ничего не запускает."
+          hint="Длины эпох задаёт сервер (список нарезки): смена пресета полосы подставляет длину автоматически, ручная правка помечает расчёт устаревшим, но ничего не запускает."
+        />
+        {/* Две половины правила читаются вместе: ≥ 2 периодов полосы (достоверность
+            пика) и ≥ 3C отсчётов (обратимость ковариации) — предупреждением, не запретом */}
+        <WarnList
+          testId="epoch-rule-warnings"
+          items={epochRuleWarnings({
+            lengthMs: calcParams.epochLengthMs,
+            bandLoHz: calcParams.filterBandHz?.[0] ?? null,
+            ...signal,
+          })}
         />
         <SegmentedControl
           label="Метод PSD"

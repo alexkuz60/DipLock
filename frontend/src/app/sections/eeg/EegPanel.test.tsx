@@ -58,4 +58,29 @@ describe('панель раздела «ЭЭГ» (2.4)', () => {
       expect(useEegParams.getState().params.baselineSec[1]).toBeGreaterThan(0),
     )
   })
+
+  it('окно STFT предупреждает о правилах «≥ 2 периодов» и «≥ 3C» (п.4)', async () => {
+    mockApiFetch()
+    renderWithProviders(<EegPanel />)
+
+    // Полоса по умолчанию 0.5–128 Гц (нормирована на 1 Гц): окно 500 мс < 2000 мс
+    const warnings = await screen.findByTestId('window-rule-warnings')
+    expect(warnings).toHaveTextContent('Окно 500 мс')
+    expect(warnings).toHaveTextContent('двух периодов нижней частоты полосы')
+  })
+
+  it('смена полосы на α снимает предупреждение об окне — правило пройдено (п.4)', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    renderWithProviders(<EegPanel />)
+    await screen.findByTestId('window-rule-warnings')
+
+    const select = screen.getByLabelText('Полоса')
+    // Ритмы приходят из /meta: ждём, пока α появится в списке пресетов
+    await screen.findByRole('option', { name: /8–16 Гц/ })
+    await user.selectOptions(select, 'alpha')
+
+    // α 8–16: минимум 250 мс, окно 500 мс проходит; записи нет — N ≥ 3C молчит
+    expect(screen.queryByTestId('window-rule-warnings')).not.toBeInTheDocument()
+  })
 })

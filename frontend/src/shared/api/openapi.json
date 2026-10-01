@@ -4036,6 +4036,44 @@
               }
             ],
             "description": "Метрики потерь L1/L3/L4/L5 (null — очистки не было)"
+          },
+          "iclabel_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iclabel Labels",
+            "description": "Вторая разметка ICA (ICLabel): класс модели на каждый компонент (null — не считалась, причина в warnings)"
+          },
+          "iclabel_probabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iclabel Probabilities",
+            "description": "Вероятность метки ICLabel по компонентам (0…1)"
+          },
+          "iclabel_recommended": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Iclabel Recommended",
+            "description": "Компоненты, которые ICLabel рекомендует удалить (классы eye/heart, proba ≥ 0.5); advisory — на ica.apply не влияет"
           }
         },
         "type": "object",

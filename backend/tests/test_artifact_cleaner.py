@@ -148,3 +148,66 @@ def test_ssp_clean_is_reported():
 
     assert report.n_projectors >= 0
     assert report.n_projectors > 0 or report.warnings
+
+
+def test_iclabel_second_opinion_real_model():
+    """Вторая разметка ICLabel: метки/вероятности advisory, контракт чистый (01.10.2026).
+
+    Модель настоящая (веса вшиты в пакет, сеть не нужна): на мимике (синфазные
+    «моргания» на Fp1/Fp2) она обязана найти артефактную компоненту — иначе
+    второе мнение ничего не стоит.
+    """
+    report = apply_cleaning(_mimic_raw(), CleanSpec(method="ica"), settings)
+
+    labels = report.iclabel_labels
+    probabilities = report.iclabel_probabilities
+    assert labels is not None and probabilities is not None
+    assert len(labels) == len(probabilities) == len(set(range(len(labels))))
+    known = {
+        "brain", "muscle artifact", "eye blink", "heart beat",
+        "line noise", "channel noise", "other",
+    }
+    assert set(labels) <= known
+    assert all(0.0 <= probability <= 1.0 for probability in probabilities)
+    assert all(0 <= index < len(labels) for index in report.iclabel_recommended)
+    # Мимик видят оба метода: ICLabel рекомендует снять моргающую компоненту
+    assert report.iclabel_recommended
+    # Контракт: отчёт целиком валидируется схемой OpenAPI
+    from app.schemas.analysis import CleanReportOut
+
+    out = CleanReportOut(**report.as_dict())
+    assert out.iclabel_labels is not None
+
+
+def test_iclabel_failure_is_warning_and_recommendation_is_advisory(monkeypatch):
+    """Сбой модели — предупреждение (чистка живёт); рекомендация не меняет решение."""
+    import app.services.artifact_cleaner as cleaner
+
+    baseline = apply_cleaning(_mimic_raw(), CleanSpec(method="ica"), settings)
+
+    # 1) Сбой ICLabel: чистка отработала, причина — в warnings отчёта
+    def _boom(raw, ica):
+        raise RuntimeError("нет onnxruntime")
+
+    monkeypatch.setattr(cleaner, "iclabel_second_opinion", _boom)
+    failed = apply_cleaning(_mimic_raw(), CleanSpec(method="ica"), settings)
+    assert failed.iclabel_labels is None
+    assert failed.iclabel_recommended == []
+    assert any("ICLabel" in text and "нет onnxruntime" in text for text in failed.warnings)
+    # наше решение не пострадало: удалено ровно то же, что без модели
+    assert list(failed.removed_components) == list(baseline.removed_components)
+
+    # 2) Рекомендация advisory: «модель хочет удалить #0» не трогает ica.apply
+    def _opinion(raw, ica):
+        n_components = int(ica.n_components_)
+        return {
+            "labels": ["other"] * n_components,
+            "probabilities": [0.9] * n_components,
+            "recommended": [0],
+        }
+
+    monkeypatch.setattr(cleaner, "iclabel_second_opinion", _opinion)
+    advised = apply_cleaning(_mimic_raw(), CleanSpec(method="ica"), settings)
+    assert advised.iclabel_recommended == [0]
+    assert list(advised.removed_components) == list(baseline.removed_components)
+    assert advised.n_components_removed == baseline.n_components_removed

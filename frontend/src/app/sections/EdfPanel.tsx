@@ -36,6 +36,7 @@ import {
   type ReferenceMode,
 } from '@/shared/state/edfParams'
 import { filterBandOf, useEdfRecording, useSignalLayerFrames } from '@/shared/state/edfRecording'
+import { epochRuleWarnings, recommendedEpochLengthMs, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { Button } from '@/shared/ui/Button'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
@@ -49,6 +50,7 @@ import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { TextField } from '@/shared/ui/TextField'
+import { WarnList } from '@/shared/ui/WarnList'
 import { ViewerSignalCaption } from './viewer/ViewerSignalCaption'
 
 const REFERENCE_MODES: { value: ReferenceMode; label: string; title: string }[] = [
@@ -88,6 +90,16 @@ const ERP_BASELINE_MODES: { value: ErpBaselineMode; label: string; title: string
 /** Пояснение к кнопкам расчёта: обработка не запускается сама по себе */
 const RECALC_HINT =
   'Расчёт запускается только кнопками шапки раздела — правка параметров ничего не пересчитывает. Каждая кнопка считает одну стадию на сервере и заменяет её слой в треках результатом.'
+
+/**
+ * Сводка меток ICLabel по классам для отчёта очистки: «brain 12, eye blink 1»
+ * (порядок появления). Вторая разметка ICA — advisory (`docs/rules/artifacts.md`).
+ */
+function iclabelClassCounts(labels: string[]): string {
+  const counts = new Map<string, number>()
+  for (const name of labels) counts.set(name, (counts.get(name) ?? 0) + 1)
+  return [...counts].map(([name, count]) => `${name} ${count}`).join(', ')
+}
 
 export function EdfPanel() {
   const params = useEdfParamsValue()
@@ -139,6 +151,12 @@ export function EdfPanel() {
     ? availableChannels
     : (meta.data?.standard_channels ?? [])
   const epochLengths = meta.data?.epoch_lengths_ms ?? []
+  // sfreq/каналы записи — половина правила N ≥ 3C (п.4): в демо и без записи
+  // она молчит, период-правило работает по полосе фильтра
+  const signal: EpochSignalInfo =
+    recording && !demo
+      ? { sfreq: recording.sfreq, nChannels: recording.channels?.length || recording.n_channels }
+      : {}
   /** Пункты «Полоса слоя» — общий `bandKeyOptions` (панель + подзаголовок вьюера) */
   const bandOptions = bandKeyOptions(meta.data)
   /** Канал графика ERP: свой выбор, иначе первый видимый канал */
@@ -182,6 +200,20 @@ export function EdfPanel() {
       : []
   })
 
+  // ICLabel (вторая разметка ICA, вердикт 01.10.2026): сводка меток модели и
+  // рекомендации, которых нет в нашем удалении — advisory, решение за пользователем
+  const iclabelSummary = cleanReport?.iclabel_labels?.length
+    ? iclabelClassCounts(cleanReport.iclabel_labels)
+    : ''
+  const iclabelExtraText = (cleanReport?.iclabel_recommended ?? [])
+    .filter((index) => !(cleanReport?.removed_components ?? []).includes(index))
+    .map((index) => {
+      const label = cleanReport?.iclabel_labels?.[index] ?? '?'
+      const proba = cleanReport?.iclabel_probabilities?.[index]
+      return `#${index} ${label}${proba === undefined ? '' : ` (${proba.toFixed(2)})`}`
+    })
+    .join(', ')
+
   return (
     <>
       <Panel title="Фильтры и референс">
@@ -189,7 +221,19 @@ export function EdfPanel() {
           label="Полоса"
           value={params.filterPreset}
           options={FILTER_PRESETS.map((preset) => ({ value: preset.value, label: preset.label }))}
-          onChange={(value) => setParams({ filterPreset: value as FilterPresetId })}
+          onChange={(value) => {
+            const preset = value as FilterPresetId
+            // Авто-длина (п.4): смена пресета подставляет длину по полосе —
+            // только для фиксированной нарезки; ERP-окна событий не трогаем
+            const band = filterBandOf({ ...params, filterPreset: preset })
+            const auto =
+              params.epochMode === 'fixed'
+                ? recommendedEpochLengthMs(band?.[0] ?? null, epochLengths, signal)
+                : null
+            setParams(
+              auto !== null ? { filterPreset: preset, epochLengthMs: auto } : { filterPreset: preset },
+            )
+          }}
         />
         {params.filterPreset === 'custom' ? (
           <>
@@ -284,6 +328,16 @@ export function EdfPanel() {
             cleanReport.amplitude_p95_uv_after !== null
               ? ` (p95 ${cleanReport.amplitude_p95_uv_before} → ${cleanReport.amplitude_p95_uv_after} мкВ)`
               : ''}
+          </p>
+        ) : null}
+        {iclabelSummary ? (
+          <p className="mt-1 text-sm text-fg-2" data-testid="iclabel-summary">
+            {`ICLabel (вторая разметка): ${iclabelSummary}`}
+          </p>
+        ) : null}
+        {iclabelExtraText ? (
+          <p className="mt-1 text-sm text-warn" data-testid="iclabel-recommend">
+            {`ICLabel рекомендует удалить ещё: ${iclabelExtraText} — решение за вами.`}
           </p>
         ) : null}
         {cleanReport?.zones?.length ? (
@@ -476,18 +530,30 @@ export function EdfPanel() {
             />
           </>
         ) : (
-          <SelectField
-            label="Длина эпохи"
-            value={String(params.epochLengthMs)}
-            options={epochOptions}
-            disabled={epochLengths.length === 0}
-            onChange={(value) => setParams({ epochLengthMs: Number(value) })}
-            hint={
-              epochLengths.length === 0
-                ? 'Список длин придёт из /meta после ответа сервера.'
-                : undefined
-            }
-          />
+          <>
+            <SelectField
+              label="Длина эпохи"
+              value={String(params.epochLengthMs)}
+              options={epochOptions}
+              disabled={epochLengths.length === 0}
+              onChange={(value) => setParams({ epochLengthMs: Number(value) })}
+              hint={
+                epochLengths.length === 0
+                  ? 'Список длин придёт из /meta после ответа сервера.'
+                  : 'Смена полосы сверху подставляет длину автоматически (правило ≥ 2 периодов); правка ничего не запускает.'
+              }
+            />
+            {/* Две половины правила читаются вместе: ≥ 2 периодов полосы (достоверность
+                пика) и ≥ 3C отсчётов (обратимость ковариации) — предупреждением, не запретом */}
+            <WarnList
+              testId="epoch-rule-warnings"
+              items={epochRuleWarnings({
+                lengthMs: params.epochLengthMs,
+                bandLoHz: filterBandOf(params)?.[0] ?? null,
+                ...signal,
+              })}
+            />
+          </>
         )}
         <CheckboxRow
           label="Маркеры событий"
