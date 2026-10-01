@@ -226,6 +226,35 @@ def test_artifacts_stage_returns_channel_qc(tmp_path, edf_file):
         assert 0.0 <= row["artifact_share"] <= 1.0
 
 
+def test_artifacts_stage_flat_line_uses_broadband_with_band(tmp_path):
+    """Стадия с δ-полосой: flat_line — с широкополосного среза, а не с полосы.
+
+    Живой шум (~1 мкВ std) после 0.5–4 Гц «замерзает» в окне 100 мс — до фикса
+    (разбор находки 29.09.2026) стадия помечала бы запись целиком. Сейчас зоны
+    только у реального нулевого сегмента (1 с, все каналы), которых на
+    δ-сигнале из-за краевых колебаний фильтра уже нет.
+    """
+    path = tmp_path / "slowband.edf"
+    sfreq = 250.0
+    n = int(30 * sfreq)
+    rng = np.random.default_rng(3)
+    data = rng.standard_normal((5, n))  # данные в мкВ, шум ~1 мкВ std
+    data[:, int(10 * sfreq): int(11 * sfreq)] = 0.0  # вся запись «замерла» на 1 с
+    write_minimal_edf(path, list(settings.standard_channels[:5]), data, sfreq)
+    recording = _register(tmp_path, path)
+
+    result = run_preprocess(
+        recording, settings,
+        PreprocessParams(stage="artifacts", filter_band=(0.5, 4.0), run_ica=False),
+        progress=lambda *_, **__: None,
+    )
+
+    flat = [zone for zone in result["artifacts"] if zone["kind"] == "flat_line"]
+    assert len(flat) == 5, "по одной зоне на канал — только реальный нулевой сегмент"
+    for zone in flat:
+        assert 0.9 <= zone["duration_sec"] <= 1.3
+
+
 def test_artifacts_stage_extracts_heart_rate(tmp_path):
     """Височные с QRS-ритмом → слот `heart_rate` с рядом ЧСС (трек пульса)."""
     from tests.conftest import write_minimal_edf

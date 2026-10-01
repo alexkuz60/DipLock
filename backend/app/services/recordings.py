@@ -311,6 +311,12 @@ class RecordingRegistry:
         self._upload_dir = upload_dir
         self._items: dict[str, Recording] = {}
         self._indexed = False
+        # Каталоги, созданные ИМЕННО этим процессом: только их имеет право
+        # удалять clear(). Флаг ``Recording.owned`` для этого не годится —
+        # дедуп (``_touch``) переводит adopted-запись в owned, чтобы её каталог
+        # жил по правилам TTL/лимита, но «найден на диске» она не перестаёт
+        # (инцидент 01.10.2026: clear() в скрипте удалил реальные записи).
+        self._created_ids: set[str] = set()
 
     # --- индекс каталогов на диске (дедуп переживает рестарт) ---------------
 
@@ -426,6 +432,7 @@ class RecordingRegistry:
 
         self._drop_expired()
         self._items[recording_id] = recording
+        self._created_ids.add(recording_id)
         self._evict()
         write_sidecar(recording)
         logger.info(
@@ -485,14 +492,22 @@ class RecordingRegistry:
         ]
 
     def clear(self) -> None:
-        """Сброс реестра (тесты): каталоги, созданные процессом, удаляются с диска."""
+        """Сброс реестра (тесты): каталоги, созданные процессом, удаляются с диска.
+
+        Каталог удаляется, только если его создал **этот** процесс
+        (``_created_ids``): запись, найденную на диске при восстановлении, не
+        трогаем — даже после дедупа (``_touch`` делает её ``owned`` для TTL,
+        но каталог процессом не создавался; инвариант держит тест
+        ``test_restore_does_not_delete_adopted_dir``, а нарушение 01.10.2026
+        удалило реальные каталоги из ``data/edf``). Чужие каталоги удаляет
+        TTL-очистка (``prune_orphans``), а не сброс памяти.
+        """
         for rec in self._items.values():
-            # Записи, найденные на диске при восстановлении, не наши: их каталоги
-            # удаляет TTL-уборка (prune_orphans), а не сброс памяти.
-            if rec.owned:
+            if rec.recording_id in self._created_ids:
                 shutil.rmtree(rec.upload_dir, ignore_errors=True)
             _drop_signal_cache(rec.recording_id)
         self._items.clear()
+        self._created_ids.clear()
         self._indexed = False  # следующее обращение перечитает сайдкары с диска
 
     def _drop(self, recording_id: str) -> None:

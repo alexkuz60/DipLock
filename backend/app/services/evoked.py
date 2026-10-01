@@ -65,7 +65,7 @@ def run_evoked(
     progress("evoked", message=f"Усреднение по событиям «{prep.event_id}»")
     try:
         raw, _clean_report = _prepare_raw(recording, cfg, prep)
-        annotations, _stats = _detect(raw, cfg, prep, progress)
+        annotations, _stats = _detect(raw, recording, cfg, prep, progress)
         epochs, events = segment_epochs_events(
             raw, annotations,
             event_id=prep.event_id,

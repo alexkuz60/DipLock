@@ -379,12 +379,40 @@ def _detect_ocular(
     return zones
 
 
+def _flat_line_source(
+    raw: mne.io.BaseRaw, flat_raw: mne.io.BaseRaw | None, data: NDArray,
+) -> NDArray:
+    """Данные для детекторов ``flat_line``/``clipping``: широкополосный срез.
+
+    ``flat_raw`` — тот же сигнал записи **без** band-pass пользователя:
+    мёртвый электрод и клиппинг — дефекты записи, а не полосы анализа (разбор
+    01.10.2026: на δ 0.5–4 Гц размах живого сигнала в окне 100 мс падает ниже
+    порога 1 мкВ — все зоны ложные; «без фильтра» на четырёх записях — ноль).
+    Каналы, частота и длина обязаны совпадать с ``raw`` (таймлайны идут
+    вместе) — при расхождении берём сам ``raw``.
+    """
+    if flat_raw is None:
+        return data
+    if (
+        list(flat_raw.ch_names) != list(raw.ch_names)
+        or float(flat_raw.info["sfreq"]) != float(raw.info["sfreq"])
+        or flat_raw.n_times != raw.n_times
+    ):
+        logger.warning(
+            "Широкополосный срез для flat_line/clipping не совпал с сигналом "
+            "(каналы/частота/длина) — детекция по самому сигналу"
+        )
+        return data
+    return flat_raw.get_data()
+
+
 def detect_artifacts(
     raw: mne.io.BaseRaw,
     settings: Settings,
     z_threshold: float = 5.0,
     pp_threshold_uv: float = 100.0,
     run_ica: bool = True,
+    flat_raw: mne.io.BaseRaw | None = None,
 ) -> tuple[mne.Annotations, dict[str, Any]]:
     """Детекция артефактов: 11 видов зон + аннотации reject-видов (правило BAD_).
 
@@ -397,6 +425,12 @@ def detect_artifacts(
     наличии EOG-подобных каналов **или** фронтального прокси Fp1/Fp2 (N8 —
     `load_edf` отрезает EOG-каналы), факт — в ``stats["ica_applied"]``.
 
+    ``flat_raw`` — широкополосный срез той же записи для ``flat_line`` и
+    ``clipping`` (см. ``_flat_line_source``): эти виды описывают дефект
+    записи, поэтому на узком медленном сигнале считать их нельзя (разбор
+    01.10.2026 находки 29.09.2026 — `docs/history.md`). Без параметра
+    детекция идёт по самому ``raw`` (обратная совместимость).
+
     Peak-to-peak: серия перекрывающихся превысивших окон — одна зона-интервал
     события, а не зона на каждое окно (N9), геометрия зоны честная
     ([начало, конец] серии окон), а не «центр окна». Инвариант «зоны ↔ drop_log»
@@ -405,6 +439,7 @@ def detect_artifacts(
     names = list(raw.ch_names)
     sfreq = float(raw.info["sfreq"])
     data = raw.get_data()
+    flat_data = _flat_line_source(raw, flat_raw, data)
     zones: list[dict[str, Any]] = []
 
     # 1. Z-score: robust (медиана/MAD, M11) в скользящем окне — выброс не тянет
@@ -453,8 +488,9 @@ def detect_artifacts(
                 "channels": interval_channels,
             })
 
-    # 3. Плоская линия / клиппинг (N7/F20 + «эпизоды клиппинга» PDF)
-    zones.extend(_detect_flat_or_clipping(data, names, sfreq, settings))
+    # 3. Плоская линия / клиппинг (N7/F20 + «эпизоды клиппинга» PDF) — на
+    # широкополосном срезе: свойство записи, а не полосы (см. докстринг)
+    zones.extend(_detect_flat_or_clipping(flat_data, names, sfreq, settings))
     # 4. Разрывы записи (NaN/inf-участки)
     zones.extend(_detect_breaks(data, names, sfreq, settings))
     # 5. Всплески электродов (pop)

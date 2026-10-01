@@ -69,6 +69,46 @@ def test_flat_line_threshold_still_comes_from_settings():
     assert stats["by_type"]["flat_line"] > 0
 
 
+# ---------- Разбор 01.10.2026 (находка 29.09.2026): узкий медленный фильтр ----------
+
+def test_flat_line_slow_filter_marks_living_signal_without_flat_raw():
+    """Воспроизведение находки: на δ 0.5–4 живой шум даёт ложные зоны.
+
+    Срезание высоких частот «замораживает» сигнал в окне 100 мс: размах ниже
+    порога 1 мкВ — детектор видит «мёртвость» там, где запись жива.
+    """
+    filtered = _raw(_noise(30.0)).filter(0.5, 4.0, verbose=False)
+
+    _, stats = detect_artifacts(filtered, settings, run_ica=False)
+
+    assert stats["by_type"]["flat_line"] > 0  # до фикса: весь сигнал «мёртв»
+
+
+def test_flat_line_broadband_flat_raw_keeps_living_signal_clean():
+    """Плоскость ищется на широкополосном срезе: живой шум через δ-фильтр — 0 зон."""
+    broadband = _raw(_noise(30.0))
+    filtered = broadband.copy().filter(0.5, 4.0, verbose=False)
+
+    _, stats = detect_artifacts(filtered, settings, run_ica=False, flat_raw=broadband)
+
+    assert stats["by_type"]["flat_line"] == 0
+
+
+def test_flat_line_true_flat_found_via_broadband_flat_raw():
+    """Настоящий нулевой сегмент виден через широкополосный срез при узкой полосе."""
+    data = _noise(30.0)
+    data[0, int(4 * _SFREQ): int(5 * _SFREQ)] = 0.0  # C3: секунда нулей
+    broadband = _raw(data)
+    filtered = broadband.copy().filter(0.5, 4.0, verbose=False)
+
+    _, stats = detect_artifacts(filtered, settings, run_ica=False, flat_raw=broadband)
+
+    flat_zones = [z for z in stats["zones"] if z["kind"] == "flat_line"]
+    assert len(flat_zones) == 1
+    assert flat_zones[0]["channels"] == ["C3"]
+    assert 3.5 < flat_zones[0]["onset_sec"] < 4.5
+
+
 # ---------- Шаг 0.4: QC-сводка по каналам из зон ----------
 
 

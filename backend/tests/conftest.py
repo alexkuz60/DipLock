@@ -29,8 +29,10 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api import routes
 from app.core.config import settings
 from app.main import app
+from app.services import analysis_pipeline
 
 
 @pytest.fixture(scope="session")
@@ -38,6 +40,26 @@ def client() -> TestClient:
     """TestClient FastAPI-приложения (использует httpx)."""
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture
+def isolated_io(tmp_path, monkeypatch):
+    """Изолирует каталоги загрузок/результатов/кэша и отключает запись в БД.
+
+    Живёт в conftest, а не в модуле теста: делят `test_api_contract.py`,
+    `test_pipeline_e2e.py` и любые будущие e2e-тесты (импорт фикстуры из
+    модуля теста ломается на F811 у параметров-фикстур).
+    """
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path / "edf"))
+    monkeypatch.setattr(settings, "results_dir", str(tmp_path / "results"))
+    monkeypatch.setattr(settings, "cache_dir", str(tmp_path / "cache"))
+
+    async def _no_db(result):
+        return None
+
+    monkeypatch.setattr(analysis_pipeline, "save_analysis_to_db", _no_db)
+    routes.job_manager.clear()
+    return tmp_path
 
 
 def _make_raw(

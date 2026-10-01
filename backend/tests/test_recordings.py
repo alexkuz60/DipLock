@@ -249,6 +249,34 @@ def test_restore_does_not_delete_adopted_dir(client, edf_file):
     assert restarted.get(meta["recording_id"]) is None
 
 
+def test_clear_after_dedup_keeps_adopted_dir(tmp_path, edf_file):
+    """Дедуп не превращает чужой каталог в «созданный процессом» для clear().
+
+    Инцидент 01.10.2026: скрипт с регистрацией по отпечатку (дедуп → ``_touch``
+    делает adopted-запись ``owned`` ради TTL) + ``clear()`` удалял реальные
+    каталоги ``data/edf``. ``clear()`` удаляет только каталоги из
+    ``_created_ids`` — созданные именно этим процессом.
+    """
+    first = RecordingRegistry(max_recordings=10, ttl_hours=24, upload_dir=str(tmp_path))
+    created = _register_copy(first, edf_file, tmp_path, "orig")
+    digest = file_digest(created.path)
+
+    again_dir = tmp_path / "again"
+    again_dir.mkdir()
+    copy_path = again_dir / "orig.edf"
+    shutil.copy(edf_file, copy_path)
+    second = RecordingRegistry(max_recordings=10, ttl_hours=24, upload_dir=str(tmp_path))
+    dedup = second.register(str(copy_path), str(again_dir), "orig.edf", settings, digest=digest)
+
+    assert dedup.recording_id == created.recording_id
+    assert dedup.deduplicated is True
+    assert dedup.owned is True  # для TTL/лимита — норма (докстринг _touch)
+
+    second.clear()
+
+    assert os.path.isdir(created.upload_dir), "clear() не должен удалять чужой каталог"
+
+
 def test_prune_orphans_removes_old_dir_and_keeps_root_file(tmp_path, edf_file):
     """Уборка сносит устаревшие каталоги и не трогает корневой файл записей."""
     root = tmp_path / "edf"

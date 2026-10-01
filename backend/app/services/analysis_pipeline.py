@@ -77,6 +77,9 @@ def run_analysis(
         raw = load_edf(filepath, settings.standard_channels, units=settings.edf_units)
         entry.bytes_out = int(raw.info["nchan"]) * int(raw.n_times) * 8
 
+    # Детекция идёт ДО полосовой фильтрации пользователя: load-сигнал 1–40 Гц
+    # шире любой пользовательской полосы, поэтому flat_line/clipping здесь уже
+    # «не по полосе» (контракт разбора 01.10.2026 — см. detect_artifacts).
     progress("artifacts", message="Детекция артефактов")
     with journal.step(
         "analyze", "artifacts",
@@ -117,8 +120,13 @@ def run_analysis(
             ),
         )
         entry.epochs = int(len(epochs.drop_log) if hasattr(epochs, "drop_log") else len(epochs))
-    # len(epochs.events) — все созданные эпохи, len(epochs) — прошедшие reject
-    n_epochs_total = len(epochs.events)
+    # len(epochs.drop_log) — все нарезанные эпохи (включая отброшенные по BAD_);
+    # len(epochs) — прошедшие reject. ВАЖНО: MNE убирает отброшенные и из
+    # `.events`, поэтому «все» — это `drop_log`, а не `.events` (иначе
+    # n_epochs_total == n_epochs_used и n_epochs_dropped вечно 0, а UI показывает
+    # «42 из 42» вместо «42 из 65»): расхождение поймал e2e-прогон на test.edf
+    # (`tests/test_pipeline_e2e.py`, 01.10.2026).
+    n_epochs_total = len(epochs.drop_log)
     n_epochs_used = len(epochs)
 
     progress("band_power", message="Спектральная мощность по диапазонам")

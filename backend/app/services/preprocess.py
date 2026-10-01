@@ -9,7 +9,9 @@
   фиксирует параметры. Возвращает только сводку: сигналы вьюера отдаёт
   отдельный бинарный эндпоинт (2.5) и здесь не дублируются;
 * ``artifacts`` — детекция артефактов на предподготовленном сигнале; зоны
-  (onset/duration/каналы) уходят прямо в слои вьюера (2.6);
+  (onset/duration/каналы) уходят прямо в слои вьюера (2.6); исключение —
+  ``flat_line``/``clipping``: они считаются на широкополосном срезе (дефект
+  записи, а не полосы — разбор 01.10.2026, см. ``detect_artifacts``);
 * ``epochs`` — нарезка эпох без наложения + reject-фильтр; индексы и
   каналы-виновники отброшенных эпох приходят в UI (штриховка, причины
   блокировки и рамки в треках каналов-виновников).
@@ -24,7 +26,7 @@
 """
 import logging
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from app.core.config import Settings
@@ -153,23 +155,33 @@ def _prepare_raw(
 
 
 def _detect(
-    raw: Any, cfg: Settings, params: PreprocessParams, progress: Any,
+    raw: Any, recording: Recording, cfg: Settings, params: PreprocessParams, progress: Any,
 ) -> tuple[Any, dict[str, Any]]:
     """Детекция артефактов с порогами из параметров стадии.
 
     ``flat_line_*`` в сервисе берутся из настроек, поэтому передаём копию
     конфигурации с порогами стадии — детектор остаётся неизменным.
+
+    ``flat_line``/``clipping`` считаются на **широкополосном** сигнале (без
+    band-pass формы): мёртвый электрод и клиппинг — дефект записи, а не полосы
+    (разбор находки 29.09.2026: на δ 0.5–4 Гц все зоны ложные, `docs/history.md`).
+    При «без фильтра» широкополосный срез — это сам ``raw`` (кэш
+    подготовленного сигнала отдаёт его без нового чтения EDF).
     """
     progress("artifacts", message="Детекция артефактов")
     stage_cfg = cfg.model_copy(update={
         "flat_line_threshold_uv": params.flat_line_uv,
         "flat_line_min_duration_ms": params.flat_line_ms,
     })
+    flat_raw = None
+    if params.filter_band is not None:
+        flat_raw, _ = _prepare_raw(recording, cfg, replace(params, filter_band=None))
     return detect_artifacts(
         raw, stage_cfg,
         z_threshold=params.z_threshold,
         pp_threshold_uv=params.pp_threshold_uv,
         run_ica=params.run_ica,
+        flat_raw=flat_raw,
     )
 
 
@@ -295,7 +307,7 @@ def run_preprocess(
         _journal()
         return base
 
-    annotations, stats = _detect(raw, cfg, params, progress)
+    annotations, stats = _detect(raw, recording, cfg, params, progress)
 
     if params.stage == "artifacts":
         zones = stats.get("zones", [])

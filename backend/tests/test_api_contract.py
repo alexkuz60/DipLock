@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from app.api import routes, uploads
+from app.api import uploads
 from app.core.config import settings
 from app.services import analysis_pipeline
 from app.services.surface_cache import clear_asset_cache
@@ -126,21 +126,6 @@ def _wait_finished(client, job_id: str, timeout: float = 10.0) -> dict:
             return body
         time.sleep(0.05)
     raise AssertionError(f"Задача не завершилась за {timeout} с: {body}")
-
-
-@pytest.fixture
-def isolated_io(tmp_path, monkeypatch):
-    """Изолирует каталоги загрузок/результатов/кэша и отключает запись в БД."""
-    monkeypatch.setattr(settings, "upload_dir", str(tmp_path / "edf"))
-    monkeypatch.setattr(settings, "results_dir", str(tmp_path / "results"))
-    monkeypatch.setattr(settings, "cache_dir", str(tmp_path / "cache"))
-
-    async def _no_db(result):
-        return None
-
-    monkeypatch.setattr(analysis_pipeline, "save_analysis_to_db", _no_db)
-    routes.job_manager.clear()
-    return tmp_path
 
 
 @pytest.fixture

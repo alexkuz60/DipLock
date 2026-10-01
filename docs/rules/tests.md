@@ -569,3 +569,26 @@ min ≡ max вместо пустого трека), `EegWindowControls.test` (+
 захвата поверх потока мелких `pointermove`, раньше шкала «залипала»), `EegWindowControls.test`
 (+2: автозум подгоняет шкалу под пики окна и не трогает отпечаток расчёта, без кадров кнопка
 выключена; в `beforeEach` добавлен мок `/meta`). pytest без изменений; итог Vitest — 916.
+
+Разбор детектора `flat_line` на медленных полосах (п.5, 01.10.2026): pytest +5 —
+`test_artifact_detector.py` (+3: воспроизведение находки — живой шум через δ-фильтр даёт ложные
+зоны без `flat_raw`; широкополосный `flat_raw` → 0 зон; настоящий нулевой сегмент через
+`flat_raw` → ровно одна зона на C3), `test_preprocess.py` (+1: стадия `artifacts` с полосой
+0.5–4 Гц — `flat_line` только у реального нулевого сегмента, по одной зоне на канал, а не
+«замёрзший» от фильтра весь сигнал), `test_recordings.py` (+1: регресс инцидента того же среза —
+`register(digest=…)` → дедуп → `clear()` не удаляет чужой каталог, `_created_ids`). Итог pytest —
+591.
+
+«Тестовый EDF» и пересмотр вердикта п.4 (01.10.2026): pytest +3 — `tests/test_pipeline_e2e.py`
+(маркер `integration` + skipif без `data/edf/test.edf`, реальная запись): полный `POST /analyze`
+(все стадии `PIPELINE_STAGES`, контракт `AnalyzeResponse`, MNI/структуры/BA из fsaverage),
+job-путь `POST /jobs` → поллинг → результат и цепочка `run_preprocess` (filter/artifacts/epochs)
+с регрессом п.5 (`flat_line` на δ = 0 зон). Фитинг диполей ограничен штатными настройками
+(фикстура `bounded_fit`: `dipole_fit_max_epochs=2`, `dipole_fit_decim=50`,
+`dipole_fit_n_jobs=min(8, cpu)`) — на дефолтах стадия `dipoles` на test.edf не завершается и за
+16 мин (докстринг `fit_dipoles_for_epochs`, F19); модуль идёт 3:42 (analyze 106.7 с, jobs
+114.2 с, preprocess 1.8 с). Тест же — страж семантики `n_epochs_total` = `drop_log`, а не
+`.events` (пойманный им баг `/analyze`: `n_epochs_dropped` был вечно 0 — см. history).
+Фикстура `isolated_io` перенесена из `test_api_contract.py` в `tests/conftest.py` (общая для
+e2e; импорт фикстуры из модуля теста давал ruff F811). Итог: pytest — **594** (без
+`integration` — **578**), Vitest — 916.
