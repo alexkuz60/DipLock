@@ -140,6 +140,9 @@ export type ContourSlice = Schemas['ContourSliceOut']
  */
 export type SpectrogramResult = Schemas['SpectrogramResult']
 
+/** 202-ответ POST /server/restart: перезапуск бэкенда запланирован */
+export type ServerRestart = Schemas['ServerRestartOut']
+
 /**
  * Сквозной автоотчёт («Итоги», `GET /recordings/{id}/report/{job}`): агрегаты
  * QC/эпох и по каждой полосе пакета; сам HTML — отдельный ассет `html_url`.

@@ -20,6 +20,7 @@ from app.schemas.analysis import (
     SurfaceRef,
     TrajectoryPoint,
 )
+from app.schemas.server import ServerRestartOut
 
 __all__ = [
     "AnalyzeResponse",
@@ -33,6 +34,7 @@ __all__ = [
     "JobStatus",
     "MetaResponse",
     "PipelineInfo",
+    "ServerRestartOut",
     "SurfaceOut",
     "SurfaceRef",
     "TrajectoryPoint",

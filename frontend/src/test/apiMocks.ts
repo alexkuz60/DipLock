@@ -142,6 +142,10 @@ export type MockApiOptions = {
    * нужны реальные контуры, передаёт срез явно.
    */
   contours?: ContourSlice
+  /** Смоделировать отказ перезапуска бэкенда (409: --reload / не лаунчер / задачи) */
+  restartFail?: string
+  /** История задач для `GET /jobs?limit=` (подтверждение перезапуска) */
+  jobs?: JobStatus[]
 }
 
 export function mockApiFetch(options: MockApiOptions = {}) {
@@ -157,6 +161,19 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse({ detail: 'Сервис недоступен' }, 500)
       }
       return jsonResponse(options.initStatus ?? initStatusFixture)
+    }
+    if (url.includes('/server/restart')) {
+      if (options.restartFail) {
+        return jsonResponse({ detail: options.restartFail }, 409)
+      }
+      return jsonResponse(
+        {
+          restarting: true,
+          restart_after_sec: 0.5,
+          server_started_at: initStatusFixture.code.server_started_at,
+        },
+        202,
+      )
     }
     if (url.includes('/preprocess')) {
       if (method === 'POST') {
@@ -254,6 +271,10 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse(calcJobCreated('job-evoked-1', 'evoked'), 202)
       }
       return jsonResponse(options.evokedResult ?? evokedResultFixture())
+    }
+    if (url.includes('/jobs?')) {
+      // История задач (для подтверждения перезапуска): по умолчанию пусто
+      return jsonResponse(options.jobs ?? [])
     }
     if (url.includes('/jobs/')) {
       return jsonResponse(

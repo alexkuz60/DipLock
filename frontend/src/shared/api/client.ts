@@ -19,6 +19,7 @@ import type {
   PreprocessResult,
   RecordingMeta,
   ReportResult,
+  ServerRestart,
   SignalLayer,
   SignalsPrepQuery,
   SpectrogramResult,
@@ -140,6 +141,13 @@ export const api = {
 
   /** Готовность компонентов (MNE, БД, fsaverage, BEM). */
   initStatus: (signal?: AbortSignal) => request<InitStatus>('/init-status', { signal }),
+
+  /**
+   * Перезапуск бэкенда из «Состояния сервера» (202 → exec через ~0.5 с).
+   * 409 — dev-режим --reload / сервер не от лаунчера / идут задачи.
+   */
+  serverRestart: (signal?: AbortSignal) =>
+    request<ServerRestart>(`${API_PREFIX}/server/restart`, { method: 'POST', signal }),
 
   /**
    * Контуры среза атласа (срез 3.9): структуры `aparc+aseg` и поля Бродмана.

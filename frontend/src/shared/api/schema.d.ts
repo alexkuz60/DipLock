@@ -919,6 +919,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/server/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Перезапуск бэкенда из UI
+         * @description Планирует замену процесса сервера свежим запуском (``os.execv``).
+         *
+         *     409 — перезапуск невозможен: dev-режим ``--reload``, сервер запущен не
+         *     лаунчером (PID-файл не наш) или идут задачи (``queued``/``running``) —
+         *     exec оборвал бы расчёт; текст причины — для UI. При успехе ответ уходит
+         *     **до** перезапуска (пауза ``restart_after_sec`` внутри фоновой задачи),
+         *     поэтому клиент гарантированно получает 202 и текущий
+         *     ``server_started_at`` для контроля (см. ``services/server_control.py``).
+         */
+        post: operations["restart_server_api_v1_server_restart_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -3844,6 +3871,27 @@ export interface components {
             duration_sec_calc: number;
         };
         /**
+         * ServerRestartOut
+         * @description 202-ответ POST /api/v1/server/restart: процесс перезапустится после ответа.
+         */
+        ServerRestartOut: {
+            /**
+             * Restarting
+             * @description Всегда true: exec запланирован после 202
+             */
+            restarting: boolean;
+            /**
+             * Restart After Sec
+             * @description Пауза перед заменой процесса — UI столько ждёт до начала опроса
+             */
+            restart_after_sec: number;
+            /**
+             * Server Started At
+             * @description Старт текущего процесса (ISO): UI сравнивает с ним `code.server_started_at` из /init-status и считает перезапуск завершённым, когда значения разошлись
+             */
+            server_started_at: string;
+        };
+        /**
          * SpectrogramGridHeader
          * @description Заголовок бинарного ответа ``GET /recordings/{id}/spectrogram/{job}/grid.bin``.
          *
@@ -5682,6 +5730,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restart_server_api_v1_server_restart_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerRestartOut"];
                 };
             };
         };

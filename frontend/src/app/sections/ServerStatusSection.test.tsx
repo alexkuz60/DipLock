@@ -1,5 +1,6 @@
-/** Тесты раздела «Состояние сервера»: проверки, версии, пути, ошибка сервера. */
+/** Тесты раздела «Состояние сервера»: проверки, версии, пути, ошибка сервера, перезапуск. */
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { ServerStatusSection } from './ServerStatusSection'
 import { mockApiFetch } from '@/test/apiMocks'
@@ -65,7 +66,58 @@ describe('раздел «Состояние сервера»', () => {
     renderWithProviders(<ServerStatusSection />)
 
     expect(await screen.findByText(/устарел — код новее сервера/)).toBeInTheDocument()
-    expect(screen.getByText(/перезапустите uvicorn/i)).toBeInTheDocument()
+    expect(screen.getByText(/перезапустите его кнопкой ниже/i)).toBeInTheDocument()
     expect(screen.getByText(/пересчитайте запись/i)).toBeInTheDocument()
+  })
+
+  it('кнопка перезапуска: подтверждение → 202 → ожидание нового процесса', async () => {
+    const fetchMock = mockApiFetch()
+    renderWithProviders(<ServerStatusSection />)
+    await screen.findByText('MNE-Python')
+
+    // Первый клик — подтверждение с числом активных задач (в моке их 0)
+    await userEvent.click(screen.getByRole('button', { name: /Перезапустить бэкенд/ }))
+    expect(await screen.findByText(/Активных задач: 0/)).toBeInTheDocument()
+
+    // Подтверждение: POST /server/restart → 202 → фаза ожидания
+    await userEvent.click(screen.getByRole('button', { name: /Да, перезапустить/ }))
+    expect(await screen.findByText(/Перезапускаем бэкенд/)).toBeInTheDocument()
+    const postUrls = fetchMock.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+      .map(([url]) => String(url))
+    expect(postUrls.some((url) => url.includes('/server/restart'))).toBe(true)
+  })
+
+  it('отказ перезапуска (409) показывает текст сервера', async () => {
+    mockApiFetch({
+      restartFail: 'Сервер запущен в dev-режиме с --reload — перезапуск из UI не нужен',
+    })
+    renderWithProviders(<ServerStatusSection />)
+    await screen.findByText('MNE-Python')
+
+    await userEvent.click(screen.getByRole('button', { name: /Перезапустить бэкенд/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Да, перезапустить/ }))
+
+    expect(
+      await screen.findByText(/dev-режиме с --reload — перезапуск из UI не нужен/),
+    ).toBeInTheDocument()
+    // отказ не закрывает подтверждение: можно отмениться или повторить
+    expect(screen.getByRole('button', { name: /Да, перезапустить/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Отмена/ })).toBeInTheDocument()
+  })
+
+  it('кнопка отмены возвращает в исходное состояние без POST', async () => {
+    const fetchMock = mockApiFetch()
+    renderWithProviders(<ServerStatusSection />)
+    await screen.findByText('MNE-Python')
+
+    await userEvent.click(screen.getByRole('button', { name: /Перезапустить бэкенд/ }))
+    await userEvent.click(screen.getByRole('button', { name: /Отмена/ }))
+
+    expect(screen.getByRole('button', { name: /Перезапустить бэкенд/ })).toBeInTheDocument()
+    const postUrls = fetchMock.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST')
+      .map(([url]) => String(url))
+    expect(postUrls.some((url) => url.includes('/server/restart'))).toBe(false)
   })
 })

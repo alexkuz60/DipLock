@@ -23,6 +23,7 @@ from typing import Any
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     File,
     Form,
     Header,
@@ -92,7 +93,8 @@ from app.schemas.analysis import (
     SurfaceOut,
 )
 from app.schemas.journal import JournalEntry, JournalOut
-from app.services import analysis_pipeline, journal
+from app.schemas.server import ServerRestartOut
+from app.services import analysis_pipeline, journal, server_control
 from app.services.atlas_contours import (
     contours_meta,
     slice_contours,
@@ -134,6 +136,7 @@ from app.services.surface_cache import (
     get_brodmann_bytes,
     get_surface_bytes,
 )
+from app.utils.versions import code_freshness as _code_freshness
 from app.utils.versions import library_versions as _library_versions
 
 logger = logging.getLogger(__name__)
@@ -1433,5 +1436,44 @@ async def journal_tail(
         entries=[
             JournalEntry(**entry) for entry in journal.read_journal(limit=limit, pipeline=pipeline)
         ],
+    )
+
+
+@router.post(
+    "/server/restart",
+    status_code=202,
+    response_model=ServerRestartOut,
+    summary="Перезапуск бэкенда из UI",
+)
+async def restart_server(background_tasks: BackgroundTasks) -> ServerRestartOut:
+    """Планирует замену процесса сервера свежим запуском (``os.execv``).
+
+    409 — перезапуск невозможен: dev-режим ``--reload``, сервер запущен не
+    лаунчером (PID-файл не наш) или идут задачи (``queued``/``running``) —
+    exec оборвал бы расчёт; текст причины — для UI. При успехе ответ уходит
+    **до** перезапуска (пауза ``restart_after_sec`` внутри фоновой задачи),
+    поэтому клиент гарантированно получает 202 и текущий
+    ``server_started_at`` для контроля (см. ``services/server_control.py``).
+    """
+    allowed, reason = server_control.can_restart()
+    if not allowed:
+        raise HTTPException(status_code=409, detail=reason)
+    busy = server_control.active_jobs()
+    if busy:
+        kinds = ", ".join(f"{job.kind} ({job.job_id[:8]})" for job in busy)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Идут задачи: {kinds} — дождитесь их завершения или отмените, "
+                "потом перезапустите"
+            ),
+        )
+    background_tasks.add_task(server_control.restart_soon)
+    # code_freshness возвращает dict[str, str | bool], поле — str: делим явно
+    started_at = _code_freshness()["server_started_at"]
+    return ServerRestartOut(
+        restarting=True,
+        restart_after_sec=server_control.RESTART_DELAY_SEC,
+        server_started_at=str(started_at),
     )
 

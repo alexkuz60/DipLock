@@ -2233,6 +2233,25 @@
         }
       }
     },
+    "/api/v1/server/restart": {
+      "post": {
+        "summary": "Перезапуск бэкенда из UI",
+        "description": "Планирует замену процесса сервера свежим запуском (``os.execv``).\n\n409 — перезапуск невозможен: dev-режим ``--reload``, сервер запущен не\nлаунчером (PID-файл не наш) или идут задачи (``queued``/``running``) —\nexec оборвал бы расчёт; текст причины — для UI. При успехе ответ уходит\n**до** перезапуска (пауза ``restart_after_sec`` внутри фоновой задачи),\nпоэтому клиент гарантированно получает 202 и текущий\n``server_started_at`` для контроля (см. ``services/server_control.py``).",
+        "operationId": "restart_server_api_v1_server_restart_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerRestartOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -7045,6 +7064,33 @@
         ],
         "title": "ReportResult",
         "description": "Результат задачи автоотчёта (``kind=report``).\n\nHTML отчёта — отдельный ассет по ``html_url`` (ETag из ``report_version``):\nдокумент самодостаточный и тяжёлый, поэтому в JSON идут только агрегаты\nдля шапки раздела и ссылка."
+      },
+      "ServerRestartOut": {
+        "properties": {
+          "restarting": {
+            "type": "boolean",
+            "title": "Restarting",
+            "description": "Всегда true: exec запланирован после 202"
+          },
+          "restart_after_sec": {
+            "type": "number",
+            "title": "Restart After Sec",
+            "description": "Пауза перед заменой процесса — UI столько ждёт до начала опроса"
+          },
+          "server_started_at": {
+            "type": "string",
+            "title": "Server Started At",
+            "description": "Старт текущего процесса (ISO): UI сравнивает с ним `code.server_started_at` из /init-status и считает перезапуск завершённым, когда значения разошлись"
+          }
+        },
+        "type": "object",
+        "required": [
+          "restarting",
+          "restart_after_sec",
+          "server_started_at"
+        ],
+        "title": "ServerRestartOut",
+        "description": "202-ответ POST /api/v1/server/restart: процесс перезапустится после ответа."
       },
       "SpectrogramGridHeader": {
         "properties": {

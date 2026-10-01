@@ -117,6 +117,13 @@ class Settings(BaseSettings):
     job_store_enabled: bool = Field(default=True)
     job_result_max_bytes: int = Field(default=2_000_000)
 
+    # PID-файл лаунчера (`start.sh`, `data/logs/server.pid`): если в нём наш PID,
+    # сервер поднят лаунчером и может перезапуститься из UI — см.
+    # `services/server_control.py` и `POST /server/restart`.
+    server_pid_file: str = Field(
+        default=str(_REPO_DIR / "data" / "logs" / "server.pid"),
+    )
+
 
     # Единицы EDF: None = автоопределение MNE + эвристика масштаба (см. edf_loader)
     edf_units: str | None = Field(default=None)
