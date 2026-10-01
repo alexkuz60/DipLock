@@ -675,6 +675,184 @@ GOF_NOTE = (
     "GOF (docs/rules/dipoles.md, принцип 3).</p>"
 )
 
+# ---------- тема отчёта (светлая для печати / тёмная для просмотра) ----------
+#
+# Тема — параметр **отображения**, не расчёта: она не входит в отпечаток
+# кэша (report_signature) и не влияет на ETag — один HTML на обе темы,
+# переключение в рантайме. Светлая — родная разметка MNE.Report
+# (Bootstrap 5.1.1), ничего не переопределяем; тёмная — оверрайды через
+# переменные --dl-* под селектором html[data-theme="dark"]. Печать
+# (@media print) возвращает светлую палитру при любой выбранной теме,
+# поэтому «Ctrl+P» всегда даёт печатный вариант. При обновлении MNE/
+# Bootstrap разметка секций может смениться (docs/rules/safety.md, дрейф MNE).
+
+THEME_CSS = """
+html[data-theme="dark"] {
+  --dl-bg: #14181d;
+  --dl-panel: #1a2027;
+  --dl-card: #1b2129;
+  --dl-stripe: #202730;
+  --dl-fg: #dfe3e8;
+  --dl-fg-2: #a8b1bd;
+  --dl-border: #2c343e;
+  --dl-link: #7fb2ff;
+}
+html[data-theme="dark"],
+html[data-theme="dark"] body {
+  background-color: var(--dl-bg);
+  color: var(--dl-fg);
+}
+html[data-theme="dark"] a { color: var(--dl-link); }
+html[data-theme="dark"] .text-muted { color: var(--dl-fg-2) !important; }
+html[data-theme="dark"] nav.navbar {
+  background-color: var(--dl-panel);
+  border-bottom: 1px solid var(--dl-border);
+  color: var(--dl-fg);
+}
+html[data-theme="dark"] .col-2 {
+  background-color: var(--dl-panel);
+  border-right: 1px solid var(--dl-border);
+}
+html[data-theme="dark"] .nav-link { color: var(--dl-fg-2); }
+html[data-theme="dark"] .nav-link:hover,
+html[data-theme="dark"] .nav-link.active { color: var(--dl-link); }
+html[data-theme="dark"] .accordion-item {
+  background-color: var(--dl-card);
+  border-color: var(--dl-border);
+}
+html[data-theme="dark"] .accordion-button {
+  background-color: var(--dl-card);
+  color: var(--dl-fg);
+}
+html[data-theme="dark"] .accordion-button:not(.collapsed) {
+  background-color: var(--dl-stripe);
+  color: var(--dl-fg);
+  box-shadow: none;
+}
+html[data-theme="dark"] .accordion-button::after { filter: invert(1); }
+html[data-theme="dark"] .accordion-body {
+  background-color: transparent;
+  color: var(--dl-fg);
+}
+html[data-theme="dark"] table {
+  color: var(--dl-fg);
+  background-color: transparent;
+}
+html[data-theme="dark"] thead th {
+  background-color: var(--dl-stripe);
+  color: var(--dl-fg);
+  border-bottom-color: var(--dl-border);
+}
+html[data-theme="dark"] tbody tr:nth-child(even) {
+  background-color: var(--dl-stripe);
+}
+html[data-theme="dark"] td,
+html[data-theme="dark"] th { border-color: var(--dl-border); }
+html[data-theme="dark"] .table {
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--dl-fg);
+  --bs-table-border-color: var(--dl-border);
+  --bs-table-striped-bg: var(--dl-stripe);
+  --bs-table-striped-color: var(--dl-fg);
+  --bs-table-hover-bg: var(--dl-stripe);
+  --bs-table-hover-color: var(--dl-fg);
+}
+html[data-theme="dark"] pre {
+  background-color: var(--dl-panel);
+  color: var(--dl-fg);
+  border-color: var(--dl-border);
+}
+html[data-theme="dark"] hr { border-color: var(--dl-border); }
+html[data-theme="dark"] img {
+  background-color: #ffffff;
+  border-radius: 6px;
+}
+#diplock-theme-toggle {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 1080;
+  padding: 6px 12px;
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid var(--dl-border, #dee2e6);
+  border-radius: 8px;
+  background-color: var(--dl-panel, #f8f9fa);
+  color: var(--dl-fg, #212529);
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+#diplock-theme-toggle:hover {
+  border-color: var(--dl-link, #0d6efd);
+  color: var(--dl-link, #0d6efd);
+}
+@media print {
+  #diplock-theme-toggle,
+  .accordion-button::after { display: none !important; }
+  html[data-theme="dark"] {
+    --dl-bg: #ffffff;
+    --dl-panel: #ffffff;
+    --dl-card: #ffffff;
+    --dl-stripe: #f4f4f4;
+    --dl-fg: #000000;
+    --dl-fg-2: #333333;
+    --dl-border: #999999;
+    --dl-link: #0645ad;
+  }
+  html[data-theme="dark"] img { background-color: transparent; }
+}
+"""
+
+THEME_JS = """/* Тема автоотчёта: ?theme=dark или кнопка в углу; печать всегда светлая. */
+(function () {
+  var root = document.documentElement;
+  var button = null;
+  function theme() {
+    return root.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  }
+  function apply(next) {
+    if (next === 'dark') root.setAttribute('data-theme', 'dark');
+    else root.removeAttribute('data-theme');
+    try {
+      var url = new URL(window.location.href);
+      if (next === 'dark') url.searchParams.set('theme', 'dark');
+      else url.searchParams.delete('theme');
+      window.history.replaceState(null, '', url.toString());
+    } catch (error) { /* URL недоступен — тема живёт только на сеанс */ }
+    if (button) {
+      button.textContent = next === 'dark' ? 'Светлая тема' : 'Тёмная тема';
+    }
+  }
+  var initial = 'light';
+  try {
+    if (new URL(window.location.href).searchParams.get('theme') === 'dark') {
+      initial = 'dark';
+    }
+  } catch (error) { /* без query — остаётся светлая */ }
+  apply(initial);
+  function start() {
+    if (!document.body) {
+      document.addEventListener('DOMContentLoaded', start);
+      return;
+    }
+    if (!button) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.id = 'diplock-theme-toggle';
+      button.setAttribute('data-testid', 'report-theme-toggle');
+      button.title =
+        'Тема отчёта: тёмная удобна на экране; печать (Ctrl+P) всегда светлая';
+      button.addEventListener('click', function () {
+        apply(theme() === 'dark' ? 'light' : 'dark');
+      });
+      document.body.appendChild(button);
+      apply(theme());
+    }
+  }
+  start();
+})();
+"""
+
 
 def _heatmap_figure(
     names: Sequence[str], columns: Sequence[str], values: Sequence[float],
@@ -725,6 +903,10 @@ def _build_report(
     section2 = "Часть 2 — диполи по полосам"
 
     rep = Report(title=f"DipLock — автоотчёт «{recording.filename}»")
+    # Тема отчёта (светлая/тёмная) — CSS и мини-JS вшиваются в самодостаточный
+    # HTML: один файл на обе темы, ?theme=dark и кнопка в углу (THEME_CSS/THEME_JS)
+    rep.add_custom_css(THEME_CSS)
+    rep.add_custom_js(THEME_JS)
     rep.add_html(
         "<p>Сквозной отчёт пайплайна DipLock: часть 1 пересказывает числа, которые "
         "уже считает препроцессинг (стадии filter / artifacts / epochs), часть 2 — "

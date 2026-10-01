@@ -227,6 +227,27 @@ def test_run_report_rejects_unknown_band(tmp_path):
         )
 
 
+def test_theme_layers_are_print_safe():
+    """Слои темы: печать принудительно светлая, тёмная — только по data-theme.
+
+    Тёмная тема живёт на CSS-переменных (THEME_CSS), поэтому блок
+    ``@media print`` возвращает светлую палитру простой подменой
+    переменных — без дублирования правил.
+    """
+    from app.services.report import THEME_CSS, THEME_JS
+
+    assert 'html[data-theme="dark"]' in THEME_CSS
+    assert "@media print" in THEME_CSS
+    # печать: палитра возвращается в светлые значения, кнопка темы скрыта
+    assert THEME_CSS.split("@media print", 1)[1].count("--dl-") >= 8
+    assert "#diplock-theme-toggle,\n  .accordion-button::after { display: none !important; }" \
+        in THEME_CSS
+    # JS: стартовая тема из ?theme=, кнопка и синхронизация URL
+    assert "searchParams.get('theme')" in THEME_JS
+    assert "diplock-theme-toggle" in THEME_JS
+    assert "history.replaceState" in THEME_JS
+
+
 # ---------- API: задача, результат, HTML-ассет ----------
 
 def _upload(client, path) -> dict:
@@ -261,6 +282,11 @@ def test_report_job_flow_with_html_asset(client, tmp_path):
     assert html.status_code == 200, html.text[:200]
     assert html.headers["content-type"].startswith("text/html")
     assert "GOF между полосами не сравним" in html.text
+    # Тема отчёта вшита в сам HTML: тёмная по data-theme/?theme=, печать — светлая
+    assert 'html[data-theme="dark"]' in html.text
+    assert "@media print" in html.text
+    assert "#diplock-theme-toggle" in html.text
+    assert "searchParams.get('theme')" in html.text
     etag = html.headers["etag"]
     assert etag
 

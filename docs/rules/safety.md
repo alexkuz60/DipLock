@@ -9,6 +9,11 @@
   `read_labels_from_parc`→`read_labels_from_annot`, `baseline` по умолчанию `(None, 0)`,
   `ICA(random_state=…)` → `ICA(rng=…)` (сигнатура 1.13 принимает оба, первый deprecated).
   Проверяйте актуальный API через тесты.
+- Тема автоотчёта («Итоги», `services/report.py`: `THEME_CSS`/`THEME_JS`) — CSS-оверрайды поверх
+  разметки `mne.Report` с встроенным **Bootstrap 5.1.1** (селекторы `html[data-theme="dark"]`,
+  переменные `--dl-*`, печать — `@media print` с подменой тех же переменных). При обновлении
+  MNE/Bootstrap классы секций (`.accordion*`, `.col-2`, `nav.navbar`) могут смениться — после
+  апгрейда собрать отчёт и сверить тёмную тему/печать; маркеры защищены `tests/test_report.py`.
 - Топокарты (N32) рендерят `mne.viz.plot_topomap` в **Agg**: `matplotlib.use("Agg")` вызывается на
   импорте `services/spectral.py` до первого pyplot (его тянет внутри самого `plot_topomap`), а
   фигура собирается через `Figure` + `FigureCanvasAgg` **без pyplot** — расчёт идёт в потоках
