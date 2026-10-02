@@ -32,7 +32,7 @@ import os
 import time
 from collections import Counter
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 import matplotlib
@@ -40,7 +40,7 @@ import numpy as np
 
 from app.core.config import Settings
 from app.schemas.analysis import PreprocessStage
-from app.services import journal
+from app.services import job_store, journal
 from app.services.cache_store import cache_clear, cache_path, cache_read, cache_write
 from app.services.dipole_scanner import GRID_STEP_MM, DipoleScanParams, compute_dipole_scan
 from app.services.preprocess import PreprocessParams, run_preprocess
@@ -64,6 +64,13 @@ TOP_BRODMANN = 12  # строк тепловой карты «BA × полосы
 
 # Стадии части 1 (та же очередь, что у раздела EDF)
 REPORT_STAGES: tuple[PreprocessStage, ...] = ("filter", "artifacts", "epochs")
+
+# Версия формата HTML отчёта: входит в report_signature, поэтому смена
+# разметки (кросс-проверки §3.9.4, отпечаток в шапке) отправляет старые
+# файлы кэша в невалидность, а не показывает устаревший документ (урок A7:
+# забытая версия = старые ассеты на диске и в браузере).
+# 1 — до кросс-проверок сквозного пайплайна (02.10.2026).
+REPORT_HTML_VERSION = 2
 
 
 class ReportError(ValueError):
@@ -129,6 +136,7 @@ def report_signature(
     """
     payload = "|".join(
         [
+            f"v{REPORT_HTML_VERSION}",
             repr(params.preprocess),
             f"{params.grid_mm:g}",
             ",".join(band_keys),
@@ -443,18 +451,229 @@ def _bullets(items: Sequence[str]) -> str:
     return "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in items) + "</ul>"
 
 
-def _part1_html(stages: dict[str, dict[str, Any]]) -> str:
-    """Часть 1: качество сырого файла и результаты трёх стадий препроцессинга."""
+def _edf_stage_match(
+    cfg: Settings, recording: Recording, artifacts_sig: str, art: dict[str, Any],
+) -> tuple[str, bool | None]:
+    """Сверка чисел отчёта с последней стадией EDF тех же параметров (№1 §3.9.4).
+
+    Источник — файлы задач (``job_store``): в них лежит ``meta.params_sig``
+    (отпечаток параметров) и результат стадии. ``None`` — стадии для сверки нет
+    (не запускалась либо параметры отличаются): это «нечего сверять», а не ошибка.
+    Числа обязаны совпасть «по построению» (общий ``run_preprocess``) — но именно
+    поэтому расхождение здесь означает дефект пайплайна, а не шум.
+    """
+    best: dict[str, Any] | None = None
+    try:
+        records = job_store.load_records(cfg)
+    except Exception:  # файлы истории — не источник истины, сверка не критична
+        logger.warning("Файлы задач не прочитаны для сверки со стадией EDF", exc_info=True)
+        records = []
+    for record in records:
+        if record.get("kind") != "preprocess" or record.get("status") != "succeeded":
+            continue
+        meta = record.get("meta") or {}
+        if meta.get("recording_id") != recording.recording_id:
+            continue
+        if meta.get("stage") != "artifacts" or meta.get("params_sig") != artifacts_sig:
+            continue
+        if isinstance(record.get("result"), dict):
+            best = record  # load_records от старых к новым — остаётся последний
+    if best is None:
+        return (
+            "Сверка со стадией EDF: не выполнялась "
+            "(нет стадии «Артефакты» с теми же параметрами)"
+        ), None
+    other = best["result"]
+    pct = float(art.get("good_data_percent") or 0.0)
+    other_pct = float(other.get("good_data_percent") or 0.0)
+    same_pct = abs(pct - other_pct) <= 0.01
+    same_kinds = (other.get("artifact_types") or {}) == (art.get("artifact_types") or {})
+    if same_pct and same_kinds:
+        return (
+            f"Сверка со стадией EDF: сошлось (чистые данные {pct:.1f} %, "
+            "счётчики видов артефактов совпали)"
+        ), True
+    return (
+        f"РАСХОЖДЕНИЕ со стадией EDF: те же параметры дают другие числа "
+        f"(отчёт {pct:.1f} % против стадии {other_pct:.1f} %) — пайплайны разошлись"
+    ), False
+
+
+def _cross_checks(
+    cfg: Settings,
+    recording: Recording,
+    params: ReportParams,
+    band_keys: Sequence[str],
+    stages: dict[str, dict[str, Any]],
+    summaries: Sequence[dict[str, Any]],
+) -> tuple[list[str], list[str]]:
+    """Кросс-проверки сквозного пайплайна (§3.9.4): (строки шапки, предупреждения).
+
+    Пункты: №1 сверка со стадией EDF, №2 доля выживших эпох как вердикт
+    (первое предупреждение = первая строка отчёта), №3 согласованность нарезки
+    «часть 1 ↔ пакет», №4 доля точек без атрибуции, №5 аутlier-структура в
+    топах, №7 верхняя граница полос пакета против Nyquist записи. Пороги —
+    в ``core/config.py``. №6 (L1 «было/стало») и №8 (отпечаток в шапке) —
+    разметка: их добавляют ``_part1_html`` и ``_fingerprint_html``.
+    """
+    info: list[str] = []
+    warns: list[str] = []
+    filt = stages["filter"]
+    art = stages["artifacts"]
+    epochs = stages["epochs"]
+    n_total = int(epochs.get("n_epochs_total") or 0)
+    n_used = int(epochs.get("n_epochs_used") or 0)
+
+    # №2 — доля выживших эпох как вердикт: первое предупреждение = первая строка
+    drop_share = (1.0 - n_used / n_total) if n_total else 0.0
+    if n_total and drop_share > cfg.report_epoch_drop_warn_share:
+        warns.append(
+            f"ВЕРДИКТ: отброшено {drop_share:.0%} эпох ({n_total - n_used} из {n_total}, "
+            f"порог {cfg.report_epoch_drop_warn_share:.0%}) — "
+            "таблицы структур ниже могут быть шумом"
+        )
+
+    # №1 — сверка со стадией EDF (params_sig той же формы, что у EDF)
+    line, matched = _edf_stage_match(
+        cfg, recording, repr(replace(params.preprocess, stage="artifacts")), art,
+    )
+    if matched is False:
+        warns.append(line)
+    info.append(line)
+
+    # №3 — нарезка части 1 против пакета (у каждой полосы свой segment_epochs)
+    if n_used and summaries:
+        diff = [
+            (str(s["band_key"]), int(s["n_epochs_used"]))
+            for s in summaries
+            if int(s["n_epochs_used"]) != n_used
+        ]
+        if diff:
+            listing = ", ".join(f"{key} {count}" for key, count in diff)
+            info.append(
+                f"Нарезка: часть 1 — {n_used} эпох; пакет нарезал иначе: {listing}"
+            )
+            worst = max(abs(count - n_used) for _, count in diff) / n_used
+            if worst > cfg.report_epochs_mismatch_warn_share:
+                warns.append(
+                    f"Нарезка пакета расходится с частью 1 более чем на "
+                    f"{cfg.report_epochs_mismatch_warn_share:.0%} "
+                    f"(часть 1 — {n_used} эпох; {listing}): структуры полос "
+                    "считались не по тем эпохам, что описаны в части 1"
+                )
+        else:
+            info.append(f"Нарезка: часть 1 и пакет сошлись ({n_used} эпох)")
+
+    # №4 — доля точек без атрибуции (fsaverage/атлас недоступны или точка вне мозга)
+    for summary in summaries:
+        points = int(summary.get("n_points") or 0)
+        missing = int(summary.get("n_no_attribution") or 0)
+        if points and missing / points > cfg.report_no_attribution_warn_share:
+            warns.append(
+                f"{summary['band_key']}: {missing / points:.0%} точек без атрибуции "
+                f"({missing} из {points}) — таблицы полосы малоинформативны"
+            )
+
+    # №5 — аутlier: структура «активна» почти в всех эпохах своей полосы
+    for summary in summaries:
+        for row in summary.get("top_structures") or []:
+            share = float(row.get("share") or 0.0)
+            if share > cfg.report_top_share_max:
+                warns.append(
+                    f"{summary['band_key']}: структура «{row['name']}» активна в "
+                    f"{share:.0%} эпох (порог {cfg.report_top_share_max:.0%}) — "
+                    "вероятна привязка к одному узлу сетки"
+                )
+
+    # №7 — верхняя граница полос пакета против Nyquist записи
+    catalog = report_band_catalog(cfg)
+    sfreq = float(filt.get("sfreq") or 0.0)
+    if sfreq:
+        offending = [key for key in band_keys if catalog[key][1] > sfreq / 2.0]
+        if offending:
+            top = max(catalog[key][1] for key in offending)
+            warns.append(
+                "Полосы пакета выше Nyquist записи: "
+                + ", ".join(f"{key} (до {catalog[key][1]:g} Гц)" for key in offending)
+                + f" требуют sfreq ≥ {2 * top:g} Гц, а запись {sfreq:g} Гц — "
+                "верхние частоты отсечены"
+            )
+    return info, warns
+
+
+def _cross_checks_html(info: Sequence[str], warns: Sequence[str]) -> str:
+    """Блок «Контроли пайплайна» в шапке отчёта (вердикт №2 — первой строкой)."""
+    parts: list[str] = ["<h3>Контроли сквозного пайплайна</h3>"]
+    parts.extend(f"<p><strong>⚠ {_esc(item)}</strong></p>" for item in warns)
+    if info:
+        parts.append("<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in info) + "</ul>")
+    return "".join(parts)
+
+
+def _fingerprint_html(
+    params: ReportParams, band_keys: Sequence[str], signature: str,
+) -> str:
+    """Полный отпечаток параметров в шапке (№8 §3.9.4).
+
+    Два собранных HTML сверяются парами: «что именно отличается» читается из
+    списков полей, а не угадывается по дате/полосам/сетке.
+    """
+    import platform as py_platform
+
+    import mne
+
+    rows: list[tuple[str, Any]] = [
+        ("report_signature (ключ кэша)", signature),
+        ("Формат HTML", f"v{REPORT_HTML_VERSION}"),
+        ("Полосы пакета", ", ".join(band_keys)),
+        ("Шаг сетки, мм", f"{params.grid_mm:g}"),
+        ("Python / MNE", f"{py_platform.python_version()} / {mne.__version__}"),
+    ]
+    rows.extend(
+        (f"preprocess.{key}", value)
+        for key, value in sorted(asdict(params.preprocess).items())
+    )
+    return (
+        "<details><summary>Полный отпечаток параметров (сверка двух отчётов парами)</summary>"
+        + _kv(rows)
+        + "</details>"
+    )
+
+
+def _part1_html(
+    stages: dict[str, dict[str, Any]],
+    meta: dict[str, Any] | None = None,
+    band_top_hz: float | None = None,
+) -> str:
+    """Часть 1: качество сырого файла и результаты трёх стадий препроцессинга.
+
+    ``meta`` — паспорт записи (единицы EDF, каналы вне монтажа — №7 «шире QC»),
+    ``band_top_hz`` — верхняя граница полос пакета (сверка с Nyquist записи).
+    """
     filt = stages["filter"]
     art = stages["artifacts"]
     epochs = stages["epochs"]
 
     band = filt.get("band_hz")
+    meta = meta or {}
+    sfreq = float(filt.get("sfreq") or 0.0)
+    # Единицы EDF: None = автоопределение MNE; флаг масштаба — из паспорта (№7)
+    units = str(meta.get("edf_units") or "авто (определены при чтении)")
+    if meta.get("units_autoscaled"):
+        units += "; масштаб трактован как микровольты"
+    unmatched = ", ".join(str(c) for c in (meta.get("unmatched_channels") or [])) or "—"
     passport = _kv(
         [
             ("Файл записи", filt.get("recording_id", "")),
             ("Длительность, с", _num(filt.get("duration_sec"), 1)),
             ("Частота дискретизации, Гц", _num(filt.get("sfreq"), 1)),
+            (
+                "Верхняя граница пакета / Nyquist, Гц",
+                f"{band_top_hz:g} / {sfreq / 2:g}"
+                if band_top_hz and sfreq else "—",
+            ),
+            ("Единицы EDF", units),
+            ("Каналы вне монтажа 10-20", unmatched),
             ("Каналов после монтажа", len(filt.get("channels") or [])),
             (
                 "Полоса пропускания, Гц",
@@ -527,26 +746,37 @@ def _part1_html(stages: dict[str, dict[str, Any]]) -> str:
     clean = filt.get("clean")
     if clean:
         loss = clean.get("loss") or {}
-        clean_html = _kv(
-            [
-                ("Метод очистки", clean.get("method", "none")),
-                ("Гармоник notch", int(clean.get("notch_harmonics", 0))),
+        clean_rows: list[tuple[str, Any]] = [
+            ("Метод очистки", clean.get("method", "none")),
+            ("Гармоник notch", int(clean.get("notch_harmonics", 0))),
+            (
+                "Интерполировано каналов",
+                ", ".join(clean.get("interpolated_channels") or []) or "—",
+            ),
+            ("Удалено компонентов ICA", int(clean.get("n_components_removed", 0))),
+            (
+                "p95 |x| до → после, мкВ",
+                f"{_num(clean.get('amplitude_p95_uv_before'), 1)} → "
+                f"{_num(clean.get('amplitude_p95_uv_after'), 1)}",
+            ),
+            (
+                "Удалённая дисперсия (L5), %",
+                _num(loss.get("removed_variance_percent"), 1),
+            ),
+        ]
+        # №6 §3.9.4: остаток наводки (L1) — числом «было/стало» прямо в части 1,
+        # чтобы эффективность notch была видна без раздела «EDF».
+        for line_row in loss.get("line_noise") or []:
+            freq = line_row.get("freq_hz")
+            freq_text = f"{float(freq):g}" if freq is not None else "?"
+            clean_rows.append(
                 (
-                    "Интерполировано каналов",
-                    ", ".join(clean.get("interpolated_channels") or []) or "—",
-                ),
-                ("Удалено компонентов ICA", int(clean.get("n_components_removed", 0))),
-                (
-                    "p95 |x| до → после, мкВ",
-                    f"{_num(clean.get('amplitude_p95_uv_before'), 1)} → "
-                    f"{_num(clean.get('amplitude_p95_uv_after'), 1)}",
-                ),
-                (
-                    "Удалённая дисперсия (L5), %",
-                    _num(loss.get("removed_variance_percent"), 1),
-                ),
-            ]
-        )
+                    f"Сетевой шум {freq_text} Гц (L1), дБ было → стало",
+                    f"{_num(line_row.get('before_db'), 1)} → "
+                    f"{_num(line_row.get('after_db'), 1)}",
+                )
+            )
+        clean_html = _kv(clean_rows)
 
     rejected = [int(i) for i in (epochs.get("rejected_epochs") or [])]
     rejected_text = ", ".join(str(i) for i in rejected[:100])
@@ -892,9 +1122,11 @@ def _build_report(
     band_keys: Sequence[str],
     stages: dict[str, dict[str, Any]],
     summaries: Sequence[dict[str, Any]],
+    checks_html: str = "",
 ) -> bytes:
     """Собирает MNE.Report (обе части) и возвращает самодостаточный HTML.
 
+    ``checks_html`` — блок кросс-проверок §3.9.4 (вердикт первой строкой).
     Сохраняется во временный файл рядом с целевым и читается целиком: в кэш
     попадают только готовые байты (правило «кэш не бывает наполовину
     записанным», ``docs/rules/data-and-caches.md``).
@@ -916,18 +1148,25 @@ def _build_report(
     rep.add_custom_css(THEME_CSS)
     rep.add_custom_js(THEME_JS)
     rep.add_html(
-        "<p>Сквозной отчёт пайплайна DipLock: часть 1 пересказывает числа, которые "
+        # №2: вердикт — первая строка документа; сверки — сразу за ним
+        checks_html
+        + "<p>Сквозной отчёт пайплайна DipLock: часть 1 пересказывает числа, которые "
         "уже считает препроцессинг (стадии filter / artifacts / epochs), часть 2 — "
         "пакетный быстрый расчёт диполей по именованным полосам.</p>"
         f"<p>Запись: {_esc(recording.filename)} · полос пакета: {len(band_keys)} · "
         f"длина эпохи: {params.preprocess.epoch_length_ms:g} мс · шаг сетки: "
         f"{params.grid_mm:g} мм · собрано: {built_at} · "
-        f"MNE {_esc(mne.__version__)}</p>",
+        f"MNE {_esc(mne.__version__)}</p>"
+        # №8: полный отпечаток параметров — два HTML сверяются парами
+        + _fingerprint_html(params, band_keys, signature),
         title="О отчёте",
         section=section1,
     )
+    catalog = report_band_catalog(cfg)
+    band_top = max((catalog[key][1] for key in band_keys), default=None)
     rep.add_html(
-        _part1_html(stages), title="Качество записи и препроцессинг", section=section1,
+        _part1_html(stages, meta=recording.meta, band_top_hz=band_top),
+        title="Качество записи и препроцессинг", section=section1,
     )
     rep.add_html(
         "<p>Метод: быстрый расчёт (fast_grid) — одна точка на эпоху в пике GFP, "
@@ -1027,8 +1266,16 @@ def run_report(
         summaries.append(summary)
         warnings.extend(summary.get("warnings") or [])
 
+    # Кросс-проверки сквозного пайплайна (§3.9.4): идут в шапку HTML (вердикт
+    # первой строкой) и в предупреждения результата (пилюля UI).
+    cross_info, cross_warns = _cross_checks(
+        cfg, recording, params, band_keys, stages, summaries,
+    )
+    warnings.extend(cross_warns)
+    checks_html = _cross_checks_html(cross_info, cross_warns)
+
     report("localize", 0.92, message="Сборка MNE.Report")
-    data = _build_report(recording, cfg, params, band_keys, stages, summaries)
+    data = _build_report(recording, cfg, params, band_keys, stages, summaries, checks_html)
     signature = report_signature(cfg, params, band_keys)
     cache_write(
         report_html_path(cfg, recording.recording_id, signature), data,

@@ -128,6 +128,18 @@ class Settings(BaseSettings):
         default=str(_REPO_DIR / "data" / "logs" / "server.pid"),
     )
 
+    # Кросс-проверки сквозного пайплайна в автоотчёте (§3.9.4
+    # docs/ui/summary.md): пороги живут здесь, а не в report.py — числа,
+    # меняющие вердикт, обязаны быть настраиваемыми и документированными.
+    # Доля отброшенных эпох (> порога) — вердикт первой строкой отчёта.
+    report_epoch_drop_warn_share: float = Field(default=0.3)
+    # Доля точек без атрибуции структуры (> порога) — предупреждение в шапке.
+    report_no_attribution_warn_share: float = Field(default=0.2)
+    # Доля эпох у структуры топа (> порога) — аутlier («активна всегда»).
+    report_top_share_max: float = Field(default=0.95)
+    # Расхождение нарезки «часть 1 ↔ пакет» (> порога) — предупреждение.
+    report_epochs_mismatch_warn_share: float = Field(default=0.05)
+
 
     # Единицы EDF: None = автоопределение MNE + эвристика масштаба (см. edf_loader)
     edf_units: str | None = Field(default=None)

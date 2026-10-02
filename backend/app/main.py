@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import router as api_router
 from app.core.config import settings
 from app.services import recording_store
+from app.services.fsaverage_assets import bem_source, trans_source
 from app.services.job_manager import job_manager
 from app.services.orphans import sweep_orphans
 from app.utils.versions import code_freshness, library_versions
@@ -211,38 +212,28 @@ async def init_status() -> dict:
     except Exception:
         checks["fsaverage"] = "loading"
 
-    # 5. FSAverage transform
+    # 5. FSAverage transform: готовый файл или расчёт из фидуциалов (FreeSurfer)
     try:
-        subjects_dir = settings.subjects_dir
-        trans_path = settings.fsaverage_trans
-        # Локальный fallback для transform
-        local_trans = os.path.expanduser("~/mne_data/MNE-fsaverage-data/fsaverage/bem/fsaverage-trans.fif")
-        local_trans2 = os.path.join(subjects_dir, "bem", "fsaverage-trans.fif")
-        if os.path.exists(trans_path) or os.path.exists(local_trans) or os.path.exists(local_trans2):
-            checks["transform"] = "ready"
-        else:
-            checks["transform"] = "error"
+        transform_src = trans_source(settings)
+        checks["transform"] = "ready" if transform_src != "missing" else "error"
     except Exception:
+        transform_src = "missing"
         checks["transform"] = "error"
 
-    # 6. BEM (модель головы)
+    # 6. BEM (модель головы): готовое решение или расчёт из .surf (FreeSurfer)
     try:
-        subjects_dir = settings.subjects_dir
-        bem_paths = [
-            os.path.join(subjects_dir, "bem"),
-            os.path.join(subjects_dir, "fsaverage", "bem"),
-            os.path.expanduser("~/mne_data/MNE-fsaverage-data/fsaverage/bem"),
-        ]
-        if any(os.path.isdir(p) for p in bem_paths):
-            checks["bem"] = "ready"
-        else:
-            checks["bem"] = "error"
+        bem_src = bem_source(settings)
+        checks["bem"] = "ready" if bem_src != "missing" else "error"
     except Exception:
+        bem_src = "missing"
         checks["bem"] = "error"
 
     ready = all(v == "ready" for v in checks.values())
     return {
         "checks": checks,
+        # Откуда возьмутся BEM/transform при первом обращении (без расчёта):
+        # precomputed | cached | computable | missing — видно в «Состоянии сервера»
+        "sources": {"bem": bem_src, "transform": transform_src},
         "status": "ready" if ready else "pending",
         # Расширенная информация для раздела UI «Состояние сервера»
         "versions": library_versions(),

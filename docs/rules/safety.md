@@ -39,8 +39,14 @@
 - Единицы EDF: часть файлов без physical dimension MNE читает как «вольты» (в 1e6 раз больше) —
   есть авто-детект масштаба (`_ensure_physical_units`) и переменная `EDF_UNITS`.
 - Brodmann-атлас — `PALS_B12_Brodmann` (метки `Brodmann.N`), а не `aparc.a2009s`; нужен `nibabel`.
-- BEM fsaverage: `fsaverage/bem/fsaverage-5120-5120-5120-bem-sol.fif`; average reference должна быть
-  применена (`projection=False`), иначе `mne.fit_dipole` падает.
+- BEM fsaverage и transform разрешает `services/fsaverage_assets.py` (задача «FreeSurfer»,
+  02.10.2026): сначала **готовые файлы установки** (`fsaverage/bem/fsaverage-5120-5120-5120-bem-sol.fif`,
+  `fsaverage-trans.fif`), затем дисковый кэш `cache_dir/bem/`, затем **расчёт чистым MNE** из
+  исходников (`.surf` → `make_bem_model` + `make_bem_solution`, ico-4 ≈62 с один раз;
+  `fsaverage-fiducials.fif` → `get_ras_to_neuromag_trans`, в файл — head→mri, как у установки;
+  замер 02.10.2026: поверхности совпали бит-в-бит, трансформ — 3.2e-07). Источник виден в
+  `/init-status` (`sources`) и `/meta` (`bem_source`/`trans_source`); `*_source` отвечают без
+  расчёта. Average reference должна быть применена (`projection=False`), иначе `mne.fit_dipole` падает.
 - `mne.fit_dipole` требует `Evoked` (не массив) и дорог — используйте `dipole_fit_decim`.
 - `mne.fit_dipole` возвращает `Dipole.gof` **в процентах** (`dipole.py`: `gof * 100`),
   а `pos` — это **фиксированная** позиция, а не стартовая точка оптимизации. Контракт проекта

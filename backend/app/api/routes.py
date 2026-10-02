@@ -94,7 +94,13 @@ from app.schemas.analysis import (
 )
 from app.schemas.journal import JournalEntry, JournalOut
 from app.schemas.server import ServerRestartOut
-from app.services import analysis_pipeline, journal, recording_store, server_control
+from app.services import (
+    analysis_pipeline,
+    fsaverage_assets,
+    journal,
+    recording_store,
+    server_control,
+)
 from app.services.atlas_contours import (
     contours_meta,
     slice_contours,
@@ -1380,6 +1386,13 @@ async def get_meta() -> MetaResponse:
 
     versions = _library_versions()
     prefix = settings.api_prefix
+    # Источники BEM/transform (задача FreeSurfer): только os.path-проверки,
+    # расчёт в /meta не запускается; сбой не должен ронять метаданные.
+    try:
+        bem_src: str | None = fsaverage_assets.bem_source(settings)
+        trans_src: str | None = fsaverage_assets.trans_source(settings)
+    except Exception:
+        bem_src = trans_src = None
     return MetaResponse(
         app=settings.app_name,
         app_version=settings.app_version,
@@ -1393,6 +1406,8 @@ async def get_meta() -> MetaResponse:
         trimesh_version=versions["trimesh"],
         subjects_dir=settings.subjects_dir,
         fsaverage_trans=settings.fsaverage_trans,
+        bem_source=bem_src,
+        trans_source=trans_src,
         upload_dir=settings.upload_dir,
         results_dir=settings.results_dir,
         cache_dir=settings.cache_dir,

@@ -91,6 +91,7 @@ backend/app/
 │   ├── job_manager.py     # фоновые задачи: этапы, прогресс эпох, семафор (F7)
 │   ├── server_control.py  # перезапуск бэкенд из UI: guard'ы + os.execv (POST /server/restart)
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
+│   ├── fsaverage_assets.py # BEM/transform fsaverage: файл → кэш → расчёт MNE (FreeSurfer)
 │   ├── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)
 │   └── atlas_contours.py  # контуры структур и полей Бродмана на срезе (вектор, ETag) (3.9)
 backend/scripts/       # dedupe_recordings.py (чистка дублей в data/edf),
@@ -177,7 +178,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (952 Vitest / 643 pytest, без `integration` — 627), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (956 Vitest / 659 pytest, без `integration` — 641), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

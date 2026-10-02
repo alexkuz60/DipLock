@@ -5,7 +5,6 @@
 выглядеть успешной, если диполей не получилось (F18, ``audit.md`` §7.7).
 """
 import logging
-import os
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -13,6 +12,7 @@ import mne
 import numpy as np
 
 from app.core.config import Settings
+from app.services import fsaverage_assets
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +126,8 @@ def fit_dipoles_for_epochs(
     """
     report = progress or (lambda *args, **kwargs: None)
     bem = _get_bem(settings)
-    trans = settings.fsaverage_trans
+    # Путь transform: готовый файл или расчёт из фидуциалов (FreeSurfer)
+    trans = fsaverage_assets.trans_path(settings)
 
     # Ковариация: из файла, иначе считаем empirical прямо из эпох
     # (method='shrunk' требует scikit-learn).
@@ -233,7 +234,8 @@ def fit_summary(dipoles: list[dict[str, Any]]) -> dict[str, Any]:
 
 def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
     subjects_dir = settings.subjects_dir
-    trans_path = settings.fsaverage_trans
+    # Готовый файл или расчёт из фидуциалов (задача FreeSurfer): наружу — путь
+    trans_path = fsaverage_assets.trans_path(settings)
     # Кэшированный один раз (module-level lru_cache)
     transform = _get_transform(subjects_dir, trans_path)
 
@@ -310,19 +312,12 @@ def _get_covariance(settings) -> Optional["mne.Covariance"]:
 
 
 def bem_path(settings) -> str:
-    """Путь к BEM-решению fsaverage; ищем существующий файл."""
-    candidates = [
-        f"{settings.subjects_dir}/fsaverage/bem/fsaverage-5120-5120-5120-bem-sol.fif",
-        f"{settings.subjects_dir}/fsaverage/bem/fsaverage-5120-5120-5120-bem.fif",
-        f"{settings.subjects_dir}/bem/fsaverage-5120-5120-5120-bem-sol.fif",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    raise FileNotFoundError(
-        "BEM-решение fsaverage не найдено. Ожидался один из файлов: "
-        + ", ".join(candidates)
-    )
+    """Путь к BEM-решению fsaverage: готовый файл → кэш → расчёт (FreeSurfer).
+
+    Разрешение живёт в ``services/fsaverage_assets.py``; имя сохранено здесь
+    для прежних имён (``_get_bem``, тесты).
+    """
+    return fsaverage_assets.bem_path(settings)
 
 
 @lru_cache(maxsize=1)

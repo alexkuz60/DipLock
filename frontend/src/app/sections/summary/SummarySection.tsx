@@ -16,12 +16,13 @@
  *   при закрытии или смене записи он сбрасывается (сравнение `recording_id`),
  *   а `reset()` глушит устаревший поллинг.
  */
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { ClipboardList } from 'lucide-react'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useSummaryReport } from '@/shared/state/summaryReport'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { SummaryDynamics } from './SummaryDynamics'
 
 /** Человеческие подписи QC-вердикта (те же слова, что в отчёте) */
 const QC_LABELS: Record<string, string> = { ok: 'QC: ок', warn: 'QC: внимание', bad: 'QC: плохо' }
@@ -47,6 +48,9 @@ export function SummarySection() {
   useEffect(() => {
     if (resultId !== null && resultId !== recordingId) reset()
   }, [recordingId, resultId, reset])
+
+  // Вид результата: документ (iframe) или клиентская динамика структур (часть 3)
+  const [view, setView] = useState<'html' | 'dynamics'>('html')
 
   if (recording === null) {
     return (
@@ -147,12 +151,48 @@ export function SummarySection() {
           {`расчёт: ${result.duration_sec_calc.toFixed(1)} с`}
         </span>
       </div>
-      <iframe
-        title="Автоотчёт DipLock (MNE.Report)"
-        src={`${result.html_url}?v=${result.report_version}`}
-        data-testid="summary-frame"
-        className="min-h-0 w-full flex-1 rounded-lg border border-border bg-white"
-      />
+      {/* Часть 3 (§3.9.6): документ MNE.Report и клиентская динамика структур —
+          два вида одного результата; переключение только рисует, ничего не считает */}
+      <div className="flex gap-1" role="tablist" aria-label="Вид результата отчёта">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'html'}
+          onClick={() => setView('html')}
+          data-testid="summary-view-html"
+          className={
+            view === 'html'
+              ? 'rounded-t-lg border border-border bg-bg-2 px-3 py-1 text-sm text-fg-1'
+              : 'rounded-t-lg border border-transparent px-3 py-1 text-sm text-fg-2 hover:text-fg-1'
+          }
+        >
+          Документ
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'dynamics'}
+          onClick={() => setView('dynamics')}
+          data-testid="summary-view-dynamics"
+          className={
+            view === 'dynamics'
+              ? 'rounded-t-lg border border-border bg-bg-2 px-3 py-1 text-sm text-fg-1'
+              : 'rounded-t-lg border border-transparent px-3 py-1 text-sm text-fg-2 hover:text-fg-1'
+          }
+        >
+          Динамика структур
+        </button>
+      </div>
+      {view === 'html' ? (
+        <iframe
+          title="Автоотчёт DipLock (MNE.Report)"
+          src={`${result.html_url}?v=${result.report_version}`}
+          data-testid="summary-frame"
+          className="min-h-0 w-full flex-1 rounded-lg border border-border bg-white"
+        />
+      ) : (
+        <SummaryDynamics bands={bands} />
+      )}
     </div>
   )
 }

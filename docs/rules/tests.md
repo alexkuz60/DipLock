@@ -666,3 +666,14 @@ advisory-строка: компонент уже в `removed` не предла�
 `name_counts` у `summarize_band`). Тестовая БД изолирована: `DATABASE_URL` в `conftest.py`
 (write-API пишет при POST/задачах — в рабочую базу тесты не ходят). Итог: pytest — **643**
 (без `integration` — **627**), Vitest — **952**.
+
+FreeSurfer + развитие «Итогов» (02.10.2026): pytest **+16** — `test_fsaverage_assets.py`
+(+11: приоритет «готовый файл → кэш → расчёт», `*_source` без расчёта, `bem_path` пустой →
+`RuntimeError`, `init-status`/`meta` отдают `sources`; 2 `integration` — реальный расчёт BEM
+на FSAverage и сверка transform с установленным `fsaverage-trans.fif`),
+`test_report.py` (+5: кросс-проверки §3.9.4 — №1 сверка `params_sig` со стадией EDF,
+№2 «ВЕРДИКТ» первой строкой, №3 «часть 1 ↔ пакет», №6 L1 «было → стало», №8 отпечаток в
+шапке), `test_api_recording_jobs.py` (+1: `meta.params_sig` в поданной задаче). Vitest **+4** —
+`summaryExport.test` (+3: RFC 4180, экранирование, имя файла), `SummarySection.test` (+1:
+вкладка «Динамика структур»). Итог: pytest — **659** (без `integration` — **641**),
+Vitest — **956**.

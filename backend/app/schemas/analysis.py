@@ -1446,6 +1446,21 @@ class MetaResponse(BaseModel):
     trimesh_version: str | None = None
     subjects_dir: str
     fsaverage_trans: str
+    bem_source: str | None = Field(
+        default=None,
+        description=(
+            "Откуда BEM при первом обращении: precomputed (файл установки) | "
+            "cached (кэш расчёта) | computable (считается из .surf) | missing; "
+            "без расчёта — services/fsaverage_assets.py"
+        ),
+    )
+    trans_source: str | None = Field(
+        default=None,
+        description=(
+            "Откуда transform при первом обращении: precomputed | cached | "
+            "computable (расчёт из fsaverage-fiducials.fif) | missing"
+        ),
+    )
     upload_dir: str
     results_dir: str
     cache_dir: str

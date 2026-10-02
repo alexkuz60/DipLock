@@ -5721,6 +5721,30 @@
             "type": "string",
             "title": "Fsaverage Trans"
           },
+          "bem_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bem Source",
+            "description": "Откуда BEM при первом обращении: precomputed (файл установки) | cached (кэш расчёта) | computable (считается из .surf) | missing; без расчёта — services/fsaverage_assets.py"
+          },
+          "trans_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trans Source",
+            "description": "Откуда transform при первом обращении: precomputed | cached | computable (расчёт из fsaverage-fiducials.fif) | missing"
+          },
           "upload_dir": {
             "type": "string",
             "title": "Upload Dir"

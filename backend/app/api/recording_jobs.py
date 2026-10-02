@@ -137,7 +137,10 @@ def submit_recording_job(
     job = job_manager.submit(
         kind, recording.filename, WORKERS[kind], recording, params,
         on_success=results_store.on_success_callback(kind, recording, params),
-        meta={"recording_id": recording.recording_id, **(meta or {})},
+        # params_sig — отпечаток параметров задачи в файле истории: по нему
+        # автоотчёт сверяет свои числа с последней стадией EDF (§3.9.4, №1).
+        # В ``JobStatus`` meta не входит — контракт API не меняется.
+        meta={"recording_id": recording.recording_id, "params_sig": repr(params), **(meta or {})},
     )
     logger.info("Создана задача %s %s (%s)", kind, job.job_id, recording.recording_id)
     prefix = settings.api_prefix

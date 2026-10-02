@@ -2993,6 +2993,16 @@ export interface components {
             subjects_dir: string;
             /** Fsaverage Trans */
             fsaverage_trans: string;
+            /**
+             * Bem Source
+             * @description Откуда BEM при первом обращении: precomputed (файл установки) | cached (кэш расчёта) | computable (считается из .surf) | missing; без расчёта — services/fsaverage_assets.py
+             */
+            bem_source?: string | null;
+            /**
+             * Trans Source
+             * @description Откуда transform при первом обращении: precomputed | cached | computable (расчёт из fsaverage-fiducials.fif) | missing
+             */
+            trans_source?: string | null;
             /** Upload Dir */
             upload_dir: string;
             /** Results Dir */

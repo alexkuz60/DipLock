@@ -212,7 +212,9 @@ def test_get_bem_returns_cached_solution(monkeypatch):
 
 def test_bem_path_reports_missing_files(monkeypatch):
     """Нет BEM-файла — понятная ошибка со списком ожидаемых путей."""
-    monkeypatch.setattr(dipole_fitter.os.path, "exists", lambda path: False)
+    # Патч глобальный (os.path общий для всех модулей): готового файла,
+    # кэша и исходных поверхностей нет — расчёт не запускается.
+    monkeypatch.setattr("os.path.exists", lambda path: False)
 
     with pytest.raises(FileNotFoundError, match="BEM-решение fsaverage"):
         dipole_fitter.bem_path(settings)

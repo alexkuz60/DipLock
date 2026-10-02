@@ -180,6 +180,9 @@ def test_submit_recording_job_returns_urls_and_runs_worker(client, tmp_path, mon
 
     status = _wait_finished(client, payload["job_id"])
     assert status["status"] == "succeeded", status
+    # params_sig в meta — отпечаток параметров для кросс-проверки №1 §3.9.4
+    job = recording_jobs.job_by_id(payload["job_id"])
+    assert job.meta["params_sig"].startswith("PreprocessParams(")
     # Тот же адрес результата в статусе задачи: UI берёт его оттуда, а не собирает сам
     assert status["result_url"] == payload["result_url"]
     assert calls and calls[0][0] == recording.recording_id

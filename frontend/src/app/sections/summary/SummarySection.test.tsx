@@ -16,7 +16,7 @@ import { EmoLabSection, NeuroAudioSection } from '../Stubs'
 import { EMPTY_PASSPORT, useEdfRecording } from '@/shared/state/edfRecording'
 import { useSummaryReport } from '@/shared/state/summaryReport'
 import { mockApiFetch } from '@/test/apiMocks'
-import { recordingFixture } from '@/test/fixtures'
+import { recordingFixture, reportResultFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 function setRecording(active: boolean) {
@@ -143,6 +143,37 @@ describe('раздел «Итоги»', () => {
     // Сброс — в эффекте: плейсхолдер «не собран» вместо чужого iframe
     expect(screen.getByText('Отчёт ещё не собран')).toBeInTheDocument()
     expect(useSummaryReport.getState().result).toBeNull()
+  })
+
+  it('часть 3: вкладка «Динамика» — таймлайн, таблицы топов и переключение полосы', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    setRecording(true)
+    useSummaryReport.setState({ result: reportResultFixture() })
+    renderSummary()
+
+    await user.click(screen.getByTestId('summary-view-dynamics'))
+
+    // Вид сменился: динамика есть, документа (iframe) в этом виде нет
+    expect(screen.getByTestId('summary-dynamics')).toBeInTheDocument()
+    expect(screen.queryByTestId('summary-frame')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Полоса')).toHaveValue('theta')
+    expect(screen.getByText('Таймлайн топ-структур (5 бинов по эпохам)')).toBeInTheDocument()
+    expect(screen.getAllByText('Precuneus').length).toBeGreaterThan(0)
+    expect(screen.getByText('BA7-lh')).toBeInTheDocument()
+    expect(screen.getByTestId('summary-dynamics-export')).toBeInTheDocument()
+
+    // Переключение полосы — чистая отрисовка, запросов не прибавилось
+    const fetchMock = mockApiFetch()
+    const before = fetchMock.mock.calls.length
+    await user.selectOptions(screen.getByLabelText('Полоса'), 'alpha')
+    expect(screen.getByLabelText('Полоса')).toHaveValue('alpha')
+    expect(fetchMock.mock.calls.length).toBe(before)
+
+    // Возврат к документу — тот же iframe
+    await user.click(screen.getByTestId('summary-view-html'))
+    expect(screen.getByTestId('summary-frame')).toBeInTheDocument()
+    expect(screen.queryByTestId('summary-dynamics')).not.toBeInTheDocument()
   })
 })
 

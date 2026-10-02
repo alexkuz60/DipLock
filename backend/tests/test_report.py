@@ -6,6 +6,7 @@
 """
 import os
 import shutil
+from dataclasses import replace
 from itertools import pairwise
 
 import numpy as np
@@ -14,7 +15,7 @@ import pytest
 from app.core.config import settings
 from app.schemas.analysis import ReportResult
 from app.services.preprocess import PreprocessParams
-from app.services.recordings import recording_registry
+from app.services.recordings import Recording, recording_registry
 from app.services.report import (
     TIME_BINS,
     ReportError,
@@ -202,6 +203,12 @@ def test_run_report_builds_html_and_contract_result(tmp_path):
     # Часть 1: числа QC и предупреждения стадий
     assert "Качество сырого файла" in text
     assert "Нарезка эпох" in text
+    # Кросс-проверки §3.9.4: блок в шапке, отпечаток №8, паспорт №7
+    assert "Контроли сквозного пайплайна" in text
+    assert "Полный отпечаток параметров" in text
+    assert "preprocess.epoch_length_ms" in text
+    assert "Единицы EDF" in text and "Каналы вне монтажа 10-20" in text
+    assert "Нарезка: часть 1" in text  # №3 — числа нарезки на виду
     # Часть 2: обязательная подпись о несравнимости GOF + сами полосы
     assert "GOF между полосами не сравним" in text
     for key in bands:
@@ -230,6 +237,154 @@ def test_run_report_rejects_unknown_band(tmp_path):
             recording, settings, ReportParams(band_keys=["omega"]),
             progress=lambda *args, **kwargs: None,
         )
+
+
+# ---------- кросс-проверки сквозного пайплайна (§3.9.4) -----------------------
+
+
+def _stages(
+    n_total: int = 10, n_used: int = 9, sfreq: float = 500.0, good: float = 95.0,
+    artifact_types: dict | None = None,
+) -> dict:
+    """Минимальные стадии части 1 для проверок (без расчёта)."""
+    return {
+        "filter": {"sfreq": sfreq, "band_hz": [1.0, 45.0], "clean": None},
+        "artifacts": {
+            "good_data_percent": good,
+            "artifact_types": artifact_types if artifact_types is not None else {"ecg": 3},
+        },
+        "epochs": {"n_epochs_total": n_total, "n_epochs_used": n_used},
+    }
+
+
+def _summary(
+    key: str = "theta", used: int = 9, points: int = 9,
+    no_attr: int = 0, share: float = 0.5,
+) -> dict:
+    """Минимальная сводка полосы для проверок (без расчёта)."""
+    return {
+        "band_key": key,
+        "n_epochs_used": used,
+        "n_points": points,
+        "n_no_attribution": no_attr,
+        "top_structures": [
+            {"name": "Cingulate", "count": max(1, int(share * points)), "share": share},
+        ],
+    }
+
+
+def _unit_recording() -> Recording:
+    """Запись-заглушка: кросс-проверкам нужен только её идентификатор.
+
+    Пути декоративные (объект нигде не открывается), поэтому без ``/tmp`` —
+    линтер S108.
+    """
+    return Recording(
+        recording_id="rec-cross", filename="cross.edf", path="unused/cross.edf",
+        upload_dir="unused", created_at=0.0, meta={},
+    )
+
+
+def test_cross_checks_verdict_is_first_warning(tmp_path):
+    """№2: >30 % отброшенных эпох — вердикт первой строкой предупреждений."""
+    from app.core.config import Settings
+    from app.services.report import _cross_checks, _cross_checks_html
+
+    cfg = Settings(results_dir=str(tmp_path / "jobs"))
+    params = ReportParams(preprocess=PreprocessParams(epoch_length_ms=1000.0))
+    info, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["theta"],
+        _stages(n_total=10, n_used=6),  # 40 % отброшено > порога 30 %
+        [_summary()],
+    )
+    assert warns and warns[0].startswith("ВЕРДИКТ")
+    assert "отброшено 40%" in warns[0] and "4 из 10" in warns[0]
+    html = _cross_checks_html(info, warns)
+    # Вердикт в HTML раньше прочих строк: первая строка документа §3.9.4
+    assert html.index("ВЕРДИКТ") < html.index("Сверка со стадией EDF")
+
+
+def test_cross_checks_stays_quiet_within_thresholds(tmp_path):
+    """№2/№4/№5/№7: в пределах порогов предупреждений нет."""
+    from app.core.config import Settings
+    from app.services.report import _cross_checks
+
+    cfg = Settings(results_dir=str(tmp_path / "jobs"))
+    params = ReportParams(preprocess=PreprocessParams(epoch_length_ms=1000.0))
+    _, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["theta", "alpha"],
+        _stages(n_total=10, n_used=9),  # 10 % отброшено < 30 %; нарезка совпадает
+        [_summary(), _summary(key="alpha", share=0.5)],
+    )
+    assert warns == []
+
+
+def test_cross_checks_flags_attribution_outlier_and_nyquist(tmp_path):
+    """№4/№5/№7: пороги срабатывают и уходят в предупреждения."""
+    from app.core.config import Settings
+    from app.services.report import _cross_checks
+
+    cfg = Settings(results_dir=str(tmp_path / "jobs"))
+    params = ReportParams(preprocess=PreprocessParams(epoch_length_ms=1000.0))
+    _, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["high_gamma"],  # 64–128 Гц против sfreq 250
+        _stages(sfreq=250.0),
+        [
+            _summary(key="high_gamma", no_attr=5, points=9),  # 55 % > 20 %
+            _summary(key="high_gamma", share=1.0),             # 100 % > 95 %
+        ],
+    )
+    joined = " | ".join(warns)
+    assert "точек без атрибуции" in joined
+    assert "активна в 100%" in joined
+    assert "выше Nyquist" in joined and "high_gamma" in joined
+
+
+def test_cross_checks_matches_seeded_edf_stage(tmp_path):
+    """№1: файл стадии EDF тех же параметров → «сошлось»; другой процент → риск."""
+    from app.core.config import Settings
+    from app.services import job_store
+    from app.services.report import _cross_checks
+
+    cfg = Settings(results_dir=str(tmp_path / "jobs"))
+    params = ReportParams(preprocess=PreprocessParams(epoch_length_ms=1000.0))
+    sig = repr(replace(params.preprocess, stage="artifacts"))
+    stage_result = {"good_data_percent": 95.0, "artifact_types": {"ecg": 3}}
+    job_store.save_record(cfg, {
+        "job_id": "stage-1", "kind": "preprocess", "status": "succeeded",
+        "meta": {
+            "recording_id": "rec-cross", "stage": "artifacts", "params_sig": sig,
+        },
+        "result": dict(stage_result),
+    })
+
+    _, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["theta"],
+        _stages(good=95.0, artifact_types={"ecg": 3}), [_summary()],
+    )
+    assert not any("РАСХОЖДЕНИЕ" in w for w in warns)
+
+    _, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["theta"],
+        _stages(good=50.0, artifact_types={"ecg": 3}), [_summary()],
+    )
+    assert any("РАСХОЖДЕНИЕ со стадией EDF" in w for w in warns)
+
+
+def test_cross_checks_epochs_mismatch_warns_over_threshold(tmp_path):
+    """№3: расхождение нарезки «часть 1 ↔ пакет» > 5 % — предупреждение."""
+    from app.core.config import Settings
+    from app.services.report import _cross_checks
+
+    cfg = Settings(results_dir=str(tmp_path / "jobs"))
+    params = ReportParams(preprocess=PreprocessParams(epoch_length_ms=1000.0))
+    info, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["theta"],
+        _stages(n_total=10, n_used=10),
+        [_summary(used=8)],  # 20 % > 5 %
+    )
+    assert any("Нарезка пакета расходится" in w for w in warns)
+    assert any("часть 1 — 10 эпох" in line for line in info)
 
 
 def test_theme_layers_are_print_safe():
