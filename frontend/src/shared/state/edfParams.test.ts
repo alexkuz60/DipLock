@@ -263,6 +263,20 @@ describe('слой параметров EDF', () => {
     expect(stageState('epochs')).toBe('ready')
   })
 
+  it('схема имён каналов (10-10/10-20) — отрисовка: дефолт 10-10, вне STAGE_PARAM_KEYS', () => {
+    expect(EDF_PARAM_DEFAULTS.channelNaming).toBe('10-10')
+    for (const stage of RECALC_STAGES) {
+      expect(STAGE_PARAM_KEYS[stage]).not.toContain('channelNaming')
+    }
+    // Смена подписей не устаревает стадии: канонические имена не меняются
+    useEdfParams.getState().markApplied()
+    useEdfParams.getState().setParams({ channelNaming: '10-20' })
+    expect(stageState('filter')).toBe('ready')
+    expect(stageState('artifacts')).toBe('ready')
+    expect(stageState('epochs')).toBe('ready')
+    expect(useEdfParams.getState().params.channelNaming).toBe('10-20')
+  })
+
   it('в localStorage уходят параметры, но не снимки результатов', () => {
     useEdfParams.getState().markApplied()
     useEdfParams.getState().setParams({ notchHz: 50 })

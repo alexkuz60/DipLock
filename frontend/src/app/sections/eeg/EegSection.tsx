@@ -63,7 +63,7 @@ import { anchoredCenter, panByPixels, windowCenter } from '@/shared/lib/viewerMa
 import { resolveSignalLevel, selectFrame, type SignalFrame } from '@/shared/lib/signalFrame'
 import { artifactZonesForChannels, zonesInWindow } from '@/shared/lib/eegArtifacts'
 import { artifactCounts, visibleZones } from '@/shared/lib/viewerLayers'
-import { useEdfParams, type ArtifactKind } from '@/shared/state/edfParams'
+import { useChannelNaming, useEdfParams, type ArtifactKind } from '@/shared/state/edfParams'
 import { TIME_LEVELS, eegResultMatchesParams, useEegParams } from '@/shared/state/eegParams'
 import { useEdfRecording, useSignalLayerFrames } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
@@ -234,7 +234,9 @@ function EegWorkspace({
     channel,
     channelSourceChannels(recording, channel),
   )
-  const channelTitle = channelLabel(recording, channel)
+  // Схема подписей каналов (10-10/10-20) — общий параметр раздела EDF
+  const channelNaming = useChannelNaming()
+  const channelTitle = channelLabel(recording, channel, channelNaming)
   const factor = TIME_LEVELS[params.timeLevel] ?? 1
   const window = eegWindow(frame.durationSec, factor, params.windowCenterSec)
   const plotWidth = plotWidthPx(size.width)
@@ -612,7 +614,7 @@ function EegWorkspace({
         </StatusPill>
         {demo ? <StatusPill tone="warn">демо-сетка</StatusPill> : null}
         {shownGrid && !demo ? (
-          <StatusPill tone="ok" title={`Сетка расчёта: ${channelLabel(recording, shownGrid.channel)}`}>
+          <StatusPill tone="ok" title={`Сетка расчёта: ${channelLabel(recording, shownGrid.channel, channelNaming)}`}>
             {`Спектрограмма: ${shownGrid.nFreqs} × ${shownGrid.nTimes} · окно ${Math.round(
               shownGrid.windowMs,
             )} мс`}

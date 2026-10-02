@@ -13,6 +13,7 @@ import { RotateCcw } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { RecalcProgress } from './EdfToolActions'
 import { bandKeyOptions } from '@/shared/lib/bandOptions'
+import { CHANNEL_NAMING_OPTIONS, channelDisplayName } from '@/shared/lib/channelNaming'
 import { DEMO_SOURCE_ID } from '@/shared/lib/signalFrame'
 import { bandLabel } from '@/shared/lib/spectrum'
 import {
@@ -161,7 +162,11 @@ export function EdfPanel() {
   const bandOptions = bandKeyOptions(meta.data)
   /** Канал графика ERP: свой выбор, иначе первый видимый канал */
   const erpChannel = params.erpChannel || params.visibleChannels[0] || channels[0] || ''
-  const channelOptions = channels.map((name) => ({ value: name, label: name }))
+  // Подписи селекта — по схеме имён (10-10/10-20); value — каноническое имя
+  const channelOptions = channels.map((name) => ({
+    value: name,
+    label: channelDisplayName(name, params.channelNaming),
+  }))
   /** ERP требует событийный режим и выбранное событие (иначе кнопка disabled) */
   const canRunErp = Boolean(recording) && params.epochMode === 'events' && params.eventId !== ''
   const epochOptions = (epochLengths.length ? epochLengths : [params.epochLengthMs]).map((value) => ({
@@ -674,6 +679,16 @@ export function EdfPanel() {
             Ничего
           </Button>
         </div>
+        {/* Схема подписей (10-10/10-20): параметр отрисовки вне STAGE_PARAM_KEYS —
+            переключение меняет только текст подписей, расчёт не запускается и не
+            устаревает (`shared/lib/channelNaming.ts`) */}
+        <SegmentedControl
+          label="Имена"
+          value={params.channelNaming}
+          options={CHANNEL_NAMING_OPTIONS}
+          onChange={(value) => setParams({ channelNaming: value })}
+          hint="Подписи отведений на карте, в треках и селектах: 10-10 — современные (T7, P7), 10-20 — классические (T3, T5). Канонические имена в расчёте, паспорте и базе не меняются."
+        />
         {/* Клик по датчику переключает канал; каналы вне монтажа — чекбоксами
             под картой (позиции приходят из /meta, `channel_positions`) */}
         <HeadChannelMap
@@ -681,6 +696,7 @@ export function EdfPanel() {
           positions={meta.data?.channel_positions ?? {}}
           selected={params.visibleChannels}
           onToggle={toggleChannel}
+          naming={params.channelNaming}
         />
       </Panel>
 

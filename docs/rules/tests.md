@@ -692,3 +692,14 @@ pytest **+13** — `test_artifact_detector.py` (+1: `annotations_from_zones` —
 `SummarySection.test` (+2: вкладка «ROI» — подпись/числа/переключение без запросов и
 заглушка `roi: null`), `summaryExport.test` (+2: `roiCsv` — строка = ROI × полоса,
 имя файла). Итог: pytest — **672** (без `integration` — **654**), Vitest — **961**.
+
+**Схема имён каналов 10-10/10-20 в блоке «Каналы» + подраздел Wiki (02.10.2026).**
+Vitest **+10** — `channelNaming.test` (+5: четыре переименования MCN в обе стороны,
+неизменность остальных каналов/миксов, состав вариантов селекта),
+`HeadChannelMap.test` (+1: подпись «T3» при `naming='10-20'`, клик отдаёт канонический
+`T7`), `EdfPanel.test` (+1: переключатель «Имена» меняет подписи и не делает новых
+запросов), `edfParams.test` (+1: `channelNaming` вне `STAGE_PARAM_KEYS` — после смены
+все стадии остаются `ready`), `TrackStack.test` (+1: подпись трека «T3» при
+`data-testid="track-label-T7"`), `eegChannels.test` (+1: `electrodeOptions`/
+`channelLabel` по схеме, `value` каноническое). pytest без изменений. Итог:
+pytest — **672** (без `integration` — **654**), Vitest — **971**.

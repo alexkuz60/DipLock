@@ -61,6 +61,7 @@ import {
   type EventMark,
 } from '@/shared/lib/viewerLayers'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue, type ArtifactKind } from '@/shared/state/edfParams'
+import { channelDisplayName } from '@/shared/lib/channelNaming'
 import { channelQcStatus, channelQcTooltip } from '@/shared/lib/channelQc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useEegParams } from '@/shared/state/eegParams'
@@ -765,6 +766,9 @@ export function TrackStack({
               <TrackRow
                 key={name}
                 name={name}
+                // Подпись по схеме имён (10-10/10-20): меняет только текст,
+                // ключ состояния и data-testid — каноническое имя
+                displayName={channelDisplayName(name, params.channelNaming)}
                 frame={signal}
                 window={window}
                 width={width}
@@ -787,7 +791,10 @@ export function TrackStack({
                           qcThresholds.snrWarn,
                           qcThresholds.snrBad,
                         ),
-                        tooltip: channelQcTooltip(name, channelQc[name]),
+                        tooltip: channelQcTooltip(
+                          channelDisplayName(name, params.channelNaming),
+                          channelQc[name],
+                        ),
                       }
                     : null
                 }
@@ -821,6 +828,7 @@ export function TrackStack({
               height={TRACK_HEIGHT}
               showXAxis
               onCanvas={registerCanvas}
+              channelNaming={params.channelNaming}
             />
           ) : null}
 

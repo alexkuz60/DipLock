@@ -17,6 +17,7 @@
  */
 import type { RecordingMeta } from '@/shared/api/types'
 import type { SignalFrame } from './signalFrame'
+import { channelDisplayName, type ChannelNaming } from './channelNaming'
 
 /** Префикс идентификатора виртуального канала (совпадает с сервером) */
 export const MIX_PREFIX = 'mix:'
@@ -40,10 +41,18 @@ export function mixOf(
   return recording?.mixes?.find((mix) => mix.id === channel) ?? null
 }
 
-/** Подпись канала для трека и статусной строки: «Fp1» или «Микс: Лобные» */
-export function channelLabel(recording: RecordingMeta | null, channel: string): string {
+/** Подпись канала для трека и статусной строки: «Fp1» или «Микс: Лобные».
+ *
+ * `naming` — схема подписей (`shared/lib/channelNaming.ts`): электроды идут по
+ * выбранной схеме (10-10/10-20), русские подписи миксов не меняются.
+ */
+export function channelLabel(
+  recording: RecordingMeta | null,
+  channel: string,
+  naming: ChannelNaming = '10-10',
+): string {
   const mix = mixOf(recording, channel)
-  return mix ? `Микс: ${mix.label}` : channel
+  return mix ? `Микс: ${mix.label}` : channelDisplayName(channel, naming)
 }
 
 /**
@@ -59,9 +68,10 @@ export function channelLabel(recording: RecordingMeta | null, channel: string): 
 export function electrodeOptions(
   recording: RecordingMeta | null,
   demoChannels: readonly string[] = [],
+  naming: ChannelNaming = '10-10',
 ): ChannelOption[] {
   const channels = recording?.channels ?? [...demoChannels]
-  return channels.map((name) => ({ value: name, label: name }))
+  return channels.map((name) => ({ value: name, label: channelDisplayName(name, naming) }))
 }
 
 /** Пункты виртуальных каналов: в паспорте записи, с явной подписью «Микс: …» */
@@ -72,8 +82,12 @@ export function mixOptions(recording: RecordingMeta | null): ChannelOption[] {
 export function channelOptions(
   recording: RecordingMeta | null,
   demoChannels: readonly string[] = [],
+  naming: ChannelNaming = '10-10',
 ): ChannelOption[] {
-  return [...electrodeOptions(recording, demoChannels), ...mixOptions(recording)]
+  return [
+    ...electrodeOptions(recording, demoChannels, naming),
+    ...mixOptions(recording),
+  ]
 }
 
 /**

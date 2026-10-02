@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
 import { perfCount } from '@/shared/lib/perf'
+import { channelDisplayNames, type ChannelNaming } from '@/shared/lib/channelNaming'
 import type { HeartRateSeries } from '@/shared/lib/viewerLayers'
 import type { TimeWindow } from '@/shared/lib/viewerMath'
 import {
@@ -36,6 +37,8 @@ export type HeartRateTrackProps = {
   showXAxis: boolean
   /** Отдаёт наружу canvas трека для PNG-снапшота (как у каналов) */
   onCanvas: (name: string, canvas: HTMLCanvasElement | null) => void
+  /** Схема подписей каналов в тултипе («каналы: …»); по умолчанию 10-10 */
+  channelNaming?: ChannelNaming
 }
 
 export function HeartRateTrack({
@@ -45,6 +48,7 @@ export function HeartRateTrack({
   height,
   showXAxis,
   onCanvas,
+  channelNaming = '10-10',
 }: HeartRateTrackProps) {
   const hostRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<uPlot | null>(null)
@@ -97,7 +101,8 @@ export function HeartRateTrack({
     series.medianBpm != null ? `медиана ${series.medianBpm} уд/мин` : 'нет медианы',
     `${series.nBeats} QRS`,
     `${series.coveragePercent} % окон с данными`,
-    `каналы: ${series.channels.join(', ')}`,
+    // Височные отведения — подписи по схеме имён (10-10/10-20)
+    `каналы: ${channelDisplayNames(series.channels, channelNaming).join(', ')}`,
   ].join(' · ')
 
   return (

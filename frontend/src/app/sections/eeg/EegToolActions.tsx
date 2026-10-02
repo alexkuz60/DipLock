@@ -33,6 +33,7 @@ import {
   eegSignature,
   useEegParams,
 } from '@/shared/state/eegParams'
+import { useChannelNaming } from '@/shared/state/edfParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { IconButton } from '@/shared/ui/IconButton'
@@ -90,7 +91,9 @@ export function EegToolHeaderActions() {
   const setChannel = useEegParams((state) => state.setChannel)
 
   const demoChannels = demo?.channels ?? []
-  const electrodes = electrodeOptions(recording, demoChannels)
+  // Подписи электродов — по схеме имён (10-10/10-20), общий параметр EDF
+  const channelNaming = useChannelNaming()
+  const electrodes = electrodeOptions(recording, demoChannels, channelNaming)
   const mixes = mixOptions(recording)
   const channel = resolveChannel(recording, demoChannels, params.channel)
   const mixSelected = isMixChannel(channel)
@@ -107,7 +110,7 @@ export function EegToolHeaderActions() {
         : stale
           ? 'Параметры расчёта изменились — пересчитайте спектрограмму по текущим настройкам'
           : result
-            ? `Пересчитать спектрограмму канала ${channelLabel(recording, channel)}: ${eegSignature({ ...params, channel })}`
+            ? `Пересчитать спектрограмму канала ${channelLabel(recording, channel, channelNaming)}: ${eegSignature({ ...params, channel })}`
             : mixSelected
               ? 'Рассчитать спектрограмму микса: сервер усреднит каналы группы и посчитает STFT'
               : 'Рассчитать спектрограмму: STFT по одному каналу, окно и перекрытие — из панели'

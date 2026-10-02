@@ -328,6 +328,27 @@ describe('панель раздела EDF', () => {
     expect(useEdfParams.getState().params.visibleChannels).toContain('Fp2')
   })
 
+  it('переключатель «Имена» меняет подписи 10-10/10-20 без запросов', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    act(() => useEdfParams.getState().setAvailableChannels(['C3', 'T7']))
+    renderWithProviders(<EdfPanel />)
+    await screen.findByLabelText('C3')
+
+    // Дефолт — канонические имена 10-10: T7 есть, классического T3 нет
+    expect(screen.getByLabelText('T7')).toBeInTheDocument()
+    expect(screen.queryByLabelText('T3')).not.toBeInTheDocument()
+
+    const callsBefore = fetchMock.mock.calls.length
+    await user.click(screen.getByRole('button', { name: '10-20' }))
+
+    expect(useEdfParams.getState().params.channelNaming).toBe('10-20')
+    expect(screen.getByLabelText('T3')).toBeInTheDocument()
+    expect(screen.queryByLabelText('T7')).not.toBeInTheDocument()
+    // Параметр отрисовки: ни одного нового запроса (расчёт не запускается)
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+  })
+
   it('показывает число ручных пометок эпох и снимает их кнопкой (срез 2.10)', async () => {
     const user = userEvent.setup()
     mockApiFetch()

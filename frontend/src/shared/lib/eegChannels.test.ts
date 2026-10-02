@@ -98,6 +98,23 @@ describe('каналы раздела «ЭЭГ»', () => {
     expect(isMixChannel('Fp1')).toBe(false)
   })
 
+  it('по схеме 10-20 электроды подписываются классически, значения — канонические', () => {
+    const recording = { ...recordingFixture, channels: ['T7', 'Fp1'] }
+    const options = channelOptions(recording, [], '10-20')
+
+    // Подпись меняется, value остаётся каноническим — формы расчёта его и ждут
+    expect(options.slice(0, 2)).toEqual([
+      { value: 'T7', label: 'T3' },
+      { value: 'Fp1', label: 'Fp1' },
+    ])
+    expect(channelLabel(recording, 'T7', '10-20')).toBe('T3')
+    expect(channelLabel(recording, 'T7', '10-10')).toBe('T7')
+    // Русские подписи миксов от схемы не зависят
+    expect(channelLabel(recording, `${MIX_PREFIX}temporal`, '10-20')).toBe('Микс: Височные')
+    // resolveChannel сравнивает канонические имена — по умолчанию схема не при чём
+    expect(resolveChannel(recording, [], 'T7')).toBe('T7')
+  })
+
   it('за миксом стоят каналы группы, за электродом — он сам', () => {
     expect(channelSourceChannels(recordingFixture, `${MIX_PREFIX}occipital`)).toEqual([
       'O1',

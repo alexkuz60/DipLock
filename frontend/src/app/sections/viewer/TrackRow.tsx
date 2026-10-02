@@ -49,6 +49,12 @@ export type TrackRowProps = {
   showXAxis: boolean
   /** QC-статус канала (шаг 0.4): точка слева от имени; null — стадии артефактов не было */
   qc: { status: ChannelQcStatus; tooltip: string } | null
+  /**
+   * Подпись по схеме имён 10-10/10-20 (`shared/lib/channelNaming.ts`): если
+   * задана, показывается вместо `name` (само имя остаётся ключом состояния и
+   * `data-testid`). Не задана — показывается `name`.
+   */
+  displayName?: string
   /** Клик по названию канала — открыть его в разделе «ЭЭГ» (срез 5) */
   onLabelClick: (name: string) => void
   /** Клик по стрелке у названия — развернуть/свернуть трек (срез 2.9) */
@@ -95,7 +101,10 @@ export function TrackRow({
   levelMark = null,
   onPickLevel,
   wasDragged,
+  displayName,
 }: TrackRowProps) {
+  /** Что видит пользователь: подпись схемы имён, иначе каноническое имя */
+  const shown = displayName ?? name
   const hostRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<uPlot | null>(null)
 
@@ -224,7 +233,7 @@ export function TrackRow({
             data-testid={`track-qc-${name}`}
             data-status={qc.status}
             title={qc.tooltip}
-            aria-label={`Качество канала ${name}: ${qc.tooltip}`}
+            aria-label={`Качество канала ${shown}: ${qc.tooltip}`}
             className={cx(
               // Точка ×2 (правка 24.09.2026) + отступ от левого края вьюера
               'absolute top-1/2 left-2 size-4 -translate-y-1/2 rounded-full',
@@ -237,19 +246,19 @@ export function TrackRow({
         <button
           type="button"
           data-testid={`track-label-${name}`}
-          aria-label={`Открыть канал ${name} в разделе «ЭЭГ»`}
-          title={`Открыть канал ${name} в разделе «ЭЭГ»: трек и спектрограмма STFT`}
+          aria-label={`Открыть канал ${shown} в разделе «ЭЭГ»`}
+          title={`Открыть канал ${shown} в разделе «ЭЭГ»: трек и спектрограмма STFT`}
           onClick={() => onLabelClick(name)}
           className="tnum w-full cursor-pointer truncate rounded text-right font-mono text-xs text-fg-2 hover:text-fg-0"
         >
-          {name}
+          {shown}
         </button>
         <button
           type="button"
           data-testid={`track-expand-${name}`}
           data-expanded={expanded}
           aria-pressed={expanded}
-          aria-label={expanded ? `Свернуть трек ${name}` : `Развернуть трек ${name}`}
+          aria-label={expanded ? `Свернуть трек ${shown}` : `Развернуть трек ${shown}`}
           title={expanded ? 'Свернуть трек' : 'Развернуть трек на высоту ×8'}
           onClick={() => onToggleExpand(name)}
           className={cx(

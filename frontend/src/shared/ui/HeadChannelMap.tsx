@@ -15,6 +15,7 @@
  * недоступен), показывается прежний список чекбоксов.
  */
 import { CENTER, DOT_R, HEAD_R, HIT_R, VIEW, layoutSensors } from '@/shared/lib/headMapLayout'
+import { channelDisplayName, type ChannelNaming } from '@/shared/lib/channelNaming'
 import { CheckboxRow } from './CheckboxRow'
 
 export type HeadChannelMapProps = {
@@ -26,9 +27,21 @@ export type HeadChannelMapProps = {
   selected: string[]
   /** Вкл/выкл канала для просмотра */
   onToggle: (name: string) => void
+  /**
+   * Схема подписей (10-10/10-20): меняет только текст точек и подписей;
+   * позиции, порядок и значения `onToggle` — канонические имена
+   * (`shared/lib/channelNaming.ts`).
+   */
+  naming?: ChannelNaming
 }
 
-export function HeadChannelMap({ channels, positions, selected, onToggle }: HeadChannelMapProps) {
+export function HeadChannelMap({
+  channels,
+  positions,
+  selected,
+  onToggle,
+  naming = '10-10',
+}: HeadChannelMapProps) {
   const { sensors, rest } = layoutSensors(channels, positions)
 
   // Позиций нет — прежний список чекбоксов (ответ /meta ещё не пришёл или
@@ -40,7 +53,7 @@ export function HeadChannelMap({ channels, positions, selected, onToggle }: Head
           <CheckboxRow
             key={name}
             mono
-            label={name}
+            label={channelDisplayName(name, naming)}
             checked={selected.includes(name)}
             onChange={() => onToggle(name)}
           />
@@ -79,12 +92,13 @@ export function HeadChannelMap({ channels, positions, selected, onToggle }: Head
         <path d="M 201 96 A 9 14 0 0 1 201 124" fill="none" stroke="var(--color-border)" strokeWidth={1.5} />
         {sensors.map(({ name, x, y, labelX, labelY }) => {
           const on = visible.has(name)
+          const shown = channelDisplayName(name, naming)
           return (
             <g
               key={name}
               role="button"
               tabIndex={0}
-              aria-label={name}
+              aria-label={shown}
               aria-pressed={on}
               className="group cursor-pointer outline-none"
               onClick={() => onToggle(name)}
@@ -95,7 +109,7 @@ export function HeadChannelMap({ channels, positions, selected, onToggle }: Head
                 }
               }}
             >
-              <title>{`${name} — ${on ? 'виден' : 'скрыт'}, клик: переключить`}</title>
+              <title>{`${shown} — ${on ? 'виден' : 'скрыт'}, клик: переключить`}</title>
               {/* Зона клика больше точки и держит кольцо фокуса/ховера */}
               <circle
                 cx={x}
@@ -123,7 +137,7 @@ export function HeadChannelMap({ channels, positions, selected, onToggle }: Head
                 className="font-mono"
                 fill={on ? 'var(--color-fg-0)' : 'var(--color-fg-2)'}
               >
-                {name}
+                {shown}
               </text>
             </g>
           )
@@ -139,7 +153,7 @@ export function HeadChannelMap({ channels, positions, selected, onToggle }: Head
             <CheckboxRow
               key={name}
               mono
-              label={name}
+              label={channelDisplayName(name, naming)}
               checked={visible.has(name)}
               onChange={() => onToggle(name)}
             />

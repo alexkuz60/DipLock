@@ -179,7 +179,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (956 Vitest / 659 pytest, без `integration` — 641), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (971 Vitest / 672 pytest, без `integration` — 654), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

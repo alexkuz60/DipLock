@@ -166,6 +166,22 @@ describe('вьюер треков', () => {
     expect(screen.queryByTestId('track-qc-C3')).not.toBeInTheDocument()
   })
 
+  it('подпись трека следует схеме имён (10-20: T7 → T3), ключ — канонический', () => {
+    const base = signalDataFixture()
+    const signal = frameFromSignalData({
+      ...base,
+      channels: ['T7'],
+      data: { T7: base.data.F3 },
+    })
+    paramsState({ visibleChannels: ['T7'], channelNaming: '10-20' })
+    renderWithProviders(<TrackStack signal={signal} />)
+
+    // data-testid — каноническое имя (по нему находят трек и тесты),
+    // видимая подпись — по выбранной схеме
+    expect(screen.getByTestId('track-label-T7')).toHaveTextContent('T3')
+    expect(screen.queryByTestId('track-label-T3')).not.toBeInTheDocument()
+  })
+
   it('не создаёт чарт для скрытого канала и показывает подсказку, если скрыто всё', () => {
     paramsState({ visibleChannels: [] })
     renderWithProviders(<TrackStack signal={frameFixture()} />)

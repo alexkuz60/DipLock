@@ -51,6 +51,8 @@ import {
   useEegJobSummary,
 } from '@/shared/state/eegParams'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import { useChannelNaming } from '@/shared/state/edfParams'
+import { channelDisplayNames } from '@/shared/lib/channelNaming'
 import { epochRuleWarnings, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
@@ -82,6 +84,8 @@ export function EegPanel() {
   const setBandwidth = useEegParams((state) => state.setBandwidth)
   const recording = useEdfRecording((state) => state.recording)
   const demo = useEdfRecording((state) => state.demo)
+  // Схема подписей каналов (10-10/10-20) — общий параметр раздела EDF
+  const channelNaming = useChannelNaming()
   // sfreq/каналы записи — половина правила N ≥ 3C для окна спектра (п.4):
   // в демо и без записи она молчит, период-правило работает по полосе фильтра
   const signal: EpochSignalInfo =
@@ -103,13 +107,13 @@ export function EegPanel() {
   const mixes = mixOptions(recording)
   const channelOptionsList = mixes.length
     ? [
-        ...electrodeOptions(recording, demoChannels).map((option) => ({
+        ...electrodeOptions(recording, demoChannels, channelNaming).map((option) => ({
           ...option,
           group: 'Электроды',
         })),
         ...mixes.map((option) => ({ ...option, group: 'Миксы' })),
       ]
-    : channelOptions(recording, demoChannels)
+    : channelOptions(recording, demoChannels, channelNaming)
   const channel = resolveChannel(recording, demoChannels, params.channel)
   const presets = filterPresetOptions(freqBands, functionalBands)
   const stale = result !== null && !eegResultMatchesParams(result, params)
@@ -475,11 +479,15 @@ export function EegPanel() {
       <Panel title="Состояние расчёта">
         <InfoRow
           label="Канал результата"
-          value={result ? channelLabel(recording, result.channel) : null}
+          value={result ? channelLabel(recording, result.channel, channelNaming) : null}
           mono
         />
         {result?.mix_channels?.length ? (
-          <InfoRow label="Каналы микса" value={result.mix_channels.join(', ')} mono />
+          <InfoRow
+            label="Каналы микса"
+            value={channelDisplayNames(result.mix_channels, channelNaming).join(', ')}
+            mono
+          />
         ) : null}
         <InfoRow label="Окно задания" value={result ? `${Math.round(result.window_ms)} мс` : null} />
         <InfoRow label="Перекрытие" value={result ? `${Math.round(result.overlap_pct)} %` : null} />

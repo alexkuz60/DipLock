@@ -69,4 +69,26 @@ describe('HeadChannelMap', () => {
     await user.click(screen.getByLabelText('Fp2'))
     expect(onToggle).toHaveBeenCalledWith('Fp2')
   })
+
+  it('схема 10-20 подписывает датчики классическими именами, клик — по каноническому', async () => {
+    const user = userEvent.setup()
+    const onToggle = vi.fn()
+    renderWithProviders(
+      <HeadChannelMap
+        channels={['T7', 'Cz']}
+        positions={{ ...POSITIONS, T7: [0.8, 0.1] }}
+        selected={['T7']}
+        onToggle={onToggle}
+        naming="10-20"
+      />,
+    )
+
+    // T7 показан под классическим именем T3, канонического «T7» на карте нет
+    expect(screen.getByRole('button', { name: 'T3' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'T7' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'T3' }))
+    // Действие — каноническое имя: расчёт и состояние его и знают
+    expect(onToggle).toHaveBeenCalledWith('T7')
+  })
 })

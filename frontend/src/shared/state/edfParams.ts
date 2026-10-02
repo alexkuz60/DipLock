@@ -22,6 +22,7 @@ import { persist } from 'zustand/middleware'
 import type { MetaResponse } from '@/shared/api/types'
 import type { SignalLayer } from '@/shared/api/types'
 import type { ArtifactKind } from '@/shared/lib/artifacts'
+import type { ChannelNaming } from '@/shared/lib/channelNaming'
 
 // Контракт артефактов живёт в `shared/lib/artifacts.ts` (срез 2.6): цвета селектят
 // и панель, и слои вьюера. Реэкспорт — чтобы раздел импортировал одно место.
@@ -207,6 +208,13 @@ export type EdfParams = {
    * перезапрашивается.
    */
   signalBandKey: string
+  /**
+   * Схема подписей каналов: '10-10' — канонические имена (T7/T8, P7/P8),
+   * '10-20' — классические (T3/T4, T5/T6). Только отрисовка — карта датчиков,
+   * треки и селекты; вне `STAGE_PARAM_KEYS`, запросы и расчёт используют
+   * канонические имена (`shared/lib/channelNaming.ts`).
+   */
+  channelNaming: ChannelNaming
   /** Канал графика ERP (просмотр результата); '' — первый видимый */
   erpChannel: string
   /** Baseline ERP-усреднения */
@@ -257,6 +265,9 @@ export const EDF_PARAM_DEFAULTS: EdfParams = {
   // Полоса слоя «По полосе»: alpha — самая частая рабочая полоса; ключи
   // стабильны (фаза A), а список пунктов приходит из /meta
   signalBandKey: 'alpha',
+  // Подписи отведений: канонические имена (10-10) — дефолт, переключение в
+  // блоке «Каналы» — отрисовка без пересчёта
+  channelNaming: '10-10',
   erpChannel: '',
   erpBaseline: 'minus200',
   artifactVisibility: {
@@ -576,6 +587,15 @@ export const useEdfParams = create<EdfParamsState>()(
 /** Текущие параметры (подписка на изменения). */
 export function useEdfParamsValue(): EdfParams {
   return useEdfParams((state) => state.params)
+}
+
+/**
+ * Текущая схема подписей каналов (`shared/lib/channelNaming.ts`): переключается
+ * селектом «Имена» в блоке «Каналы» панели EDF и применяется во всех подписях
+ * UI — карте датчиков, треках и селектах. Канонические имена не меняются.
+ */
+export function useChannelNaming(): ChannelNaming {
+  return useEdfParams((state) => state.params.channelNaming)
 }
 
 /** Сводка готовности перерасчёта: состояния стадий + текст и тон для панели. */
