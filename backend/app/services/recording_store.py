@@ -21,8 +21,9 @@
 import logging
 import os
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import Select, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -48,7 +49,10 @@ logger = logging.getLogger(__name__)
 
 async def _delete_recording_rows(session: AsyncSession, recording_id: str) -> None:
     """Каскад одной записи: ребёнок → родитель, все таблицы одним коммитом."""
-    session_ids = select(Session.id).where(Session.recording_id == recording_id)
+    # Аннотация обязательна для SQLAlchemy >= 2.1 (иначе var-annotated в CI).
+    session_ids: Select[Any] = select(Session.id).where(
+        Session.recording_id == recording_id
+    )
     await session.execute(
         delete(EpochRecord).where(EpochRecord.session_id.in_(session_ids))
     )
@@ -143,7 +147,10 @@ async def drop_orphan_rows() -> list[str]:
     protected = recording_registry.known_ids(settings) | _disk_recording_ids()
     orphans: list[str] = []
     async with AsyncSessionLocal() as session:
-        ids = (await session.scalars(select(RecordingRecord.recording_id))).all()
+        # list() + аннотация: SQLAlchemy >= 2.1 (var-annotated в CI).
+        ids: list[str] = list(
+            (await session.scalars(select(RecordingRecord.recording_id))).all()
+        )
         for recording_id in ids:
             if recording_id in protected:
                 continue
