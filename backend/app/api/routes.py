@@ -71,8 +71,10 @@ from app.schemas.analysis import (
     ContourSliceOut,
     ContoursOut,
     ContoursRef,
+    DipoleOut,
     DipoleRefineResult,
     DipoleScanResult,
+    EpochOut,
     EvokedResult,
     FilterResponseOut,
     JobCreated,
@@ -87,6 +89,9 @@ from app.schemas.analysis import (
     RecordingMeta,
     RecordingSignalsHeader,
     ReportResult,
+    SessionDetailOut,
+    SessionsPageOut,
+    SessionSummaryOut,
     SpectrogramGridHeader,
     SpectrogramResult,
     SpectrumResult,
@@ -99,6 +104,7 @@ from app.services import (
     fsaverage_assets,
     journal,
     recording_store,
+    results_store,
     server_control,
 )
 from app.services.atlas_contours import (
@@ -316,6 +322,89 @@ async def delete_recording(recording_id: str) -> Response:
         # Файл уже удалён: строки уберёт обход сирот при следующем старте.
         logger.exception("Строки записи %s в БД не удалены", recording_id)
     return Response(status_code=204)
+
+
+# ---------- read-API сессий (4.7): чтение строк результатов -----------------
+
+
+@router.get(
+    "/sessions", response_model=SessionsPageOut,
+    summary="Список сессий (read-API 4.7)",
+)
+async def list_sessions(
+    recording_id: str | None = Query(
+        default=None, description="Только сессии этой записи (каскад TTL)",
+    ),
+    kind: str | None = Query(
+        default=None,
+        description="Источник строки: legacy | preprocess | dipoles | dipole_refine | spectrogram",
+    ),
+    limit: int = Query(default=50, ge=1, le=500, description="Размер страницы"),
+    offset: int = Query(default=0, ge=0, description="Смещение (новые сверху)"),
+) -> SessionsPageOut:
+    """Страница сессий с агрегатами детей (эпохи/диполи) — вход Фазы 5.
+
+    ``total`` считается до ``limit/offset``; работа — в
+    ``results_store.list_sessions`` (тот же модуль, что пишет строки).
+    """
+    total, items = await results_store.list_sessions(
+        recording_id=recording_id, kind=kind, limit=limit, offset=offset,
+    )
+    return SessionsPageOut(
+        total=total, limit=limit, offset=offset,
+        items=[SessionSummaryOut(**item) for item in items],
+    )
+
+
+@router.get(
+    "/sessions/{session_id}", response_model=SessionDetailOut,
+    summary="Паспорт сессии",
+)
+async def get_session(session_id: str) -> SessionDetailOut:
+    """Сессия с числом эпох/диполей и ключами мощностей; 404 — не найдена."""
+    detail = await results_store.get_session_detail(session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Сессия {session_id} не найдена")
+    return SessionDetailOut(**detail)
+
+
+@router.get(
+    "/sessions/{session_id}/epochs", response_model=list[EpochOut],
+    summary="Эпохи сессии",
+)
+async def get_session_epochs(
+    session_id: str,
+    limit: int = Query(default=500, ge=1, le=5000, description="Размер страницы"),
+    offset: int = Query(default=0, ge=0, description="Смещение (по epoch_index)"),
+) -> list[EpochOut]:
+    """Сетка эпох с мощностями полос (честные None — «не измерено»); 404 — нет сессии."""
+    rows = await results_store.list_session_epochs(
+        session_id, limit=limit, offset=offset,
+    )
+    if rows is None:
+        raise HTTPException(status_code=404, detail=f"Сессия {session_id} не найдена")
+    return [EpochOut(**row) for row in rows]
+
+
+@router.get(
+    "/sessions/{session_id}/dipoles", response_model=list[DipoleOut],
+    summary="Диполи сессии",
+)
+async def get_session_dipoles(
+    session_id: str,
+    freq_band: str | None = Query(
+        default=None, description="Фильтр по полосе прогона («lo-hi» Гц)",
+    ),
+    limit: int = Query(default=500, ge=1, le=5000, description="Размер страницы"),
+    offset: int = Query(default=0, ge=0, description="Смещение (по эпохам)"),
+) -> list[DipoleOut]:
+    """Строки диполей для агрегатов Фазы 5 (ROI/полоса); 404 — нет сессии."""
+    rows = await results_store.list_session_dipoles(
+        session_id, freq_band=freq_band, limit=limit, offset=offset,
+    )
+    if rows is None:
+        raise HTTPException(status_code=404, detail=f"Сессия {session_id} не найдена")
+    return [DipoleOut(**row) for row in rows]
 
 
 @router.get(

@@ -110,6 +110,23 @@ describe('раздел «Таблица локализации»', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('показывает кавет редкого монтажа из предупреждений результата', () => {
+    // Подпись таблицы локализации: кавет генерирует сервер
+    // (`montage_sparse_warning`) и кладёт в warnings результата — UI его только
+    // показывает (срез A, обсуждение 01.10.2026).
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture({
+        warnings: [
+          'Разреженный монтаж: 18 каналов (< 32) — погрешность позиции диполя до нескольких сантиметров',
+        ],
+      }),
+    })
+    renderWithProviders(<LocalizationTableSection />)
+
+    expect(screen.getByText(/Разреженный монтаж: 18 каналов/)).toBeInTheDocument()
+  })
+
   it('переставляет строки по настройке панели и переворачивает таблицу', () => {
     useEdfRecording.setState({ recording: recordingFixture })
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })

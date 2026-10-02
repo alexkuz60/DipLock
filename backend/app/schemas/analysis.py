@@ -1398,6 +1398,57 @@ class ReportBandSummaryOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class RoiBandCellOut(BaseModel):
+    """Ячейка ROI × полоса (4.5): числа своей полосы, без межполосных сумм.
+
+    ``median_gof``/``gof_pass`` — только **внутри** полосы (принцип 3
+    ``docs/rules/dipoles.md``: между полосами GOF не сравним).
+    """
+
+    count: int = Field(description="Точек ROI в этой полосе")
+    share: float = Field(description="Доля от числа точек полосы, 0..1")
+    median_gof: float | None = None
+    median_amplitude_nam: float | None = Field(
+        default=None, description="Медиана амплитуды момента (нАм) внутри полосы",
+    )
+    gof_pass: int = Field(
+        description="Точек с GOF ≥ roi_gof_threshold внутри своей полосы",
+    )
+
+
+class RoiRowOut(BaseModel):
+    """Строка ROI (структура или поле Бродмана): итог по полосам + ячейки."""
+
+    name: str
+    hemisphere: str = Field(description="Производная от имени: lh | rh | mid")
+    count: int = Field(description="Всего точек по всем полосам")
+    bands: dict[str, RoiBandCellOut] = Field(
+        default_factory=dict, description="Ячейки по ключам полос (порядок — RoiAggregateOut.bands)",
+    )
+
+
+class RoiAggregateOut(BaseModel):
+    """ROI-агрегат пакета автоотчёта (4.5): строки ROI × полосы + полушария.
+
+    Источник — точки того же прогона, что и HTML отчёта: UI-вкладка «ROI» и
+    секция отчёта показывают одни числа (один вызов ``roi.aggregate_roi``).
+    """
+
+    gof_threshold: float = Field(description="Порог «надёжной» точки, внутреполосный")
+    bands: list[str] = Field(description="Порядок колонок — ключи полос пакета")
+    n_points_total: int = Field(description="Точек во всех полосах")
+    structures: list[RoiRowOut] = Field(default_factory=list)
+    brodmann: list[RoiRowOut] = Field(default_factory=list)
+    n_structure_names: int = Field(
+        description="Всего названий структур (показан топ — сколько скрыто, видно из разницы)",
+    )
+    n_brodmann_names: int = Field(description="Всего названий полей Бродмана")
+    hemisphere_counts: dict[str, int] = Field(
+        default_factory=dict, description="Точек по полушариям по структурам: lh/rh/mid",
+    )
+    n_without_structure: int = Field(description="Точек без названной структуры")
+
+
 class ReportResult(BaseModel):
     """Результат задачи автоотчёта (``kind=report``).
 
@@ -1425,6 +1476,13 @@ class ReportResult(BaseModel):
     rejected_epochs: int = Field(description="Эпох отброшено (BAD_)")
     bands: list[ReportBandSummaryOut] = Field(
         default_factory=list, description="Агрегаты пакета по полосам (часть 2)",
+    )
+    roi: RoiAggregateOut | None = Field(
+        default=None,
+        description=(
+            "ROI-агрегат пакета (4.5, вкладка «ROI»); None — отчёт собран "
+            "до появления поля (старый результат задачи)"
+        ),
     )
     warnings: list[str] = Field(default_factory=list)
     duration_sec_calc: float = 0.0
@@ -1537,4 +1595,92 @@ class MetaResponse(BaseModel):
     contours: ContoursRef = Field(
         description="Контуры атласа (структуры + поля Бродмана): версия, URL, метод"
     )
+
+
+# ---------- read-API сессий (4.7, Фаза 5: вход группового анализа) ----------
+
+
+class SessionSummaryOut(BaseModel):
+    """Строка списка сессий (``GET /sessions``, 4.7).
+
+    Сессия — строка ``sessions``: один успешный прогон (legacy ``/analyze`` или
+    задача UI-раздела). Счётчики — агрегаты дочерних строк ``epochs``/``dipoles``
+    (источник — тот же, что write-API 4.4).
+    """
+
+    id: str
+    recording_id: str | None = Field(
+        default=None,
+        description="Запись-владелец (каскад TTL); None — legacy-строка без файла",
+    )
+    kind: str = Field(
+        description="Источник: legacy | preprocess | dipoles | dipole_refine | spectrogram",
+    )
+    filename: str | None = None
+    n_channels: int | None = None
+    sfreq: float | None = None
+    duration_sec: float | None = None
+    epoch_length_ms: float | None = None
+    freq_band: str | None = Field(default=None, description="Полоса прогона, «lo-hi» Гц")
+    created_at: datetime | None = None
+    n_epochs: int = Field(description="Строк в epochs (включая отброшенные)")
+    n_epochs_rejected: int = Field(description="Эпох с has_artifact (отбраковано)")
+    n_dipoles: int = Field(description="Строк в dipoles")
+
+
+class SessionDetailOut(SessionSummaryOut):
+    """Паспорт сессии (``GET /sessions/{id}``) + вход к мощностям эпох."""
+
+    power_bands: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Ключи полос мощностей ``epochs`` (``settings.freq_bands``): "
+            "колонка = «ключ + _power»"
+        ),
+    )
+
+
+class EpochOut(BaseModel):
+    """Эпоха сессии (``GET /sessions/{id}/epochs``): сетка + мощности полос."""
+
+    session_id: str
+    epoch_index: int
+    start_time_sec: float | None = Field(
+        default=None,
+        description="Начало окна, с; None — сетка не перечислялась (дипольный прогон)",
+    )
+    duration_ms: float | None = None
+    has_artifact: bool = Field(description="Эпоха отбракована аннотациями BAD_")
+    powers: dict[str, float | None] = Field(
+        default_factory=dict,
+        description="Мощности по полосам (ключи freq_bands); None — не измерено (честный прочерк)",
+    )
+
+
+class DipoleOut(BaseModel):
+    """Строка диполей сессии (``GET /sessions/{id}/dipoles``) для агрегатов Фазы 5."""
+
+    session_id: str
+    epoch_id: int | None = Field(
+        default=None, description="FK на epochs.id (настоящая ссылка, F21)",
+    )
+    time_ms: float | None = None
+    mni: list[float] | None = Field(
+        default=None, description="[x, y, z] мм; None — MNI не считался",
+    )
+    amplitude_nam: float | None = None
+    gof: float | None = None
+    anatomical_roi: str | None = None
+    brodmann_area: str | None = None
+    freq_band: str | None = None
+    method: str | None = Field(default=None, description="fast_grid | bem_fit | None (legacy)")
+
+
+class SessionsPageOut(BaseModel):
+    """Страница списка сессий: ``total`` честный (считается до limit/offset)."""
+
+    total: int = Field(description="Всего строк под фильтрами")
+    limit: int
+    offset: int
+    items: list[SessionSummaryOut] = Field(default_factory=list)
 

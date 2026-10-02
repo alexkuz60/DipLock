@@ -155,6 +155,300 @@
         }
       }
     },
+    "/api/v1/sessions": {
+      "get": {
+        "summary": "Список сессий (read-API 4.7)",
+        "description": "Страница сессий с агрегатами детей (эпохи/диполи) — вход Фазы 5.\n\n``total`` считается до ``limit/offset``; работа — в\n``results_store.list_sessions`` (тот же модуль, что пишет строки).",
+        "operationId": "list_sessions_api_v1_sessions_get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Только сессии этой записи (каскад TTL)",
+              "title": "Recording Id"
+            },
+            "description": "Только сессии этой записи (каскад TTL)"
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Источник строки: legacy | preprocess | dipoles | dipole_refine | spectrogram",
+              "title": "Kind"
+            },
+            "description": "Источник строки: legacy | preprocess | dipoles | dipole_refine | spectrogram"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Размер страницы",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Размер страницы"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Смещение (новые сверху)",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Смещение (новые сверху)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionsPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}": {
+      "get": {
+        "summary": "Паспорт сессии",
+        "description": "Сессия с числом эпох/диполей и ключами мощностей; 404 — не найдена.",
+        "operationId": "get_session_api_v1_sessions__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetailOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/epochs": {
+      "get": {
+        "summary": "Эпохи сессии",
+        "description": "Сетка эпох с мощностями полос (честные None — «не измерено»); 404 — нет сессии.",
+        "operationId": "get_session_epochs_api_v1_sessions__session_id__epochs_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "description": "Размер страницы",
+              "default": 500,
+              "title": "Limit"
+            },
+            "description": "Размер страницы"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Смещение (по epoch_index)",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Смещение (по epoch_index)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EpochOut"
+                  },
+                  "title": "Response Get Session Epochs Api V1 Sessions  Session Id  Epochs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/sessions/{session_id}/dipoles": {
+      "get": {
+        "summary": "Диполи сессии",
+        "description": "Строки диполей для агрегатов Фазы 5 (ROI/полоса); 404 — нет сессии.",
+        "operationId": "get_session_dipoles_api_v1_sessions__session_id__dipoles_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "freq_band",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Фильтр по полосе прогона («lo-hi» Гц)",
+              "title": "Freq Band"
+            },
+            "description": "Фильтр по полосе прогона («lo-hi» Гц)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 5000,
+              "minimum": 1,
+              "description": "Размер страницы",
+              "default": 500,
+              "title": "Limit"
+            },
+            "description": "Размер страницы"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Смещение (по эпохам)",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Смещение (по эпохам)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DipoleOut"
+                  },
+                  "title": "Response Get Session Dipoles Api V1 Sessions  Session Id  Dipoles Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/recordings/{recording_id}/signals": {
       "get": {
         "summary": "Сигналы записи: float32-огибающая уровня зума (ETag)",
@@ -4448,6 +4742,125 @@
         "title": "DipoleFit",
         "description": "Результат фитинга одной эпохи: траектория по времени + лучший кадр."
       },
+      "DipoleOut": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "epoch_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Id",
+            "description": "FK на epochs.id (настоящая ссылка, F21)"
+          },
+          "time_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Ms"
+          },
+          "mni": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mni",
+            "description": "[x, y, z] мм; None — MNI не считался"
+          },
+          "amplitude_nam": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amplitude Nam"
+          },
+          "gof": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gof"
+          },
+          "anatomical_roi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anatomical Roi"
+          },
+          "brodmann_area": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brodmann Area"
+          },
+          "freq_band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freq Band"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method",
+            "description": "fast_grid | bem_fit | None (legacy)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "DipoleOut",
+        "description": "Строка диполей сессии (``GET /sessions/{id}/dipoles``) для агрегатов Фазы 5."
+      },
       "DipoleRefineResult": {
         "properties": {
           "recording_id": {
@@ -4832,6 +5245,69 @@
         ],
         "title": "DipoleScanResult",
         "description": "Результат задачи быстрого расчёта диполей (``kind=dipoles``)."
+      },
+      "EpochOut": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "epoch_index": {
+            "type": "integer",
+            "title": "Epoch Index"
+          },
+          "start_time_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Time Sec",
+            "description": "Начало окна, с; None — сетка не перечислялась (дипольный прогон)"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "has_artifact": {
+            "type": "boolean",
+            "title": "Has Artifact",
+            "description": "Эпоха отбракована аннотациями BAD_"
+          },
+          "powers": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Powers",
+            "description": "Мощности по полосам (ключи freq_bands); None — не измерено (честный прочерк)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "epoch_index",
+          "has_artifact"
+        ],
+        "title": "EpochOut",
+        "description": "Эпоха сессии (``GET /sessions/{id}/epochs``): сетка + мощности полос."
       },
       "EpochRejectOut": {
         "properties": {
@@ -7143,6 +7619,17 @@
             "title": "Bands",
             "description": "Агрегаты пакета по полосам (часть 2)"
           },
+          "roi": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoiAggregateOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ROI-агрегат пакета (4.5, вкладка «ROI»); None — отчёт собран до появления поля (старый результат задачи)"
+          },
           "warnings": {
             "items": {
               "type": "string"
@@ -7170,6 +7657,160 @@
         "title": "ReportResult",
         "description": "Результат задачи автоотчёта (``kind=report``).\n\nHTML отчёта — отдельный ассет по ``html_url`` (ETag из ``report_version``):\nдокумент самодостаточный и тяжёлый, поэтому в JSON идут только агрегаты\nдля шапки раздела и ссылка."
       },
+      "RoiAggregateOut": {
+        "properties": {
+          "gof_threshold": {
+            "type": "number",
+            "title": "Gof Threshold",
+            "description": "Порог «надёжной» точки, внутреполосный"
+          },
+          "bands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Bands",
+            "description": "Порядок колонок — ключи полос пакета"
+          },
+          "n_points_total": {
+            "type": "integer",
+            "title": "N Points Total",
+            "description": "Точек во всех полосах"
+          },
+          "structures": {
+            "items": {
+              "$ref": "#/components/schemas/RoiRowOut"
+            },
+            "type": "array",
+            "title": "Structures"
+          },
+          "brodmann": {
+            "items": {
+              "$ref": "#/components/schemas/RoiRowOut"
+            },
+            "type": "array",
+            "title": "Brodmann"
+          },
+          "n_structure_names": {
+            "type": "integer",
+            "title": "N Structure Names",
+            "description": "Всего названий структур (показан топ — сколько скрыто, видно из разницы)"
+          },
+          "n_brodmann_names": {
+            "type": "integer",
+            "title": "N Brodmann Names",
+            "description": "Всего названий полей Бродмана"
+          },
+          "hemisphere_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Hemisphere Counts",
+            "description": "Точек по полушариям по структурам: lh/rh/mid"
+          },
+          "n_without_structure": {
+            "type": "integer",
+            "title": "N Without Structure",
+            "description": "Точек без названной структуры"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gof_threshold",
+          "bands",
+          "n_points_total",
+          "n_structure_names",
+          "n_brodmann_names",
+          "n_without_structure"
+        ],
+        "title": "RoiAggregateOut",
+        "description": "ROI-агрегат пакета автоотчёта (4.5): строки ROI × полосы + полушария.\n\nИсточник — точки того же прогона, что и HTML отчёта: UI-вкладка «ROI» и\nсекция отчёта показывают одни числа (один вызов ``roi.aggregate_roi``)."
+      },
+      "RoiBandCellOut": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Точек ROI в этой полосе"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share",
+            "description": "Доля от числа точек полосы, 0..1"
+          },
+          "median_gof": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Gof"
+          },
+          "median_amplitude_nam": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Amplitude Nam",
+            "description": "Медиана амплитуды момента (нАм) внутри полосы"
+          },
+          "gof_pass": {
+            "type": "integer",
+            "title": "Gof Pass",
+            "description": "Точек с GOF ≥ roi_gof_threshold внутри своей полосы"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count",
+          "share",
+          "gof_pass"
+        ],
+        "title": "RoiBandCellOut",
+        "description": "Ячейка ROI × полоса (4.5): числа своей полосы, без межполосных сумм.\n\n``median_gof``/``gof_pass`` — только **внутри** полосы (принцип 3\n``docs/rules/dipoles.md``: между полосами GOF не сравним)."
+      },
+      "RoiRowOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "hemisphere": {
+            "type": "string",
+            "title": "Hemisphere",
+            "description": "Производная от имени: lh | rh | mid"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Всего точек по всем полосам"
+          },
+          "bands": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RoiBandCellOut"
+            },
+            "type": "object",
+            "title": "Bands",
+            "description": "Ячейки по ключам полос (порядок — RoiAggregateOut.bands)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "hemisphere",
+          "count"
+        ],
+        "title": "RoiRowOut",
+        "description": "Строка ROI (структура или поле Бродмана): итог по полосам + ячейки."
+      },
       "ServerRestartOut": {
         "properties": {
           "restarting": {
@@ -7196,6 +7837,304 @@
         ],
         "title": "ServerRestartOut",
         "description": "202-ответ POST /api/v1/server/restart: процесс перезапустится после ответа."
+      },
+      "SessionDetailOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id",
+            "description": "Запись-владелец (каскад TTL); None — legacy-строка без файла"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "Источник: legacy | preprocess | dipoles | dipole_refine | spectrogram"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "n_channels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Channels"
+          },
+          "sfreq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sfreq"
+          },
+          "duration_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Sec"
+          },
+          "epoch_length_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Length Ms"
+          },
+          "freq_band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freq Band",
+            "description": "Полоса прогона, «lo-hi» Гц"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "n_epochs": {
+            "type": "integer",
+            "title": "N Epochs",
+            "description": "Строк в epochs (включая отброшенные)"
+          },
+          "n_epochs_rejected": {
+            "type": "integer",
+            "title": "N Epochs Rejected",
+            "description": "Эпох с has_artifact (отбраковано)"
+          },
+          "n_dipoles": {
+            "type": "integer",
+            "title": "N Dipoles",
+            "description": "Строк в dipoles"
+          },
+          "power_bands": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Power Bands",
+            "description": "Ключи полос мощностей ``epochs`` (``settings.freq_bands``): колонка = «ключ + _power»"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "n_epochs",
+          "n_epochs_rejected",
+          "n_dipoles"
+        ],
+        "title": "SessionDetailOut",
+        "description": "Паспорт сессии (``GET /sessions/{id}``) + вход к мощностям эпох."
+      },
+      "SessionSummaryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id",
+            "description": "Запись-владелец (каскад TTL); None — legacy-строка без файла"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "Источник: legacy | preprocess | dipoles | dipole_refine | spectrogram"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "n_channels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Channels"
+          },
+          "sfreq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sfreq"
+          },
+          "duration_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Sec"
+          },
+          "epoch_length_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Length Ms"
+          },
+          "freq_band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freq Band",
+            "description": "Полоса прогона, «lo-hi» Гц"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "n_epochs": {
+            "type": "integer",
+            "title": "N Epochs",
+            "description": "Строк в epochs (включая отброшенные)"
+          },
+          "n_epochs_rejected": {
+            "type": "integer",
+            "title": "N Epochs Rejected",
+            "description": "Эпох с has_artifact (отбраковано)"
+          },
+          "n_dipoles": {
+            "type": "integer",
+            "title": "N Dipoles",
+            "description": "Строк в dipoles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "n_epochs",
+          "n_epochs_rejected",
+          "n_dipoles"
+        ],
+        "title": "SessionSummaryOut",
+        "description": "Строка списка сессий (``GET /sessions``, 4.7).\n\nСессия — строка ``sessions``: один успешный прогон (legacy ``/analyze`` или\nзадача UI-раздела). Счётчики — агрегаты дочерних строк ``epochs``/``dipoles``\n(источник — тот же, что write-API 4.4)."
+      },
+      "SessionsPageOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Всего строк под фильтрами"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionSummaryOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "SessionsPageOut",
+        "description": "Страница списка сессий: ``total`` честный (считается до limit/offset)."
       },
       "SpectrogramGridHeader": {
         "properties": {

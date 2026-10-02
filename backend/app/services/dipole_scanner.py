@@ -117,6 +117,27 @@ class DipoleScanParams:
     grid_mm: float = GRID_STEP_MM
 
 
+def montage_sparse_warning(n_channels: int, cfg: Settings) -> str | None:
+    """Кавет редкого монтажа: ``None``, если каналов достаточно.
+
+    Обсуждение 01.10.2026: на разреженной сетке (< ``cfg.montage_sparse_warn_channels``)
+    погрешность позиции диполя — «до нескольких сантиметров», диполь проваливается
+    вглубь, расстояние до конкретной структуры/BA недостоверно; перекрытие эпох
+    даёт временную динамику вектора, но **не** добавляет пространственной
+    информации. Один текст для обоих носителей — подпись таблицы локализации
+    (``warnings`` результата) и автоотчёт.
+    """
+    threshold = int(cfg.montage_sparse_warn_channels)
+    if n_channels >= threshold:
+        return None
+    return (
+        f"Разреженный монтаж: {n_channels} каналов (< {threshold}) — погрешность "
+        "позиции диполя до нескольких сантиметров, диполь может «проваливаться» "
+        "вглубь; расстояние до конкретной структуры/BA недостоверно. Перекрытие "
+        "эпох даёт временную динамику, но не добавляет пространственной информации."
+    )
+
+
 @lru_cache(maxsize=8)
 def candidate_grid(
     step_mm: float = GRID_STEP_MM,
@@ -372,11 +393,22 @@ def _localize_point(position_m: np.ndarray, cfg: Settings) -> list[float] | None
     return [float(value) for value in mni]
 
 
-def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParams) -> Any:
+def _prepare_epochs(
+    recording: Recording,
+    cfg: Settings,
+    params: DipoleScanParams,
+    artifact_annotations: mne.Annotations | None = None,
+) -> tuple[Any, Any]:
     """Читает запись и нарезает эпохи для расчёта (reject-порог из параметров).
 
     Сигнал — из кэша подготовленного сигнала (A4): повторный запуск с теми же
     параметрами фильтра и нарезки не читает EDF заново.
+
+    ``artifact_annotations`` — ``BAD_``-зоны детекторов стадий препроцессинга
+    (находка кросс-проверки №3 02.10.2026): без них нарезка пакета автоотчёта
+    видела только краевой буфер своей полосы и расходилась с частью 1. Списки
+    точек без переданных зон (отдельная задача UI «Диполи», уточнение) нарезку
+    не меняют — как и раньше.
     """
     l_freq: float | None = None
     h_freq: float | None = None
@@ -396,6 +428,8 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParam
     except ValueError as exc:
         raise DipoleScanError(str(exc)) from exc
 
+    if artifact_annotations is None:
+        artifact_annotations = mne.Annotations([], [], [])
     try:
         with journal.step(
             "dipoles", "segment_epochs",
@@ -403,7 +437,7 @@ def _prepare_epochs(recording: Recording, cfg: Settings, params: DipoleScanParam
         ) as entry:
             epochs = segment_epochs(
                 raw,
-                mne.Annotations([], [], []),
+                artifact_annotations,
                 filter_band=params.filter_band,
                 epoch_length_ms=params.epoch_length_ms,
             )
@@ -437,18 +471,24 @@ def compute_dipole_scan(
     cfg: Settings,
     params: DipoleScanParams,
     progress: Any = None,
+    *,
+    artifact_annotations: mne.Annotations | None = None,
 ) -> dict[str, Any]:
     """Быстрый расчёт диполей по эпохам: одна точка на эпоху (пик GFP).
 
     Возвращает dict под схему ``DipoleScanResult`` (её валидирует API). Прогресс
     сообщается по эпохам (``epochs_done``/``epochs_total``) — расчёт эпох
     составляет основное время, и «12 из 30» информативнее дробного прогресса.
+
+    ``artifact_annotations`` — ``BAD_``-зоны стадий препроцессинга для нарезки
+    пакета автоотчёта (см. ``_prepare_epochs``); отдельная задача UI «Диполи»
+    передаёт ``None`` и нарезает как раньше.
     """
     report = progress or (lambda *args, **kwargs: None)
     started = time.perf_counter()
     report("load_edf", message="Чтение EDF, монтаж 10-20")
 
-    raw, epochs = _prepare_epochs(recording, cfg, params)
+    raw, epochs = _prepare_epochs(recording, cfg, params, artifact_annotations)
     channels = list(epochs.ch_names)
     positions = channel_positions(channels)
     used_channels, positions_m, used_index = _electrode_matrix(channels, positions)
@@ -469,6 +509,12 @@ def compute_dipole_scan(
         warnings.append(
             f"Отброшено эпох аннотациями BAD_: {dropped} из {len(epochs.drop_log)}"
         )
+    # Кавет редкого монтажа (обсуждение 01.10.2026): разреженная сетка не даёт
+    # пространственной информации — перекрытие эпох даёт только временную
+    # динамику вектора. Единый текст — `montage_sparse_warning` (тот же в отчёте).
+    sparse = montage_sparse_warning(len(channels), cfg)
+    if sparse:
+        warnings.append(sparse)
     if len(used_channels) < len(channels):
         missing = [name for name in channels if name not in positions]
         warnings.append(

@@ -17,6 +17,8 @@ import type {
   RecordingMeta,
   ReportBandSummary,
   ReportResult,
+  RoiAggregate,
+  RoiBandCell,
   SpectrogramResult,
   SpectrumBandOut,
   SpectrumResult,
@@ -752,6 +754,48 @@ export function reportBandFixture(bandKey: string): ReportBandSummary {
   }
 }
 
+/** ROI-агрегат пакета (4.5): две полосы, структуры и поле БА с ячейками. */
+export function roiAggregateFixture(): RoiAggregate {
+  const cell = (count: number, gofPass: number): RoiBandCell => ({
+    count,
+    share: count / 9,
+    median_gof: 0.83,
+    median_amplitude_nam: 12.5,
+    gof_pass: gofPass,
+  })
+  return {
+    gof_threshold: 0.8,
+    bands: ['theta', 'alpha'],
+    n_points_total: 18,
+    structures: [
+      {
+        name: 'Precuneus (слева)',
+        hemisphere: 'lh',
+        count: 10,
+        bands: { theta: cell(5, 4), alpha: cell(5, 3) },
+      },
+      {
+        name: 'таламус (справа)',
+        hemisphere: 'rh',
+        count: 6,
+        bands: { theta: cell(3, 2), alpha: cell(3, 1) },
+      },
+    ],
+    brodmann: [
+      {
+        name: 'BA7-lh',
+        hemisphere: 'lh',
+        count: 10,
+        bands: { theta: cell(5, 4), alpha: cell(5, 3) },
+      },
+    ],
+    n_structure_names: 4,
+    n_brodmann_names: 3,
+    hemisphere_counts: { lh: 10, rh: 6, mid: 1 },
+    n_without_structure: 1,
+  }
+}
+
 /** Сквозной автоотчёт (раздел «Итоги»): агрегаты QC, эпох и полос пакета. */
 export function reportResultFixture(overrides: Partial<ReportResult> = {}): ReportResult {
   return {
@@ -773,6 +817,7 @@ export function reportResultFixture(overrides: Partial<ReportResult> = {}): Repo
     n_epochs_used: 9,
     rejected_epochs: 1,
     bands: [reportBandFixture('theta'), reportBandFixture('alpha')],
+    roi: roiAggregateFixture(),
     warnings: ['[Фильтр и референс] Переходный процесс FIR-фильтра: ±0.42 с у краёв записи'],
     duration_sec_calc: 12.3,
     ...overrides,

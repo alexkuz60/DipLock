@@ -23,6 +23,7 @@ import { useSummaryReport } from '@/shared/state/summaryReport'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { SummaryDynamics } from './SummaryDynamics'
+import { SummaryRoi } from './SummaryRoi'
 
 /** Человеческие подписи QC-вердикта (те же слова, что в отчёте) */
 const QC_LABELS: Record<string, string> = { ok: 'QC: ок', warn: 'QC: внимание', bad: 'QC: плохо' }
@@ -50,7 +51,7 @@ export function SummarySection() {
   }, [recordingId, resultId, reset])
 
   // Вид результата: документ (iframe) или клиентская динамика структур (часть 3)
-  const [view, setView] = useState<'html' | 'dynamics'>('html')
+  const [view, setView] = useState<'html' | 'dynamics' | 'roi'>('html')
 
   if (recording === null) {
     return (
@@ -182,6 +183,22 @@ export function SummarySection() {
         >
           Динамика структур
         </button>
+        {/* ROI (4.5): агрегат тех же точек пакета — вид одного результата,
+            переключение вкладки только рисует (запросов не делает) */}
+        <button
+          type="button"
+          role="tab"
+          aria-selected={view === 'roi'}
+          onClick={() => setView('roi')}
+          data-testid="summary-view-roi"
+          className={
+            view === 'roi'
+              ? 'rounded-t-lg border border-border bg-bg-2 px-3 py-1 text-sm text-fg-1'
+              : 'rounded-t-lg border border-transparent px-3 py-1 text-sm text-fg-2 hover:text-fg-1'
+          }
+        >
+          ROI
+        </button>
       </div>
       {view === 'html' ? (
         <iframe
@@ -190,6 +207,8 @@ export function SummarySection() {
           data-testid="summary-frame"
           className="min-h-0 w-full flex-1 rounded-lg border border-border bg-white"
         />
+      ) : view === 'roi' ? (
+        <SummaryRoi roi={result.roi ?? null} />
       ) : (
         <SummaryDynamics bands={bands} />
       )}

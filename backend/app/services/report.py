@@ -41,10 +41,17 @@ import numpy as np
 from app.core.config import Settings
 from app.schemas.analysis import PreprocessStage
 from app.services import job_store, journal
+from app.services.artifact_detector import annotations_from_zones
 from app.services.cache_store import cache_clear, cache_path, cache_read, cache_write
-from app.services.dipole_scanner import GRID_STEP_MM, DipoleScanParams, compute_dipole_scan
+from app.services.dipole_scanner import (
+    GRID_STEP_MM,
+    DipoleScanParams,
+    compute_dipole_scan,
+    montage_sparse_warning,
+)
 from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recordings import Recording
+from app.services.roi import aggregate_roi
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +68,7 @@ matplotlib.use("Agg")
 TIME_BINS = 5
 TOP_STRUCTURES = 5
 TOP_BRODMANN = 12  # строк тепловой карты «BA × полосы»
+TOP_ROI = 12  # строк ROI-агрегата каждого словаря (структуры и BA отдельно)
 
 # Стадии части 1 (та же очередь, что у раздела EDF)
 REPORT_STAGES: tuple[PreprocessStage, ...] = ("filter", "artifacts", "epochs")
@@ -70,7 +78,10 @@ REPORT_STAGES: tuple[PreprocessStage, ...] = ("filter", "artifacts", "epochs")
 # файлы кэша в невалидность, а не показывает устаревший документ (урок A7:
 # забытая версия = старые ассеты на диске и в браузере).
 # 1 — до кросс-проверок сквозного пайплайна (02.10.2026).
-REPORT_HTML_VERSION = 2
+# 2 — кросс-проверки сквозного пайплайна (02.10.2026).
+# 3 — строка кавета редкого монтажа в шапке кросс-проверок (срез A, 02.10.2026).
+# 4 — секция «ROI-анализ» части 2 (срез B/4.5, 02.10.2026).
+REPORT_HTML_VERSION = 4
 
 
 class ReportError(ValueError):
@@ -598,6 +609,15 @@ def _cross_checks(
                 + f" требуют sfreq ≥ {2 * top:g} Гц, а запись {sfreq:g} Гц — "
                 "верхние частоты отсечены"
             )
+
+    # Кавет редкого монтажа (обсуждение 01.10.2026): погрешность позиции при
+    # разреженной сетке — в шапку отчёта один раз (в предупреждениях полос он
+    # отфильтрован в run_report, иначе дубль по числу полос). 0 каналов —
+    # стадия без списка (юнит-тесты `_stages`), кавет не выдумываем.
+    n_channels = len(filt.get("channels") or [])
+    sparse = montage_sparse_warning(n_channels, cfg) if n_channels else None
+    if sparse:
+        warns.append(sparse)
     return info, warns
 
 
@@ -903,6 +923,77 @@ def _heatmap_model(
     return names, columns, values
 
 
+_HEMISPHERE_RU = {"lh": "слева", "rh": "справа", "mid": "срединная"}
+
+
+def _roi_html(roi: dict[str, Any] | None) -> str:
+    """Секция «ROI-анализ» части 2 (4.5): надёжные точки × полосы + полушария.
+
+    Доли эпох уже показаны тепловой картой выше — здесь то, чего в ней нет:
+    счёт точек «GOF ≥ порога» **внутри каждой полосы** и распределение по
+    полушариям. Подпись обязана повторить правило чтения (§8.1
+    ``docs/data-blocks.md``: «Правило подписи переносится в 4.5 (ROI)»).
+    """
+    if not roi or not roi.get("n_points_total"):
+        return "<p>ROI-агрегат не посчитан: в пакете нет точек.</p>"
+    bands = list(roi.get("bands") or [])
+    threshold = float(roi.get("gof_threshold") or 0.0)
+    hidden = int(roi.get("n_structure_names") or 0) - len(roi.get("structures") or [])
+    hidden_ba = int(roi.get("n_brodmann_names") or 0) - len(roi.get("brodmann") or [])
+
+    def _rows_table(rows: Sequence[dict[str, Any]]) -> str:
+        if not rows:
+            return "<p>не названы (атлас недоступен?)</p>"
+        body: list[list[Any]] = []
+        for row in rows:
+            cells: list[Any] = [row["name"], _HEMISPHERE_RU.get(row["hemisphere"], "—")]
+            for band_key in bands:
+                cell = (row.get("bands") or {}).get(band_key) or {}
+                count = int(cell.get("count") or 0)
+                cells.append(
+                    f"{int(cell.get('gof_pass') or 0)} из {count}" if count else "—"
+                )
+            cells.append(int(row.get("count") or 0))
+            body.append(cells)
+        return _table(("ROI", "Полушарие", *bands, "Всего точек"), body)
+
+    hemi = dict(roi.get("hemisphere_counts") or {})
+    total = int(roi.get("n_points_total") or 0)
+    asymmetry = _table(
+        ("Полушарие", "Точек", "Доля, %"),
+        [
+            [label, int(hemi.get(key) or 0), _pct((hemi.get(key) or 0) / total if total else 0.0)]
+            for key, label in (("lh", "слева"), ("rh", "справа"), ("mid", "срединные"))
+        ]
+        + [[
+            "без названной структуры",
+            int(roi.get("n_without_structure") or 0),
+            _pct((roi.get("n_without_structure") or 0) / total if total else 0.0),
+        ]],
+    )
+    top_note = ""
+    if hidden > 0 or hidden_ba > 0:
+        top_note = (
+            f"<p>Показан топ: структур — {len(roi['structures'])} из "
+            f"{roi['n_structure_names']}, полей — {len(roi['brodmann'])} из "
+            f"{roi['n_brodmann_names']} (полный счёт — в БД, §8.4.4).</p>"
+        )
+    return (
+        f"<p><b>Как читать:</b> «GOF ≥ {threshold:g}» — счёт точек <b>внутри "
+        "своей полосы</b>: между полосами GOF не сравним (узкая полоса завышает "
+        "R², docs/rules/dipoles.md, принцип 3) — сравнивайте полосы по долям и "
+        "RIV, а не по GOF. Полушарие — производная от имени атласа, асимметрия "
+        f"— по точкам всех полос ({total} точек, одна на эпоху).</p>"
+        + f"<h3>Надёжные точки (GOF ≥ {threshold:g}): структуры × полосы</h3>"
+        + _rows_table(list(roi.get("structures") or []))
+        + f"<h3>Надёжные точки (GOF ≥ {threshold:g}): поля Бродмана × полосы</h3>"
+        + _rows_table(list(roi.get("brodmann") or []))
+        + "<h3>Асимметрия полушарий</h3>"
+        + asymmetry
+        + top_note
+    )
+
+
 # Подпись «как читать» для части 2: дословный смысл принципа 3 пакетного
 # сценария (docs/rules/dipoles.md) — она обязана стоять перед любыми таблицами.
 GOF_NOTE = (
@@ -1123,6 +1214,7 @@ def _build_report(
     stages: dict[str, dict[str, Any]],
     summaries: Sequence[dict[str, Any]],
     checks_html: str = "",
+    roi: dict[str, Any] | None = None,
 ) -> bytes:
     """Собирает MNE.Report (обе части) и возвращает самодостаточный HTML.
 
@@ -1192,6 +1284,13 @@ def _build_report(
             title="Структуры/поля × полосы: доля эпох, %",
             section=section2,
         )
+    # ROI-анализ (4.5): секция после тепловой карты — надёжные точки по полосам
+    # и асимметрия (тех же чисел нет в heatmap)
+    rep.add_html(
+        _roi_html(roi),
+        title="ROI-анализ (надёжность и полушария)",
+        section=section2,
+    )
 
     # MNE сам каталог не создаёт (FileNotFoundError на первом отчёте), поэтому
     # путь подготавливаем до save; запись в кэш всё равно атомарная (cache_write).
@@ -1240,6 +1339,15 @@ def run_report(
         )
 
     # Часть 2: пакетный быстрый расчёт по полосам + агрегаты структур/BA
+    # Нарезка пакета видит BAD_-зоны стадий (находка кросс-проверки №3
+    # 02.10.2026): без них часть 1 отбраковывала эпохи детекторов, а пакет —
+    # только края своей полосы, и числа расходились (66 против 128 из 130).
+    stage_annotations = annotations_from_zones(stages["artifacts"].get("artifacts") or [])
+    # Кавет редкого монтажа добавляется один раз (в кросс-проверки шапки) —
+    # из предупреждений полос он убирается, иначе дублировался бы по числу полос.
+    sparse_caveat = montage_sparse_warning(
+        len(stages["filter"].get("channels") or []), cfg,
+    )
     summaries: list[dict[str, Any]] = []
     warnings: list[str] = []
     package_points: dict[str, list[dict[str, Any]]] = {}
@@ -1258,13 +1366,28 @@ def run_report(
         hi = 0.30 + 0.60 * (index + 1) / n_bands
         scan_result = compute_dipole_scan(
             recording, cfg, scan, progress=_BandWindow(report, lo, hi, key),
+            artifact_annotations=stage_annotations,
         )
         # Точки пакета — для кирпича dipole_points (4.4, шаг ③): в контракт
         # ReportResult они не входят, write-API потребляет ключ и убирает.
         package_points[key] = list(scan_result.get("points") or [])
         summary = summarize_band(key, (low, high), scan_result)
+        if sparse_caveat:
+            # Кавет монтажа уже будет в кросс-проверках шапки — по строке на
+            # полосу он превратился бы в дубли (по числу полос пакета).
+            summary["warnings"] = [
+                w for w in summary["warnings"] if not w.endswith(sparse_caveat)
+            ]
         summaries.append(summary)
         warnings.extend(summary.get("warnings") or [])
+
+    # ROI-агрегат (4.5): те же точки пакета, что уйдут в dipole_points — один
+    # источник для секции HTML и вкладки UI («ROI»); подписи GOF внутри полосы
+    # и полушария считаются здесь (services/roi.py).
+    roi = aggregate_roi(
+        package_points, band_keys,
+        gof_threshold=cfg.roi_gof_threshold, top_n=TOP_ROI,
+    )
 
     # Кросс-проверки сквозного пайплайна (§3.9.4): идут в шапку HTML (вердикт
     # первой строкой) и в предупреждения результата (пилюля UI).
@@ -1275,7 +1398,9 @@ def run_report(
     checks_html = _cross_checks_html(cross_info, cross_warns)
 
     report("localize", 0.92, message="Сборка MNE.Report")
-    data = _build_report(recording, cfg, params, band_keys, stages, summaries, checks_html)
+    data = _build_report(
+        recording, cfg, params, band_keys, stages, summaries, checks_html, roi=roi,
+    )
     signature = report_signature(cfg, params, band_keys)
     cache_write(
         report_html_path(cfg, recording.recording_id, signature), data,
@@ -1318,6 +1443,7 @@ def run_report(
         "n_epochs_used": int(epochs.get("n_epochs_used", 0)),
         "rejected_epochs": len(epochs.get("rejected_epochs") or []),
         "bands": summaries,
+        "roi": roi,  # ROI-агрегат (4.5): вкладка UI и подпись отчёта — одни числа
         "_package_points": package_points,  # внутренний ключ write-API (4.4)
         "warnings": warnings,
         "duration_sec_calc": round(elapsed, 3),

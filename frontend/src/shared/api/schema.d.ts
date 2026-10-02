@@ -87,6 +87,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Список сессий (read-API 4.7)
+         * @description Страница сессий с агрегатами детей (эпохи/диполи) — вход Фазы 5.
+         *
+         *     ``total`` считается до ``limit/offset``; работа — в
+         *     ``results_store.list_sessions`` (тот же модуль, что пишет строки).
+         */
+        get: operations["list_sessions_api_v1_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Паспорт сессии
+         * @description Сессия с числом эпох/диполей и ключами мощностей; 404 — не найдена.
+         */
+        get: operations["get_session_api_v1_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/epochs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Эпохи сессии
+         * @description Сетка эпох с мощностями полос (честные None — «не измерено»); 404 — нет сессии.
+         */
+        get: operations["get_session_epochs_api_v1_sessions__session_id__epochs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/dipoles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Диполи сессии
+         * @description Строки диполей для агрегатов Фазы 5 (ROI/полоса); 404 — нет сессии.
+         */
+        get: operations["get_session_dipoles_api_v1_sessions__session_id__dipoles_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recordings/{recording_id}/signals": {
         parameters: {
             query?: never;
@@ -2260,6 +2343,41 @@ export interface components {
             error?: string | null;
         };
         /**
+         * DipoleOut
+         * @description Строка диполей сессии (``GET /sessions/{id}/dipoles``) для агрегатов Фазы 5.
+         */
+        DipoleOut: {
+            /** Session Id */
+            session_id: string;
+            /**
+             * Epoch Id
+             * @description FK на epochs.id (настоящая ссылка, F21)
+             */
+            epoch_id?: number | null;
+            /** Time Ms */
+            time_ms?: number | null;
+            /**
+             * Mni
+             * @description [x, y, z] мм; None — MNI не считался
+             */
+            mni?: number[] | null;
+            /** Amplitude Nam */
+            amplitude_nam?: number | null;
+            /** Gof */
+            gof?: number | null;
+            /** Anatomical Roi */
+            anatomical_roi?: string | null;
+            /** Brodmann Area */
+            brodmann_area?: string | null;
+            /** Freq Band */
+            freq_band?: string | null;
+            /**
+             * Method
+             * @description fast_grid | bem_fit | None (legacy)
+             */
+            method?: string | null;
+        };
+        /**
          * DipoleRefineResult
          * @description Результат точного уточнения одной эпохи (``kind=dipole_refine``, F19).
          *
@@ -2474,6 +2592,35 @@ export interface components {
              * @default 0
              */
             duration_sec_calc: number;
+        };
+        /**
+         * EpochOut
+         * @description Эпоха сессии (``GET /sessions/{id}/epochs``): сетка + мощности полос.
+         */
+        EpochOut: {
+            /** Session Id */
+            session_id: string;
+            /** Epoch Index */
+            epoch_index: number;
+            /**
+             * Start Time Sec
+             * @description Начало окна, с; None — сетка не перечислялась (дипольный прогон)
+             */
+            start_time_sec?: number | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            /**
+             * Has Artifact
+             * @description Эпоха отбракована аннотациями BAD_
+             */
+            has_artifact: boolean;
+            /**
+             * Powers
+             * @description Мощности по полосам (ключи freq_bands); None — не измерено (честный прочерк)
+             */
+            powers?: {
+                [key: string]: number | null;
+            };
         };
         /**
          * EpochRejectOut
@@ -3900,6 +4047,8 @@ export interface components {
              * @description Агрегаты пакета по полосам (часть 2)
              */
             bands?: components["schemas"]["ReportBandSummaryOut"][];
+            /** @description ROI-агрегат пакета (4.5, вкладка «ROI»); None — отчёт собран до появления поля (старый результат задачи) */
+            roi?: components["schemas"]["RoiAggregateOut"] | null;
             /** Warnings */
             warnings?: string[];
             /**
@@ -3907,6 +4056,112 @@ export interface components {
              * @default 0
              */
             duration_sec_calc: number;
+        };
+        /**
+         * RoiAggregateOut
+         * @description ROI-агрегат пакета автоотчёта (4.5): строки ROI × полосы + полушария.
+         *
+         *     Источник — точки того же прогона, что и HTML отчёта: UI-вкладка «ROI» и
+         *     секция отчёта показывают одни числа (один вызов ``roi.aggregate_roi``).
+         */
+        RoiAggregateOut: {
+            /**
+             * Gof Threshold
+             * @description Порог «надёжной» точки, внутреполосный
+             */
+            gof_threshold: number;
+            /**
+             * Bands
+             * @description Порядок колонок — ключи полос пакета
+             */
+            bands: string[];
+            /**
+             * N Points Total
+             * @description Точек во всех полосах
+             */
+            n_points_total: number;
+            /** Structures */
+            structures?: components["schemas"]["RoiRowOut"][];
+            /** Brodmann */
+            brodmann?: components["schemas"]["RoiRowOut"][];
+            /**
+             * N Structure Names
+             * @description Всего названий структур (показан топ — сколько скрыто, видно из разницы)
+             */
+            n_structure_names: number;
+            /**
+             * N Brodmann Names
+             * @description Всего названий полей Бродмана
+             */
+            n_brodmann_names: number;
+            /**
+             * Hemisphere Counts
+             * @description Точек по полушариям по структурам: lh/rh/mid
+             */
+            hemisphere_counts?: {
+                [key: string]: number;
+            };
+            /**
+             * N Without Structure
+             * @description Точек без названной структуры
+             */
+            n_without_structure: number;
+        };
+        /**
+         * RoiBandCellOut
+         * @description Ячейка ROI × полоса (4.5): числа своей полосы, без межполосных сумм.
+         *
+         *     ``median_gof``/``gof_pass`` — только **внутри** полосы (принцип 3
+         *     ``docs/rules/dipoles.md``: между полосами GOF не сравним).
+         */
+        RoiBandCellOut: {
+            /**
+             * Count
+             * @description Точек ROI в этой полосе
+             */
+            count: number;
+            /**
+             * Share
+             * @description Доля от числа точек полосы, 0..1
+             */
+            share: number;
+            /** Median Gof */
+            median_gof?: number | null;
+            /**
+             * Median Amplitude Nam
+             * @description Медиана амплитуды момента (нАм) внутри полосы
+             */
+            median_amplitude_nam?: number | null;
+            /**
+             * Gof Pass
+             * @description Точек с GOF ≥ roi_gof_threshold внутри своей полосы
+             */
+            gof_pass: number;
+        };
+        /**
+         * RoiRowOut
+         * @description Строка ROI (структура или поле Бродмана): итог по полосам + ячейки.
+         */
+        RoiRowOut: {
+            /** Name */
+            name: string;
+            /**
+             * Hemisphere
+             * @description Производная от имени: lh | rh | mid
+             */
+            hemisphere: string;
+            /**
+             * Count
+             * @description Всего точек по всем полосам
+             */
+            count: number;
+            /**
+             * Bands
+             * @description Ячейки по ключам полос (порядок — RoiAggregateOut.bands)
+             */
+            bands?: {
+                [key: string]: components["schemas"]["RoiBandCellOut"];
+            };
         };
         /**
          * ServerRestartOut
@@ -3928,6 +4183,132 @@ export interface components {
              * @description Старт текущего процесса (ISO): UI сравнивает с ним `code.server_started_at` из /init-status и считает перезапуск завершённым, когда значения разошлись
              */
             server_started_at: string;
+        };
+        /**
+         * SessionDetailOut
+         * @description Паспорт сессии (``GET /sessions/{id}``) + вход к мощностям эпох.
+         */
+        SessionDetailOut: {
+            /** Id */
+            id: string;
+            /**
+             * Recording Id
+             * @description Запись-владелец (каскад TTL); None — legacy-строка без файла
+             */
+            recording_id?: string | null;
+            /**
+             * Kind
+             * @description Источник: legacy | preprocess | dipoles | dipole_refine | spectrogram
+             */
+            kind: string;
+            /** Filename */
+            filename?: string | null;
+            /** N Channels */
+            n_channels?: number | null;
+            /** Sfreq */
+            sfreq?: number | null;
+            /** Duration Sec */
+            duration_sec?: number | null;
+            /** Epoch Length Ms */
+            epoch_length_ms?: number | null;
+            /**
+             * Freq Band
+             * @description Полоса прогона, «lo-hi» Гц
+             */
+            freq_band?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * N Epochs
+             * @description Строк в epochs (включая отброшенные)
+             */
+            n_epochs: number;
+            /**
+             * N Epochs Rejected
+             * @description Эпох с has_artifact (отбраковано)
+             */
+            n_epochs_rejected: number;
+            /**
+             * N Dipoles
+             * @description Строк в dipoles
+             */
+            n_dipoles: number;
+            /**
+             * Power Bands
+             * @description Ключи полос мощностей ``epochs`` (``settings.freq_bands``): колонка = «ключ + _power»
+             */
+            power_bands?: string[];
+        };
+        /**
+         * SessionSummaryOut
+         * @description Строка списка сессий (``GET /sessions``, 4.7).
+         *
+         *     Сессия — строка ``sessions``: один успешный прогон (legacy ``/analyze`` или
+         *     задача UI-раздела). Счётчики — агрегаты дочерних строк ``epochs``/``dipoles``
+         *     (источник — тот же, что write-API 4.4).
+         */
+        SessionSummaryOut: {
+            /** Id */
+            id: string;
+            /**
+             * Recording Id
+             * @description Запись-владелец (каскад TTL); None — legacy-строка без файла
+             */
+            recording_id?: string | null;
+            /**
+             * Kind
+             * @description Источник: legacy | preprocess | dipoles | dipole_refine | spectrogram
+             */
+            kind: string;
+            /** Filename */
+            filename?: string | null;
+            /** N Channels */
+            n_channels?: number | null;
+            /** Sfreq */
+            sfreq?: number | null;
+            /** Duration Sec */
+            duration_sec?: number | null;
+            /** Epoch Length Ms */
+            epoch_length_ms?: number | null;
+            /**
+             * Freq Band
+             * @description Полоса прогона, «lo-hi» Гц
+             */
+            freq_band?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /**
+             * N Epochs
+             * @description Строк в epochs (включая отброшенные)
+             */
+            n_epochs: number;
+            /**
+             * N Epochs Rejected
+             * @description Эпох с has_artifact (отбраковано)
+             */
+            n_epochs_rejected: number;
+            /**
+             * N Dipoles
+             * @description Строк в dipoles
+             */
+            n_dipoles: number;
+        };
+        /**
+         * SessionsPageOut
+         * @description Страница списка сессий: ``total`` честный (считается до limit/offset).
+         */
+        SessionsPageOut: {
+            /**
+             * Total
+             * @description Всего строк под фильтрами
+             */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Items */
+            items?: components["schemas"]["SessionSummaryOut"][];
         };
         /**
          * SpectrogramGridHeader
@@ -4570,6 +4951,149 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sessions_api_v1_sessions_get: {
+        parameters: {
+            query?: {
+                /** @description Только сессии этой записи (каскад TTL) */
+                recording_id?: string | null;
+                /** @description Источник строки: legacy | preprocess | dipoles | dipole_refine | spectrogram */
+                kind?: string | null;
+                /** @description Размер страницы */
+                limit?: number;
+                /** @description Смещение (новые сверху) */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionsPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_api_v1_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_epochs_api_v1_sessions__session_id__epochs_get: {
+        parameters: {
+            query?: {
+                /** @description Размер страницы */
+                limit?: number;
+                /** @description Смещение (по epoch_index) */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpochOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_dipoles_api_v1_sessions__session_id__dipoles_get: {
+        parameters: {
+            query?: {
+                /** @description Фильтр по полосе прогона («lo-hi» Гц) */
+                freq_band?: string | null;
+                /** @description Размер страницы */
+                limit?: number;
+                /** @description Смещение (по эпохам) */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DipoleOut"][];
+                };
             };
             /** @description Validation Error */
             422: {

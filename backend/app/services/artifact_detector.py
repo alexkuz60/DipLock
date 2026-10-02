@@ -94,6 +94,24 @@ ANNOTATION_DESC: dict[str, str] = {
     "electrode_pop": f"{BAD_PREFIX}electrode_pop",
 }
 
+
+def annotations_from_zones(zones: list[dict[str, Any]]) -> mne.Annotations:
+    """Аннотации ``BAD_*`` из зон стадии — только reject-виды (правило BAD_).
+
+    Единственный источник превращения зон в аннотации: его используют и
+    ``detect_artifacts``, и нарезка пакета автоотчёта (находка кросс-проверки
+    №3 02.10.2026: свой ``segment_epochs`` пакета не видел аннотации детекторов
+    стадий — зоны стадий переносятся в пакет через эту функцию). Информационные
+    виды (мышечный, сетевой, окулярный, ЭКГ) отбрасываются — эпоху они убить
+    не могут, и в аннотации пакета им нечего делать.
+    """
+    reject_zones = [z for z in zones if z.get("kind") in EPOCH_REJECT_KINDS]
+    return mne.Annotations(
+        onset=[z["onset_sec"] for z in reject_zones],
+        duration=[z["duration_sec"] for z in reject_zones],
+        description=[ANNOTATION_DESC[z["kind"]] for z in reject_zones],
+    )
+
 # Значимость пика 50/60 Гц относительно сильнейшего бина канала (см.
 # `_significant` в `line_noise_zones`): пыль Welch ~1e-43 против пыли — не
 # сетевой шум, а числовой артефакт (пачка B, разбор 01.10.2026).
@@ -570,12 +588,7 @@ def detect_artifacts(
     counts["ica_eog"] = ica_components
 
     # Аннотации — только reject-виды (правило BAD_, см. докстринг модуля)
-    reject_zones = [z for z in zones if z["kind"] in EPOCH_REJECT_KINDS]
-    annotations = mne.Annotations(
-        onset=[z["onset_sec"] for z in reject_zones],
-        duration=[z["duration_sec"] for z in reject_zones],
-        description=[ANNOTATION_DESC[z["kind"]] for z in reject_zones],
-    )
+    annotations = annotations_from_zones(zones)
     return annotations, {
         "total": sum(counts.values()),
         "by_type": counts,

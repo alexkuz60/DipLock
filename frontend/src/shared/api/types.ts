@@ -152,6 +152,18 @@ export type ReportResult = Schemas['ReportResult']
 /** Агрегаты одной полосы пакета в части 2 отчёта */
 export type ReportBandSummary = Schemas['ReportBandSummaryOut']
 
+/**
+ * ROI-агрегат пакета (4.5): строки ROI × полосы + полушария. GOF и порог
+ * «надёжной точки» — только внутри полосы (принцип 3 docs/rules/dipoles.md).
+ */
+export type RoiAggregate = Schemas['RoiAggregateOut']
+
+/** Строка ROI-агрегата (структура или поле Бродмана) */
+export type RoiRow = Schemas['RoiRowOut']
+
+/** Ячейка ROI × полоса (числа своей полосы) */
+export type RoiBandCell = Schemas['RoiBandCellOut']
+
 /** Статусы проверок готовности (GET /init-status) */
 export type CheckStatus = 'ready' | 'pending' | 'loading' | 'error' | 'unknown'
 

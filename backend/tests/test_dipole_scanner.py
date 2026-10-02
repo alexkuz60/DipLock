@@ -267,6 +267,49 @@ def test_compute_dipole_scan_returns_point_per_epoch(tmp_path):
     assert all(name in settings.standard_channels for name in result["channels"])
 
 
+def test_compute_dipole_scan_drops_epochs_by_stage_annotations(tmp_path):
+    """BAD_-зоны стадий в нарезке скана (находка №3 02.10.2026).
+
+    Пакет автоотчёта передаёт зоны детекторов — эпохи, пересекающие зону,
+    отбрасываются так же, как в части 1; без зон (задача UI «Диполи») нарезка
+    не меняется.
+    """
+    import mne
+
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+    params = DipoleScanParams(filter_band=(1, 40), epoch_length_ms=1000.0)
+
+    plain = compute_dipole_scan(recording, settings, params)
+    # Зона на выжившей эпохе в середине записи: у 6-секундной записи края
+    # (BAD_edge, ядро 1–40 Гц ≈ ±1.65 с) уже отбрасывают первые/последние эпохи
+    with_zone = compute_dipole_scan(
+        recording, settings, params,
+        artifact_annotations=mne.Annotations([2.0], [0.5], ["BAD_peak_to_peak"]),
+    )
+
+    assert with_zone["n_epochs_total"] == plain["n_epochs_total"]
+    assert with_zone["n_epochs_used"] == plain["n_epochs_used"] - 1
+    assert len(with_zone["points"]) == with_zone["n_epochs_used"]
+    assert any(
+        "Отброшено эпох аннотациями BAD_" in w for w in with_zone["warnings"]
+    )
+
+
+def test_montage_sparse_warning_threshold():
+    """Кавет редкого монтажа: порог из конфига, текст — общий для таблицы/отчёта."""
+    from app.core.config import Settings
+    from app.services.dipole_scanner import montage_sparse_warning
+
+    cfg = Settings(results_dir="unused-jobs")  # путь не открывается — cfg только для порога
+    threshold = cfg.montage_sparse_warn_channels
+    assert montage_sparse_warning(threshold, cfg) is None
+    assert montage_sparse_warning(threshold + 10, cfg) is None
+    warning = montage_sparse_warning(threshold - 1, cfg)
+    assert warning is not None
+    assert f"{threshold - 1} каналов" in warning
+    assert "структуры/BA недостоверно" in warning
+
+
 def test_dipole_job_flow(client, tmp_path):
     """202 → поллинг с прогрессом по эпохам → точки по `result_url`."""
     recording = _register(tmp_path, _alpha_edf(tmp_path))

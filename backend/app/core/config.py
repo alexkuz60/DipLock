@@ -139,6 +139,14 @@ class Settings(BaseSettings):
     report_top_share_max: float = Field(default=0.95)
     # Расхождение нарезки «часть 1 ↔ пакет» (> порога) — предупреждение.
     report_epochs_mismatch_warn_share: float = Field(default=0.05)
+    # Редкий монтаж: меньше каналов — погрешность позиции диполя до нескольких
+    # сантиметров (кавет в подписи таблицы локализации и в отчёте; обсуждение
+    # 01.10.2026, todo.md «Кавет погрешности на редком монтаже»).
+    montage_sparse_warn_channels: int = Field(default=32)
+    # ROI-анализ (4.5): порог «надёжной» точки — «сколько диполей с GOF ≥ X в ROI».
+    # Применяется только **внутри** полосы (принцип 3 docs/rules/dipoles.md:
+    # GOF между полосами не сравним — узкая полоса завышает R²).
+    roi_gof_threshold: float = Field(default=0.8)
 
 
     # Единицы EDF: None = автоопределение MNE + эвристика масштаба (см. edf_loader)

@@ -175,6 +175,50 @@ describe('раздел «Итоги»', () => {
     expect(screen.getByTestId('summary-frame')).toBeInTheDocument()
     expect(screen.queryByTestId('summary-dynamics')).not.toBeInTheDocument()
   })
+
+  it('4.5: вкладка «ROI» — таблицы агрегата, подпись GOF и переключение без запросов', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    setRecording(true)
+    useSummaryReport.setState({ result: reportResultFixture() })
+    renderSummary()
+
+    await user.click(screen.getByTestId('summary-view-roi'))
+
+    expect(screen.getByTestId('summary-roi')).toBeInTheDocument()
+    expect(screen.queryByTestId('summary-frame')).not.toBeInTheDocument()
+    // Обязательная подпись: GOF сравнивается только внутри полосы (принцип 3)
+    expect(screen.getByText(/только внутри выбранной полосы/)).toBeInTheDocument()
+    // Числа фикстуры: ячейка theta первой структуры + полушария
+    expect(screen.getAllByText('Precuneus (слева)').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('summary-roi-meta')).toHaveTextContent('точек: 18')
+    expect(screen.getByTestId('summary-roi-meta')).toHaveTextContent('полушария: слева 10 · справа 6')
+
+    // Селект полосы и экспорт — чистая отрисовка/скачивание, запросов не прибавилось
+    const fetchMock = mockApiFetch()
+    const before = fetchMock.mock.calls.length
+    await user.selectOptions(screen.getByLabelText('Полоса'), 'alpha')
+    expect(screen.getByLabelText('Полоса')).toHaveValue('alpha')
+    expect(fetchMock.mock.calls.length).toBe(before)
+    expect(screen.getByTestId('summary-roi-export')).toBeInTheDocument()
+
+    // Возврат к документу — тот же iframe
+    await user.click(screen.getByTestId('summary-view-html'))
+    expect(screen.getByTestId('summary-frame')).toBeInTheDocument()
+  })
+
+  it('4.5: результат без roi (старый отчёт) — честная заглушка вкладки', async () => {
+    const user = userEvent.setup()
+    mockApiFetch()
+    setRecording(true)
+    useSummaryReport.setState({ result: reportResultFixture({ roi: null }) })
+    renderSummary()
+
+    await user.click(screen.getByTestId('summary-view-roi'))
+
+    expect(screen.getByTestId('summary-roi-missing')).toBeInTheDocument()
+    expect(screen.queryByTestId('summary-roi')).not.toBeInTheDocument()
+  })
 })
 
 describe('заглушки новых направлений', () => {

@@ -1,4 +1,4 @@
-# База результатов (4.4): write-API, TTL строк, PHI-псевдоним
+# База результатов (4.4/4.7): write-API и read-API, TTL строк, PHI-псевдоним
 
 > Появился вместе с срезом 4.4 (01.10.2026): схема — `docs/data-blocks.md` §8.1–§8.4
 > (утверждена делегированным решением владельца), порядок внедрения шагов — §8.4.
@@ -45,6 +45,30 @@
    агрегатах (§8.4.4 — в БД все имена, не топ-N HTML); `results_store` потребляет
    оба (`pop`) **до** записи файла задачи — в job-файле и ответе UI их нет.
 
+## Read-API сессий (4.7, 02.10.2026)
+
+Чтение строк результатов — вход группового анализа Фазы 5; работает с теми же
+таблицами, что write-API (`results_store.list_sessions` / `get_session_detail` /
+`list_session_epochs` / `list_session_dipoles`, роуты — `routes.py` №5–8):
+
+* **`GET /sessions`** — страница (`limit`/`offset`, фильтры `recording_id`/`kind`,
+  сортировка «новые сверху»); `total` считается **до** пагинации, счётчики детей
+  (эпохи / отбраковано / диполи) — тремя групповыми запросами на страницу, не N+1;
+* **`GET /sessions/{id}`** — тот же паспорт + `power_bands` (ключи `freq_bands` —
+  вход к колонкам мощностей `epochs`);
+* **`GET /sessions/{id}/epochs`** — сетка эпох с `powers` (ключ полосы → число
+  или **честный `None`** «не измерено»: задачи UI PSD не пишут — нули выдумывать
+  нельзя) и `has_artifact` (bool);
+* **`GET /sessions/{id}/dipoles`** — строки диполей (MNI-список или `None`,
+  фильтр `freq_band`), пагинация по эпохам.
+
+Инварианты read: **404 на неизвестную сессию** (не пустой список — пустой
+ответ читался бы как «сессий нет вообще»); чужой `recording_id` в списке —
+честная пустая страница; `analyses`/`dipole_points`/`report_*` read-API пока
+не читает (ROI живёт в результате задачи — `docs/rules/dipoles.md`,
+«ROI-анализ»; SQL-агрегаты «BA × полоса» по `report_name_counts` — задача
+остатка 4.7 вместе с `group_analysis`).
+
 ## Схема, тесты, связки
 
 - Миграции: `0002_recordings` → `0003_sessions_recording` → `0004_analyses_report`
@@ -52,7 +76,8 @@
 - Тесты: `tests/test_edf_phi.py` (поля заголовка, читаемость после патча),
   `tests/test_recording_store.py` (upsert/каскад/сироты), `tests/test_results_store.py`
   (шаг ②), `tests/test_report_store.py` (шаг ③, КД, полный счёт), `DELETE` — в
-  `tests/test_recordings.py`.
+  `tests/test_recordings.py`, read-API — `tests/test_results_read.py`
+  (страница/паспорт/эпохи/диполи, 404, фильтры, честные `None`).
 - Лимиты: write-API — best-effort (ошибка не меняет статус задачи, правило 13
   `docs/rules/api-jobs.md`); тесты работают на изолированной tmp-БД
   (`DATABASE_URL` в `tests/conftest.py`).

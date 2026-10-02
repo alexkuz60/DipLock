@@ -213,6 +213,17 @@ def test_run_report_builds_html_and_contract_result(tmp_path):
     assert "GOF между полосами не сравним" in text
     for key in bands:
         assert f"Полоса {key}" in text
+    # ROI-анализ (4.5): поле контракта + секция в HTML одних чисел
+    assert out.roi is not None
+    assert out.roi.bands == bands
+    assert out.roi.n_points_total > 0
+    # Число агрегата согласовано со строками: сумма count структур ≤ точек
+    # (одна точка — одна структура, но показан только топ)
+    assert all(
+        row.count <= out.roi.n_points_total for row in out.roi.structures
+    )
+    assert "ROI-анализ (надёжность и полушария)" in text
+    assert "Асимметрия полушарий" in text
 
     fractions = [fraction for _, fraction in log if fraction is not None]
     # Допуск на плавающую точку: окна считаются как lo+0.09, и 0.2 vs 0.19999…98
@@ -385,6 +396,89 @@ def test_cross_checks_epochs_mismatch_warns_over_threshold(tmp_path):
     )
     assert any("Нарезка пакета расходится" in w for w in warns)
     assert any("часть 1 — 10 эпох" in line for line in info)
+
+
+def test_cross_checks_flags_sparse_montage(tmp_path):
+    """Кавет редкого монтажа: < 32 каналов — в шапке; ≥ 32 и без списка — тихо."""
+    from app.core.config import Settings
+    from app.services.report import _cross_checks
+
+    cfg = Settings(results_dir=str(tmp_path / "jobs"))
+    params = ReportParams(preprocess=PreprocessParams(epoch_length_ms=1000.0))
+    threshold = cfg.montage_sparse_warn_channels
+
+    def stages(channels):
+        built = _stages()
+        built["filter"] = dict(built["filter"], channels=channels)
+        return built
+
+    _, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["theta"],
+        stages([f"E{i}" for i in range(threshold - 1)]),
+        [_summary()],
+    )
+    sparse = [w for w in warns if "Разреженный монтаж" in w]
+    assert len(sparse) == 1
+    assert f"{threshold - 1} каналов" in sparse[0]
+
+    _, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["theta"],
+        stages([f"E{i}" for i in range(threshold)]),
+        [_summary()],
+    )
+    assert not any("Разреженный монтаж" in w for w in warns)
+
+    # Стадия без списка каналов (юнит-тест `_stages`) — кавет не выдумываем
+    _, warns = _cross_checks(
+        cfg, _unit_recording(), params, ["theta"], _stages(), [_summary()],
+    )
+    assert not any("Разреженный монтаж" in w for w in warns)
+
+
+def test_run_report_passes_stage_annotations_to_package(tmp_path, monkeypatch):
+    """Нарезка пакета видит BAD_-зоны стадий (находка №3 02.10.2026).
+
+    Спай на `compute_dipole_scan` ловит `artifact_annotations`: пакет обязан
+    получать reject-зоны детекторов части 1 (иначе нарезки «часть 1 ↔ пакет»
+    расходятся: 66 против 128 из 130 на `test.edf`), а информационные виды —
+    не обязан (их в зонах нет — правило BAD_).
+    """
+    from app.services import report as report_module
+    from tests.conftest import write_minimal_edf
+
+    # Тот же EDF, что у отчёта, + всплеск 500 мкВ: детектор обязан найти зону
+    channels = list(settings.standard_channels[:8])
+    sfreq = 250.0
+    times = np.arange(int(6.0 * sfreq)) / sfreq
+    data = np.stack([
+        np.sin(2 * np.pi * (6 + index) * times) * (10.0 + 3.0 * index)
+        for index in range(len(channels))
+    ])
+    data[:, int(2.0 * sfreq): int(2.2 * sfreq)] = 500e-6
+    burst = tmp_path / "report_burst.edf"
+    write_minimal_edf(burst, channels, data, sfreq)
+    recording = _register(tmp_path, burst, "rec-report-zones")
+
+    captured: list = []
+    real_scan = report_module.compute_dipole_scan
+
+    def spy(recording_, cfg, params, progress=None, **kwargs):
+        captured.append(kwargs.get("artifact_annotations"))
+        return real_scan(recording_, cfg, params, progress=progress, **kwargs)
+
+    monkeypatch.setattr(report_module, "compute_dipole_scan", spy)
+
+    run_report(
+        recording, settings,
+        ReportParams(preprocess=PreprocessParams(epoch_length_ms=1000.0), band_keys=_two_bands()),
+        progress=lambda *args, **kwargs: None,
+    )
+
+    assert len(captured) == len(_two_bands())
+    for annotations in captured:
+        assert annotations is not None, "пакет обязан получить зоны стадий"
+        assert len(annotations) > 0, "всплеск обязан дать reject-зону"
+        assert all(d.startswith("BAD_") for d in annotations.description)
 
 
 def test_theme_layers_are_print_safe():

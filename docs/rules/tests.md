@@ -677,3 +677,18 @@ FreeSurfer + развитие «Итогов» (02.10.2026): pytest **+16** — 
 `summaryExport.test` (+3: RFC 4180, экранирование, имя файла), `SummarySection.test` (+1:
 вкладка «Динамика структур»). Итог: pytest — **659** (без `integration` — **641**),
 Vitest — **956**.
+
+**Срезы A+B+C (02.10.2026): кавет монтажа/нарезка пакета + ROI (4.5) + read-API (4.7).**
+pytest **+13** — `test_artifact_detector.py` (+1: `annotations_from_zones` — общий
+источник «зоны → BAD_», информационные виды отбрасываются),
+`test_dipole_scanner.py` (+2: зона стадий роняет эпоху скана, порог
+`montage_sparse_warning`), `test_report.py` (+3: спай `artifact_annotations` у пакета,
+кавет редкого монтажа в кросс-проверках, поле `roi`+секция HTML в сквозном тесте),
+`test_roi.py` (**+4**: полушария «(слева)/(справа)»/`-lh`, ячейки «своей полосы»,
+топ-обрезка со счётчиками, подпись «внутри полосы» в HTML),
+`test_results_read.py` (**+4**: страница/фильтры/честный `total`, паспорт+404,
+эпохи с `powers`=None, диполи с фильтром `freq_band`). Vitest **+5** —
+`LocalizationTableSection.test` (+1: кавет монтажа из `warnings` результата),
+`SummarySection.test` (+2: вкладка «ROI» — подпись/числа/переключение без запросов и
+заглушка `roi: null`), `summaryExport.test` (+2: `roiCsv` — строка = ROI × полоса,
+имя файла). Итог: pytest — **672** (без `integration` — **654**), Vitest — **961**.

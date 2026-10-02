@@ -215,6 +215,27 @@ def test_bad_rule_annotations_only_reject_kinds():
     assert not informational & EPOCH_REJECT_KINDS
 
 
+def test_annotations_from_zones_filters_informational_kinds():
+    """`annotations_from_zones` — общий источник зон → аннотации: только reject.
+
+    Её же пользуется нарезка пакета автоотчёта (находка кросс-проверки №3
+    02.10.2026): информационные зоны (сетевой, ЭКГ…) не должны убивать эпохи
+    пакета, а reject-виды обязаны совпасть с аннотациями `detect_artifacts`.
+    """
+    from app.services.artifact_detector import annotations_from_zones
+
+    zones = [
+        {"kind": "peak_to_peak", "onset_sec": 1.0, "duration_sec": 0.2, "channels": ["C3"]},
+        {"kind": "line_noise", "onset_sec": 3.0, "duration_sec": 1.0, "channels": []},
+        {"kind": "break", "onset_sec": 5.5, "duration_sec": 0.5, "channels": []},
+    ]
+    annotations = annotations_from_zones(zones)
+    assert list(annotations.description) == ["BAD_peak_to_peak", "BAD_break"]
+    assert list(annotations.onset) == [1.0, 5.5]
+    # Пустой список — валидные пустые аннотации (нечего отбраковывать)
+    assert len(annotations_from_zones([])) == 0
+
+
 def test_detects_break_pop_and_clipping():
     """NaN-разрыв, pop-всплеск и клиппинг у предела АЦП — три reject-вида."""
     data = _noise(10.0)

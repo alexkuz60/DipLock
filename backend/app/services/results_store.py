@@ -34,6 +34,8 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import case, func, select
+
 from app.core.config import settings
 from app.models.db import (
     Analysis,
@@ -486,3 +488,196 @@ def on_success_callback(
         await persist_recording_result(kind, recording, params, result, job.job_id)
 
     return _callback
+
+
+# ---------- read-API сессий (4.7): чтение sessions/epochs/dipoles ------------
+#
+# Вход группового анализа Фазы 5: список/паспорт сессий и их дочерние строки
+# теми же строками, что write-API. Инварианты read — `docs/rules/results-db.md`:
+# 404 на неизвестную сессию (не пустой список), счётчики считаются запросами
+# на страницу (не N+1), мощности эпох — честные None «не измерено».
+
+
+def epoch_powers(row: EpochRecord) -> dict[str, float | None]:
+    """Мощности эпохи по ключам ``settings.freq_bands`` (колонка = ключ + ``_power``).
+
+    ``None`` — колонка не измерена (задачи UI пишут сетку без PSD; legacy мог
+    не заполнить все полосы) — честный прочерк, а не ноль.
+    """
+    return {key: getattr(row, f"{key}_power", None) for key in settings.freq_bands}
+
+
+def _session_summary(
+    row: Session, counts: tuple[int, int, int],
+) -> dict[str, Any]:
+    """Строка списка/паспорта: поля строки + (эпохи, отброшено, диполи)."""
+    n_epochs, n_rejected, n_dipoles = counts
+    return {
+        "id": row.id,
+        "recording_id": row.recording_id,
+        "kind": row.kind or "legacy",
+        "filename": row.filename,
+        "n_channels": row.n_channels,
+        "sfreq": row.sfreq,
+        "duration_sec": row.duration_sec,
+        "epoch_length_ms": row.epoch_length_ms,
+        "freq_band": row.freq_band,
+        "created_at": row.created_at,
+        "n_epochs": n_epochs,
+        "n_epochs_rejected": n_rejected,
+        "n_dipoles": n_dipoles,
+    }
+
+
+async def _children_counts(
+    session: Any, ids: list[str],
+) -> dict[str, tuple[int, int, int]]:
+    """``session_id → (эпохи, отброшено, диполи)`` — три групповых запроса на страницу."""
+    if not ids:
+        return {}
+    epoch_rows = await session.execute(
+        select(
+            EpochRecord.session_id,
+            func.count(),
+            func.coalesce(func.sum(case((EpochRecord.has_artifact == 1, 1), else_=0)), 0),
+        )
+        .where(EpochRecord.session_id.in_(ids))
+        .group_by(EpochRecord.session_id)
+    )
+    dipole_rows = await session.execute(
+        select(Dipole.session_id, func.count())
+        .where(Dipole.session_id.in_(ids))
+        .group_by(Dipole.session_id)
+    )
+    counts: dict[str, tuple[int, int, int]] = {
+        row_id: (int(n_epochs), int(n_rejected), 0)
+        for row_id, n_epochs, n_rejected in epoch_rows.all()
+    }
+    for row_id, n_dipoles in dipole_rows.all():
+        n_epochs, n_rejected, _ = counts.get(row_id, (0, 0, 0))
+        counts[row_id] = (n_epochs, n_rejected, int(n_dipoles))
+    return counts
+
+
+async def list_sessions(
+    *,
+    recording_id: str | None = None,
+    kind: str | None = None,
+    limit: int,
+    offset: int,
+) -> tuple[int, list[dict[str, Any]]]:
+    """Страница сессий с агрегатами детей: ``(total, строки под SessionSummaryOut)``.
+
+    Сортировка — новые сверху (``created_at DESC``), ``total`` считается до
+    ``limit/offset`` — пагинация не прячет общий размер.
+    """
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        conditions: list[Any] = []
+        if recording_id is not None:
+            conditions.append(Session.recording_id == recording_id)
+        if kind is not None:
+            conditions.append(Session.kind == kind)
+        total = int(
+            (await session.execute(
+                select(func.count()).select_from(Session).where(*conditions)
+            )).scalar() or 0
+        )
+        rows = list((await session.scalars(
+            select(Session)
+            .where(*conditions)
+            .order_by(Session.created_at.desc(), Session.id)
+            .limit(limit)
+            .offset(offset)
+        )).all())
+        counts = await _children_counts(session, [str(row.id) for row in rows])
+        return total, [
+            _session_summary(row, counts.get(str(row.id), (0, 0, 0)))
+            for row in rows
+        ]
+
+
+async def get_session_detail(session_id: str) -> dict[str, Any] | None:
+    """Паспорт сессии + счётчики + ключи мощностей; ``None`` — не найдена."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        row = await session.get(Session, session_id)
+        if row is None:
+            return None
+        counts = await _children_counts(session, [str(row.id)])
+        detail = _session_summary(row, counts.get(str(row.id), (0, 0, 0)))
+        detail["power_bands"] = list(settings.freq_bands)
+        return detail
+
+
+async def list_session_epochs(
+    session_id: str, *, limit: int, offset: int,
+) -> list[dict[str, Any]] | None:
+    """Эпохи сессии (по ``epoch_index``); ``None`` — сессии нет."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        if await session.get(Session, session_id) is None:
+            return None
+        rows = list((await session.scalars(
+            select(EpochRecord)
+            .where(EpochRecord.session_id == session_id)
+            .order_by(EpochRecord.epoch_index, EpochRecord.id)
+            .limit(limit)
+            .offset(offset)
+        )).all())
+        return [
+            {
+                "session_id": row.session_id,
+                "epoch_index": row.epoch_index,
+                "start_time_sec": row.start_time_sec,
+                "duration_ms": row.duration_ms,
+                "has_artifact": bool(row.has_artifact),
+                "powers": epoch_powers(row),
+            }
+            for row in rows
+        ]
+
+
+async def list_session_dipoles(
+    session_id: str, *,
+    freq_band: str | None = None,
+    limit: int,
+    offset: int,
+) -> list[dict[str, Any]] | None:
+    """Диполи сессии (по эпохам); ``None`` — сессии нет. ``freq_band`` — фильтр полосы."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        if await session.get(Session, session_id) is None:
+            return None
+        conditions = [Dipole.session_id == session_id]
+        if freq_band is not None:
+            conditions.append(Dipole.freq_band == freq_band)
+        rows = list((await session.scalars(
+            select(Dipole)
+            .where(*conditions)
+            .order_by(Dipole.epoch_id, Dipole.id)
+            .limit(limit)
+            .offset(offset)
+        )).all())
+        return [
+            {
+                "session_id": row.session_id,
+                "epoch_id": row.epoch_id,
+                "time_ms": row.time_ms,
+                "mni": _dipole_mni(row),
+                "amplitude_nam": row.amplitude_nam,
+                "gof": row.gof,
+                "anatomical_roi": row.anatomical_roi,
+                "brodmann_area": row.brodmann_area,
+                "freq_band": row.freq_band,
+                "method": row.method,
+            }
+            for row in rows
+        ]
+
+
+def _dipole_mni(row: Dipole) -> list[float] | None:
+    """``[x, y, z]`` мм или ``None`` — MNI не считался (хотя бы одна NULL)."""
+    if row.mni_x is None or row.mni_y is None or row.mni_z is None:
+        return None
+    return [float(row.mni_x), float(row.mni_y), float(row.mni_z)]
