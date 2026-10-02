@@ -5,6 +5,7 @@ import re
 import mne
 import numpy as np
 
+from app.services import gpu
 from app.services.artifact_detector import find_dead_channels
 from app.services.edf_events import attach_stim_annotations
 from app.services.filter_design import band_filter_kwargs, clamped_band
@@ -170,10 +171,13 @@ def load_edf(
             **band_filter_kwargs(l_freq, h_freq, sfreq),
         )
     if notch_hz:
-        raw.notch_filter(notch_hz)
-    # Даунсэмплинг до 500 Гц только если запись чаще (экономия памяти/времени)
+        # notch по умолчанию method='fir' — туда 'cuda' допустим (n_jobs из
+        # единой точки gpu.filter_n_jobs, как в АЧХ filter_response)
+        raw.notch_filter(notch_hz, n_jobs=gpu.filter_n_jobs())
+    # Даунсэмплинг до 500 Гц только если запись чаще (экономия памяти/времени);
+    # method='fft' (дефолт) — единственный, где реземплинг принимает 'cuda'
     if raw.info["sfreq"] > 500.0:
-        raw.resample(500.0)
+        raw.resample(500.0, n_jobs=gpu.filter_n_jobs())
 
     return raw
 

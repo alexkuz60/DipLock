@@ -1,10 +1,13 @@
 /**
- * Настройки приложения: интерфейс (масштаб шрифта, плотность списков) и
- * параметры расчёта (только чтение — источник истины `backend/.env`).
+ * Настройки приложения: интерфейс (масштаб шрифта, плотность списков),
+ * параметры расчёта (только чтение — источник истины `backend/.env`) и
+ * локальный ресурс (автоопределение GPU + тумблер «Использовать GPU»,
+ * источник истины — сервер: MNE-конфиг, `backend/app/services/gpu.py`).
  */
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { RotateCcw } from 'lucide-react'
-import { api } from '@/shared/api/client'
+import { useState } from 'react'
+import { api, apiErrorText } from '@/shared/api/client'
 import {
   applyUiPreferences,
   useUiStore,
@@ -12,9 +15,10 @@ import {
   type FontScale,
 } from '@/shared/state/uiStore'
 import { Button } from '@/shared/ui/Button'
+import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { cx } from '@/shared/ui/cx'
 import { Panel } from '@/shared/ui/Panel'
-import { InfoRow, LoadingBlock } from '@/shared/ui/StateViews'
+import { ErrorBlock, InfoRow, LoadingBlock } from '@/shared/ui/StateViews'
 
 const FONT_SCALES: { value: FontScale; label: string; hint: string }[] = [
   { value: 'normal', label: 'Обычный', hint: '16 px' },
@@ -71,12 +75,35 @@ export function SettingsSection() {
   const setDensity = useUiStore((state) => state.setDensity)
   const resetUiState = useUiStore((state) => state.resetUiState)
 
+  const queryClient = useQueryClient()
+  /** Ошибка PUT тумблера (409 от сервера — текст уже человекочитаемый). */
+  const [gpuError, setGpuError] = useState<string | null>(null)
+  /** PUT в полёте: тумблер не должен щёлкать, пока сервер не ответил. */
+  const [gpuSaving, setGpuSaving] = useState(false)
+
   const meta = useQuery({
     queryKey: ['meta'],
     queryFn: ({ signal }) => api.meta(signal),
     staleTime: 60_000,
     retry: false,
   })
+  const resource = useQuery({
+    queryKey: ['resource'],
+    queryFn: ({ signal }) => api.resource(signal),
+    staleTime: 30_000,
+    retry: false,
+  })
+
+  /** Переключить «Использовать GPU»: PUT → новое состояние в кэш запроса. */
+  const toggleGpu = (enabled: boolean) => {
+    setGpuError(null)
+    setGpuSaving(true)
+    api
+      .setResourceUseCuda(enabled)
+      .then((next) => queryClient.setQueryData(['resource'], next))
+      .catch((error: unknown) => setGpuError(apiErrorText(error)))
+      .finally(() => setGpuSaving(false))
+  }
 
   return (
     <div className="grid max-w-4xl grid-cols-1 gap-4 p-4">
@@ -129,6 +156,46 @@ export function SettingsSection() {
               mono
             />
             <InfoRow label="параллельных задач" value={meta.data.max_concurrent_jobs} mono />
+          </>
+        ) : null}
+      </Panel>
+
+      <Panel
+        title="Локальный ресурс"
+        hint="Автоопределение GPU этого сервера. Тумблер хранится на сервере и действует только на новые расчёты: ускоряется КИХ-фильтрация и реземплинг MNE, IIR и фитинг диполей остаются на CPU. Для ускорения нужен NVIDIA GPU и CuPy (backend/requirements-gpu.txt)."
+      >
+        {resource.isPending ? <LoadingBlock /> : null}
+        {resource.isError ? <ErrorBlock message={apiErrorText(resource.error)} /> : null}
+        {resource.data ? (
+          <>
+            <CheckboxRow
+              label="Использовать GPU (CUDA)"
+              checked={resource.data.use_cuda}
+              disabled={!resource.data.gpu.usable || gpuSaving}
+              hint={
+                resource.data.gpu.usable
+                  ? 'Действует на новые расчёты: фильтрация и реземплинг идут через n_jobs="cuda"'
+                  : (resource.data.gpu.reason ?? 'CUDA недоступна на этом сервере')
+              }
+              onChange={toggleGpu}
+            />
+            <InfoRow label="Видеокарта" value={resource.data.gpu.name ?? 'не найдена'} mono />
+            <InfoRow
+              label="Память GPU, МБ"
+              value={
+                resource.data.gpu.mem_total_mb != null
+                  ? `${resource.data.gpu.mem_free_mb ?? '—'} / ${resource.data.gpu.mem_total_mb}`
+                  : null
+              }
+              mono
+            />
+            <InfoRow label="CuPy" value={resource.data.gpu.cupy ? 'установлен' : 'не установлен'} />
+            <InfoRow label="MNE CUDA" value={resource.data.gpu.usable ? 'доступна' : 'недоступна'} />
+            {gpuError ? (
+              <p role="alert" className="text-sm text-danger">
+                {gpuError}
+              </p>
+            ) : null}
           </>
         ) : null}
       </Panel>

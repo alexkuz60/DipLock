@@ -2577,6 +2577,62 @@
         }
       }
     },
+    "/api/v1/resource": {
+      "get": {
+        "summary": "Локальный ресурс: GPU и ускорение MNE",
+        "description": "Автоопределение GPU этого сервера + состояние тумблера «Использовать GPU».\n\n``nvidia-smi`` и проба CuPy блокирующие — в потоке (правило Async);\nответ — для панели «Локальный ресурс» раздела «Настройки».",
+        "operationId": "get_resource_api_v1_resource_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalResourceOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Тумблер «Использовать GPU»",
+        "description": "Переключить ускорение MNE на GPU: пишется в MNE-конфиг сервера.\n\n409 — включить нечего: CUDA недоступна (текст причины — для UI);\nвыключение всегда возможно. Ответ — новое состояние тумблера.",
+        "operationId": "put_resource_api_v1_resource_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalResourceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalResourceOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -5588,6 +5644,81 @@
         "title": "FilterResponseOut",
         "description": "АЧХ применяемого фильтра (`GET /filter-response`, шаг 2.5, N11–N14).\n\nКривая — фактический отклик живого конвейера\n(`services/filter_design.filter_response`): единичный импульс проходит те же\n`raw.filter` + `raw.notch_filter` (с гармониками — N13), поэтому график\nпоказывает ровно то, что получает расчёт, а не «приблизительно по формулам»."
       },
+      "GpuStatusOut": {
+        "properties": {
+          "present": {
+            "type": "boolean",
+            "title": "Present",
+            "description": "NVIDIA GPU виден системе (nvidia-smi или CuPy)"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Имя устройства"
+          },
+          "cupy": {
+            "type": "boolean",
+            "title": "Cupy",
+            "description": "CuPy установлен и CUDA инициализируется"
+          },
+          "usable": {
+            "type": "boolean",
+            "title": "Usable",
+            "description": "CUDA доступна для ускорения MNE (бэкенд MNE — только CuPy); включение тумблера без неё отвечает 409"
+          },
+          "mem_total_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Total Mb",
+            "description": "Память GPU, МБ"
+          },
+          "mem_free_mb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mem Free Mb",
+            "description": "Свободная память сейчас, МБ"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Почему CUDA недоступна — текст для UI (None, когда usable)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "present",
+          "cupy",
+          "usable"
+        ],
+        "title": "GpuStatusOut",
+        "description": "Автоопределение GPU локального сервера (один запрос, без расчётов)."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6047,6 +6178,39 @@
         ],
         "title": "JournalOut",
         "description": "Хвост журнала шагов: последние ``limit`` строк (в порядке записи)."
+      },
+      "LocalResourceOut": {
+        "properties": {
+          "gpu": {
+            "$ref": "#/components/schemas/GpuStatusOut"
+          },
+          "use_cuda": {
+            "type": "boolean",
+            "title": "Use Cuda",
+            "description": "Тумблер «Использовать GPU»: MNE-конфиг сервера (MNE_USE_CUDA), дефолт USE_CUDA из .env"
+          }
+        },
+        "type": "object",
+        "required": [
+          "gpu",
+          "use_cuda"
+        ],
+        "title": "LocalResourceOut",
+        "description": "``GET /api/v1/resource`` — локальный ресурс: детекция GPU + тумблер."
+      },
+      "LocalResourceUpdate": {
+        "properties": {
+          "use_cuda": {
+            "type": "boolean",
+            "title": "Use Cuda"
+          }
+        },
+        "type": "object",
+        "required": [
+          "use_cuda"
+        ],
+        "title": "LocalResourceUpdate",
+        "description": "``PUT /api/v1/resource``: новое состояние тумблера."
       },
       "MainsOut": {
         "properties": {

@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = Field(default=2)
     jobs_history_limit: int = Field(default=50)
 
+    # Локальный ресурс (GPU/CUDA): дефолт тумблера «Использовать GPU» в
+    # «Настройках». Выбор пользователя хранится в MNE-конфиге сервера
+    # (MNE_USE_CUDA, файл ~/.mne/mne-python.json — переживает рестарт) через
+    # PUT /api/v1/resource, это значение — стартовая позиция, пока выбора нет.
+    # Ускоряет MNE только КИХ-фильтрацию/реземплинг и требует NVIDIA GPU + CuPy
+    # (requirements-gpu.txt); детекция — services/gpu.py.
+    use_cuda: bool = Field(default=False)
+
     # Загруженные для просмотра записи: лимит истории и TTL (устаревшие
     # каталоги удаляются с диска при обращении к реестру).
     # TTL = 0 — записи **не истекают** (4.4, «записи — не 24 ч»): удаление только

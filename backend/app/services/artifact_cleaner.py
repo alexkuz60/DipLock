@@ -40,6 +40,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.core.config import Settings
+from app.services import gpu
 from app.services.cardio import ecg_proxy
 from app.services.clean_metrics import clean_loss, detect_clean_zones, zone_channels
 from app.services.filter_design import band_filter_kwargs, harmonic_frequencies
@@ -377,7 +378,9 @@ def iclabel_second_opinion(
     # копию фильтруем под спецификацию — сигнал чистки не трогаем
     nyquist = float(raw.info["sfreq"]) / 2.0
     if nyquist > 1.0:
-        labeled.filter(1.0, min(100.0, nyquist), verbose=False)
+        # Копия под спецификацию ICLabel (1–100 Гц): при включённом тумблере
+        # «Использовать GPU» фильтр идёт тем же n_jobs='cuda', что и подготовка
+        labeled.filter(1.0, min(100.0, nyquist), verbose=False, n_jobs=gpu.filter_n_jobs())
     with warnings.catch_warnings():
         # Документированное расхождение advisory-пути: fit_ica — fastica, а ICLabel
         # обучен на extended infomax (смена алгоритма чистки — отдельное решение

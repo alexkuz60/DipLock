@@ -14,6 +14,7 @@ import type {
   InitStatus,
   JobCreated,
   JobStatus,
+  LocalResource,
   MainsResponse,
   MetaResponse,
   PreprocessResult,
@@ -138,6 +139,21 @@ function recordingJob<TResult>(kind: RecordingJobKind): RecordingJob<TResult> {
 export const api = {
   /** Версии, пути и активные параметры сервера. */
   meta: (signal?: AbortSignal) => request<MetaResponse>(`${API_PREFIX}/meta`, { signal }),
+
+  /** Локальный ресурс: автоопределение GPU + тумблер «Использовать GPU». */
+  resource: (signal?: AbortSignal) => request<LocalResource>(`${API_PREFIX}/resource`, { signal }),
+
+  /**
+   * Переключить тумблер «Использовать GPU» (пишется в MNE-конфиг сервера).
+   * 409 — включить нечего: CUDA недоступна, `detail` — причина для UI.
+   */
+  setResourceUseCuda: (useCuda: boolean, signal?: AbortSignal) =>
+    request<LocalResource>(`${API_PREFIX}/resource`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ use_cuda: useCuda }),
+      signal,
+    }),
 
   /** Готовность компонентов (MNE, БД, fsaverage, BEM). */
   initStatus: (signal?: AbortSignal) => request<InitStatus>('/init-status', { signal }),

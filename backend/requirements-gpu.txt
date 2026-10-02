@@ -1,0 +1,12 @@
+# Опциональное GPU-ускорение MNE (CUDA): КИХ-фильтрация и реземплинг на GPU.
+# Ставится только на машине с NVIDIA GPU и драйвером (проверка — `nvidia-smi -L`):
+#   venv/bin/pip install -r requirements-gpu.txt
+# Wheel привязан к серии CUDA: cuda12x — CUDA 12.x (старше — cupy-cuda11x,
+# см. «CUDA Version» в шапке nvidia-smi). Экстра [ctk] ставит заголовки/nvrtc
+# CUDA-тулкита: без них устройство видно, но **первое ядро** MNE падает
+# «Failed to find CUDA headers» (живой случай 02.10.2026) — проба в
+# services/gpu.py это ловит и показывает причину вместо упавшей задачи.
+# Без CuPy всё работает на CPU — тумблер «Использовать GPU» в «Настройках»
+# честно покажет причину отказа. CI GPU не имеет, поэтому в requirements.txt
+# зависимость не входит.
+cupy-cuda12x[ctk]

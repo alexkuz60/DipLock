@@ -10,6 +10,7 @@ import type {
   FilterResponse,
   InitStatus,
   JobStatus,
+  LocalResource,
   MainsResponse,
   MetaResponse,
   PreprocessResult,
@@ -213,6 +214,20 @@ export const initStatusFixture: InitStatus = {
     cache_dir: '/home/user/DipLock/data/cache',
   },
   api: { prefix: '/api/v1', docs_url: '/docs', meta_url: '/api/v1/meta' },
+}
+
+/** Локальный ресурс (GET /resource): рабочий GPU/CuPy, тумблер выключен. */
+export const localResourceFixture: LocalResource = {
+  gpu: {
+    present: true,
+    name: 'NVIDIA RTX A4000',
+    cupy: true,
+    usable: true,
+    mem_total_mb: 16376,
+    mem_free_mb: 15120,
+    reason: null,
+  },
+  use_cuda: false,
 }
 
 export const recordingFixture: RecordingMeta = {

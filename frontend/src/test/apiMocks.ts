@@ -9,6 +9,7 @@ import {
   evokedResultFixture,
   filterResponseFixture,
   initStatusFixture,
+  localResourceFixture,
   mainsFixture,
   metaFixture,
   preprocessJobFixture,
@@ -28,6 +29,7 @@ import type {
   FilterResponse,
   InitStatus,
   JobStatus,
+  LocalResource,
   MainsResponse,
   MetaResponse,
   PreprocessResult,
@@ -104,6 +106,10 @@ export type MockApiOptions = {
   recording?: RecordingMeta
   /** Смоделировать недоступность сервера (500 на /init-status) */
   initStatusFails?: boolean
+  /** Локальный ресурс для GET /resource (по умолчанию — рабочий GPU) */
+  localResource?: LocalResource
+  /** Ответ PUT /resource (например «CuPy не установлен», HTTP 409) */
+  localResourceFail?: string
   /** Смоделировать отказ сигналов записи (например 404 после TTL) */
   signalsFail?: boolean
   /** Стадия предподготовки, если запрос её не указал (срез 2.7) */
@@ -161,6 +167,17 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse({ detail: 'Сервис недоступен' }, 500)
       }
       return jsonResponse(options.initStatus ?? initStatusFixture)
+    }
+    if (url.includes('/resource')) {
+      if (method === 'PUT') {
+        if (options.localResourceFail) {
+          return jsonResponse({ detail: options.localResourceFail }, 409)
+        }
+        const body = JSON.parse(String(init?.body ?? '{}')) as { use_cuda?: boolean }
+        const current = options.localResource ?? localResourceFixture
+        return jsonResponse({ ...current, use_cuda: body.use_cuda ?? false })
+      }
+      return jsonResponse(options.localResource ?? localResourceFixture)
     }
     if (url.includes('/server/restart')) {
       if (options.restartFail) {

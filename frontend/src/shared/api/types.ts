@@ -120,6 +120,13 @@ export type ArtifactThresholds = Schemas['ArtifactThresholds']
 
 export type MetaResponse = Schemas['MetaResponse']
 
+/**
+ * Локальный ресурс (`GET/PUT /api/v1/resource`): автоопределение GPU сервера
+ * и тумблер «Использовать GPU» (источник истины — MNE-конфиг сервера, см.
+ * `backend/app/services/gpu.py`).
+ */
+export type LocalResource = Schemas['LocalResourceOut']
+
 export type MriSliceRef = Schemas['MriSliceRef']
 
 /** Ссылка на тома fsaverage для 3D-вида Niivue — схема `MriVolumeRef` */

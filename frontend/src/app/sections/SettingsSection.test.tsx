@@ -1,10 +1,11 @@
-/** Тесты раздела «Настройки»: масштаб текста, плотность, параметры расчёта. */
-import { screen } from '@testing-library/react'
+/** Тесты раздела «Настройки»: масштаб текста, плотность, параметры расчёта, локальный ресурс. */
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { SettingsSection } from './SettingsSection'
 import { useUiStore } from '@/shared/state/uiStore'
 import { mockApiFetch } from '@/test/apiMocks'
+import { localResourceFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 describe('раздел «Настройки»', () => {
@@ -51,5 +52,55 @@ describe('раздел «Настройки»', () => {
     expect(screen.getByText(/"alpha":\[8,16\]/)).toBeInTheDocument()
     expect(screen.getByText(/"high_gamma":\[64,128\]/)).toBeInTheDocument()
     expect(screen.getByText(/backend\/\.env/)).toBeInTheDocument()
+  })
+
+  it('показывает локальный ресурс и включает GPU тумблером', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<SettingsSection />)
+
+    const toggle = await screen.findByRole('checkbox', { name: /Использовать GPU/ })
+    expect(screen.getByText('Видеокарта')).toBeInTheDocument()
+    expect(screen.getByText('NVIDIA RTX A4000')).toBeInTheDocument()
+    expect(screen.getByText('15120 / 16376')).toBeInTheDocument()
+    expect(toggle).not.toBeDisabled()
+
+    await user.click(toggle)
+    // Ответ PUT обновляет кэш запроса — тумблер становится включённым
+    await waitFor(() => expect(toggle).toBeChecked())
+  })
+
+  it('блокирует тумблер и показывает причину, когда CUDA недоступна', async () => {
+    mockApiFetch({
+      localResource: {
+        ...localResourceFixture,
+        gpu: {
+          ...localResourceFixture.gpu,
+          cupy: false,
+          usable: false,
+          mem_total_mb: null,
+          mem_free_mb: null,
+          reason: 'CuPy не установлен (ImportError)',
+        },
+      },
+    })
+    renderWithProviders(<SettingsSection />)
+
+    const toggle = await screen.findByRole('checkbox', { name: /Использовать GPU/ })
+    expect(toggle).toBeDisabled()
+    expect(screen.getByText('CuPy не установлен (ImportError)')).toBeInTheDocument()
+    expect(screen.getByText('недоступна')).toBeInTheDocument()
+  })
+
+  it('показывает текст сервера, когда переключение отклонено (409)', async () => {
+    mockApiFetch({ localResourceFail: 'CuPy не установлен — ускорение недоступно' })
+    const user = userEvent.setup()
+    renderWithProviders(<SettingsSection />)
+
+    const toggle = await screen.findByRole('checkbox', { name: /Использовать GPU/ })
+    await user.click(toggle)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('CuPy не установлен — ускорение недоступно')
+    expect(toggle).not.toBeChecked()
   })
 })

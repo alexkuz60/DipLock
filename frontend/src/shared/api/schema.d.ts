@@ -1037,6 +1037,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/resource": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Локальный ресурс: GPU и ускорение MNE
+         * @description Автоопределение GPU этого сервера + состояние тумблера «Использовать GPU».
+         *
+         *     ``nvidia-smi`` и проба CuPy блокирующие — в потоке (правило Async);
+         *     ответ — для панели «Локальный ресурс» раздела «Настройки».
+         */
+        get: operations["get_resource_api_v1_resource_get"];
+        /**
+         * Тумблер «Использовать GPU»
+         * @description Переключить ускорение MNE на GPU: пишется в MNE-конфиг сервера.
+         *
+         *     409 — включить нечего: CUDA недоступна (текст причины — для UI);
+         *     выключение всегда возможно. Ответ — новое состояние тумблера.
+         */
+        put: operations["put_resource_api_v1_resource_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -2807,6 +2837,47 @@ export interface components {
              */
             sfreq: number;
         };
+        /**
+         * GpuStatusOut
+         * @description Автоопределение GPU локального сервера (один запрос, без расчётов).
+         */
+        GpuStatusOut: {
+            /**
+             * Present
+             * @description NVIDIA GPU виден системе (nvidia-smi или CuPy)
+             */
+            present: boolean;
+            /**
+             * Name
+             * @description Имя устройства
+             */
+            name?: string | null;
+            /**
+             * Cupy
+             * @description CuPy установлен и CUDA инициализируется
+             */
+            cupy: boolean;
+            /**
+             * Usable
+             * @description CUDA доступна для ускорения MNE (бэкенд MNE — только CuPy); включение тумблера без неё отвечает 409
+             */
+            usable: boolean;
+            /**
+             * Mem Total Mb
+             * @description Память GPU, МБ
+             */
+            mem_total_mb?: number | null;
+            /**
+             * Mem Free Mb
+             * @description Свободная память сейчас, МБ
+             */
+            mem_free_mb?: number | null;
+            /**
+             * Reason
+             * @description Почему CUDA недоступна — текст для UI (None, когда usable)
+             */
+            reason?: string | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -3038,6 +3109,26 @@ export interface components {
              * @description Строки, новые — в конце
              */
             entries?: components["schemas"]["JournalEntry"][];
+        };
+        /**
+         * LocalResourceOut
+         * @description ``GET /api/v1/resource`` — локальный ресурс: детекция GPU + тумблер.
+         */
+        LocalResourceOut: {
+            gpu: components["schemas"]["GpuStatusOut"];
+            /**
+             * Use Cuda
+             * @description Тумблер «Использовать GPU»: MNE-конфиг сервера (MNE_USE_CUDA), дефолт USE_CUDA из .env
+             */
+            use_cuda: boolean;
+        };
+        /**
+         * LocalResourceUpdate
+         * @description ``PUT /api/v1/resource``: новое состояние тумблера.
+         */
+        LocalResourceUpdate: {
+            /** Use Cuda */
+            use_cuda: boolean;
         };
         /**
          * MainsOut
@@ -6341,6 +6432,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerRestartOut"];
+                };
+            };
+        };
+    };
+    get_resource_api_v1_resource_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalResourceOut"];
+                };
+            };
+        };
+    };
+    put_resource_api_v1_resource_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalResourceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocalResourceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

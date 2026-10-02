@@ -39,6 +39,7 @@ import mne
 import numpy as np
 
 from app.core.config import Settings, settings
+from app.services import gpu
 
 # Минимальная переходная полоса MNE, Гц — столько запаса оставляем до Найквиста.
 _MIN_TRANSITION_HZ = 2.0
@@ -230,7 +231,12 @@ def band_filter_kwargs(
 
     Для FIR — явные ``l_trans_bandwidth``/``h_trans_bandwidth`` (N11) без
     ``fir_design`` (дефолт MNE); для IIR — только ``method="iir"`` (переходные
-    полосы в IIR-ветке MNE игнорирует). ``verbose`` добавляет вызывающий.
+    полосы в IIR-ветке MNE игнорирует), ``n_jobs`` не передаётся: ``'cuda'``
+    MNE допускает только для FIR, а в IIR-ветке строка упала бы в joblib.
+    При включённом тумблере «Использовать GPU» FIR-ветка получает
+    ``n_jobs='cuda'`` (`services/gpu.py`) — тем же конвейером считается и
+    АЧХ (``filter_response``), поэтому кривая соответствует реальной
+    подготовке. ``verbose`` добавляет вызывающий.
     """
     design = design_filter(l_freq, h_freq, sfreq, cfg)
     if design.method == "none":
@@ -242,6 +248,9 @@ def band_filter_kwargs(
         kwargs["l_trans_bandwidth"] = design.l_trans_bandwidth
     if design.h_trans_bandwidth is not None:
         kwargs["h_trans_bandwidth"] = design.h_trans_bandwidth
+    n_jobs = gpu.filter_n_jobs(cfg)
+    if n_jobs:
+        kwargs["n_jobs"] = n_jobs
     return kwargs
 
 
@@ -317,7 +326,9 @@ def filter_response(
         raw.filter(l_freq, h_freq, verbose=False, **kwargs)
     freqs = notch_frequencies(notch_hz, notch_harmonics, sfreq)
     if freqs:
-        raw.notch_filter(freqs, verbose=False)
+        # n_jobs — как в подготовке сигнала (edf_loader): notch по умолчанию
+        # method='fir', туда 'cuda' допустим — кривая отражает реальный конвейер
+        raw.notch_filter(freqs, verbose=False, n_jobs=gpu.filter_n_jobs(cfg))
 
     spectrum = np.abs(np.fft.rfft(raw.get_data()[0]))
     fft_freqs = np.fft.rfftfreq(n_fft, 1.0 / sfreq)

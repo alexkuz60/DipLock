@@ -45,6 +45,18 @@ def client() -> TestClient:
         yield c
 
 
+@pytest.fixture(autouse=True)
+def _cpu_only_cuda(monkeypatch) -> None:
+    """Тесты всегда на CPU: настоящий MNE-конфиг пользователя не включает CUDA.
+
+    ``MNE_USE_CUDA`` из окружения приоритетнее файла конфига MNE — этого
+    достаточно, чтобы детекция и тумблер не видели машину с GPU и CuPy
+    (``services/gpu.py``; включённый на машине разработчика тумблер заставил
+    бы тесты фильтрации уходить на GPU).
+    """
+    monkeypatch.setenv("MNE_USE_CUDA", "false")
+
+
 @pytest.fixture
 def isolated_io(tmp_path, monkeypatch):
     """Изолирует каталоги загрузок/результатов/кэша и отключает запись в БД.

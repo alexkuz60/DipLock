@@ -36,6 +36,19 @@
   фильтра (метод FIR/IIR, переходные полосы) — только через `services/filter_design.py`; формула
   переходных полос MNE `"auto"` зафиксирована числом и защищена дрейф-тестом
   (`docs/rules/filters.md`).
+- `n_jobs='cuda'` (локальный ресурс, `services/gpu.py`): MNE 1.13 допускает его **только**
+  для `method='fir'` (filter/notch) и `method='fft'` (реземплинг) — в IIR-ветку/`spectrum_fit`
+  строка ушла бы в joblib и упала, поэтому `band_filter_kwargs` не добавляет `n_jobs` при
+  `method='iir'`, а `filter_n_jobs()` возвращает `'cuda'` лишь при включённом тумблере **и**
+  рабочем CuPy (без второго условия MNE залогировал бы «CUDA not used»). CuPy —
+  опциональная зависимость (`backend/requirements-gpu.txt`, в `requirements.txt` его нет:
+  CI без GPU); детекция без расчёта — `GET /api/v1/resource`, контракт и гейты —
+  `tests/test_gpu.py`. Проба в `gpu.py` **функциональная** (FFT + компиляция ядра nvrtc):
+  `init_cuda` проверяет только устройство, а без заголовков тулкита (`cupy-cuda12x[ctk]`)
+  фильтр падает `RuntimeError: Failed to find CUDA headers` на первом ядре (живой случай
+  02.10.2026) — сломанная среда обязана давать `usable=false` с причиной, а не падающую
+  задачу. Дрейф: единственный бэкенд MNE для CUDA — CuPy, `n_jobs` у
+  notch/resample обязан оставаться `int | str | None`.
 - Единицы EDF: часть файлов без physical dimension MNE читает как «вольты» (в 1e6 раз больше) —
   есть авто-детект масштаба (`_ensure_physical_units`) и переменная `EDF_UNITS`.
 - Brodmann-атлас — `PALS_B12_Brodmann` (метки `Brodmann.N`), а не `aparc.a2009s`; нужен `nibabel`.

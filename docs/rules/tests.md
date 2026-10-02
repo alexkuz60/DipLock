@@ -703,3 +703,13 @@ Vitest **+10** — `channelNaming.test` (+5: четыре переименова
 `data-testid="track-label-T7"`), `eegChannels.test` (+1: `electrodeOptions`/
 `channelLabel` по схеме, `value` каноническое). pytest без изменений. Итог:
 pytest — **672** (без `integration` — **654**), Vitest — **971**.
+
+Локальный ресурс: автоопределение GPU и тумблер «Использовать GPU» (02.10.2026):
+pytest **+12** — `test_gpu.py` (**новый**: детекция GPU/CuPy с текстом причины, тумблер
+`MNE_USE_CUDA` — фолбэк на `USE_CUDA`/запись в MNE-конфиг/отказ без CuPy, гейт
+`filter_n_jobs` «тумблер ∧ CuPy», `n_jobs='cuda'` только для FIR-ветки, роуты
+`GET/PUT /resource` — 200 и 409), conftest — autouse `MNE_USE_CUDA=false` (тесты всегда
+на CPU, конфиг разработчика не влияет). Vitest **+3** — `SettingsSection.test` (панель
+«Локальный ресурс»: показ GPU и включение тумблером, блокировка с причиной при
+недоступной CUDA, текст 409 в алерте). Итог: pytest — **684** (без `integration` —
+**666**), Vitest — **974**.

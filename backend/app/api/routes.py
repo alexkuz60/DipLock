@@ -98,10 +98,12 @@ from app.schemas.analysis import (
     SurfaceOut,
 )
 from app.schemas.journal import JournalEntry, JournalOut
+from app.schemas.resource import GpuStatusOut, LocalResourceOut, LocalResourceUpdate
 from app.schemas.server import ServerRestartOut
 from app.services import (
     analysis_pipeline,
     fsaverage_assets,
+    gpu,
     journal,
     recording_store,
     results_store,
@@ -1613,4 +1615,59 @@ async def restart_server(background_tasks: BackgroundTasks) -> ServerRestartOut:
         restart_after_sec=server_control.RESTART_DELAY_SEC,
         server_started_at=str(started_at),
     )
+
+
+def _gpu_state() -> tuple[gpu.GpuInfo, bool]:
+    """Срез «локального ресурса»: детекция GPU и тумблер (для ``async def`` в потоке)."""
+    return gpu.detect_gpu(), gpu.get_use_cuda()
+
+
+def _local_resource_out(info: gpu.GpuInfo, use_cuda: bool) -> LocalResourceOut:
+    """Собрать контракт из данных сервиса (домен → Pydantic, F4)."""
+    return LocalResourceOut(
+        gpu=GpuStatusOut(
+            present=info.present,
+            name=info.name,
+            cupy=info.cupy,
+            usable=info.usable,
+            mem_total_mb=info.mem_total_mb,
+            mem_free_mb=info.mem_free_mb,
+            reason=info.reason,
+        ),
+        use_cuda=use_cuda,
+    )
+
+
+@router.get(
+    "/resource",
+    response_model=LocalResourceOut,
+    summary="Локальный ресурс: GPU и ускорение MNE",
+)
+async def get_resource() -> LocalResourceOut:
+    """Автоопределение GPU этого сервера + состояние тумблера «Использовать GPU».
+
+    ``nvidia-smi`` и проба CuPy блокирующие — в потоке (правило Async);
+    ответ — для панели «Локальный ресурс» раздела «Настройки».
+    """
+    info, use_cuda = await asyncio.to_thread(_gpu_state)
+    return _local_resource_out(info, use_cuda)
+
+
+@router.put(
+    "/resource",
+    response_model=LocalResourceOut,
+    summary="Тумблер «Использовать GPU»",
+)
+async def put_resource(payload: LocalResourceUpdate) -> LocalResourceOut:
+    """Переключить ускорение MNE на GPU: пишется в MNE-конфиг сервера.
+
+    409 — включить нечего: CUDA недоступна (текст причины — для UI);
+    выключение всегда возможно. Ответ — новое состояние тумблера.
+    """
+    try:
+        await asyncio.to_thread(gpu.set_use_cuda, payload.use_cuda)
+    except gpu.GpuUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    info, use_cuda = await asyncio.to_thread(_gpu_state)
+    return _local_resource_out(info, use_cuda)
 

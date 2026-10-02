@@ -51,7 +51,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 46 роутов (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 48 роутов (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -91,6 +91,7 @@ backend/app/
 │   ├── prepared_persist.py # дисковый персист массива по полосе: ключ band_key+notch+референс (Фаза B)
 │   ├── job_manager.py     # фоновые задачи: этапы, прогресс эпох, семафор (F7)
 │   ├── server_control.py  # перезапуск бэкенд из UI: guard'ы + os.execv (POST /server/restart)
+│   ├── gpu.py           # локальный ресурс: автоопределение GPU/CuPy + тумблер «Использовать GPU» → n_jobs='cuda' (GET/PUT /resource)
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
 │   ├── fsaverage_assets.py # BEM/transform fsaverage: файл → кэш → расчёт MNE (FreeSurfer)
 │   ├── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)
@@ -179,7 +180,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (971 Vitest / 672 pytest, без `integration` — 654), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (974 Vitest / 684 pytest, без `integration` — 666), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
