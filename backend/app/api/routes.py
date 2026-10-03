@@ -102,7 +102,14 @@ from app.schemas.analysis import (
     SurfaceOut,
 )
 from app.schemas.compare import CompareResult
-from app.schemas.group import GroupAggregateIn, GroupAggregateOut
+from app.schemas.group import (
+    GroupAggregateIn,
+    GroupAggregateOut,
+    GroupAnalysesPage,
+    GroupAnalysisCreateIn,
+    GroupAnalysisDetailOut,
+    GroupAnalysisSummaryOut,
+)
 from app.schemas.journal import JournalEntry, JournalOut
 from app.schemas.resource import GpuStatusOut, LocalResourceOut, LocalResourceUpdate
 from app.schemas.server import ServerRestartOut
@@ -125,7 +132,13 @@ from app.services.atlas_contours import (
 from app.services.channel_mix import mixes_for
 from app.services.compare import cached_compare_topomap
 from app.services.filter_design import filter_response
-from app.services.group_analysis import GroupError, aggregate_group
+from app.services.group_analysis import (
+    GroupError,
+    aggregate_group,
+    get_group_analysis,
+    list_group_analyses,
+    save_group_analysis,
+)
 from app.services.job_manager import job_manager, noop_progress
 from app.services.mains import mains_component
 from app.services.mri_slices import (
@@ -1815,4 +1828,55 @@ async def group_aggregate(payload: GroupAggregateIn) -> GroupAggregateOut:
     except GroupError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return GroupAggregateOut(**result)
+
+
+@router.post(
+    "/group/analyses", status_code=201, response_model=GroupAnalysisSummaryOut,
+    summary="Сохранить прогон группового анализа (история, не UPSERT)",
+)
+async def create_group_analysis(payload: GroupAnalysisCreateIn) -> GroupAnalysisSummaryOut:
+    """Снимок определения (фильтры + состав) в БД — числа не замораживаются.
+
+    Читается ``GET /group/analyses/{id}`` пересчётом по живой БД: история
+    хранит «что считалось», а не устаревающие цифры (§8.4.2 — история, не
+    UPSERT: повтор оставляет новую строку).
+    """
+    try:
+        summary = await save_group_analysis(
+            payload, settings, payload.name,
+        )
+    except GroupError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return GroupAnalysisSummaryOut(**summary)
+
+
+@router.get(
+    "/group/analyses", response_model=GroupAnalysesPage,
+    summary="История прогонов группового анализа",
+)
+async def list_group_analyses_route(
+    limit: int = Query(50, ge=1, le=200, description="Размер страницы"),
+    offset: int = Query(0, ge=0, description="Смещение"),
+) -> GroupAnalysesPage:
+    """Страница прогонов: новые сверху, честный ``total``, живые участники."""
+    page = await list_group_analyses(limit=limit, offset=offset)
+    return GroupAnalysesPage(
+        total=int(page["total"]),
+        items=[GroupAnalysisSummaryOut(**item) for item in page["items"]],
+    )
+
+
+@router.get(
+    "/group/analyses/{run_id}", response_model=GroupAnalysisDetailOut,
+    summary="Прогон группового анализа: паспорт + свежий агрегат",
+)
+async def get_group_analysis_route(run_id: int) -> GroupAnalysisDetailOut:
+    """Паспорт прогона и пересчёт его определения по живой БД; 404 — нет."""
+    detail = await get_group_analysis(run_id, settings)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Прогон {run_id} не найден")
+    return GroupAnalysisDetailOut(
+        run=GroupAnalysisSummaryOut(**detail["run"]),
+        aggregate=GroupAggregateOut(**detail["aggregate"]),
+    )
 

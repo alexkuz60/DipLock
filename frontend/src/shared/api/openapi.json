@@ -2933,6 +2933,141 @@
         }
       }
     },
+    "/api/v1/group/analyses": {
+      "post": {
+        "summary": "Сохранить прогон группового анализа (история, не UPSERT)",
+        "description": "Снимок определения (фильтры + состав) в БД — числа не замораживаются.\n\nЧитается ``GET /group/analyses/{id}`` пересчётом по живой БД: история\nхранит «что считалось», а не устаревающие цифры (§8.4.2 — история, не\nUPSERT: повтор оставляет новую строку).",
+        "operationId": "create_group_analysis_api_v1_group_analyses_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupAnalysisCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAnalysisSummaryOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "История прогонов группового анализа",
+        "description": "Страница прогонов: новые сверху, честный ``total``, живые участники.",
+        "operationId": "list_group_analyses_route_api_v1_group_analyses_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "description": "Размер страницы",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Размер страницы"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Смещение",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Смещение"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAnalysesPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/group/analyses/{run_id}": {
+      "get": {
+        "summary": "Прогон группового анализа: паспорт + свежий агрегат",
+        "description": "Паспорт прогона и пересчёт его определения по живой БД; 404 — нет.",
+        "operationId": "get_group_analysis_route_api_v1_group_analyses__run_id__get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAnalysisDetailOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -7048,6 +7183,233 @@
         ],
         "title": "GroupAggregateOut",
         "description": "Результат ``POST /group/aggregate``: агрегаты «BA × сессии» по выборке.\n\nДва словаря строк (структуры и поля Бродмана) — та же форма, что\n``RoiAggregateOut``: число точек между строками сравнимо, GOF — только\nвнутри полосы (подпись обязательна, `notes` показывает UI без правок)."
+      },
+      "GroupAnalysesPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Всего прогонов до пагинации"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GroupAnalysisSummaryOut"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Строки истории — новые сверху"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "GroupAnalysesPage",
+        "description": "Страница истории прогонов (``GET /group/analyses``)."
+      },
+      "GroupAnalysisCreateIn": {
+        "properties": {
+          "recording_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recording Ids",
+            "description": "Записи-участники (колонки тепловой карты); дедупликация сохраняет порядок выбора"
+          },
+          "band_key": {
+            "type": "string",
+            "title": "Band Key",
+            "description": "Полоса пакета (freq_bands/functional_bands) — агрегаты считаются в ней"
+          },
+          "gof_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gof Min",
+            "description": "Отбор точек: GOF ≥ X (внутри полосы); None — все точки"
+          },
+          "epoch_length_ms": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Length Ms",
+            "description": "Отбор прогонов по длине эпохи, мс (с допуском 0.01); None — любая"
+          },
+          "date_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date From",
+            "description": "Отбор прогонов: создан не раньше (UTC); None — без нижней границы"
+          },
+          "date_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date To",
+            "description": "Отбор прогонов: создан не позже (UTC); None — без верхней границы"
+          },
+          "names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Names",
+            "description": "Показывать только эти строки структур/полей Бродмана; None — все (знаменатель share не меняется)"
+          },
+          "top_n": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Top N",
+            "description": "Максимум строк в каждом словаре (топ по числу точек, как TOP_ROI отчёта)",
+            "default": 12
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Подпись истории («покой vs деятельность, диппы»); пустая — без имени"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_ids",
+          "band_key"
+        ],
+        "title": "GroupAnalysisCreateIn",
+        "description": "Вход ``POST /group/analyses``: тот же снимок + подпись прогона."
+      },
+      "GroupAnalysisDetailOut": {
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/GroupAnalysisSummaryOut"
+          },
+          "aggregate": {
+            "$ref": "#/components/schemas/GroupAggregateOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run",
+          "aggregate"
+        ],
+        "title": "GroupAnalysisDetailOut",
+        "description": "``GET /group/analyses/{id}``: паспорт прогона + свежий пересчёт агрегата.\n\nЧисла **не заморожены**: читаются по живой БД тем же сервисом, что и\n``POST /group/aggregate`` — история хранит определение, а не устаревающие\nцифры (решение-точка 1 плана G1)."
+      },
+      "GroupAnalysisSummaryOut": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Подпись пользователя; None — без имени"
+          },
+          "band_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Key"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At",
+            "description": "Когда прогон сохранён (UTC)"
+          },
+          "n_sessions_requested": {
+            "type": "integer",
+            "title": "N Sessions Requested",
+            "description": "Размер группы при сохранении; сейчас живых участников может быть меньше"
+          },
+          "n_members_alive": {
+            "type": "integer",
+            "title": "N Members Alive",
+            "description": "Сколько участников ещё в БД (записи удаляются каскадно, §8.4.3)"
+          },
+          "params_sig": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params Sig",
+            "description": "Отпечаток фильтров — ключ истории"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "n_sessions_requested",
+          "n_members_alive"
+        ],
+        "title": "GroupAnalysisSummaryOut",
+        "description": "Строка истории ``GET /group/analyses``: определение без пересчёта."
       },
       "GroupCellOut": {
         "properties": {

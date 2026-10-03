@@ -147,3 +147,50 @@ class GroupAggregateOut(BaseModel):
     )
     duration_sec_calc: float = 0.0
 
+
+
+class GroupAnalysisCreateIn(GroupAggregateIn):
+    """Вход ``POST /group/analyses``: тот же снимок + подпись прогона."""
+
+    name: str | None = Field(
+        default=None, max_length=128,
+        description="Подпись истории («покой vs деятельность, диппы»); пустая — без имени",
+    )
+
+
+class GroupAnalysisSummaryOut(BaseModel):
+    """Строка истории ``GET /group/analyses``: определение без пересчёта."""
+
+    id: int
+    name: str | None = Field(default=None, description="Подпись пользователя; None — без имени")
+    band_key: str | None = None
+    created_at: datetime | None = Field(default=None, description="Когда прогон сохранён (UTC)")
+    n_sessions_requested: int = Field(
+        description="Размер группы при сохранении; сейчас живых участников может быть меньше",
+    )
+    n_members_alive: int = Field(
+        description="Сколько участников ещё в БД (записи удаляются каскадно, §8.4.3)",
+    )
+    params_sig: str | None = Field(default=None, description="Отпечаток фильтров — ключ истории")
+
+
+class GroupAnalysisDetailOut(BaseModel):
+    """``GET /group/analyses/{id}``: паспорт прогона + свежий пересчёт агрегата.
+
+    Числа **не заморожены**: читаются по живой БД тем же сервисом, что и
+    ``POST /group/aggregate`` — история хранит определение, а не устаревающие
+    цифры (решение-точка 1 плана G1).
+    """
+
+    run: GroupAnalysisSummaryOut
+    aggregate: GroupAggregateOut
+
+
+class GroupAnalysesPage(BaseModel):
+    """Страница истории прогонов (``GET /group/analyses``)."""
+
+    total: int = Field(description="Всего прогонов до пагинации")
+    items: list[GroupAnalysisSummaryOut] = Field(
+        default_factory=list, description="Строки истории — новые сверху",
+    )
+

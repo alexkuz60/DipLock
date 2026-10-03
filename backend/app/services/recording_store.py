@@ -34,6 +34,7 @@ from app.models.db import (
     Dipole,
     DipolePoint,
     EpochRecord,
+    GroupAnalysisMember,
     RecordingRecord,
     ReportBandSummary,
     ReportDynamics,
@@ -80,6 +81,11 @@ async def _delete_recording_rows(session: AsyncSession, recording_id: str) -> No
     )
     await session.execute(
         delete(RecordingRecord).where(RecordingRecord.recording_id == recording_id)
+    )
+    # Членство в групповых прогонах (остаток 4.7): сам прогон — история и
+    # остаётся, состав убывает вместе с записью (§8.4.3, явный DELETE).
+    await session.execute(
+        delete(GroupAnalysisMember).where(GroupAnalysisMember.recording_id == recording_id)
     )
 
 

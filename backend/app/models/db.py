@@ -345,6 +345,47 @@ class ReportDynamics(Base):
     share = Column(Float, nullable=True)
 
 
+class GroupAnalysis(Base):
+    """Прогон группового анализа (остаток 4.7, Фаза 5): снимок определения.
+
+    Хранит **определение** — фильтры и отпечаток — а не замороженные числа:
+    агрегат пересчитывается по живой БД при чтении (решение-точка 1 плана:
+    честность по текущим данным; строки-участники живут отдельно и убывают
+    каскадно вместе с записями, §8.4.3). История прогонов — не UPSERT
+    (§8.4.2): каждая кнопка «Сохранить прогон» оставляет свою строку.
+    """
+
+    __tablename__ = "group_analyses"
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=True)  # подпись пользователя; NULL — без имени
+    band_key = Column(String, nullable=True)
+    filters = Column(JSON, nullable=True)  # GroupAggregateIn без recording_ids
+    params_sig = Column(String, nullable=True)  # отпечаток фильтров (ключ истории)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    n_sessions_requested = Column(Integer, nullable=True)  # размер группы при создании
+
+
+class GroupAnalysisMember(Base):
+    """Участник группы: запись в составе прогона (many-to-many + порядок выбора).
+
+    ``recording_id`` — без FK: SQLite не проверяет внешние ключи по умолчанию,
+    а членство обязано убывать вместе с записью — это делает явным
+    ``recording_store._delete_recording_rows`` (тот же приём, что и для
+    строк ``sessions``/``analyses``, §8.4.3).
+    """
+
+    __tablename__ = "group_analysis_members"
+    __table_args__ = (
+        Index("ux_group_members_pair", "group_analysis_id", "recording_id", unique=True),
+    )
+    id = Column(Integer, primary_key=True)
+    group_analysis_id = Column(
+        Integer, ForeignKey("group_analyses.id", ondelete="CASCADE"), index=True,
+    )
+    recording_id = Column(String, nullable=True, index=True)
+    position = Column(Integer, nullable=True)  # порядок выбора в UI — колонки карты
+
+
 def _sync_driver_url(url: URL) -> str:
     """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 

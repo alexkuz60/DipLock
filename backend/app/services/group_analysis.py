@@ -22,19 +22,24 @@
 сверяются с точками — расхождение уходит в ``warnings`` (одна истина на
 прогон, §8, вариант (а)).
 """
+import hashlib
+import json
 import math
 import time
 from collections import defaultdict
+from datetime import datetime
 from statistics import median, pstdev
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.core.config import Settings
 from app.models.db import (
     Analysis,
     AsyncSessionLocal,
     DipolePoint,
+    GroupAnalysis,
+    GroupAnalysisMember,
     RecordingRecord,
     ReportNameCount,
     ReportRun,
@@ -372,4 +377,173 @@ async def aggregate_group(
         "warnings": warnings,
         "duration_sec_calc": round(time.perf_counter() - started, 3),
     }
+
+
+
+# ------------------------- персист прогонов (G2) ---------------------------
+
+def filters_sig(payload: GroupAggregateIn) -> str:
+    """Отпечаток определения прогона: фильтры + состав (SHA-256 короткий).
+
+    Ключ истории §8.4.2: повтор с тем же определением — честная новая строка,
+    но в списке видно «такое же уже было».
+    """
+    canonical = json.dumps(
+        {
+            "band_key": payload.band_key,
+            "gof_min": payload.gof_min,
+            "epoch_length_ms": payload.epoch_length_ms,
+            "date_from": payload.date_from.isoformat() if payload.date_from else None,
+            "date_to": payload.date_to.isoformat() if payload.date_to else None,
+            "names": payload.names,
+            "top_n": payload.top_n,
+            "recording_ids": [
+                str(rid) for rid in dict.fromkeys(payload.recording_ids) if rid
+            ],
+        },
+        sort_keys=True, ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+
+async def save_group_analysis(
+    payload: GroupAggregateIn, cfg: Settings, name: str | None,
+) -> dict[str, Any]:
+    """Сохраняет прогон (определение) и возвращает его паспорт.
+
+    Валидация — как у живого агрегата: неизвестная полоса и пустая выборка
+    не создают строку (``GroupError`` → 400 в роуте).
+    """
+    catalog = report_band_catalog(cfg)
+    if payload.band_key not in catalog:
+        raise GroupError(
+            f"Неизвестная полоса: {payload.band_key}; доступны: {', '.join(catalog)}",
+        )
+    participant_ids = list(dict.fromkeys(str(rid) for rid in payload.recording_ids if rid))
+    if not participant_ids:
+        raise GroupError("Нужна хотя бы одна запись участника (recording_ids пуст)")
+
+    await init_db()
+    filters = payload.model_dump(exclude={"recording_ids", "name"})
+    sig = filters_sig(payload)
+    async with AsyncSessionLocal() as session:
+        run = GroupAnalysis(
+            name=(name or "").strip()[:128] or None,
+            band_key=payload.band_key,
+            filters=json.loads(json.dumps(filters, default=str)),
+            params_sig=sig,
+            created_at=datetime.utcnow(),
+            n_sessions_requested=len(participant_ids),
+        )
+        session.add(run)
+        await session.flush()
+        for position, rid in enumerate(participant_ids):
+            session.add(GroupAnalysisMember(
+                group_analysis_id=run.id, recording_id=rid, position=position,
+            ))
+        await session.commit()
+        return _summary_row(run, alive=len(participant_ids))
+
+
+async def _run_row(run_id: int) -> tuple[GroupAnalysis | None, list[str]]:
+    """Строка прогона и её участники в порядке выбора; ``None`` — нет/удалён."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        run = await session.get(GroupAnalysis, run_id)
+        if run is None:
+            return None, []
+        rows = list((await session.scalars(
+            select(GroupAnalysisMember)
+            .where(GroupAnalysisMember.group_analysis_id == run_id)
+            .order_by(GroupAnalysisMember.position, GroupAnalysisMember.id)
+        )).all())
+    return run, [str(row.recording_id) for row in rows if row.recording_id]
+
+
+
+def _summary_row(run: GroupAnalysis, *, alive: int) -> dict[str, Any]:
+    """Паспорт прогона для списка/деталей (``GroupAnalysisSummaryOut``)."""
+    return {
+        "id": int(run.id),
+        "name": run.name,
+        "band_key": run.band_key,
+        "created_at": run.created_at,
+        "n_sessions_requested": int(run.n_sessions_requested or 0),
+        "n_members_alive": alive,
+        "params_sig": run.params_sig,
+    }
+
+
+async def list_group_analyses(limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    """История прогонов: страница ``group_analyses`` + живые участники одним запросом.
+
+    ``total`` — до пагинации (инвариант read ``docs/rules/results-db.md``);
+    счётчик живых членов — групповой ``GROUP BY`` по прогонам страницы (не N+1).
+    """
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        total = int(await session.scalar(select(func.count()).select_from(GroupAnalysis)) or 0)
+        runs = list((await session.scalars(
+            select(GroupAnalysis)
+            .order_by(GroupAnalysis.created_at.desc(), GroupAnalysis.id.desc())
+            .limit(limit).offset(offset)
+        )).all())
+        run_ids = [int(run.id) for run in runs]
+        alive: dict[int, int] = {}
+        if run_ids:
+            counts = (await session.execute(
+                select(GroupAnalysisMember.group_analysis_id, func.count())
+                .where(GroupAnalysisMember.group_analysis_id.in_(run_ids))
+                .group_by(GroupAnalysisMember.group_analysis_id)
+            )).all()
+            alive = {int(rid): int(count) for rid, count in counts}
+    return {
+        "total": total,
+        "items": [_summary_row(run, alive=alive.get(int(run.id), 0)) for run in runs],
+    }
+
+
+async def get_group_analysis(
+    run_id: int, cfg: Settings,
+) -> dict[str, Any] | None:
+    """Паспорт прогона + **свежий** пересчёт агрегата по живой БД; ``None`` — нет.
+
+    Состав берётся из ``group_analysis_members``, фильтры — из снимка
+    ``group_analyses.filters``; участники, чьи записи уже удалены, честно
+    уходят в ``warnings`` агрегата («нет прогона»), а не теряются молча.
+    """
+    run, member_ids = await _run_row(run_id)
+    if run is None:
+        return None
+    filters = dict(run.filters or {})
+    payload = GroupAggregateIn(
+        recording_ids=member_ids,
+        band_key=str(filters.get("band_key") or run.band_key or ""),
+        gof_min=filters.get("gof_min"),
+        epoch_length_ms=filters.get("epoch_length_ms"),
+        date_from=_iso(filters.get("date_from")),
+        date_to=_iso(filters.get("date_to")),
+        names=filters.get("names"),
+        top_n=int(filters.get("top_n") or 12),
+    )
+    aggregate = await aggregate_group(payload, cfg)
+    requested = int(run.n_sessions_requested or len(member_ids))
+    if len(member_ids) < requested:
+        aggregate["warnings"].insert(0, (
+            f"Участников в БД {len(member_ids)} из {requested} сохранённых: "
+            "записи удалялись после сохранения прогона (§8.4.3)"
+        ))
+    return {"run": _summary_row(run, alive=len(member_ids)), "aggregate": aggregate}
+
+
+def _iso(value: Any) -> datetime | None:
+    """JSON-дата снимка → ``datetime``; мусор — честный ``None``."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
 

@@ -1161,6 +1161,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/group/analyses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * История прогонов группового анализа
+         * @description Страница прогонов: новые сверху, честный ``total``, живые участники.
+         */
+        get: operations["list_group_analyses_route_api_v1_group_analyses_get"];
+        put?: never;
+        /**
+         * Сохранить прогон группового анализа (история, не UPSERT)
+         * @description Снимок определения (фильтры + состав) в БД — числа не замораживаются.
+         *
+         *     Читается ``GET /group/analyses/{id}`` пересчётом по живой БД: история
+         *     хранит «что считалось», а не устаревающие цифры (§8.4.2 — история, не
+         *     UPSERT: повтор оставляет новую строку).
+         */
+        post: operations["create_group_analysis_api_v1_group_analyses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/group/analyses/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Прогон группового анализа: паспорт + свежий агрегат
+         * @description Паспорт прогона и пересчёт его определения по живой БД; 404 — нет.
+         */
+        get: operations["get_group_analysis_route_api_v1_group_analyses__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -3491,6 +3539,121 @@ export interface components {
              * @default 0
              */
             duration_sec_calc: number;
+        };
+        /**
+         * GroupAnalysesPage
+         * @description Страница истории прогонов (``GET /group/analyses``).
+         */
+        GroupAnalysesPage: {
+            /**
+             * Total
+             * @description Всего прогонов до пагинации
+             */
+            total: number;
+            /**
+             * Items
+             * @description Строки истории — новые сверху
+             */
+            items?: components["schemas"]["GroupAnalysisSummaryOut"][];
+        };
+        /**
+         * GroupAnalysisCreateIn
+         * @description Вход ``POST /group/analyses``: тот же снимок + подпись прогона.
+         */
+        GroupAnalysisCreateIn: {
+            /**
+             * Recording Ids
+             * @description Записи-участники (колонки тепловой карты); дедупликация сохраняет порядок выбора
+             */
+            recording_ids: string[];
+            /**
+             * Band Key
+             * @description Полоса пакета (freq_bands/functional_bands) — агрегаты считаются в ней
+             */
+            band_key: string;
+            /**
+             * Gof Min
+             * @description Отбор точек: GOF ≥ X (внутри полосы); None — все точки
+             */
+            gof_min?: number | null;
+            /**
+             * Epoch Length Ms
+             * @description Отбор прогонов по длине эпохи, мс (с допуском 0.01); None — любая
+             */
+            epoch_length_ms?: number | null;
+            /**
+             * Date From
+             * @description Отбор прогонов: создан не раньше (UTC); None — без нижней границы
+             */
+            date_from?: string | null;
+            /**
+             * Date To
+             * @description Отбор прогонов: создан не позже (UTC); None — без верхней границы
+             */
+            date_to?: string | null;
+            /**
+             * Names
+             * @description Показывать только эти строки структур/полей Бродмана; None — все (знаменатель share не меняется)
+             */
+            names?: string[] | null;
+            /**
+             * Top N
+             * @description Максимум строк в каждом словаре (топ по числу точек, как TOP_ROI отчёта)
+             * @default 12
+             */
+            top_n: number;
+            /**
+             * Name
+             * @description Подпись истории («покой vs деятельность, диппы»); пустая — без имени
+             */
+            name?: string | null;
+        };
+        /**
+         * GroupAnalysisDetailOut
+         * @description ``GET /group/analyses/{id}``: паспорт прогона + свежий пересчёт агрегата.
+         *
+         *     Числа **не заморожены**: читаются по живой БД тем же сервисом, что и
+         *     ``POST /group/aggregate`` — история хранит определение, а не устаревающие
+         *     цифры (решение-точка 1 плана G1).
+         */
+        GroupAnalysisDetailOut: {
+            run: components["schemas"]["GroupAnalysisSummaryOut"];
+            aggregate: components["schemas"]["GroupAggregateOut"];
+        };
+        /**
+         * GroupAnalysisSummaryOut
+         * @description Строка истории ``GET /group/analyses``: определение без пересчёта.
+         */
+        GroupAnalysisSummaryOut: {
+            /** Id */
+            id: number;
+            /**
+             * Name
+             * @description Подпись пользователя; None — без имени
+             */
+            name?: string | null;
+            /** Band Key */
+            band_key?: string | null;
+            /**
+             * Created At
+             * @description Когда прогон сохранён (UTC)
+             */
+            created_at?: string | null;
+            /**
+             * N Sessions Requested
+             * @description Размер группы при сохранении; сейчас живых участников может быть меньше
+             */
+            n_sessions_requested: number;
+            /**
+             * N Members Alive
+             * @description Сколько участников ещё в БД (записи удаляются каскадно, §8.4.3)
+             */
+            n_members_alive: number;
+            /**
+             * Params Sig
+             * @description Отпечаток фильтров — ключ истории
+             */
+            params_sig?: string | null;
         };
         /**
          * GroupCellOut
@@ -7382,6 +7545,104 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupAggregateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_group_analyses_route_api_v1_group_analyses_get: {
+        parameters: {
+            query?: {
+                /** @description Размер страницы */
+                limit?: number;
+                /** @description Смещение */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupAnalysesPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_group_analysis_api_v1_group_analyses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupAnalysisCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupAnalysisSummaryOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_group_analysis_route_api_v1_group_analyses__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupAnalysisDetailOut"];
                 };
             };
             /** @description Validation Error */

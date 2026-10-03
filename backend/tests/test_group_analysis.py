@@ -12,6 +12,8 @@ import asyncio
 import pytest
 
 from app.core.config import settings
+from app.models import db as db_module
+from app.models.db import GroupAnalysis, GroupAnalysisMember
 from app.schemas.group import GroupAggregateIn, GroupAggregateOut
 from app.services import recording_store, results_store
 from app.services.group_analysis import aggregate_group
@@ -103,12 +105,27 @@ def _seed(name_counts: dict | None = None) -> None:
 @pytest.fixture(autouse=True)
 def clean_state():
     """Строки теста убираются до и после: общая tmp-БД не помнит соседей."""
+
+    def _drop_runs() -> None:
+        """Прогоны группового анализа — вместе со строками записей (и после)."""
+        async def _run() -> None:
+            from sqlalchemy import delete
+
+            await db_module.init_db()
+            async with db_module.AsyncSessionLocal() as session:
+                await session.execute(delete(GroupAnalysisMember))
+                await session.execute(delete(GroupAnalysis))
+                await session.commit()
+        asyncio.run(_run())
+
     for rid in _RECS:
         asyncio.run(recording_store.drop_recording_rows(rid))
+    _drop_runs()
     recording_registry.clear()
     yield
     for rid in _RECS:
         asyncio.run(recording_store.drop_recording_rows(rid))
+    _drop_runs()
     recording_registry.clear()
 
 
@@ -256,4 +273,81 @@ def test_route_validation_400_and_contract(client):
     assert body.n_points_total == 4
     assert body.filters.gof_min == 0.7
     assert len(body.participants) == 2
+
+
+# ------------------------------ G2: персист прогонов ------------------------
+
+def _create_run(client, **overrides) -> dict:
+    """Сохранённый прогон через ``POST /group/analyses`` (201 + паспорт)."""
+    payload = {
+        "recording_ids": ["rec-group-a", "rec-group-b"],
+        "band_key": "alpha",
+        "name": "покой vs деятельность",
+    }
+    payload.update(overrides)
+    response = client.post(f"{_PREFIX}/group/analyses", json=payload)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_save_run_history_not_upsert(client):
+    """История прогонов: повтор — новая строка, список новых сверху, total честный."""
+    _seed()
+    first = _create_run(client)
+    second = _create_run(client, name="повтор")
+    assert first["id"] != second["id"], "§8.4.2: история, не UPSERT"
+    assert first["name"] == "покой vs деятельность"
+    assert first["n_sessions_requested"] == 2
+    assert first["params_sig"] and first["params_sig"] == second["params_sig"]
+
+    page = client.get(f"{_PREFIX}/group/analyses").json()
+    assert page["total"] >= 2
+    assert page["items"][0]["id"] == second["id"]  # новые сверху
+    assert page["items"][0]["n_members_alive"] == 2
+
+
+def test_saved_run_recomputes_from_live_db(client):
+    """Чтение прогона — свежий пересчёт: фильтры снимка + живые точки БД."""
+    _seed()
+    run = _create_run(client, gof_min=0.75)
+    detail = client.get(f"{_PREFIX}/group/analyses/{run['id']}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["run"]["id"] == run["id"]
+    aggregate = GroupAggregateOut(**body["aggregate"])
+    # Числа пересчитаны по снимку фильтров (не заморожены)
+    assert aggregate.n_points_total == 3
+    assert aggregate.filters.gof_min == 0.75
+
+    missing = client.get(f"{_PREFIX}/group/analyses/424242")
+    assert missing.status_code == 404
+
+
+def test_run_validation_400(client):
+    """Сохранение повторяет шлюзы живого агрегата: полоса и пустая выборка."""
+    bad = client.post(f"{_PREFIX}/group/analyses", json={
+        "recording_ids": ["rec-group-a"], "band_key": "alpja",
+    })
+    assert bad.status_code == 400
+    assert "Неизвестная полоса" in bad.json()["detail"]
+
+    empty = client.post(f"{_PREFIX}/group/analyses", json={
+        "recording_ids": ["", ""], "band_key": "alpha",
+    })
+    assert empty.status_code == 400
+
+
+def test_member_cascade_on_recording_delete(client):
+    """Удаление записи убывает из состава прогона; сам прогон — история, остаётся."""
+    _seed()
+    run = _create_run(client)
+    asyncio.run(recording_store.drop_recording_rows("rec-group-a"))
+
+    detail = client.get(f"{_PREFIX}/group/analyses/{run['id']}").json()
+    # Один из двух участников удалён: честное предупреждение в шапке
+    assert any("из 2 сохранённых" in w for w in detail["aggregate"]["warnings"])
+    assert detail["run"]["n_members_alive"] == 1
+    # Прогон не исчез — история переживает записи (§8.4.3)
+    page = client.get(f"{_PREFIX}/group/analyses").json()
+    assert any(item["id"] == run["id"] for item in page["items"])
 
