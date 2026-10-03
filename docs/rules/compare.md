@@ -4,7 +4,8 @@
 > `backend/app/services/compare.py`, контракт `backend/app/schemas/compare.py`,
 > роуты №17–19 (`docs/rules/api-jobs.md`), раздел UI «Групповой анализ»
 > (`frontend/src/app/sections/group/`). Тип 2 (поиск общих закономерностей в
-> группе N>2, ORM `group_analysis`) — отдельное планирование.
+> группе N>2) — закрыт срезами G1–G4 03.10.2026, правило
+> `docs/rules/group-analysis.md`.
 
 ## Зачем и что сравнивает
 

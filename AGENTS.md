@@ -177,12 +177,13 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/eeg.md` | раздел «ЭЭГ»: трек канала и спектрограмма |
 | `docs/rules/api-jobs.md` | инвентарь роутов, правило «задача = job», ETag/304, ошибки |
 | `docs/rules/compare.md` | дифференциальный анализ двух записей (B9): дельты B − A, кластерный тест MNE, карты разности |
+| `docs/rules/group-analysis.md` | групповой анализ группы N>2 (остаток 4.7): агрегаты «BA × сессии», два знаменателя share, персист прогонов, тепловая карта, кластеры диполей (B8) |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (985 Vitest / 693 pytest, без `integration` — 675), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (996 Vitest / 708 pytest, без `integration` — 690), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

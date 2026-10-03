@@ -207,7 +207,7 @@ export const useGroupRun = create<GroupRunState>()(
       },
     }),
     {
-      name: 'diplock-group-run',
+      name: 'diplock.group-run',
       // Персистятся только фильтры и подпись: выборка, результат и
       // история — состояние сессии (правило `docs/rules/frontend-state.md`).
       partialize: (state) => ({
