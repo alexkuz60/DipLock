@@ -102,6 +102,7 @@ from app.schemas.analysis import (
     SurfaceOut,
 )
 from app.schemas.compare import CompareResult
+from app.schemas.group import GroupAggregateIn, GroupAggregateOut
 from app.schemas.journal import JournalEntry, JournalOut
 from app.schemas.resource import GpuStatusOut, LocalResourceOut, LocalResourceUpdate
 from app.schemas.server import ServerRestartOut
@@ -124,6 +125,7 @@ from app.services.atlas_contours import (
 from app.services.channel_mix import mixes_for
 from app.services.compare import cached_compare_topomap
 from app.services.filter_design import filter_response
+from app.services.group_analysis import GroupError, aggregate_group
 from app.services.job_manager import job_manager, noop_progress
 from app.services.mains import mains_component
 from app.services.mri_slices import (
@@ -1790,4 +1792,27 @@ async def put_resource(payload: LocalResourceUpdate) -> LocalResourceOut:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     info, use_cuda = await asyncio.to_thread(_gpu_state)
     return _local_resource_out(info, use_cuda)
+
+
+# ---------------------------------------------------------------------------
+# Групповой анализ (остаток 4.7, Фаза 5): агрегаты «BA × сессии»
+
+@router.post(
+    "/group/aggregate",
+    response_model=GroupAggregateOut,
+    summary="Групповой агрегат выборки «BA × сессии»",
+)
+async def group_aggregate(payload: GroupAggregateIn) -> GroupAggregateOut:
+    """Агрегаты дипольных точек выбранной полосы по списку записей (§3.5).
+
+    Вход — записи-участники (кандидаты ``GET /sessions``) и групповые фильтры
+    «диапазон / длина эпохи / GOF / BA-ROI / дата». Расчёт — выборки и
+    арифметика по ``dipole_points`` последнего прогона каждой записи (без
+    MNE), поэтому синхронно, без задачи. ``GroupError`` → 400 с текстом для UI.
+    """
+    try:
+        result = await aggregate_group(payload, settings)
+    except GroupError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return GroupAggregateOut(**result)
 

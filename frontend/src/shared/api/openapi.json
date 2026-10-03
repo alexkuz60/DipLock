@@ -2894,6 +2894,45 @@
         }
       }
     },
+    "/api/v1/group/aggregate": {
+      "post": {
+        "summary": "Групповой агрегат выборки «BA × сессии»",
+        "description": "Агрегаты дипольных точек выбранной полосы по списку записей (§3.5).\n\nВход — записи-участники (кандидаты ``GET /sessions``) и групповые фильтры\n«диапазон / длина эпохи / GOF / BA-ROI / дата». Расчёт — выборки и\nарифметика по ``dipole_points`` последнего прогона каждой записи (без\nMNE), поэтому синхронно, без задачи. ``GroupError`` → 400 с текстом для UI.",
+        "operationId": "group_aggregate_api_v1_group_aggregate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupAggregateIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupAggregateOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -6834,6 +6873,473 @@
         ],
         "title": "GpuStatusOut",
         "description": "Автоопределение GPU локального сервера (один запрос, без расчётов)."
+      },
+      "GroupAggregateIn": {
+        "properties": {
+          "recording_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recording Ids",
+            "description": "Записи-участники (колонки тепловой карты); дедупликация сохраняет порядок выбора"
+          },
+          "band_key": {
+            "type": "string",
+            "title": "Band Key",
+            "description": "Полоса пакета (freq_bands/functional_bands) — агрегаты считаются в ней"
+          },
+          "gof_min": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gof Min",
+            "description": "Отбор точек: GOF ≥ X (внутри полосы); None — все точки"
+          },
+          "epoch_length_ms": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Length Ms",
+            "description": "Отбор прогонов по длине эпохи, мс (с допуском 0.01); None — любая"
+          },
+          "date_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date From",
+            "description": "Отбор прогонов: создан не раньше (UTC); None — без нижней границы"
+          },
+          "date_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date To",
+            "description": "Отбор прогонов: создан не позже (UTC); None — без верхней границы"
+          },
+          "names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Names",
+            "description": "Показывать только эти строки структур/полей Бродмана; None — все (знаменатель share не меняется)"
+          },
+          "top_n": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Top N",
+            "description": "Максимум строк в каждом словаре (топ по числу точек, как TOP_ROI отчёта)",
+            "default": 12
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_ids",
+          "band_key"
+        ],
+        "title": "GroupAggregateIn",
+        "description": "Вход ``POST /group/aggregate``: выборка записей + групповые фильтры §3.5."
+      },
+      "GroupAggregateOut": {
+        "properties": {
+          "filters": {
+            "$ref": "#/components/schemas/GroupFiltersOut"
+          },
+          "participants": {
+            "items": {
+              "$ref": "#/components/schemas/GroupParticipantOut"
+            },
+            "type": "array",
+            "title": "Participants",
+            "description": "Записи-участники: порядок входного списка (колонки тепловой карты)"
+          },
+          "n_points_total": {
+            "type": "integer",
+            "title": "N Points Total",
+            "description": "Точек выборки в полосе после всех фильтров"
+          },
+          "structures": {
+            "items": {
+              "$ref": "#/components/schemas/GroupRowOut"
+            },
+            "type": "array",
+            "title": "Structures"
+          },
+          "brodmann": {
+            "items": {
+              "$ref": "#/components/schemas/GroupRowOut"
+            },
+            "type": "array",
+            "title": "Brodmann"
+          },
+          "n_structure_names": {
+            "type": "integer",
+            "title": "N Structure Names",
+            "description": "Всего названий структур в выборке (показан топ; разница видна из этого числа)"
+          },
+          "n_brodmann_names": {
+            "type": "integer",
+            "title": "N Brodmann Names",
+            "description": "Всего названий полей Бродмана в выборке"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes",
+            "description": "Правила чтения чисел — показываются в UI под результатом без редактирования"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "Честные предупреждения: записи без прогонов, пустые полосы, расхождения счётчиков"
+          },
+          "duration_sec_calc": {
+            "type": "number",
+            "title": "Duration Sec Calc",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "filters",
+          "participants",
+          "n_points_total",
+          "n_structure_names",
+          "n_brodmann_names"
+        ],
+        "title": "GroupAggregateOut",
+        "description": "Результат ``POST /group/aggregate``: агрегаты «BA × сессии» по выборке.\n\nДва словаря строк (структуры и поля Бродмана) — та же форма, что\n``RoiAggregateOut``: число точек между строками сравнимо, GOF — только\nвнутри полосы (подпись обязательна, `notes` показывает UI без правок)."
+      },
+      "GroupCellOut": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Точек этой записи в строке"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share",
+            "description": "Доля точек **своей записи** (в полосе), попавших в строку, 0..1 — между записями сравнима"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "count",
+          "share"
+        ],
+        "title": "GroupCellOut",
+        "description": "Ячейка «строка × запись»: сколько точек записи попало в строку."
+      },
+      "GroupFiltersOut": {
+        "properties": {
+          "band_key": {
+            "type": "string",
+            "title": "Band Key"
+          },
+          "band_hz": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Band Hz",
+            "description": "Границы полосы, Гц [lo, hi] — из каталога /meta"
+          },
+          "gof_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gof Min",
+            "description": "Отбор точек по GOF; None — без отбора"
+          },
+          "epoch_length_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Length Ms",
+            "description": "Отбор прогонов по длине эпохи, мс"
+          },
+          "date_from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date From"
+          },
+          "date_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date To"
+          },
+          "names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Names",
+            "description": "Фильтр строк результата (знаменатель share — все точки полосы)"
+          },
+          "top_n": {
+            "type": "integer",
+            "title": "Top N"
+          }
+        },
+        "type": "object",
+        "required": [
+          "band_key",
+          "band_hz",
+          "top_n"
+        ],
+        "title": "GroupFiltersOut",
+        "description": "Эхо применённых фильтров — подпись «что именно считалось» под результатом."
+      },
+      "GroupParticipantOut": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename",
+            "description": "Имя файла из строки recordings; None — строка записи уже удалена"
+          },
+          "analysis_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Id",
+            "description": "Взятый прогон диполей; None — подходящих прогонов нет (предупреждение в warnings)"
+          },
+          "analysis_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Kind",
+            "description": "fast_grid | bem_fit | refine"
+          },
+          "analysis_created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysis Created At",
+            "description": "Когда прогон был выполнен (история не UPSERT, §8.4.2)"
+          },
+          "n_points": {
+            "type": "integer",
+            "title": "N Points",
+            "description": "Точек записи в полосе после фильтров (0 — предупреждение в warnings)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "n_points"
+        ],
+        "title": "GroupParticipantOut",
+        "description": "Колонка тепловой карты: одна запись и её последний подходящий прогон."
+      },
+      "GroupRowOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "hemisphere": {
+            "type": "string",
+            "title": "Hemisphere",
+            "description": "Производная от имени: lh | rh | mid (как в ROI-анализе)"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Точек группы в этой строке (после фильтров)"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share",
+            "description": "Доля строки от всех точек выборки в полосе, 0..1"
+          },
+          "mean_gof": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Gof",
+            "description": "Средний GOF группы — только внутри полосы"
+          },
+          "median_gof": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Gof",
+            "description": "Медиана GOF группы — только внутри полосы"
+          },
+          "std_gof": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Std Gof",
+            "description": "СТОД GOF (популяционное); None — меньше двух значений"
+          },
+          "mean_amplitude_nam": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean Amplitude Nam",
+            "description": "Средний момент диполя, нАм — только внутри полосы"
+          },
+          "std_amplitude_nam": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Std Amplitude Nam",
+            "description": "СТОД момента, нАм (популяционное); None — меньше двух значений"
+          },
+          "n_sessions": {
+            "type": "integer",
+            "title": "N Sessions",
+            "description": "В скольких записях группы встречается строка (устойчивость закономерности)"
+          },
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/GroupCellOut"
+            },
+            "type": "array",
+            "title": "Cells",
+            "description": "Ячейки по записям — порядок участников (колонки карты)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "hemisphere",
+          "count",
+          "share",
+          "n_sessions"
+        ],
+        "title": "GroupRowOut",
+        "description": "Строка агрегата (структура или поле Бродмана): итог группы + ячейки записей."
       },
       "HTTPValidationError": {
         "properties": {

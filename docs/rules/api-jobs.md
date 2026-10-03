@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **51 роут**, префикс `/api/v1` из `settings.api_prefix`.
+- `backend/app/api/routes.py` — **52 роута**, префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
   - `api/params.py` — формы → параметры сервисов и проверки с текстом для UI (400);
@@ -32,7 +32,7 @@
   `test_openapi_json_is_up_to_date` и CI-шаг `git diff`, 4.2).
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (51 в `routes.py`, порядок файла)
+## Инвентарь эндпоинтов (52 в `routes.py`, порядок файла)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -84,6 +84,7 @@
 | 49 | `POST /server/restart` | **перезапуск бэкенда из UI** (202 → `os.execv` после ответа; guard'ы: только режим лаунчера по `settings.server_pid_file`, `--reload` → 409, активные задачи → 409; `services/server_control.py`) |
 | 50 | `GET /resource` | **локальный ресурс**: автоопределение GPU (имя, память, CuPy, причина отказа) + тумблер `use_cuda` (`services/gpu.py`; детекция в `asyncio.to_thread`) |
 | 51 | `PUT /resource` | тумблер «Использовать GPU» → MNE-конфиг сервера (`MNE_USE_CUDA`); 409 — CUDA недоступна, `detail` — причина для UI |
+| 52 | `POST /group/aggregate` | **групповой агрегат «BA × сессии»** (остаток 4.7, Фаза 5): выборка записей + фильтры «диапазон / длина эпохи / GOF / BA-ROI / дата» → строки структур и полей Бродмана с ячейками по записям (`schemas/group.py`, `services/group_analysis.py`); 400 — неизвестная полоса/пустая выборка; синхронно (без MNE и задачи) |
 
 **Чего в API нет осознанно:** листинга записей. «Закрыть запись» в UI остаётся **клиентским**
 действием (сброс состояния), а явное удаление — `DELETE /recordings/{id}` (4.4): TTL записей

@@ -1136,6 +1136,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/group/aggregate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Групповой агрегат выборки «BA × сессии»
+         * @description Агрегаты дипольных точек выбранной полосы по списку записей (§3.5).
+         *
+         *     Вход — записи-участники (кандидаты ``GET /sessions``) и групповые фильтры
+         *     «диапазон / длина эпохи / GOF / BA-ROI / дата». Расчёт — выборки и
+         *     арифметика по ``dipole_points`` последнего прогона каждой записи (без
+         *     MNE), поэтому синхронно, без задачи. ``GroupError`` → 400 с текстом для UI.
+         */
+        post: operations["group_aggregate_api_v1_group_aggregate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -3369,6 +3394,246 @@ export interface components {
              * @description Почему CUDA недоступна — текст для UI (None, когда usable)
              */
             reason?: string | null;
+        };
+        /**
+         * GroupAggregateIn
+         * @description Вход ``POST /group/aggregate``: выборка записей + групповые фильтры §3.5.
+         */
+        GroupAggregateIn: {
+            /**
+             * Recording Ids
+             * @description Записи-участники (колонки тепловой карты); дедупликация сохраняет порядок выбора
+             */
+            recording_ids: string[];
+            /**
+             * Band Key
+             * @description Полоса пакета (freq_bands/functional_bands) — агрегаты считаются в ней
+             */
+            band_key: string;
+            /**
+             * Gof Min
+             * @description Отбор точек: GOF ≥ X (внутри полосы); None — все точки
+             */
+            gof_min?: number | null;
+            /**
+             * Epoch Length Ms
+             * @description Отбор прогонов по длине эпохи, мс (с допуском 0.01); None — любая
+             */
+            epoch_length_ms?: number | null;
+            /**
+             * Date From
+             * @description Отбор прогонов: создан не раньше (UTC); None — без нижней границы
+             */
+            date_from?: string | null;
+            /**
+             * Date To
+             * @description Отбор прогонов: создан не позже (UTC); None — без верхней границы
+             */
+            date_to?: string | null;
+            /**
+             * Names
+             * @description Показывать только эти строки структур/полей Бродмана; None — все (знаменатель share не меняется)
+             */
+            names?: string[] | null;
+            /**
+             * Top N
+             * @description Максимум строк в каждом словаре (топ по числу точек, как TOP_ROI отчёта)
+             * @default 12
+             */
+            top_n: number;
+        };
+        /**
+         * GroupAggregateOut
+         * @description Результат ``POST /group/aggregate``: агрегаты «BA × сессии» по выборке.
+         *
+         *     Два словаря строк (структуры и поля Бродмана) — та же форма, что
+         *     ``RoiAggregateOut``: число точек между строками сравнимо, GOF — только
+         *     внутри полосы (подпись обязательна, `notes` показывает UI без правок).
+         */
+        GroupAggregateOut: {
+            filters: components["schemas"]["GroupFiltersOut"];
+            /**
+             * Participants
+             * @description Записи-участники: порядок входного списка (колонки тепловой карты)
+             */
+            participants: components["schemas"]["GroupParticipantOut"][];
+            /**
+             * N Points Total
+             * @description Точек выборки в полосе после всех фильтров
+             */
+            n_points_total: number;
+            /** Structures */
+            structures?: components["schemas"]["GroupRowOut"][];
+            /** Brodmann */
+            brodmann?: components["schemas"]["GroupRowOut"][];
+            /**
+             * N Structure Names
+             * @description Всего названий структур в выборке (показан топ; разница видна из этого числа)
+             */
+            n_structure_names: number;
+            /**
+             * N Brodmann Names
+             * @description Всего названий полей Бродмана в выборке
+             */
+            n_brodmann_names: number;
+            /**
+             * Notes
+             * @description Правила чтения чисел — показываются в UI под результатом без редактирования
+             */
+            notes?: string[];
+            /**
+             * Warnings
+             * @description Честные предупреждения: записи без прогонов, пустые полосы, расхождения счётчиков
+             */
+            warnings?: string[];
+            /**
+             * Duration Sec Calc
+             * @default 0
+             */
+            duration_sec_calc: number;
+        };
+        /**
+         * GroupCellOut
+         * @description Ячейка «строка × запись»: сколько точек записи попало в строку.
+         */
+        GroupCellOut: {
+            /** Recording Id */
+            recording_id: string;
+            /**
+             * Count
+             * @description Точек этой записи в строке
+             */
+            count: number;
+            /**
+             * Share
+             * @description Доля точек **своей записи** (в полосе), попавших в строку, 0..1 — между записями сравнима
+             */
+            share: number;
+        };
+        /**
+         * GroupFiltersOut
+         * @description Эхо применённых фильтров — подпись «что именно считалось» под результатом.
+         */
+        GroupFiltersOut: {
+            /** Band Key */
+            band_key: string;
+            /**
+             * Band Hz
+             * @description Границы полосы, Гц [lo, hi] — из каталога /meta
+             */
+            band_hz: number[];
+            /**
+             * Gof Min
+             * @description Отбор точек по GOF; None — без отбора
+             */
+            gof_min?: number | null;
+            /**
+             * Epoch Length Ms
+             * @description Отбор прогонов по длине эпохи, мс
+             */
+            epoch_length_ms?: number | null;
+            /** Date From */
+            date_from?: string | null;
+            /** Date To */
+            date_to?: string | null;
+            /**
+             * Names
+             * @description Фильтр строк результата (знаменатель share — все точки полосы)
+             */
+            names?: string[] | null;
+            /** Top N */
+            top_n: number;
+        };
+        /**
+         * GroupParticipantOut
+         * @description Колонка тепловой карты: одна запись и её последний подходящий прогон.
+         */
+        GroupParticipantOut: {
+            /** Recording Id */
+            recording_id: string;
+            /**
+             * Filename
+             * @description Имя файла из строки recordings; None — строка записи уже удалена
+             */
+            filename?: string | null;
+            /**
+             * Analysis Id
+             * @description Взятый прогон диполей; None — подходящих прогонов нет (предупреждение в warnings)
+             */
+            analysis_id?: number | null;
+            /**
+             * Analysis Kind
+             * @description fast_grid | bem_fit | refine
+             */
+            analysis_kind?: string | null;
+            /**
+             * Analysis Created At
+             * @description Когда прогон был выполнен (история не UPSERT, §8.4.2)
+             */
+            analysis_created_at?: string | null;
+            /**
+             * N Points
+             * @description Точек записи в полосе после фильтров (0 — предупреждение в warnings)
+             */
+            n_points: number;
+        };
+        /**
+         * GroupRowOut
+         * @description Строка агрегата (структура или поле Бродмана): итог группы + ячейки записей.
+         */
+        GroupRowOut: {
+            /** Name */
+            name: string;
+            /**
+             * Hemisphere
+             * @description Производная от имени: lh | rh | mid (как в ROI-анализе)
+             */
+            hemisphere: string;
+            /**
+             * Count
+             * @description Точек группы в этой строке (после фильтров)
+             */
+            count: number;
+            /**
+             * Share
+             * @description Доля строки от всех точек выборки в полосе, 0..1
+             */
+            share: number;
+            /**
+             * Mean Gof
+             * @description Средний GOF группы — только внутри полосы
+             */
+            mean_gof?: number | null;
+            /**
+             * Median Gof
+             * @description Медиана GOF группы — только внутри полосы
+             */
+            median_gof?: number | null;
+            /**
+             * Std Gof
+             * @description СТОД GOF (популяционное); None — меньше двух значений
+             */
+            std_gof?: number | null;
+            /**
+             * Mean Amplitude Nam
+             * @description Средний момент диполя, нАм — только внутри полосы
+             */
+            mean_amplitude_nam?: number | null;
+            /**
+             * Std Amplitude Nam
+             * @description СТОД момента, нАм (популяционное); None — меньше двух значений
+             */
+            std_amplitude_nam?: number | null;
+            /**
+             * N Sessions
+             * @description В скольких записях группы встречается строка (устойчивость закономерности)
+             */
+            n_sessions: number;
+            /**
+             * Cells
+             * @description Ячейки по записям — порядок участников (колонки карты)
+             */
+            cells?: components["schemas"]["GroupCellOut"][];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -7084,6 +7349,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LocalResourceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    group_aggregate_api_v1_group_aggregate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupAggregateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupAggregateOut"];
                 };
             };
             /** @description Validation Error */
