@@ -117,6 +117,47 @@ class GroupRowOut(BaseModel):
     )
 
 
+class GroupClusterParamsOut(BaseModel):
+    """Паспорт кластеризации (B8): параметры, задающие числа (concept §11.3)."""
+
+    voxel_mm: float = Field(description="Размер вокселя плотности, мм")
+    min_points: int = Field(description="Минимум точек в кластере (меньше — случайное скопление)")
+    connectivity: int = Field(description="Связность ячеек: 26 (8 соседей слоя × 3 слоя)")
+
+
+class GroupClusterOut(BaseModel):
+    """Пространственный кластер дипольных точек одной полосы (B8 «Кластер»).
+
+    Устойчивость — доля участников группы, чьи точки вошли в кластер: общая
+    закономерность обязана воспроизводиться на нескольких записях, а не быть
+    особенностью одной. ROI — доминирующие (топ-3) структуры и поля Бродмана
+    точек кластера.
+    """
+
+    centroid_mni: list[float] = Field(description="Центроид кластера, мм MNI [x, y, z]")
+    n_points: int = Field(description="Точек в кластере")
+    n_sessions: int = Field(description="Записей группы, чьи точки вошли в кластер")
+    session_share: float = Field(
+        description="Доля участников группы с точками кластера, 0..1 (устойчивость)",
+    )
+    volume_cm3: float | None = Field(
+        default=None, description="Объём по ячейкам воксельной сетки, см³",
+    )
+    density_per_cm3: float | None = Field(
+        default=None, description="Плотность, точек/см³; None — объём не определён",
+    )
+    share: float = Field(description="Доля кластера от всех точек выборки, 0..1")
+    extent_mm: list[float] = Field(
+        description="Протяжённость ббокса по осям, мм [dx, dy, dz]",
+    )
+    top_structures: list[str] = Field(
+        default_factory=list, description="Доминирующие структуры кластера (топ-3)",
+    )
+    top_brodmann: list[str] = Field(
+        default_factory=list, description="Доминирующие поля Бродмана кластера (топ-3)",
+    )
+
+
 
 class GroupAggregateOut(BaseModel):
     """Результат ``POST /group/aggregate``: агрегаты «BA × сессии» по выборке.
@@ -137,6 +178,14 @@ class GroupAggregateOut(BaseModel):
         description="Всего названий структур в выборке (показан топ; разница видна из этого числа)",
     )
     n_brodmann_names: int = Field(description="Всего названий полей Бродмана в выборке")
+    clusters: list[GroupClusterOut] = Field(
+        default_factory=list,
+        description="Пространственные кластеры точек полосы (B8): по убыванию числа точек; пусто — кластеров нет",
+    )
+    cluster_params: GroupClusterParamsOut | None = Field(
+        default=None,
+        description="Паспорт кластеризации: параметры, задающие числа кластеров (concept §11.3)",
+    )
     notes: list[str] = Field(
         default_factory=list,
         description="Правила чтения чисел — показываются в UI под результатом без редактирования",

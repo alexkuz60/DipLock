@@ -124,6 +124,11 @@ describe('режим «Группа (N>2)»', () => {
       'только внутри своей полосы',
     )
     expect(screen.getByTestId('group-export-csv')).toBeInTheDocument()
+    // Кластеры (B8): таблица с паспортом параметров и устойчивостью
+    const clusters = screen.getByTestId('group-clusters')
+    expect(clusters).toHaveTextContent('[-40.5, -17.5, 56]')
+    expect(clusters).toHaveTextContent('таламус (слева)')
+    expect(screen.getByText(/Воксельная сетка 12 мм/)).toBeInTheDocument()
   })
 
   it('тепловая карта: viewBox = ширина контейнера (заглушка 1024), высота — константа', async () => {

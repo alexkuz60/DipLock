@@ -1010,6 +1010,21 @@ export function groupAggregateFixture(
     ],
     n_structure_names: 2,
     n_brodmann_names: 2,
+    clusters: [
+      {
+        centroid_mni: [-40.5, -17.5, 56],
+        n_points: 4,
+        n_sessions: 2,
+        session_share: 1.0,
+        volume_cm3: 1.728,
+        density_per_cm3: 2.3,
+        share: 0.8,
+        extent_mm: [8, 6, 7],
+        top_structures: ['таламус (слева)'],
+        top_brodmann: ['BA7-lh'],
+      },
+    ],
+    cluster_params: { voxel_mm: 12, min_points: 4, connectivity: 26 },
     notes: [
       'GOF и амплитуда момента считаются только внутри своей полосы — между полосами они не сравнимы (узкая полоса завышает R², принцип 3).',
       'share строки — доля от всех точек выборки в полосе; доля ячейки — от точек своей записи.',

@@ -46,6 +46,7 @@ from app.models.db import (
     init_db,
 )
 from app.schemas.group import GroupAggregateIn
+from app.services.dipole_clusters import cluster_dipoles, cluster_params
 from app.services.report import report_band_catalog
 from app.services.roi import hemisphere_of
 
@@ -355,6 +356,27 @@ async def aggregate_group(
             "(запустите автоотчёт для участников или снимите фильтры)",
         )
 
+    # Кластеры диполей (B8, G4): пространственные скопления точек полосы с
+    # привязкой к ROI и устойчивостью по записям — чистая функция, без БД
+    cluster_points = [
+        {
+            "recording_id": rid,
+            "mni": point.mni_coords,
+            "structure": point.anatomical_structure,
+            "area": point.brodmann_area,
+        }
+        for rid, point in flat
+    ]
+    clusters = cluster_dipoles(cluster_points, cfg)
+    cluster_params_out = cluster_params(cfg)
+    if total > 0 and not clusters:
+        warnings.append(
+            f"Кластеров нет: точек в полосе {total}, минимум кластера — "
+            f"{cluster_params_out['min_points']} точки (сетка "
+            f"{cluster_params_out['voxel_mm']:g} мм); отборы могли оставить "
+            "разрозненные точки",
+        )
+
     lo, hi = catalog[payload.band_key]
     return {
         "filters": {
@@ -373,6 +395,8 @@ async def aggregate_group(
         "brodmann": brodmann,
         "n_structure_names": n_structure_names,
         "n_brodmann_names": n_brodmann_names,
+        "clusters": clusters,
+        "cluster_params": cluster_params_out,
         "notes": list(GROUP_NOTES),
         "warnings": warnings,
         "duration_sec_calc": round(time.perf_counter() - started, 3),

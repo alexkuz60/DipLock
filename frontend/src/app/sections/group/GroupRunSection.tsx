@@ -157,6 +157,79 @@ function AggregatesTable({
 
 
 
+/** Блок «Кластеры диполей» (B8): пространственные скопления точек полосы. */
+function ClustersPanel({ aggregate }: { aggregate: GroupAggregateOut }) {
+  const clusters = aggregate.clusters ?? []
+  const params = aggregate.cluster_params
+  return (
+    <Panel
+      title="Кластеры диполей (B8)"
+      hint={
+        params
+          ? `Воксельная сетка ${params.voxel_mm} мм, минимум ${params.min_points} точек, 26-связность; параметры — в паспорте (смена сетки меняет кластеры). Устойчивость — доля записей группы с точками кластера.`
+          : 'Пространственные скопления точек одной полосы с привязкой к ROI.'
+      }
+    >
+      {clusters.length === 0 ? (
+        <p className="text-sm text-fg-2" data-testid="group-clusters-empty">
+          Кластеров нет — точек меньше минимума или они разрознены.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" data-testid="group-clusters">
+            <thead>
+              <tr className="border-b border-border text-left text-fg-2">
+                <th className="py-1.5 pr-3 font-normal">Центроид MNI</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Точек</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Записей</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Устойчивость</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Доля</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Объём, см³</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Плотность</th>
+                <th className="py-1.5 pr-3 font-normal">Структуры (топ)</th>
+                <th className="py-1.5 font-normal">Поля БА (топ)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {clusters.map((cluster, index) => (
+                <tr
+                  key={`${cluster.centroid_mni.join('-')}-${index}`}
+                  className="border-b border-border/50 text-fg-1"
+                  data-testid={`group-cluster-${index}`}
+                >
+                  <td className="tnum py-1.5 pr-3">
+                    {`[${cluster.centroid_mni.join(', ')}]`}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-right">{cluster.n_points}</td>
+                  <td className="tnum py-1.5 pr-3 text-right">{cluster.n_sessions}</td>
+                  <td className="tnum py-1.5 pr-3 text-right">
+                    {`${(cluster.session_share * 100).toFixed(0)} %`}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-right">
+                    {`${(cluster.share * 100).toFixed(1)} %`}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-right">
+                    {cluster.volume_cm3 ?? '—'}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-right">
+                    {cluster.density_per_cm3 ?? '—'}
+                  </td>
+                  <td className="py-1.5 pr-3 text-fg-2">
+                    {(cluster.top_structures ?? []).join(', ') || '—'}
+                  </td>
+                  <td className="py-1.5 text-fg-2">
+                    {(cluster.top_brodmann ?? []).join(', ') || '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
 export function GroupRunSection() {
   const aggregate = useGroupRun((state) => state.aggregate)
   const loading = useGroupRun((state) => state.loading)
@@ -236,6 +309,8 @@ export function GroupRunSection() {
           Экспорт CSV
         </Button>
       </div>
+
+      <ClustersPanel aggregate={aggregate} />
 
       <AggregatesTable
         title="Поля Бродмана"

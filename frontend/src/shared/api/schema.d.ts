@@ -3525,6 +3525,13 @@ export interface components {
              */
             n_brodmann_names: number;
             /**
+             * Clusters
+             * @description Пространственные кластеры точек полосы (B8): по убыванию числа точек; пусто — кластеров нет
+             */
+            clusters?: components["schemas"]["GroupClusterOut"][];
+            /** @description Паспорт кластеризации: параметры, задающие числа кластеров (concept §11.3) */
+            cluster_params?: components["schemas"]["GroupClusterParamsOut"] | null;
+            /**
              * Notes
              * @description Правила чтения чисел — показываются в UI под результатом без редактирования
              */
@@ -3672,6 +3679,88 @@ export interface components {
              * @description Доля точек **своей записи** (в полосе), попавших в строку, 0..1 — между записями сравнима
              */
             share: number;
+        };
+        /**
+         * GroupClusterOut
+         * @description Пространственный кластер дипольных точек одной полосы (B8 «Кластер»).
+         *
+         *     Устойчивость — доля участников группы, чьи точки вошли в кластер: общая
+         *     закономерность обязана воспроизводиться на нескольких записях, а не быть
+         *     особенностью одной. ROI — доминирующие (топ-3) структуры и поля Бродмана
+         *     точек кластера.
+         */
+        GroupClusterOut: {
+            /**
+             * Centroid Mni
+             * @description Центроид кластера, мм MNI [x, y, z]
+             */
+            centroid_mni: number[];
+            /**
+             * N Points
+             * @description Точек в кластере
+             */
+            n_points: number;
+            /**
+             * N Sessions
+             * @description Записей группы, чьи точки вошли в кластер
+             */
+            n_sessions: number;
+            /**
+             * Session Share
+             * @description Доля участников группы с точками кластера, 0..1 (устойчивость)
+             */
+            session_share: number;
+            /**
+             * Volume Cm3
+             * @description Объём по ячейкам воксельной сетки, см³
+             */
+            volume_cm3?: number | null;
+            /**
+             * Density Per Cm3
+             * @description Плотность, точек/см³; None — объём не определён
+             */
+            density_per_cm3?: number | null;
+            /**
+             * Share
+             * @description Доля кластера от всех точек выборки, 0..1
+             */
+            share: number;
+            /**
+             * Extent Mm
+             * @description Протяжённость ббокса по осям, мм [dx, dy, dz]
+             */
+            extent_mm: number[];
+            /**
+             * Top Structures
+             * @description Доминирующие структуры кластера (топ-3)
+             */
+            top_structures?: string[];
+            /**
+             * Top Brodmann
+             * @description Доминирующие поля Бродмана кластера (топ-3)
+             */
+            top_brodmann?: string[];
+        };
+        /**
+         * GroupClusterParamsOut
+         * @description Паспорт кластеризации (B8): параметры, задающие числа (concept §11.3).
+         */
+        GroupClusterParamsOut: {
+            /**
+             * Voxel Mm
+             * @description Размер вокселя плотности, мм
+             */
+            voxel_mm: number;
+            /**
+             * Min Points
+             * @description Минимум точек в кластере (меньше — случайное скопление)
+             */
+            min_points: number;
+            /**
+             * Connectivity
+             * @description Связность ячеек: 26 (8 соседей слоя × 3 слоя)
+             */
+            connectivity: number;
         };
         /**
          * GroupFiltersOut

@@ -7151,6 +7151,25 @@
             "title": "N Brodmann Names",
             "description": "Всего названий полей Бродмана в выборке"
           },
+          "clusters": {
+            "items": {
+              "$ref": "#/components/schemas/GroupClusterOut"
+            },
+            "type": "array",
+            "title": "Clusters",
+            "description": "Пространственные кластеры точек полосы (B8): по убыванию числа точек; пусто — кластеров нет"
+          },
+          "cluster_params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupClusterParamsOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Паспорт кластеризации: параметры, задающие числа кластеров (concept §11.3)"
+          },
           "notes": {
             "items": {
               "type": "string"
@@ -7436,6 +7455,124 @@
         ],
         "title": "GroupCellOut",
         "description": "Ячейка «строка × запись»: сколько точек записи попало в строку."
+      },
+      "GroupClusterOut": {
+        "properties": {
+          "centroid_mni": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Centroid Mni",
+            "description": "Центроид кластера, мм MNI [x, y, z]"
+          },
+          "n_points": {
+            "type": "integer",
+            "title": "N Points",
+            "description": "Точек в кластере"
+          },
+          "n_sessions": {
+            "type": "integer",
+            "title": "N Sessions",
+            "description": "Записей группы, чьи точки вошли в кластер"
+          },
+          "session_share": {
+            "type": "number",
+            "title": "Session Share",
+            "description": "Доля участников группы с точками кластера, 0..1 (устойчивость)"
+          },
+          "volume_cm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Cm3",
+            "description": "Объём по ячейкам воксельной сетки, см³"
+          },
+          "density_per_cm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Per Cm3",
+            "description": "Плотность, точек/см³; None — объём не определён"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share",
+            "description": "Доля кластера от всех точек выборки, 0..1"
+          },
+          "extent_mm": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Extent Mm",
+            "description": "Протяжённость ббокса по осям, мм [dx, dy, dz]"
+          },
+          "top_structures": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Structures",
+            "description": "Доминирующие структуры кластера (топ-3)"
+          },
+          "top_brodmann": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Brodmann",
+            "description": "Доминирующие поля Бродмана кластера (топ-3)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "centroid_mni",
+          "n_points",
+          "n_sessions",
+          "session_share",
+          "share",
+          "extent_mm"
+        ],
+        "title": "GroupClusterOut",
+        "description": "Пространственный кластер дипольных точек одной полосы (B8 «Кластер»).\n\nУстойчивость — доля участников группы, чьи точки вошли в кластер: общая\nзакономерность обязана воспроизводиться на нескольких записях, а не быть\nособенностью одной. ROI — доминирующие (топ-3) структуры и поля Бродмана\nточек кластера."
+      },
+      "GroupClusterParamsOut": {
+        "properties": {
+          "voxel_mm": {
+            "type": "number",
+            "title": "Voxel Mm",
+            "description": "Размер вокселя плотности, мм"
+          },
+          "min_points": {
+            "type": "integer",
+            "title": "Min Points",
+            "description": "Минимум точек в кластере (меньше — случайное скопление)"
+          },
+          "connectivity": {
+            "type": "integer",
+            "title": "Connectivity",
+            "description": "Связность ячеек: 26 (8 соседей слоя × 3 слоя)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "voxel_mm",
+          "min_points",
+          "connectivity"
+        ],
+        "title": "GroupClusterParamsOut",
+        "description": "Паспорт кластеризации (B8): параметры, задающие числа (concept §11.3)."
       },
       "GroupFiltersOut": {
         "properties": {
