@@ -9,6 +9,8 @@ import {
   dipoleScanResultFixture,
   evokedResultFixture,
   filterResponseFixture,
+  groupAggregateFixture,
+  groupRunSummaryFixture,
   initStatusFixture,
   localResourceFixture,
   mainsFixture,
@@ -30,6 +32,8 @@ import type {
   DipoleScanResult,
   EvokedResult,
   FilterResponse,
+  GroupAggregateOut,
+  GroupAnalysisSummary,
   InitStatus,
   JobStatus,
   LocalResource,
@@ -144,6 +148,14 @@ export type MockApiOptions = {
   compareResult?: CompareResult
   /** Текст ошибки запуска сравнения (400 с текстом шлюза пары) */
   compareStartFails?: string
+  /** Агрегат группы (`POST /group/aggregate`); по умолчанию — фикстура */
+  groupAggregate?: GroupAggregateOut
+  /** Текст ошибки агрегата (400: неизвестная полоса / пустая выборка) */
+  groupAggregateFails?: string
+  /** История прогонов (`GET /group/analyses`); по умолчанию пусто */
+  groupRuns?: GroupAnalysisSummary[]
+  /** Деталь прогона (`GET /group/analyses/{id}`) */
+  groupRunDetail?: { run: GroupAnalysisSummary; aggregate: GroupAggregateOut }
   /** Строки `GET /sessions` — кандидаты выбора пары */
   sessions?: { total: number; items: SessionSummary[] }
   /** АЧХ фильтра (`GET /filter-response`, шаг 2.5) */
@@ -321,6 +333,35 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         )
       }
       return jsonResponse(options.compareResult ?? compareResultFixture())
+    }
+    if (url.includes('/group/aggregate')) {
+      // Живой агрегат группы: синхронный JSON, 400 с текстом шлюза
+      if (options.groupAggregateFails) {
+        return jsonResponse({ detail: options.groupAggregateFails }, 400)
+      }
+      return jsonResponse(options.groupAggregate ?? groupAggregateFixture())
+    }
+    if (/\/group\/analyses\/\d+/.test(url)) {
+      // Деталь прогона: паспорт + свежий пересчёт сервера
+      const detail = options.groupRunDetail ?? {
+        run: groupRunSummaryFixture(),
+        aggregate: options.groupAggregate ?? groupAggregateFixture(),
+      }
+      if (detail.run.id === Number(url.split('/').pop())) {
+        return jsonResponse(detail)
+      }
+      return jsonResponse({ detail: 'Прогон не найден' }, 404)
+    }
+    if (url.includes('/group/analyses')) {
+      // История прогонов: POST → 201 паспорт, GET → страница
+      if (method === 'POST') {
+        if (options.groupAggregateFails) {
+          return jsonResponse({ detail: options.groupAggregateFails }, 400)
+        }
+        return jsonResponse(groupRunSummaryFixture({ id: 99 }), 201)
+      }
+      const items = options.groupRuns ?? []
+      return jsonResponse({ total: items.length, items })
     }
     if (url.includes('/sessions')) {
       return jsonResponse(options.sessions ?? sessionsFixture)

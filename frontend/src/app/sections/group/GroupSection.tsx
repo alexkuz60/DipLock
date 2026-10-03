@@ -15,11 +15,13 @@ import { api } from '@/shared/api/client'
 import type { CompareResult } from '@/shared/api/types'
 import { bandLabel, formatPower } from '@/shared/lib/spectrum'
 import { useGroupCompare } from '@/shared/state/groupCompare'
+import { useGroupRun } from '@/shared/state/groupRun'
 import { Panel } from '@/shared/ui/Panel'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { WarnList } from '@/shared/ui/WarnList'
 import { cx } from '@/shared/ui/cx'
 import { BandDeltaBar, CompareStackChart, IndexDumbbell } from './GroupCharts'
+import { GroupRunSection } from './GroupRunSection'
 import { bandDeltaScale, formatDb, formatP } from './chartFormat'
 
 /** Паспорт пары: что сравнивается и что совпало (B9 «совпадение параметров»). */
@@ -351,11 +353,17 @@ function IndicesPanel({ result }: { result: CompareResult }) {
 }
 
 export function GroupSection() {
+  const mode = useGroupRun((state) => state.mode)
   const result = useGroupCompare((state) => state.result)
   const error = useGroupCompare((state) => state.error)
   const job = useGroupCompare((state) => state.job)
   // Сессии — только для подсказки пустого состояния (кандидаты рисуют панель)
   useQuery({ queryKey: ['sessions', 200], queryFn: ({ signal }) => api.sessions({ limit: 200 }, signal) })
+
+  // Режим «Группа (N>2)» — свой результат, свои правила чтения чисел
+  if (mode === 'group') {
+    return <GroupRunSection />
+  }
 
   if (!result) {
     const running = job?.status === 'running'

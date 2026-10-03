@@ -9,6 +9,8 @@ import type {
   DipoleScanResult,
   EvokedResult,
   FilterResponse,
+  GroupAggregateOut,
+  GroupAnalysisSummary,
   InitStatus,
   JobStatus,
   LocalResource,
@@ -941,4 +943,97 @@ export function compareResultFixture(
     ...overrides,
   }
 }
+
+/** Агрегат «BA × сессии» (остаток 4.7): две записи, две строки в каждом словаре. */
+export function groupAggregateFixture(
+  overrides: Partial<GroupAggregateOut> = {},
+): GroupAggregateOut {
+  const cell = (recordingId: string, count: number, share: number) => ({
+    recording_id: recordingId,
+    count,
+    share,
+  })
+  const thalamus = {
+    name: 'таламус (слева)',
+    hemisphere: 'lh',
+    count: 4,
+    share: 0.8,
+    mean_gof: 0.75,
+    median_gof: 0.75,
+    std_gof: 0.1118,
+    mean_amplitude_nam: 52.5,
+    std_amplitude_nam: 31.9,
+    n_sessions: 2,
+    cells: [cell('rec-rest', 2, 0.6667), cell('rec-task', 2, 1.0)],
+  }
+  const visual = {
+    name: 'зрительная кора (справа)',
+    hemisphere: 'rh',
+    count: 1,
+    share: 0.2,
+    mean_gof: 0.85,
+    median_gof: 0.85,
+    std_gof: null,
+    mean_amplitude_nam: 40,
+    std_amplitude_nam: null,
+    n_sessions: 1,
+    cells: [cell('rec-rest', 1, 0.3333), cell('rec-task', 0, 0.0)],
+  }
+  return {
+    filters: {
+      band_key: 'alpha',
+      band_hz: [8, 16],
+      gof_min: null,
+      epoch_length_ms: null,
+      date_from: null,
+      date_to: null,
+      names: null,
+      top_n: 12,
+    },
+    participants: [
+      {
+        recording_id: 'rec-rest', filename: 'rest.edf', analysis_id: 3,
+        analysis_kind: 'fast_grid', analysis_created_at: '2026-10-02T10:00:00',
+        n_points: 3,
+      },
+      {
+        recording_id: 'rec-task', filename: 'task.edf', analysis_id: 5,
+        analysis_kind: 'fast_grid', analysis_created_at: '2026-10-02T11:00:00',
+        n_points: 2,
+      },
+    ],
+    n_points_total: 5,
+    structures: [thalamus, visual],
+    brodmann: [
+      { ...thalamus, name: 'BA7-lh' },
+      { ...visual, name: 'BA17-rh' },
+    ],
+    n_structure_names: 2,
+    n_brodmann_names: 2,
+    notes: [
+      'GOF и амплитуда момента считаются только внутри своей полосы — между полосами они не сравнимы (узкая полоса завышает R², принцип 3).',
+      'share строки — доля от всех точек выборки в полосе; доля ячейки — от точек своей записи.',
+    ],
+    warnings: [],
+    duration_sec_calc: 0.012,
+    ...overrides,
+  }
+}
+
+/** Строка истории прогонов группового анализа (`GET /group/analyses`). */
+export function groupRunSummaryFixture(
+  overrides: Partial<GroupAnalysisSummary> = {},
+): GroupAnalysisSummary {
+  return {
+    id: 7,
+    name: 'покой vs деятельность',
+    band_key: 'alpha',
+    created_at: '2026-10-03T12:00:00',
+    n_sessions_requested: 2,
+    n_members_alive: 2,
+    params_sig: 'abcdef0123456789',
+    ...overrides,
+  }
+}
+
 

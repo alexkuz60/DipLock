@@ -101,6 +101,32 @@ export type CompareBand = Schemas['CompareBandOut']
 
 export type CompareCluster = Schemas['CompareClusterOut']
 
+// — Групповой анализ (остаток 4.7, Фаза 5): агрегаты «BA × сессии» —
+
+/** Вход `POST /group/aggregate`: выборка записей + групповые фильтры §3.5 */
+export type GroupAggregateIn = Schemas['GroupAggregateIn']
+
+/** Результат `POST /group/aggregate`: строки словарей × колонки-записи */
+export type GroupAggregateOut = Schemas['GroupAggregateOut']
+
+/** Вход `POST /group/analyses`: тот же снимок + подпись истории */
+export type GroupAnalysisCreateIn = Schemas['GroupAnalysisCreateIn']
+
+/** Строка истории прогонов (`GET /group/analyses`) */
+export type GroupAnalysisSummary = Schemas['GroupAnalysisSummaryOut']
+
+/** Прогон: паспорт + свежий пересчёт (`GET /group/analyses/{id}`) */
+export type GroupAnalysisDetail = Schemas['GroupAnalysisDetailOut']
+
+/** Страница истории прогонов */
+export type GroupAnalysesPage = Schemas['GroupAnalysesPage']
+
+/** Строка агрегата (структура или поле Бродмана) с ячейками по записям */
+export type GroupRow = Schemas['GroupRowOut']
+
+/** Колонка тепловой карты: запись-участник и её прогон */
+export type GroupParticipant = Schemas['GroupParticipantOut']
+
 
 export type DipoleScanPoint = Schemas['DipoleScanPointOut']
 

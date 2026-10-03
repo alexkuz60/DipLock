@@ -1,15 +1,21 @@
 /**
- * Тулс-хедер «Сравнения двух записей»: запуск по кнопке, прогресс задачи и
- * отмена (3.2) — тот же каркас, что в «Итогах» и «Диполях»: правка параметров
- * ничего не запускает, пока идёт задача — полоса прогресса с сообщением этапа
- * (этапы сравнения: чтение пары → PSD → кластерный тест → карты разности).
+ * Тулс-хедер раздела «Групповой анализ»: кнопка запуска текущего режима.
+ *
+ * Пара (B − A) — фоновая задача `kind=compare` (прогресс + отмена, 3.2);
+ * группа (N>2) — синхронный JSON `POST /group/aggregate` (без MNE, без
+ * задачи): индикатор загрузки, а при результате — вторая кнопка
+ * «Сохранить прогон» (`POST /group/analyses`, снимок определения в
+ * историю). Правка параметров в панели ничего не запускает — считает
+ * только кнопка (правило раздела).
  */
-import { GitCompareArrows } from 'lucide-react'
+import { GitCompareArrows, Layers, Save } from 'lucide-react'
 import { useGroupCompare } from '@/shared/state/groupCompare'
+import { useGroupRun } from '@/shared/state/groupRun'
 import { Button } from '@/shared/ui/Button'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 
-export function GroupToolActions() {
+/** Кнопки режима «Пара (B − A)» — задача с прогрессом и отменой. */
+function PairActions() {
   const recordingIdA = useGroupCompare((state) => state.recordingIdA)
   const recordingIdB = useGroupCompare((state) => state.recordingIdB)
   const job = useGroupCompare((state) => state.job)
@@ -69,4 +75,49 @@ export function GroupToolActions() {
       {result ? 'Сравнить заново' : 'Сравнить'}
     </Button>
   )
+}
+
+/** Кнопки режима «Группа (N>2)» — синхронный агрегат + снимок в историю. */
+function GroupActions() {
+  const recordingIds = useGroupRun((state) => state.recordingIds)
+  const bandKey = useGroupRun((state) => state.bandKey)
+  const loading = useGroupRun((state) => state.loading)
+  const aggregate = useGroupRun((state) => state.aggregate)
+  const run = useGroupRun((state) => state.run)
+  const saveRun = useGroupRun((state) => state.saveRun)
+
+  const missing = recordingIds.length === 0 || !bandKey
+  const disabledHint = missing
+    ? 'Выберите участников и полосу в панели.'
+    : ''
+
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        icon={<Layers className="size-4" />}
+        disabled={missing || loading}
+        title={disabledHint || 'Групповой агрегат: строки BA × колонки-записи по выбранной полосе'}
+        onClick={() => void run()}
+        data-testid="group-run-aggregate"
+      >
+        {loading ? 'Считаем…' : aggregate ? 'Считать заново' : 'Считать'}
+      </Button>
+      {aggregate ? (
+        <Button
+          icon={<Save className="size-4" />}
+          disabled={loading}
+          title="Сохранить определение (фильтры + состав) в историю прогонов — числа не замораживаются"
+          onClick={() => void saveRun()}
+          data-testid="group-save-run"
+        >
+          Сохранить прогон
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+export function GroupToolActions() {
+  const mode = useGroupRun((state) => state.mode)
+  return mode === 'group' ? <GroupActions /> : <PairActions />
 }

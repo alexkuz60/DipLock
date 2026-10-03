@@ -12,6 +12,12 @@ import type {
   DipoleScanResult,
   EvokedResult,
   FilterResponse,
+  GroupAggregateIn,
+  GroupAggregateOut,
+  GroupAnalysesPage,
+  GroupAnalysisCreateIn,
+  GroupAnalysisDetail,
+  GroupAnalysisSummary,
   InitStatus,
   JobCreated,
   JobStatus,
@@ -205,6 +211,44 @@ export const api = {
       request<JobCreated>(`${API_PREFIX}/compare`, { method: 'POST', body: form, signal }),
     result: (jobId: string, signal?: AbortSignal) =>
       request<CompareResult>(`${API_PREFIX}/compare/${jobId}`, { signal }),
+  },
+
+  /**
+   * Групповой анализ (остаток 4.7): агрегаты «BA × сессии» и история прогонов.
+   * Синхронные JSON-запросы (без MNE и задачи): расчёт — выборки по
+   * `dipole_points`, поэтому запросы не питают job-очередь.
+   */
+  group: {
+    /** Живой агрегат выборки (`POST /group/aggregate`). */
+    aggregate: (payload: GroupAggregateIn, signal?: AbortSignal) =>
+      request<GroupAggregateOut>(`${API_PREFIX}/group/aggregate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+      }),
+    /** Сохранить прогон — снимок определения (`POST /group/analyses`, 201). */
+    save: (payload: GroupAnalysisCreateIn, signal?: AbortSignal) =>
+      request<GroupAnalysisSummary>(`${API_PREFIX}/group/analyses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal,
+      }),
+    /** История прогонов: страница новых сверху (`GET /group/analyses`). */
+    runs: (query?: { limit?: number; offset?: number }, signal?: AbortSignal) => {
+      const params = new URLSearchParams()
+      if (query?.limit) params.set('limit', String(query.limit))
+      if (query?.offset) params.set('offset', String(query.offset))
+      const search = params.toString()
+      return request<GroupAnalysesPage>(
+        `${API_PREFIX}/group/analyses${search ? `?${search}` : ''}`,
+        { signal },
+      )
+    },
+    /** Прогон: паспорт + свежий пересчёт (`GET /group/analyses/{id}`; 404 — нет). */
+    run: (runId: number, signal?: AbortSignal) =>
+      request<GroupAnalysisDetail>(`${API_PREFIX}/group/analyses/${runId}`, { signal }),
   },
 
   /** Состояние задачи: этап, прогресс 0..1, ошибка. */

@@ -14,12 +14,17 @@ import { filterBandText } from '@/shared/lib/calcFilter'
 import { useEdfParams } from '@/shared/state/edfParams'
 import { filterBandOf, useEdfRecording } from '@/shared/state/edfRecording'
 import { useGroupCompare } from '@/shared/state/groupCompare'
+import { useGroupRun } from '@/shared/state/groupRun'
 import { Panel } from '@/shared/ui/Panel'
+import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { TextField } from '@/shared/ui/TextField'
 import { compareCandidates } from './candidates'
+import { GroupRunPanel } from './GroupRunPanel'
 
 export function GroupPanel() {
+  const mode = useGroupRun((state) => state.mode)
+  const setMode = useGroupRun((state) => state.setMode)
   const sessions = useQuery({
     queryKey: ['sessions', 200],
     queryFn: ({ signal }) => api.sessions({ limit: 200 }, signal),
@@ -44,6 +49,25 @@ export function GroupPanel() {
 
   return (
     <>
+      <Panel
+        title="Режим"
+        hint="Пара — дифференциальный анализ двух записей (B9, дельты B − A). Группа — агрегаты «BA × сессии» по выборке N>2 (остаток 4.7)."
+      >
+        <SegmentedControl
+          label="Режим"
+          value={mode}
+          options={[
+            { value: 'pair', label: 'Пара (B − A)' },
+            { value: 'group', label: 'Группа (N>2)' },
+          ]}
+          onChange={setMode}
+        />
+      </Panel>
+
+      {mode === 'group' ? <GroupRunPanel /> : null}
+
+      {mode === 'group' ? null : (
+        <>
       <Panel
         title="Пара записей"
         hint="Дифференциальный анализ (B9): обе стороны обрабатываются одинаково (фильтр, notch, референс и длина эпохи — форма EDF), дельты считаются как B − A. Кандидаты — записи с результатами (GET /sessions) и текущая открытая запись."
@@ -106,6 +130,8 @@ export function GroupPanel() {
           Событийная нарезка не участвует: сравнение режет эпохи фиксированной длиной.
         </p>
       </Panel>
+        </>
+      )}
     </>
   )
 }
