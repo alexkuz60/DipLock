@@ -13,6 +13,7 @@ import {
   Brain,
   Calculator,
   Compass,
+  FileText,
   Filter,
   FolderOpen,
   Layers,
@@ -36,6 +37,7 @@ export type WikiArticleId =
   | 'dipole-calc'
   | 'dipole-playback'
   | 'eeg-screen'
+  | 'summary-report'
   | 'group-analysis'
   | 'glossary'
 
@@ -128,6 +130,13 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'ЭЭГ/Спектр',
     hint: 'Две половины и курсор, шапка с зумами, расчёт спектрограммы, палитра',
     icon: Activity,
+  },
+  {
+    id: 'summary-report',
+    title: 'Итоги: сквозной автоотчёт записи',
+    short: 'Итоги: автоотчёт',
+    hint: 'Подготовка к сборке, две части отчёта, кросс-проверки, чтение результата',
+    icon: FileText,
   },
   {
     id: 'group-analysis',

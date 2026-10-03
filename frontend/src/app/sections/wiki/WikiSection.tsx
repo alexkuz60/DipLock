@@ -24,6 +24,7 @@ import { GroupAnalysisArticle } from './articles/GroupAnalysisArticle'
 import { IntroArticle } from './articles/IntroArticle'
 import { OpenArticle } from './articles/OpenArticle'
 import { ScreenArticle } from './articles/ScreenArticle'
+import { SummaryReportArticle } from './articles/SummaryReportArticle'
 import {
   adjacentArticle,
   parseWikiHash,
@@ -46,6 +47,7 @@ const ARTICLE_COMPONENTS: Record<WikiArticleId, ComponentType> = {
   'dipole-calc': DipoleCalcArticle,
   'dipole-playback': DipolePlaybackArticle,
   'eeg-screen': EegScreenArticle,
+  'summary-report': SummaryReportArticle,
   'group-analysis': GroupAnalysisArticle,
   glossary: GlossaryArticle,
 }
