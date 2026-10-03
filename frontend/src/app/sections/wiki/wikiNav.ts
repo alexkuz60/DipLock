@@ -15,6 +15,7 @@ import {
   Compass,
   Filter,
   FolderOpen,
+  Layers,
   Monitor,
   Play,
   ScanSearch,
@@ -35,6 +36,7 @@ export type WikiArticleId =
   | 'dipole-calc'
   | 'dipole-playback'
   | 'eeg-screen'
+  | 'group-analysis'
   | 'glossary'
 
 export type WikiArticle = {
@@ -126,6 +128,13 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'ЭЭГ/Спектр',
     hint: 'Две половины и курсор, шапка с зумами, расчёт спектрограммы, палитра',
     icon: Activity,
+  },
+  {
+    id: 'group-analysis',
+    title: 'Групповой анализ: подготовка, расчёт и результат',
+    short: 'Групповой анализ',
+    hint: 'Участники и фильтры, методики расчёта, кластеры, чтение результата',
+    icon: Layers,
   },
   {
     id: 'glossary',

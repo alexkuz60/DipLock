@@ -6,7 +6,9 @@
 > таблицы `group_analyses`/`group_analysis_members` (миграция `0005`, правило
 > `docs/rules/results-db.md`), UI — вкладки «Пара / Группа» раздела
 > «Групповой анализ» (`frontend/src/app/sections/group/`). Сравнение пары
-> (B9, «Тип 1») — `docs/rules/compare.md`.
+> (B9, «Тип 1») — `docs/rules/compare.md`. **Пользовательское описание**
+> (подготовка, методики, чтение результата) — статья Wiki
+> «Групповой анализ: подготовка, расчёт и результат» (`/wiki#group-analysis`).
 
 ## Что считается и почему
 
