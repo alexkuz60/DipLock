@@ -4,6 +4,7 @@
 import { vi } from 'vitest'
 import {
   calcJobFixture,
+  compareResultFixture,
   dipoleRefineResultFixture,
   dipoleScanResultFixture,
   evokedResultFixture,
@@ -16,12 +17,14 @@ import {
   preprocessResultFixture,
   recordingFixture,
   reportResultFixture,
+  sessionsFixture,
   spectrogramResultFixture,
   spectrumResultFixture,
 } from './fixtures'
 import { encodeSignalBlob } from './signalBlob'
 import { spectrogramBlobFixture } from './spectrogramBlob'
 import type {
+  CompareResult,
   ContourSlice,
   DipoleRefineResult,
   DipoleScanResult,
@@ -36,6 +39,7 @@ import type {
   PreprocessStage,
   RecordingMeta,
   ReportResult,
+  SessionSummary,
   SpectrogramResult,
   SpectrumResult,
 } from '@/shared/api/types'
@@ -136,6 +140,12 @@ export type MockApiOptions = {
   spectrogramJob?: JobStatus
   /** Явный результат автоотчёта (раздел «Итоги») */
   reportResult?: ReportResult
+  /** Результат дифференциального анализа (`GET /compare/{id}`) */
+  compareResult?: CompareResult
+  /** Текст ошибки запуска сравнения (400 с текстом шлюза пары) */
+  compareStartFails?: string
+  /** Строки `GET /sessions` — кандидаты выбора пары */
+  sessions?: { total: number; items: SessionSummary[] }
   /** АЧХ фильтра (`GET /filter-response`, шаг 2.5) */
   filterResponse?: FilterResponse
   /** Сигнал сетевого фона (`GET /recordings/{id}/mains`) */
@@ -288,6 +298,32 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse(calcJobCreated('job-evoked-1', 'evoked'), 202)
       }
       return jsonResponse(options.evokedResult ?? evokedResultFixture())
+    }
+    if (url.includes('/compare/topomap/')) {
+      // PNG карты разности: в тестах возвращаем JSON — компонент картинку не читает,
+      // а наличие URL проверяется по строке результата
+      return jsonResponse({ detail: 'PNG не мокается в jsdom' }, 404)
+    }
+    if (url.includes('/compare')) {
+      // Дифференциальный анализ (B9): POST → 202, GET результата → CompareResult
+      if (method === 'POST') {
+        if (options.compareStartFails) {
+          return jsonResponse({ detail: options.compareStartFails }, 400)
+        }
+        return jsonResponse(
+          {
+            job_id: 'job-compare-1',
+            status: 'queued',
+            poll_url: '/api/v1/jobs/job-compare-1',
+            result_url: '/api/v1/compare/job-compare-1',
+          },
+          202,
+        )
+      }
+      return jsonResponse(options.compareResult ?? compareResultFixture())
+    }
+    if (url.includes('/sessions')) {
+      return jsonResponse(options.sessions ?? sessionsFixture)
     }
     if (url.includes('/jobs?')) {
       // История задач (для подтверждения перезапуска): по умолчанию пусто

@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.schemas.analysis import PreprocessStage
 from app.services.artifact_cleaner import CLEAN_METHODS, CleanSpec
+from app.services.compare import CompareParams
 from app.services.dipole_scanner import DipoleRefineParams, DipoleScanParams
 from app.services.evoked import EvokedParams
 from app.services.preprocess import PreprocessParams
@@ -420,6 +421,37 @@ def spectrum_params(
         reference_channels=parse_reference_channels(reference_channels),
         psd_method=psd_method,
     )
+
+
+def compare_params(
+    *,
+    label_a: str,
+    label_b: str,
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
+    reference: str,
+    reference_channels: str | None,
+    epoch_length_ms: float,
+    psd_method: str = "welch",
+) -> CompareParams:
+    """Параметры дифференциального анализа: спектр пары + ярлыки условий.
+
+    Ярлыки — подпись условия в результате («покой», «деятельность»): пустой
+    ярлык заменяется нейтральным («Условие A/B»), длина режется — форма
+    приходит от пользователя и не должна ломать контракт.
+    """
+    spectrum = spectrum_params(
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, psd_method=psd_method,
+    )
+    return CompareParams(
+        spectrum=spectrum,
+        label_a=label_a.strip()[:64] or "Условие A",
+        label_b=label_b.strip()[:64] or "Условие B",
+    )
+
 
 
 def spectrogram_params(

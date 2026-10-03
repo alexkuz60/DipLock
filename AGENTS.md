@@ -51,7 +51,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 48 роутов (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 51 роут (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -78,6 +78,7 @@ backend/app/
 │   ├── spectrogram.py     # спектрограмма канала: STFT → сетка дБ (DPS2), кэш + ETag (5)
 │   ├── channel_mix.py     # виртуальные каналы «ЭЭГ»: миксы групп 10-20 из паспорта записи (5+)
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
+│   ├── compare.py         # дифференциальный анализ двух записей (B9): дельты B − A, FDR/бутстрап, кластерный тест MNE, карты разности
 │   ├── report.py          # автоотчёт «Итоги»: MNE.Report (часть 1) + пакет диполей по полосам (§3.9) + тема (THEME_CSS/THEME_JS)
 │   ├── roi.py             # ROI-анализ (4.5): агрегат «строка ROI × полосы» из точек пакета — один источник для отчёта и вкладки UI
 │   ├── analysis_pipeline.py # пайплайн файлового анализа (/analyze, /jobs) + запись в БД (A1)
@@ -175,12 +176,13 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/atlas-mri.md` | срез МРТ, анатомические структуры и поля Бродмана |
 | `docs/rules/eeg.md` | раздел «ЭЭГ»: трек канала и спектрограмма |
 | `docs/rules/api-jobs.md` | инвентарь роутов, правило «задача = job», ETag/304, ошибки |
+| `docs/rules/compare.md` | дифференциальный анализ двух записей (B9): дельты B − A, кластерный тест MNE, карты разности |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (974 Vitest / 684 pytest, без `integration` — 666), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (985 Vitest / 693 pytest, без `integration` — 675), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

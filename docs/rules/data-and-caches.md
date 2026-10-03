@@ -12,8 +12,10 @@
    в сигнатуры кэшей не нужно. Отпечаток и паспорт лежат в сайдкаре `recording.json`
    (дедуп переживает рестарт), легаси-каталоги без сайдкара чистятся
    `backend/scripts/dedupe_recordings.py`.
-2. **Семь дисковых кэшей, один отпечаток ассетов** (`docs/data_map.md`, раздел «Носители»):
-   `signals` / `spectra` / `spectrograms` / `prepared` — по записи, живут и умирают вместе с ней;
+2. **Девять дисковых кэшей, один отпечаток ассетов** (`docs/data_map.md`, раздел «Носители»):
+   `signals` / `spectra` / `spectrograms` / `prepared` / `reports` / `compare` — по записи, живут
+   и умирают вместе с ней (`compare/{id_A}/{signature}/{band}.png` — карты разности пар B9:
+   второй уровень внутри каталога `id_A` чистит `clear_compare_cache`);
    `surface` / `mri` / `contours` — по версии ассета, не чистятся по TTL. Входы трёх ассетов
    (номер сборки, параметры, файлы данных) объявлены **в одном месте** — `services/asset_versions.py`
    (п.12), и версия считается одной функцией `fingerprint(kind, subjects_dir)`. Меняете сборку
@@ -23,7 +25,8 @@
    шагов (п.11). Не путайте версию ассета с **отпечатком расчёта** (`topomap_version`, `grid_version`):
    второй собирается из параметров задачи и меняется автоматически.
 3. **Чистка кэшей привязана к вытеснению записи, а сироты убирает обход.** `_drop_signal_cache`
-   (signals, spectra, spectrograms, prepared + RAM-кэш сигнала) срабатывает при вытеснении записи — TTL 24 ч
+   (signals, spectra, spectrograms, prepared, compare + RAM-кэш сигнала) срабатывает при
+   вытеснении записи — TTL 24 ч
    (`RECORDINGS_TTL_HOURS`) и лимит 10 (`RECORDINGS_HISTORY_LIMIT`) применяются при обращении к реестру
    (`_drop_expired`). Кэш записи, которую реестр уже не знает, никто бы не убрал — этим занимается
    `services/orphans.py` (`sweep_orphans`, п.13): обход «каталоги данных против реестра» при старте
@@ -97,7 +100,8 @@
    `grid_version`) — не ассет: он собирается из параметров задачи и подъёма не требует.
 13. **Сироты убирает обход, а не кнопка.** `services/orphans.py` (`sweep_orphans`) сносит три вида
    мусора: каталоги загрузок без живого владельца (через `RecordingRegistry.prune_orphans`), кэши
-   `signals`/`spectra`/`spectrograms` и файлы задач записи, которой нет **ни** в реестре, **ни** в
+   `signals`/`spectra`/`spectrograms`/`prepared`/`reports`/`compare` (верхний уровень по `id_A`)
+   и файлы задач записи, которой нет **ни** в реестре, **ни** в
    каталоге загрузок, а также файлы задач сверх `JOBS_HISTORY_LIMIT`. Вызовы: lifespan приложения
    (`main.py`) и `backend/scripts/dedupe_recordings.py --prune`. Правила: ассеты
    (`surface`/`mri`/`contours`) и `journal.jsonl` обход не трогает; уборка best-effort — исключение

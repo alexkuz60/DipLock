@@ -156,6 +156,16 @@ class Settings(BaseSettings):
     # GOF между полосами не сравним — узкая полоса завышает R²).
     roi_gof_threshold: float = Field(default=0.8)
 
+    # Дифференциальный анализ двух записей (B9, «Сравнение»):
+    # пермутаций кластерного теста MNE (мощность «каналы × частоты» двух эпоховых
+    # наборов). Больше — стабильнее p, но дольше; в тестах уменьшается.
+    compare_n_permutations: int = Field(default=1024)
+    # Уровень значимости p: кластеры (cluster_p < alpha) и поправка FDR
+    # на по-канальные t-тесты полос.
+    compare_alpha: float = Field(default=0.05)
+    # Ресэмплингов bootstrap для доверительного интервала дельты мощности (дБ).
+    compare_n_bootstraps: int = Field(default=2000)
+
 
     # Единицы EDF: None = автоопределение MNE + эвристика масштаба (см. edf_loader)
     edf_units: str | None = Field(default=None)

@@ -2,6 +2,7 @@
  * Фикстуры ответов бэкенда для тестов UI (совпадают по форме со схемами API).
  */
 import type {
+  CompareResult,
   ContourSlice,
   DipoleScanPoint,
   DipoleRefineResult,
@@ -20,6 +21,7 @@ import type {
   ReportResult,
   RoiAggregate,
   RoiBandCell,
+  SessionSummary,
   SpectrogramResult,
   SpectrumBandOut,
   SpectrumResult,
@@ -838,3 +840,105 @@ export function reportResultFixture(overrides: Partial<ReportResult> = {}): Repo
     ...overrides,
   }
 }
+
+/** Строки `GET /sessions` для выбора пары сравнения (две записи, по 2 сессии). */
+export const sessionsFixture: { total: number; items: SessionSummary[] } = {
+  total: 3,
+  items: [
+    {
+      id: 'sess-1', recording_id: 'rec-rest', kind: 'preprocess', filename: 'rest.edf',
+      n_channels: 10, sfreq: 250, duration_sec: 120, epoch_length_ms: 2000,
+      n_epochs: 60, n_epochs_rejected: 2, n_dipoles: 0, created_at: '2026-10-01T10:00:00',
+    },
+    {
+      id: 'sess-2', recording_id: 'rec-rest', kind: 'spectrum', filename: 'rest.edf',
+      n_channels: 10, sfreq: 250, duration_sec: 120, epoch_length_ms: 2000,
+      n_epochs: 60, n_epochs_rejected: 2, n_dipoles: 0, created_at: '2026-10-01T10:05:00',
+    },
+    {
+      id: 'sess-3', recording_id: 'rec-task', kind: 'preprocess', filename: 'task.edf',
+      n_channels: 10, sfreq: 250, duration_sec: 120, epoch_length_ms: 2000,
+      n_epochs: 60, n_epochs_rejected: 4, n_dipoles: 0, created_at: '2026-10-01T11:00:00',
+    },
+  ],
+}
+
+/** Результат сравнения двух записей (B9): дельта по α + значимый кластер. */
+export function compareResultFixture(
+  overrides: Partial<CompareResult> = {},
+): CompareResult {
+  return {
+    signature: 'abc123def4567890',
+    side_a: {
+      recording_id: 'rec-rest', filename: 'rest.edf', label: 'Покой',
+      n_epochs: 60, n_channels: 10,
+    },
+    side_b: {
+      recording_id: 'rec-task', filename: 'task.edf', label: 'Деятельность',
+      n_epochs: 58, n_channels: 10,
+    },
+    match: {
+      sfreq: 250, filter_band_hz: [1, 40], notch_hz: null, epoch_length_ms: 2000,
+      psd_method: 'welch', reference: 'average',
+      channels: ['Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', 'O1', 'O2'],
+      channels_only_a: [], channels_only_b: ['T3'],
+    },
+    freqs: [1, 2, 3, 4, 6, 8, 10, 12, 16, 20, 24, 30, 40],
+    psd_mean_a_uv2: [8, 6, 5, 4, 4, 5, 9, 7, 4, 3, 2, 1.5, 1],
+    psd_mean_b_uv2: [8, 6, 5, 4, 4, 6, 60, 9, 4, 3, 2, 1.5, 1],
+    psd_delta_db: [0, 0, 0, 0, 0, 0.8, 8.3, 1.1, 0, 0, 0, 0, 0],
+    bands: [
+      {
+        name: 'alpha', fmin: 8, fmax: 13, power_a_uv2: 9.1, power_b_uv2: 61.2,
+        delta_uv2: 52.1, delta_db: 8.3, relative_power_a: 0.3, relative_power_b: 0.55,
+        median_a_uv2: 9.0, median_b_uv2: 60.8, ci95_delta_db: [7.1, 9.5],
+        effect: 2.4, p_value: 0.0004, q_value: 0.003,
+        fdr_significant_channels: ['O1', 'O2', 'P3', 'P4'],
+        topomap_delta_url: '/api/v1/compare/topomap/alpha.png?recording_id_a=rec-rest&recording_id_b=rec-task',
+      },
+      {
+        name: 'theta', fmin: 4, fmax: 8, power_a_uv2: 4.0, power_b_uv2: 4.2,
+        delta_uv2: 0.2, delta_db: 0.2, relative_power_a: 0.13, relative_power_b: 0.14,
+        median_a_uv2: 4.0, median_b_uv2: 4.1, ci95_delta_db: [-0.5, 0.9],
+        effect: 0.1, p_value: 0.62, q_value: 0.71,
+        fdr_significant_channels: [], topomap_delta_url: null,
+      },
+    ],
+    indices: {
+      iaf_a_hz: 10.0, iaf_b_hz: 10.2, delta_iaf_hz: 0.2,
+      theta_beta_a: 1.4, theta_beta_b: 1.5, delta_theta_beta: 0.1,
+      theta_alpha_beta_a: 2.1, theta_alpha_beta_b: 2.2, delta_theta_alpha_beta: 0.1,
+    },
+    specparam: {
+      exponent_a: 1.4, exponent_b: 1.1, delta_exponent: -0.3,
+      offset_a: 2.1, offset_b: 2.4, delta_offset: 0.3,
+      fit_r_squared_a: 0.98, fit_r_squared_b: 0.97, peaks_a: [], peaks_b: [],
+    },
+    stats: {
+      method: 'permutation_cluster_test', n_permutations: 1024, alpha: 0.05,
+      n_clusters: 3, n_significant: 1,
+      clusters: [
+        {
+          p_value: 0.01, significant: true, channels: ['O1', 'O2', 'P3', 'P4'],
+          freq_min_hz: 8.8, freq_max_hz: 11.7, n_points: 24,
+          mean_delta_db: 7.9, direction: 'B>A',
+        },
+        {
+          p_value: 0.4, significant: false, channels: ['F7'],
+          freq_min_hz: 20.0, freq_max_hz: 22.0, n_points: 4,
+          mean_delta_db: -0.3, direction: 'A>B',
+        },
+      ],
+    },
+    topomap_version: 'abc123def4567890',
+    notes: [
+      'Кластерный тест указывает на связку «частота × канал», но не доказывает значимость каждой её точки отдельно (Sassenhagen & Draschkow, 2019).',
+      'Эпохи внутри записи автокоррелированы: эффективная выборка меньше числа эпох, поэтому p-значения могут быть оптимистичными.',
+      'Дельты считаются по общим каналам пары и при одинаковой обработке (см. «совпадение параметров»); направление дельт — B − A.',
+    ],
+    warnings: ['Каналы вне пересечения исключены из сравнения: B: T3'],
+    duration_sec_calc: 3.2,
+    ...overrides,
+  }
+}
+

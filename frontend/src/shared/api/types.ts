@@ -91,6 +91,17 @@ export type SpectrumPeakOut = Schemas['SpectrumPeakOut']
 
 export type SpectrumResult = Schemas['SpectrumResult']
 
+/**
+ * Дифференциальный анализ двух записей (B9, задача «Сравнение»): дельты по
+ * полосам (B − A), статистика кластерного теста MNE и ссылки на карты разности.
+ */
+export type CompareResult = Schemas['CompareResult']
+
+export type CompareBand = Schemas['CompareBandOut']
+
+export type CompareCluster = Schemas['CompareClusterOut']
+
+
 export type DipoleScanPoint = Schemas['DipoleScanPointOut']
 
 export type DipoleScanResult = Schemas['DipoleScanResult']
@@ -103,6 +114,12 @@ export type RecordingMix = Schemas['ChannelMixOut']
 export type RecordingEvent = Schemas['RecordingEvent']
 
 export type RecordingMeta = Schemas['RecordingMeta']
+
+/** Строка списка сессий (`GET /sessions`, 4.7) — кандидат выбора пары сравнения */
+export type SessionSummary = Schemas['SessionSummaryOut']
+
+/** Страница списка сессий (`GET /sessions`) */
+export type SessionsPage = Schemas['SessionsPageOut']
 
 export type PipelineInfo = Schemas['PipelineInfo']
 

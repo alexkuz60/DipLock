@@ -24,6 +24,7 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.schemas.analysis import JobCreated, JobStatus
 from app.services import results_store
+from app.services.compare import CompareParams, run_compare
 from app.services.dipole_scanner import (
     DipoleRefineParams,
     DipoleScanParams,
@@ -73,6 +74,18 @@ def worker_evoked(
 ) -> dict[str, Any]:
     """Воркер задачи ERP (поток): усреднение эпох вокруг событий записи (2.7)."""
     return run_evoked(recording, settings, params, progress)
+
+
+def worker_compare(
+    progress: ProgressCallback,
+    recording_a: Recording, recording_b: Recording, params: CompareParams,
+) -> dict[str, Any]:
+    """Воркер дифференциального анализа (поток): PSD пары → дельты и статистика.
+
+    Задача принадлежит **паре** записей, а не одной, поэтому живёт не в
+    ``RECORDING_JOB_KINDS``: её результат отдаёт ``GET /compare/{job_id}``.
+    """
+    return run_compare(recording_a, recording_b, settings, params, progress)
 
 
 def worker_spectrum(
@@ -152,22 +165,61 @@ def submit_recording_job(
     )
 
 
+def submit_compare_job(
+    recording_a: Recording,
+    recording_b: Recording,
+    params: CompareParams,
+    meta: dict[str, Any] | None = None,
+) -> JobCreated:
+    """202 для задачи сравнения двух записей: результат — ``GET /compare/{job_id}``.
+
+    Задача не привязана к одной записи (пара), поэтому не входит в
+    ``RECORDING_JOB_KINDS`` и не пишет строку в БД через ``results_store`` —
+    носитель результата B9 (срез 1) — файл задачи и дисковый кэш карт разности.
+    """
+    filename = f"{recording_a.filename} ↔ {recording_b.filename}"
+    job = job_manager.submit(
+        "compare", filename, worker_compare,
+        recording_a, recording_b, params,
+        meta={
+            "recording_ids": [recording_a.recording_id, recording_b.recording_id],
+            "params_sig": repr(params),
+            **(meta or {}),
+        },
+    )
+    logger.info(
+        "Создана задача compare %s (%s ↔ %s)",
+        job.job_id, recording_a.recording_id, recording_b.recording_id,
+    )
+    prefix = settings.api_prefix
+    return JobCreated(
+        job_id=job.job_id,
+        status=job.status,
+        poll_url=f"{prefix}/jobs/{job.job_id}",
+        result_url=f"{prefix}/compare/{job.job_id}",
+    )
+
+
 def job_status(job: Any) -> JobStatus:
     """``JobStatus`` из задачи; ``result_url`` заполняется только для успешных.
 
     У задач записи результат лежит не в ``/jobs/{id}/result``, а рядом с записью
     (``/recordings/{id}/{kind}/{job_id}``) — это отдельные контракты
     (``PreprocessResult``, ``SpectrumResult``, ``DipoleScanResult``,
-    ``SpectrogramResult``).
+    ``SpectrogramResult``). Задача сравнения — пара записей: её результат
+    отдаёт ``GET /compare/{job_id}`` (``CompareResult``).
     """
     prefix = settings.api_prefix
     result_url: str | None = None
     if job.status == "succeeded":
-        recording_id = job.meta.get("recording_id")
-        if recording_id and job.kind in RECORDING_JOB_KINDS:
-            result_url = f"{prefix}/recordings/{recording_id}/{job.kind}/{job.job_id}"
+        if job.kind == "compare":
+            result_url = f"{prefix}/compare/{job.job_id}"
         else:
-            result_url = f"{prefix}/jobs/{job.job_id}/result"
+            recording_id = job.meta.get("recording_id")
+            if recording_id and job.kind in RECORDING_JOB_KINDS:
+                result_url = f"{prefix}/recordings/{recording_id}/{job.kind}/{job.job_id}"
+            else:
+                result_url = f"{prefix}/jobs/{job.job_id}/result"
     return JobStatus(**job.as_dict(), result_url=result_url)
 
 
@@ -212,6 +264,21 @@ def recording_job_result(recording_id: str, job_id: str, kind: str) -> Any:
     if job is None or job.kind != kind or job.meta.get("recording_id") != recording_id:
         raise HTTPException(
             status_code=404, detail=f"Задача {kind} {job_id} для записи {recording_id} не найдена",
+        )
+    _require_finished(job)
+    return job
+
+
+def compare_job_result(job_id: str) -> Any:
+    """Задача сравнения двух записей; 404/409 — как у задач записи.
+
+    Чужой вид задачи (спектр, отчёт) на адресе ``/compare/{id}`` — тоже 404:
+    адрес контракта ``CompareResult``, и другой результат здесь не читается.
+    """
+    job = job_manager.get(job_id)
+    if job is None or job.kind != "compare":
+        raise HTTPException(
+            status_code=404, detail=f"Задача сравнения {job_id} не найдена",
         )
     _require_finished(job)
     return job

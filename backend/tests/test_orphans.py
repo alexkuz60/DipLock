@@ -67,6 +67,9 @@ def test_sweep_removes_orphan_caches_and_keeps_live_ones(isolated, edf_file):
     # Тот самый факт из аудита: каталог «edf» в кэше спектрограмм.
     _touch(os.path.join(cache, "spectrograms", live, "sig1.bin"))
     _touch(os.path.join(cache, "spectrograms", "edf", "sig1.bin"))
+    # Карты разности пар (B9): верхний уровень — id первой записи пары.
+    _touch(os.path.join(cache, "compare", live, "sig1", "alpha.png"))
+    _touch(os.path.join(cache, "compare", "ghost", "sig1", "alpha.png"))
     # Ассеты и журнал живут по версии/диагностике — обход их не касается.
     _touch(os.path.join(cache, "surface", "surface-abc.json"))
     _touch(os.path.join(cache, "journal.jsonl"))
@@ -74,19 +77,23 @@ def test_sweep_removes_orphan_caches_and_keeps_live_ones(isolated, edf_file):
     report = sweep_orphans(settings, registry=registry)
 
     assert sorted(report.cache_dirs) == [
-        "signals/ghost", "spectra/ghost", "spectrograms/edf",
+        "compare/ghost", "signals/ghost", "spectra/ghost", "spectrograms/edf",
     ]
     assert report.freed_bytes > 0
     assert os.path.isfile(os.path.join(cache, "signals", live, "level1.bin"))
     assert os.path.isfile(os.path.join(cache, "spectra", live, "sig1", "delta.png"))
     assert os.path.isfile(os.path.join(cache, "spectrograms", live, "sig1.bin"))
+    assert os.path.isfile(os.path.join(cache, "compare", live, "sig1", "alpha.png"))
     for orphan in ("ghost", "edf"):
         assert not os.path.exists(os.path.join(cache, "spectrograms", orphan))
     assert not os.path.exists(os.path.join(cache, "signals", "ghost"))
     assert not os.path.exists(os.path.join(cache, "spectra", "ghost"))
+    assert not os.path.exists(os.path.join(cache, "compare", "ghost"))
     assert os.path.isfile(os.path.join(cache, "surface", "surface-abc.json"))
     assert os.path.isfile(os.path.join(cache, "journal.jsonl"))
-    assert RECORDING_CACHE_SUBDIRS == ("signals", "spectra", "spectrograms", "prepared", "reports")
+    assert RECORDING_CACHE_SUBDIRS == (
+        "signals", "spectra", "spectrograms", "prepared", "reports", "compare",
+    )
 
 
 def test_sweep_removes_stale_upload_dirs_and_keeps_root_file(isolated, edf_file):

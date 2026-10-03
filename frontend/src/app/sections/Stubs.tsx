@@ -8,7 +8,7 @@
  * разделы стоят в меню, чтобы навигация и хоткеи не менялись потом.
  */
 import type { ReactNode } from 'react'
-import { Headphones, Layers, Smile } from 'lucide-react'
+import { Headphones, Smile } from 'lucide-react'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { Panel } from '@/shared/ui/Panel'
 
@@ -49,38 +49,6 @@ function StubPanel({ title, options }: { title: string; options: string[] }) {
         ))}
       </ul>
     </Panel>
-  )
-}
-
-export function GroupAnalysisSection() {
-  return (
-    <StubSection
-      phase="Фаза 5: групповой анализ (требует read-API и наполнения БД)"
-      icon={<Layers className="size-12" />}
-      title="Групповой анализ"
-      description="Сравнение записей из базы: групповые фильтры, агрегаты по полям Бродмана, поиск общих закономерностей."
-      planned={[
-        'Список сессий из БД с параметрами анализа каждой записи',
-        'Групповая фильтрация: диапазон, длина эпохи, GOF, BA/ROI, файл, дата',
-        'Агрегаты: число диполей, средняя/стд амплитуда, средний GOF по BA',
-        'Тепловая карта «BA × сессии», топ-области',
-        'Экспорт групповой сводки',
-      ]}
-    />
-  )
-}
-
-export function GroupAnalysisPanel() {
-  return (
-    <StubPanel
-      title="Параметры группы"
-      options={[
-        'Набор сессий (чекбоксы)',
-        'Фильтры по параметрам анализа',
-        'Метрика агрегации',
-        'Период и источник записей',
-      ]}
-    />
   )
 }
 

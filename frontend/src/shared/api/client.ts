@@ -6,6 +6,7 @@
  */
 import type {
   AnalyzeResponse,
+  CompareResult,
   ContourSlice,
   DipoleRefineResult,
   DipoleScanResult,
@@ -21,6 +22,7 @@ import type {
   RecordingMeta,
   ReportResult,
   ServerRestart,
+  SessionsPage,
   SignalLayer,
   SignalsPrepQuery,
   SpectrogramResult,
@@ -175,6 +177,35 @@ export const api = {
   /** Запуск анализа фоновой задачей (основной вход для UI). */
   createAnalysisJob: (form: FormData, signal?: AbortSignal) =>
     request<JobCreated>(`${API_PREFIX}/jobs`, { method: 'POST', body: form, signal }),
+
+  /**
+   * Страница сессий (read-API 4.7): кандидаты записей для сравнения — у каждой
+   * строки `recording_id` + `filename`. Листинга записей в API нет
+   * (осознанно, `docs/rules/api-jobs.md`), санкционированный вход — сессии.
+   */
+  sessions: (query?: { limit?: number; recording_id?: string }, signal?: AbortSignal) => {
+    const params = new URLSearchParams()
+    if (query?.limit) params.set('limit', String(query.limit))
+    if (query?.recording_id) params.set('recording_id', query.recording_id)
+    const search = params.toString()
+    return request<SessionsPage>(
+      `${API_PREFIX}/sessions${search ? `?${search}` : ''}`,
+      { signal },
+    )
+  },
+
+  /**
+   * Дифференциальный анализ двух записей (B9): запуск — `POST /compare`
+   * (FormData с обеими записями и параметрами спектра), результат —
+   * `GET /compare/{job_id}` (`CompareResult`). Пара — не одна запись, поэтому
+   * это не `recordingJob`.
+   */
+  compare: {
+    start: (form: FormData, signal?: AbortSignal) =>
+      request<JobCreated>(`${API_PREFIX}/compare`, { method: 'POST', body: form, signal }),
+    result: (jobId: string, signal?: AbortSignal) =>
+      request<CompareResult>(`${API_PREFIX}/compare/${jobId}`, { signal }),
+  },
 
   /** Состояние задачи: этап, прогресс 0..1, ошибка. */
   job: (jobId: string, signal?: AbortSignal) =>

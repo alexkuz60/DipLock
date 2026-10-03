@@ -240,11 +240,17 @@ def head_map_positions(channels: Sequence[str]) -> dict[str, list[float]]:
 
 def topomap_png(
     positions: dict[str, np.ndarray], values: dict[str, float], size: int = TOPO_SIZE,
+    cmap: str = TOPO_CMAP, vlim: tuple[float, float] | None = None,
 ) -> bytes:
     """PNG топокарты: контур головы, палитра MNE, вне контура прозрачно.
 
     Чистая функция (без диска) — её и проверяет тест сервиса: картинка
     разбирается обратно RGBA-декодером (`tests/test_png.py`).
+
+    ``cmap``/``vlim`` — для карт **разности** (B−A, дифференциальный анализ,
+    `services/compare.py`): дивергентная палитра со шкалой ``(-m, m)``, чтобы
+    знак дельты читался цветом; по умолчанию — всё как у карт мощности
+    (viridis, min..max своих значений).
     """
     if not positions:
         raise SpectrumError("Нет позиций каналов — топокарта не строится")
@@ -254,10 +260,13 @@ def topomap_png(
 
     channel_xy = _scalp_projection(np.stack([positions[name] for name in names]))
     data = np.asarray([values[name] for name in names], dtype=float)
-    return encode_png_rgba8(_render_topomap(channel_xy, data, size))
+    return encode_png_rgba8(_render_topomap(channel_xy, data, size, cmap=cmap, vlim=vlim))
 
 
-def _render_topomap(channel_xy: np.ndarray, data: np.ndarray, size: int) -> np.ndarray:
+def _render_topomap(
+    channel_xy: np.ndarray, data: np.ndarray, size: int,
+    cmap: str = TOPO_CMAP, vlim: tuple[float, float] | None = None,
+) -> np.ndarray:
     """Рендер `mne.viz.plot_topomap` в RGBA-массив формы (size, size, 4).
 
     Фигура собирается без pyplot (Agg включён на импорте модуля): расчёт идёт
@@ -265,6 +274,8 @@ def _render_topomap(channel_xy: np.ndarray, data: np.ndarray, size: int) -> np.n
     pyplot в них не thread-safe. Ось — на весь холст, фон фигуры и оси
     прозрачный: вне контура головы пиксель не рисуется (изображение MNE
     обрезано контуром ``outlines='head'``, а линии контура не клипуются).
+    ``vlim=None`` — шкала min..max самих данных (карта мощности); для карты
+    разности передаётся симметричная пара ``(-m, m)``.
     """
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
@@ -276,13 +287,14 @@ def _render_topomap(channel_xy: np.ndarray, data: np.ndarray, size: int) -> np.n
     axes.patch.set_alpha(0.0)
     plot_topomap(
         data, channel_xy,
-        axes=axes, show=False, cmap=TOPO_CMAP, res=size,
+        axes=axes, show=False, cmap=cmap, res=size,
         # Шкала каждого диапазона — свои min..max мощностей (как прежний IDW):
         # картинка показывает форму распределения, число — в подписи под ней.
-        vlim=(float(np.min(data)), float(np.max(data))),
+        vlim=vlim if vlim is not None else (float(np.min(data)), float(np.max(data))),
     )
     canvas.draw()
     return np.asarray(canvas.buffer_rgba(), dtype=np.uint8).copy()
+
 
 
 def _integrate_band(freqs: np.ndarray, values: np.ndarray, df: float) -> np.ndarray:

@@ -17,6 +17,7 @@ fsaverage, атлас Brodmann) отдаются отдельными кэшир
 import asyncio
 import json
 import logging
+import math
 import shutil
 import sys
 from typing import Any
@@ -40,6 +41,7 @@ from app.api.assets import (
     asset_response,
 )
 from app.api.params import (
+    compare_params,
     dipole_refine_params,
     dipole_scan_params,
     evoked_params,
@@ -53,10 +55,12 @@ from app.api.params import (
     validate_analysis_request,
 )
 from app.api.recording_jobs import (
+    compare_job_result,
     job_by_id,
     job_status,
     recording_job_result,
     require_recording,
+    submit_compare_job,
     submit_recording_job,
 )
 from app.api.uploads import safe_edf_name, save_upload
@@ -97,6 +101,7 @@ from app.schemas.analysis import (
     SpectrumResult,
     SurfaceOut,
 )
+from app.schemas.compare import CompareResult
 from app.schemas.journal import JournalEntry, JournalOut
 from app.schemas.resource import GpuStatusOut, LocalResourceOut, LocalResourceUpdate
 from app.schemas.server import ServerRestartOut
@@ -117,6 +122,7 @@ from app.services.atlas_contours import (
     contours_ref as contour_ref,
 )
 from app.services.channel_mix import mixes_for
+from app.services.compare import cached_compare_topomap
 from app.services.filter_design import filter_response
 from app.services.job_manager import job_manager, noop_progress
 from app.services.mains import mains_component
@@ -727,6 +733,120 @@ async def get_spectrum_topomap(
         media_type="image/png",
         cache_control=CACHE_PRIVATE_DAY,
         headers={"X-Spectrum-Band": band},
+    )
+
+
+@router.post(
+    "/compare", status_code=202, response_model=JobCreated,
+    summary="Дифференциальный анализ двух записей (покой vs деятельность)",
+)
+async def create_compare_job(
+    recording_id_a: str = Form(..., description="Запись A — первая сторона пары (например, покой)"),
+    recording_id_b: str = Form(..., description="Запись B — вторая сторона (например, деятельность)"),
+    label_a: str = Form("Покой", description="Ярлык условия A (до 64 символов)"),
+    label_b: str = Form("Деятельность", description="Ярлык условия B"),
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц; без пары — без фильтра"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц (None — выключен)"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
+    epoch_length_ms: float = Form(2000.0, description="Длина эпохи для PSD"),
+    psd_method: str = Form("welch", description="Метод PSD: welch | multitaper (N17)"),
+) -> JobCreated:
+    """Две записи → общая обработка → дельты по полосам, статистика, карты разности.
+
+    Шлюз параметров пары (400 до старта задачи): записи разные, одинаковая
+    частота дискретизации и хотя бы один общий канал — без этого дельты не
+    определены (B9 «совпадение параметров»). Обе стороны обрабатываются
+    **одними и теми же** параметрами: это и есть гарантия сравнимости.
+    Дельты всегда B − A.
+    """
+    recording_a = require_recording(recording_id_a)
+    recording_b = require_recording(recording_id_b)
+    if recording_a.recording_id == recording_b.recording_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Сравнивать нужно две разные записи (A и B совпадают)",
+        )
+    sfreq_a = float(recording_a.meta.get("sfreq") or 0.0)
+    sfreq_b = float(recording_b.meta.get("sfreq") or 0.0)
+    if sfreq_a <= 0 or sfreq_b <= 0 or not math.isclose(sfreq_a, sfreq_b, rel_tol=1e-9):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Частоты дискретизации различаются ({sfreq_a:g} vs {sfreq_b:g} Гц) — "
+                "сравнение не определено"
+            ),
+        )
+    channels_a = set(recording_a.meta.get("channels") or [])
+    channels_b = set(recording_b.meta.get("channels") or [])
+    if not (channels_a & channels_b):
+        raise HTTPException(
+            status_code=400, detail="Записи не имеют ни одного общего канала — сравнивать нечего",
+        )
+    params = compare_params(
+        label_a=label_a, label_b=label_b,
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, psd_method=psd_method,
+    )
+    return submit_compare_job(recording_a, recording_b, params)
+
+
+@router.get(
+    "/compare/{job_id}", response_model=CompareResult,
+    summary="Результат дифференциального анализа двух записей",
+)
+async def get_compare_result(job_id: str) -> CompareResult:
+    """Дельты, статистика и ссылки на карты разности. 409 — задача идёт/упала."""
+    job = compare_job_result(job_id)
+    return CompareResult(**job.result)
+
+
+@router.get(
+    "/compare/topomap/{band}.png",
+    response_class=Response,
+    responses={200: { "content": {"image/png": {}} }},
+    summary="Карта разности B−A по полосе (PNG, ETag)",
+)
+async def get_compare_topomap(
+    band: str,
+    recording_id_a: str = Query(..., description="Запись A"),
+    recording_id_b: str = Query(..., description="Запись B"),
+    band_min: float | None = Query(None, description="Полоса фильтра, нижняя граница, Гц"),
+    band_max: float | None = Query(None, description="Полоса фильтра, верхняя граница, Гц"),
+    notch_hz: float | None = Query(None, description="Сетевой фильтр, Гц"),
+    epoch_length_ms: float = Query(2000.0, description="Длина эпохи для PSD"),
+    psd_method: str = Query("welch", description="Метод PSD: welch | multitaper (входит в ETag)"),
+    reference: str = Query("average", description="Референс (входит в ETag)"),
+    reference_channels: str | None = Query(None, description="Каналы референса через запятую"),
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """Дельты дБ по каналам полосы: дивергентная палитра, шкала (−m, m).
+
+    Подпись ETag включает параметры и **обе** записи; промах кэша пересчитывает
+    пару (кэш prepared_raw делает повтор дешёвым), как у топокарт спектра.
+    """
+    recording_a = require_recording(recording_id_a)
+    recording_b = require_recording(recording_id_b)
+    params = compare_params(
+        label_a="", label_b="",
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, psd_method=psd_method,
+    )
+    try:
+        data, version = await asyncio.to_thread(
+            cached_compare_topomap, recording_a, recording_b, settings, params, band,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return asset_response(
+        data, version,
+        if_none_match=if_none_match,
+        media_type="image/png",
+        cache_control=CACHE_PRIVATE_DAY,
+        headers={"X-Compare-Band": band},
     )
 
 

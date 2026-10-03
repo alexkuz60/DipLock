@@ -292,6 +292,14 @@ def _drop_signal_cache(recording_id: str) -> None:
         return
     clear_spectrogram_cache(settings, recording_id)
 
+    # Карты разности (дифференциальный анализ): запись может быть и первым
+    # участником пары (каталог по id_A), и вторым (второй уровень внутри id_A).
+    try:
+        from app.services.compare import clear_compare_cache
+    except ImportError:  # pragma: no cover — модуль всегда есть
+        return
+    clear_compare_cache(settings, recording_id)
+
     try:
         from app.services.prepared_signal import clear_prepared_cache
     except ImportError:  # pragma: no cover — модуль всегда есть

@@ -28,11 +28,12 @@ import { LocalizationTableSection } from './table/LocalizationTableSection'
 import { SummaryPanel } from './summary/SummaryPanel'
 import { SummarySection } from './summary/SummarySection'
 import { SummaryToolActions } from './summary/SummaryToolActions'
+import { GroupPanel } from './group/GroupPanel'
+import { GroupSection } from './group/GroupSection'
+import { GroupToolActions } from './group/GroupToolActions'
 import {
   EmoLabPanel,
   EmoLabSection,
-  GroupAnalysisPanel,
-  GroupAnalysisSection,
   NeuroAudioPanel,
   NeuroAudioSection,
 } from './Stubs'
@@ -71,7 +72,11 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
     Drawer: DipolesDrawer,
   },
   table: { Component: LocalizationTableSection, Panel: LocalizationTablePanel },
-  group: { Component: GroupAnalysisSection, Panel: GroupAnalysisPanel },
+  group: {
+    Component: GroupSection,
+    Panel: GroupPanel,
+    ToolActions: GroupToolActions,
+  },
   summary: {
     Component: SummarySection,
     Panel: SummaryPanel,

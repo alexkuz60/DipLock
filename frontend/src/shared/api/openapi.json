@@ -1140,6 +1140,267 @@
         }
       }
     },
+    "/api/v1/compare": {
+      "post": {
+        "summary": "Дифференциальный анализ двух записей (покой vs деятельность)",
+        "description": "Две записи → общая обработка → дельты по полосам, статистика, карты разности.\n\nШлюз параметров пары (400 до старта задачи): записи разные, одинаковая\nчастота дискретизации и хотя бы один общий канал — без этого дельты не\nопределены (B9 «совпадение параметров»). Обе стороны обрабатываются\n**одними и теми же** параметрами: это и есть гарантия сравнимости.\nДельты всегда B − A.",
+        "operationId": "create_compare_job_api_v1_compare_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_compare_job_api_v1_compare_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/compare/{job_id}": {
+      "get": {
+        "summary": "Результат дифференциального анализа двух записей",
+        "description": "Дельты, статистика и ссылки на карты разности. 409 — задача идёт/упала.",
+        "operationId": "get_compare_result_api_v1_compare__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompareResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/compare/topomap/{band}.png": {
+      "get": {
+        "summary": "Карта разности B−A по полосе (PNG, ETag)",
+        "description": "Дельты дБ по каналам полосы: дивергентная палитра, шкала (−m, m).\n\nПодпись ETag включает параметры и **обе** записи; промах кэша пересчитывает\nпару (кэш prepared_raw делает повтор дешёвым), как у топокарт спектра.",
+        "operationId": "get_compare_topomap_api_v1_compare_topomap__band__png_get",
+        "parameters": [
+          {
+            "name": "band",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Band"
+            }
+          },
+          {
+            "name": "recording_id_a",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Запись A",
+              "title": "Recording Id A"
+            },
+            "description": "Запись A"
+          },
+          {
+            "name": "recording_id_b",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Запись B",
+              "title": "Recording Id B"
+            },
+            "description": "Запись B"
+          },
+          {
+            "name": "band_min",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Полоса фильтра, нижняя граница, Гц",
+              "title": "Band Min"
+            },
+            "description": "Полоса фильтра, нижняя граница, Гц"
+          },
+          {
+            "name": "band_max",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Полоса фильтра, верхняя граница, Гц",
+              "title": "Band Max"
+            },
+            "description": "Полоса фильтра, верхняя граница, Гц"
+          },
+          {
+            "name": "notch_hz",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Сетевой фильтр, Гц",
+              "title": "Notch Hz"
+            },
+            "description": "Сетевой фильтр, Гц"
+          },
+          {
+            "name": "epoch_length_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "description": "Длина эпохи для PSD",
+              "default": 2000.0,
+              "title": "Epoch Length Ms"
+            },
+            "description": "Длина эпохи для PSD"
+          },
+          {
+            "name": "psd_method",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Метод PSD: welch | multitaper (входит в ETag)",
+              "default": "welch",
+              "title": "Psd Method"
+            },
+            "description": "Метод PSD: welch | multitaper (входит в ETag)"
+          },
+          {
+            "name": "reference",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Референс (входит в ETag)",
+              "default": "average",
+              "title": "Reference"
+            },
+            "description": "Референс (входит в ETag)"
+          },
+          {
+            "name": "reference_channels",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Каналы референса через запятую",
+              "title": "Reference Channels"
+            },
+            "description": "Каналы референса через запятую"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/recordings/{recording_id}/dipoles": {
       "post": {
         "summary": "Быстрый расчёт диполей (перебор сетки, одна точка на эпоху)",
@@ -3210,6 +3471,104 @@
         ],
         "title": "Body_create_analysis_job_api_v1_jobs_post"
       },
+      "Body_create_compare_job_api_v1_compare_post": {
+        "properties": {
+          "recording_id_a": {
+            "type": "string",
+            "title": "Recording Id A",
+            "description": "Запись A — первая сторона пары (например, покой)"
+          },
+          "recording_id_b": {
+            "type": "string",
+            "title": "Recording Id B",
+            "description": "Запись B — вторая сторона (например, деятельность)"
+          },
+          "label_a": {
+            "type": "string",
+            "title": "Label A",
+            "description": "Ярлык условия A (до 64 символов)",
+            "default": "Покой"
+          },
+          "label_b": {
+            "type": "string",
+            "title": "Label B",
+            "description": "Ярлык условия B",
+            "default": "Деятельность"
+          },
+          "band_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Min",
+            "description": "Нижняя граница полосы, Гц; без пары — без фильтра"
+          },
+          "band_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Max",
+            "description": "Верхняя граница полосы, Гц"
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz",
+            "description": "Сетевой фильтр 50/60 Гц (None — выключен)"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference",
+            "description": "average | custom",
+            "default": "average"
+          },
+          "reference_channels": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Channels",
+            "description": "Каналы референса через запятую"
+          },
+          "epoch_length_ms": {
+            "type": "number",
+            "title": "Epoch Length Ms",
+            "description": "Длина эпохи для PSD",
+            "default": 2000.0
+          },
+          "psd_method": {
+            "type": "string",
+            "title": "Psd Method",
+            "description": "Метод PSD: welch | multitaper (N17)",
+            "default": "welch"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id_a",
+          "recording_id_b"
+        ],
+        "title": "Body_create_compare_job_api_v1_compare_post"
+      },
       "Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post": {
         "properties": {
           "epoch_index": {
@@ -4508,6 +4867,763 @@
         ],
         "title": "CleanZoneOut",
         "description": "Зона вклада чистки (шаг 2 плана): интервал, где чистка изменила сигнал.\n\n``id`` серверный и стабильный между пересчётами (по порядку onset от\n**полного** вклада): UI отменяет зоны по id, поэтому «поехавшие» id\nпревращают отмену в лотерею. ``excluded`` — зона отменена в текущей\nконфигурации (вклада в сигнал не даёт, в списке остаётся)."
+      },
+      "CompareBandOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Ключ диапазона (delta…gamma)"
+          },
+          "fmin": {
+            "type": "number",
+            "title": "Fmin"
+          },
+          "fmax": {
+            "type": "number",
+            "title": "Fmax"
+          },
+          "power_a_uv2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power A Uv2",
+            "description": "Мощность в A, мкВ²; None — частоты вне полосы фильтра"
+          },
+          "power_b_uv2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power B Uv2",
+            "description": "Мощность в B, мкВ²"
+          },
+          "delta_uv2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Uv2",
+            "description": "B − A, мкВ²"
+          },
+          "delta_db": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Db",
+            "description": "10·log10(B/A), дБ — знак = направление изменения"
+          },
+          "relative_power_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Power A",
+            "description": "Доля диапазона в спектре A, 0..1"
+          },
+          "relative_power_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Power B",
+            "description": "Доля диапазона в спектре B, 0..1"
+          },
+          "median_a_uv2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median A Uv2",
+            "description": "Медиана мощности по эпохам A, мкВ²"
+          },
+          "median_b_uv2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median B Uv2",
+            "description": "Медиана мощности по эпохам B, мкВ²"
+          },
+          "ci95_delta_db": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci95 Delta Db",
+            "description": "95% bootstrap-ИИ дельты дБ [низ, верх]; 0 внутри — различие не подтверждено"
+          },
+          "effect": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effect",
+            "description": "Робастный эффект (медианная разность / pooled MAD); None — масштаб нулевой"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Value",
+            "description": "Welch t-тест по эпоховым мощностям, p"
+          },
+          "q_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Value",
+            "description": "p после поправки FDR внутри полосы (по каналам)"
+          },
+          "fdr_significant_channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fdr Significant Channels",
+            "description": "Каналы со значимой дельтой после FDR (q < alpha) — по ним карта разности"
+          },
+          "topomap_delta_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topomap Delta Url",
+            "description": "URL карты разности B−A (PNG, ETag); None — мало каналов с позицией"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "fmin",
+          "fmax",
+          "power_a_uv2",
+          "power_b_uv2",
+          "delta_uv2",
+          "delta_db",
+          "relative_power_a",
+          "relative_power_b",
+          "median_a_uv2",
+          "median_b_uv2",
+          "p_value",
+          "q_value"
+        ],
+        "title": "CompareBandOut",
+        "description": "Дельта одного диапазона ``freq_bands`` между записями B и A."
+      },
+      "CompareClusterOut": {
+        "properties": {
+          "p_value": {
+            "type": "number",
+            "title": "P Value",
+            "description": "Уровень значимости кластера (пермутации)"
+          },
+          "significant": {
+            "type": "boolean",
+            "title": "Significant",
+            "description": "p < alpha — кластер показывается как различие"
+          },
+          "channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Channels",
+            "description": "Каналы, попавшие в кластер"
+          },
+          "freq_min_hz": {
+            "type": "number",
+            "title": "Freq Min Hz",
+            "description": "Нижняя частота кластера, Гц"
+          },
+          "freq_max_hz": {
+            "type": "number",
+            "title": "Freq Max Hz",
+            "description": "Верхняя частота кластера, Гц"
+          },
+          "n_points": {
+            "type": "integer",
+            "title": "N Points",
+            "description": "Число точек «канал × частота» в кластере"
+          },
+          "mean_delta_db": {
+            "type": "number",
+            "title": "Mean Delta Db",
+            "description": "Средняя дельта дБ внутри кластера (знак = направление)"
+          },
+          "direction": {
+            "type": "string",
+            "title": "Direction",
+            "description": "«A>B» или «B>A» — где мощность больше"
+          }
+        },
+        "type": "object",
+        "required": [
+          "p_value",
+          "significant",
+          "channels",
+          "freq_min_hz",
+          "freq_max_hz",
+          "n_points",
+          "mean_delta_db",
+          "direction"
+        ],
+        "title": "CompareClusterOut",
+        "description": "Значимый кластер «частота × канал» из пермутационного теста."
+      },
+      "CompareIndicesOut": {
+        "properties": {
+          "iaf_a_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iaf A Hz"
+          },
+          "iaf_b_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Iaf B Hz"
+          },
+          "delta_iaf_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Iaf Hz",
+            "description": "B − A, Гц; None — IAF не измерен на одной из сторон"
+          },
+          "theta_beta_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta Beta A"
+          },
+          "theta_beta_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta Beta B"
+          },
+          "delta_theta_beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Theta Beta"
+          },
+          "theta_alpha_beta_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta Alpha Beta A"
+          },
+          "theta_alpha_beta_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theta Alpha Beta B"
+          },
+          "delta_theta_alpha_beta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Theta Alpha Beta"
+          }
+        },
+        "type": "object",
+        "title": "CompareIndicesOut",
+        "description": "Скалярные индексы обеих сторон и их дельты (IAF и отношения ритмов)."
+      },
+      "CompareMatchOut": {
+        "properties": {
+          "sfreq": {
+            "type": "number",
+            "title": "Sfreq",
+            "description": "Частота дискретизации, Гц — одинаковая у обеих записей (шлюз 400)"
+          },
+          "filter_band_hz": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Band Hz",
+            "description": "Полоса фильтра расчёта, Гц; None — без фильтра"
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz",
+            "description": "Notch, Гц"
+          },
+          "epoch_length_ms": {
+            "type": "number",
+            "title": "Epoch Length Ms",
+            "description": "Длина эпохи, мс"
+          },
+          "psd_method": {
+            "type": "string",
+            "title": "Psd Method",
+            "description": "Метод PSD: welch | multitaper"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference",
+            "description": "Референс: average | custom"
+          },
+          "channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Channels",
+            "description": "Общий набор каналов — по нему считается всё"
+          },
+          "channels_only_a": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Channels Only A",
+            "description": "Каналы только в записи A — исключены из сравнения"
+          },
+          "channels_only_b": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Channels Only B",
+            "description": "Каналы только в записи B — исключены из сравнения"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sfreq",
+          "epoch_length_ms",
+          "psd_method",
+          "reference",
+          "channels"
+        ],
+        "title": "CompareMatchOut",
+        "description": "«Совпадение параметров» пары (B9): что сравнивается и что разошлось."
+      },
+      "CompareResult": {
+        "properties": {
+          "signature": {
+            "type": "string",
+            "title": "Signature",
+            "description": "Отпечаток пары и параметров (ключ кэша карт разности)"
+          },
+          "side_a": {
+            "$ref": "#/components/schemas/CompareSideOut"
+          },
+          "side_b": {
+            "$ref": "#/components/schemas/CompareSideOut"
+          },
+          "match": {
+            "$ref": "#/components/schemas/CompareMatchOut"
+          },
+          "freqs": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Freqs",
+            "description": "Частотная сетка PSD, Гц (общая для обеих сторон)"
+          },
+          "psd_mean_a_uv2": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Psd Mean A Uv2",
+            "description": "PSD A, усреднённый по каналам и эпохам, мкВ²/Гц"
+          },
+          "psd_mean_b_uv2": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Psd Mean B Uv2",
+            "description": "PSD B, усреднённый по каналам и эпохам, мкВ²/Гц"
+          },
+          "psd_delta_db": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Psd Delta Db",
+            "description": "10·log10(B/A) по частотам, дБ"
+          },
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/CompareBandOut"
+            },
+            "type": "array",
+            "title": "Bands",
+            "description": "Дельты по диапазонам freq_bands"
+          },
+          "indices": {
+            "$ref": "#/components/schemas/CompareIndicesOut"
+          },
+          "specparam": {
+            "$ref": "#/components/schemas/CompareSpecparamOut"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/CompareStatsOut"
+          },
+          "topomap_version": {
+            "type": "string",
+            "title": "Topomap Version",
+            "description": "Версия карт разности (в URL — против «залипания» кэша)"
+          },
+          "notes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Notes",
+            "description": "Каветы интерпретации — показываются в UI под результатом без пересчёта"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "duration_sec_calc": {
+            "type": "number",
+            "title": "Duration Sec Calc",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "signature",
+          "side_a",
+          "side_b",
+          "match",
+          "freqs",
+          "psd_mean_a_uv2",
+          "psd_mean_b_uv2",
+          "psd_delta_db",
+          "bands",
+          "indices",
+          "specparam",
+          "stats",
+          "topomap_version"
+        ],
+        "title": "CompareResult",
+        "description": "Результат задачи сравнения двух записей (``kind=compare``).\n\nДельты всегда **B − A**: направление («деятельность минус покой») задаёт\nпользователь порядком выбора записей и ярлыками условий. Каветы\nинтерпретации (``notes``) — обязательные подписи UI: кластерный тест не\nлокализует эффект внутри кластера, а эпохи внутри записи автокоррелированы."
+      },
+      "CompareSideOut": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Ярлык условия от пользователя («покой», «деятельность»)"
+          },
+          "n_epochs": {
+            "type": "integer",
+            "title": "N Epochs",
+            "description": "Сколько эпох записи попало в расчёт"
+          },
+          "n_channels": {
+            "type": "integer",
+            "title": "N Channels",
+            "description": "Каналов в расчёте (общий набор пары)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "filename",
+          "label",
+          "n_epochs",
+          "n_channels"
+        ],
+        "title": "CompareSideOut",
+        "description": "Паспорт одной стороны пары (одна запись + её условие)."
+      },
+      "CompareSpecparamOut": {
+        "properties": {
+          "exponent_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exponent A"
+          },
+          "exponent_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exponent B"
+          },
+          "delta_exponent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Exponent"
+          },
+          "offset_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offset A"
+          },
+          "offset_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offset B"
+          },
+          "delta_offset": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Offset"
+          },
+          "fit_r_squared_a": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fit R Squared A"
+          },
+          "fit_r_squared_b": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fit R Squared B"
+          },
+          "peaks_a": {
+            "items": {
+              "$ref": "#/components/schemas/SpectrumPeakOut"
+            },
+            "type": "array",
+            "title": "Peaks A"
+          },
+          "peaks_b": {
+            "items": {
+              "$ref": "#/components/schemas/SpectrumPeakOut"
+            },
+            "type": "array",
+            "title": "Peaks B"
+          }
+        },
+        "type": "object",
+        "title": "CompareSpecparamOut",
+        "description": "1/f-разложение (specparam) каждой стороны и дельты наклона/сдвига."
+      },
+      "CompareStatsOut": {
+        "properties": {
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "description": "Идентификатор метода: permutation_cluster_test"
+          },
+          "n_permutations": {
+            "type": "integer",
+            "title": "N Permutations",
+            "description": "Число пермутаций"
+          },
+          "alpha": {
+            "type": "number",
+            "title": "Alpha",
+            "description": "Уровень значимости кластеров"
+          },
+          "n_clusters": {
+            "type": "integer",
+            "title": "N Clusters",
+            "description": "Всего найдено кластеров"
+          },
+          "n_significant": {
+            "type": "integer",
+            "title": "N Significant",
+            "description": "Значимых (p < alpha)"
+          },
+          "clusters": {
+            "items": {
+              "$ref": "#/components/schemas/CompareClusterOut"
+            },
+            "type": "array",
+            "title": "Clusters",
+            "description": "Кластеры по возрастанию p; вклад UI показывает значимые (significant=true)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "method",
+          "n_permutations",
+          "alpha",
+          "n_clusters",
+          "n_significant"
+        ],
+        "title": "CompareStatsOut",
+        "description": "Статистика различий: кластерный тест MNE по «канал × частота»."
       },
       "ContourShapeOut": {
         "properties": {

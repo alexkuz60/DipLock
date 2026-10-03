@@ -42,8 +42,10 @@ from app.services.recordings import RecordingRegistry, recording_registry
 logger = logging.getLogger(__name__)
 
 # Кэши, ключ которых — recording_id: у сироты их не чистит никто (см. правило 3
-# в ``docs/rules/data-and-caches.md``).
-RECORDING_CACHE_SUBDIRS = ("signals", "spectra", "spectrograms", "prepared", "reports")
+# в ``docs/rules/data-and-caches.md``). ``compare`` — карты разности пар записей:
+# верхний уровень по id_A, второй (``{id_A}/{signature}``) чистится вместе с A,
+# парные файлы с мёртвым B под живой A уходят при удалении B (``_drop_signal_cache``).
+RECORDING_CACHE_SUBDIRS = ("signals", "spectra", "spectrograms", "prepared", "reports", "compare")
 
 
 @dataclass

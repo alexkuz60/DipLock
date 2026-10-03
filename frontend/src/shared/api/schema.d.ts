@@ -368,6 +368,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Дифференциальный анализ двух записей (покой vs деятельность)
+         * @description Две записи → общая обработка → дельты по полосам, статистика, карты разности.
+         *
+         *     Шлюз параметров пары (400 до старта задачи): записи разные, одинаковая
+         *     частота дискретизации и хотя бы один общий канал — без этого дельты не
+         *     определены (B9 «совпадение параметров»). Обе стороны обрабатываются
+         *     **одними и теми же** параметрами: это и есть гарантия сравнимости.
+         *     Дельты всегда B − A.
+         */
+        post: operations["create_compare_job_api_v1_compare_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/compare/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Результат дифференциального анализа двух записей
+         * @description Дельты, статистика и ссылки на карты разности. 409 — задача идёт/упала.
+         */
+        get: operations["get_compare_result_api_v1_compare__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/compare/topomap/{band}.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Карта разности B−A по полосе (PNG, ETag)
+         * @description Дельты дБ по каналам полосы: дивергентная палитра, шкала (−m, m).
+         *
+         *     Подпись ETag включает параметры и **обе** записи; промах кэша пересчитывает
+         *     пару (кэш prepared_raw делает повтор дешёвым), как у топокарт спектра.
+         */
+        get: operations["get_compare_topomap_api_v1_compare_topomap__band__png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recordings/{recording_id}/dipoles": {
         parameters: {
             query?: never;
@@ -1369,6 +1438,69 @@ export interface components {
              */
             pp_threshold_uv: number;
         };
+        /** Body_create_compare_job_api_v1_compare_post */
+        Body_create_compare_job_api_v1_compare_post: {
+            /**
+             * Recording Id A
+             * @description Запись A — первая сторона пары (например, покой)
+             */
+            recording_id_a: string;
+            /**
+             * Recording Id B
+             * @description Запись B — вторая сторона (например, деятельность)
+             */
+            recording_id_b: string;
+            /**
+             * Label A
+             * @description Ярлык условия A (до 64 символов)
+             * @default Покой
+             */
+            label_a: string;
+            /**
+             * Label B
+             * @description Ярлык условия B
+             * @default Деятельность
+             */
+            label_b: string;
+            /**
+             * Band Min
+             * @description Нижняя граница полосы, Гц; без пары — без фильтра
+             */
+            band_min?: number | null;
+            /**
+             * Band Max
+             * @description Верхняя граница полосы, Гц
+             */
+            band_max?: number | null;
+            /**
+             * Notch Hz
+             * @description Сетевой фильтр 50/60 Гц (None — выключен)
+             */
+            notch_hz?: number | null;
+            /**
+             * Reference
+             * @description average | custom
+             * @default average
+             */
+            reference: string;
+            /**
+             * Reference Channels
+             * @description Каналы референса через запятую
+             */
+            reference_channels?: string | null;
+            /**
+             * Epoch Length Ms
+             * @description Длина эпохи для PSD
+             * @default 2000
+             */
+            epoch_length_ms: number;
+            /**
+             * Psd Method
+             * @description Метод PSD: welch | multitaper (N17)
+             * @default welch
+             */
+            psd_method: string;
+        };
         /** Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post */
         Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post: {
             /**
@@ -2195,6 +2327,366 @@ export interface components {
              * @description Зона отменена (чистка в ней не применена)
              */
             excluded: boolean;
+        };
+        /**
+         * CompareBandOut
+         * @description Дельта одного диапазона ``freq_bands`` между записями B и A.
+         */
+        CompareBandOut: {
+            /**
+             * Name
+             * @description Ключ диапазона (delta…gamma)
+             */
+            name: string;
+            /** Fmin */
+            fmin: number;
+            /** Fmax */
+            fmax: number;
+            /**
+             * Power A Uv2
+             * @description Мощность в A, мкВ²; None — частоты вне полосы фильтра
+             */
+            power_a_uv2: number | null;
+            /**
+             * Power B Uv2
+             * @description Мощность в B, мкВ²
+             */
+            power_b_uv2: number | null;
+            /**
+             * Delta Uv2
+             * @description B − A, мкВ²
+             */
+            delta_uv2: number | null;
+            /**
+             * Delta Db
+             * @description 10·log10(B/A), дБ — знак = направление изменения
+             */
+            delta_db: number | null;
+            /**
+             * Relative Power A
+             * @description Доля диапазона в спектре A, 0..1
+             */
+            relative_power_a: number | null;
+            /**
+             * Relative Power B
+             * @description Доля диапазона в спектре B, 0..1
+             */
+            relative_power_b: number | null;
+            /**
+             * Median A Uv2
+             * @description Медиана мощности по эпохам A, мкВ²
+             */
+            median_a_uv2: number | null;
+            /**
+             * Median B Uv2
+             * @description Медиана мощности по эпохам B, мкВ²
+             */
+            median_b_uv2: number | null;
+            /**
+             * Ci95 Delta Db
+             * @description 95% bootstrap-ИИ дельты дБ [низ, верх]; 0 внутри — различие не подтверждено
+             */
+            ci95_delta_db?: number[] | null;
+            /**
+             * Effect
+             * @description Робастный эффект (медианная разность / pooled MAD); None — масштаб нулевой
+             */
+            effect?: number | null;
+            /**
+             * P Value
+             * @description Welch t-тест по эпоховым мощностям, p
+             */
+            p_value: number | null;
+            /**
+             * Q Value
+             * @description p после поправки FDR внутри полосы (по каналам)
+             */
+            q_value: number | null;
+            /**
+             * Fdr Significant Channels
+             * @description Каналы со значимой дельтой после FDR (q < alpha) — по ним карта разности
+             */
+            fdr_significant_channels?: string[];
+            /**
+             * Topomap Delta Url
+             * @description URL карты разности B−A (PNG, ETag); None — мало каналов с позицией
+             */
+            topomap_delta_url?: string | null;
+        };
+        /**
+         * CompareClusterOut
+         * @description Значимый кластер «частота × канал» из пермутационного теста.
+         */
+        CompareClusterOut: {
+            /**
+             * P Value
+             * @description Уровень значимости кластера (пермутации)
+             */
+            p_value: number;
+            /**
+             * Significant
+             * @description p < alpha — кластер показывается как различие
+             */
+            significant: boolean;
+            /**
+             * Channels
+             * @description Каналы, попавшие в кластер
+             */
+            channels: string[];
+            /**
+             * Freq Min Hz
+             * @description Нижняя частота кластера, Гц
+             */
+            freq_min_hz: number;
+            /**
+             * Freq Max Hz
+             * @description Верхняя частота кластера, Гц
+             */
+            freq_max_hz: number;
+            /**
+             * N Points
+             * @description Число точек «канал × частота» в кластере
+             */
+            n_points: number;
+            /**
+             * Mean Delta Db
+             * @description Средняя дельта дБ внутри кластера (знак = направление)
+             */
+            mean_delta_db: number;
+            /**
+             * Direction
+             * @description «A>B» или «B>A» — где мощность больше
+             */
+            direction: string;
+        };
+        /**
+         * CompareIndicesOut
+         * @description Скалярные индексы обеих сторон и их дельты (IAF и отношения ритмов).
+         */
+        CompareIndicesOut: {
+            /** Iaf A Hz */
+            iaf_a_hz?: number | null;
+            /** Iaf B Hz */
+            iaf_b_hz?: number | null;
+            /**
+             * Delta Iaf Hz
+             * @description B − A, Гц; None — IAF не измерен на одной из сторон
+             */
+            delta_iaf_hz?: number | null;
+            /** Theta Beta A */
+            theta_beta_a?: number | null;
+            /** Theta Beta B */
+            theta_beta_b?: number | null;
+            /** Delta Theta Beta */
+            delta_theta_beta?: number | null;
+            /** Theta Alpha Beta A */
+            theta_alpha_beta_a?: number | null;
+            /** Theta Alpha Beta B */
+            theta_alpha_beta_b?: number | null;
+            /** Delta Theta Alpha Beta */
+            delta_theta_alpha_beta?: number | null;
+        };
+        /**
+         * CompareMatchOut
+         * @description «Совпадение параметров» пары (B9): что сравнивается и что разошлось.
+         */
+        CompareMatchOut: {
+            /**
+             * Sfreq
+             * @description Частота дискретизации, Гц — одинаковая у обеих записей (шлюз 400)
+             */
+            sfreq: number;
+            /**
+             * Filter Band Hz
+             * @description Полоса фильтра расчёта, Гц; None — без фильтра
+             */
+            filter_band_hz?: number[] | null;
+            /**
+             * Notch Hz
+             * @description Notch, Гц
+             */
+            notch_hz?: number | null;
+            /**
+             * Epoch Length Ms
+             * @description Длина эпохи, мс
+             */
+            epoch_length_ms: number;
+            /**
+             * Psd Method
+             * @description Метод PSD: welch | multitaper
+             */
+            psd_method: string;
+            /**
+             * Reference
+             * @description Референс: average | custom
+             */
+            reference: string;
+            /**
+             * Channels
+             * @description Общий набор каналов — по нему считается всё
+             */
+            channels: string[];
+            /**
+             * Channels Only A
+             * @description Каналы только в записи A — исключены из сравнения
+             */
+            channels_only_a?: string[];
+            /**
+             * Channels Only B
+             * @description Каналы только в записи B — исключены из сравнения
+             */
+            channels_only_b?: string[];
+        };
+        /**
+         * CompareResult
+         * @description Результат задачи сравнения двух записей (``kind=compare``).
+         *
+         *     Дельты всегда **B − A**: направление («деятельность минус покой») задаёт
+         *     пользователь порядком выбора записей и ярлыками условий. Каветы
+         *     интерпретации (``notes``) — обязательные подписи UI: кластерный тест не
+         *     локализует эффект внутри кластера, а эпохи внутри записи автокоррелированы.
+         */
+        CompareResult: {
+            /**
+             * Signature
+             * @description Отпечаток пары и параметров (ключ кэша карт разности)
+             */
+            signature: string;
+            side_a: components["schemas"]["CompareSideOut"];
+            side_b: components["schemas"]["CompareSideOut"];
+            match: components["schemas"]["CompareMatchOut"];
+            /**
+             * Freqs
+             * @description Частотная сетка PSD, Гц (общая для обеих сторон)
+             */
+            freqs: number[];
+            /**
+             * Psd Mean A Uv2
+             * @description PSD A, усреднённый по каналам и эпохам, мкВ²/Гц
+             */
+            psd_mean_a_uv2: number[];
+            /**
+             * Psd Mean B Uv2
+             * @description PSD B, усреднённый по каналам и эпохам, мкВ²/Гц
+             */
+            psd_mean_b_uv2: number[];
+            /**
+             * Psd Delta Db
+             * @description 10·log10(B/A) по частотам, дБ
+             */
+            psd_delta_db: number[];
+            /**
+             * Bands
+             * @description Дельты по диапазонам freq_bands
+             */
+            bands: components["schemas"]["CompareBandOut"][];
+            indices: components["schemas"]["CompareIndicesOut"];
+            specparam: components["schemas"]["CompareSpecparamOut"];
+            stats: components["schemas"]["CompareStatsOut"];
+            /**
+             * Topomap Version
+             * @description Версия карт разности (в URL — против «залипания» кэша)
+             */
+            topomap_version: string;
+            /**
+             * Notes
+             * @description Каветы интерпретации — показываются в UI под результатом без пересчёта
+             */
+            notes?: string[];
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Duration Sec Calc
+             * @default 0
+             */
+            duration_sec_calc: number;
+        };
+        /**
+         * CompareSideOut
+         * @description Паспорт одной стороны пары (одна запись + её условие).
+         */
+        CompareSideOut: {
+            /** Recording Id */
+            recording_id: string;
+            /** Filename */
+            filename: string;
+            /**
+             * Label
+             * @description Ярлык условия от пользователя («покой», «деятельность»)
+             */
+            label: string;
+            /**
+             * N Epochs
+             * @description Сколько эпох записи попало в расчёт
+             */
+            n_epochs: number;
+            /**
+             * N Channels
+             * @description Каналов в расчёте (общий набор пары)
+             */
+            n_channels: number;
+        };
+        /**
+         * CompareSpecparamOut
+         * @description 1/f-разложение (specparam) каждой стороны и дельты наклона/сдвига.
+         */
+        CompareSpecparamOut: {
+            /** Exponent A */
+            exponent_a?: number | null;
+            /** Exponent B */
+            exponent_b?: number | null;
+            /** Delta Exponent */
+            delta_exponent?: number | null;
+            /** Offset A */
+            offset_a?: number | null;
+            /** Offset B */
+            offset_b?: number | null;
+            /** Delta Offset */
+            delta_offset?: number | null;
+            /** Fit R Squared A */
+            fit_r_squared_a?: number | null;
+            /** Fit R Squared B */
+            fit_r_squared_b?: number | null;
+            /** Peaks A */
+            peaks_a?: components["schemas"]["SpectrumPeakOut"][];
+            /** Peaks B */
+            peaks_b?: components["schemas"]["SpectrumPeakOut"][];
+        };
+        /**
+         * CompareStatsOut
+         * @description Статистика различий: кластерный тест MNE по «канал × частота».
+         */
+        CompareStatsOut: {
+            /**
+             * Method
+             * @description Идентификатор метода: permutation_cluster_test
+             */
+            method: string;
+            /**
+             * N Permutations
+             * @description Число пермутаций
+             */
+            n_permutations: number;
+            /**
+             * Alpha
+             * @description Уровень значимости кластеров
+             */
+            alpha: number;
+            /**
+             * N Clusters
+             * @description Всего найдено кластеров
+             */
+            n_clusters: number;
+            /**
+             * N Significant
+             * @description Значимых (p < alpha)
+             */
+            n_significant: number;
+            /**
+             * Clusters
+             * @description Кластеры по возрастанию p; вклад UI показывает значимые (significant=true)
+             */
+            clusters?: components["schemas"]["CompareClusterOut"][];
         };
         /**
          * ContourShapeOut
@@ -5478,6 +5970,122 @@ export interface operations {
             };
             path: {
                 recording_id: string;
+                band: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_compare_job_api_v1_compare_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_compare_job_api_v1_compare_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compare_result_api_v1_compare__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompareResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compare_topomap_api_v1_compare_topomap__band__png_get: {
+        parameters: {
+            query: {
+                /** @description Запись A */
+                recording_id_a: string;
+                /** @description Запись B */
+                recording_id_b: string;
+                /** @description Полоса фильтра, нижняя граница, Гц */
+                band_min?: number | null;
+                /** @description Полоса фильтра, верхняя граница, Гц */
+                band_max?: number | null;
+                /** @description Сетевой фильтр, Гц */
+                notch_hz?: number | null;
+                /** @description Длина эпохи для PSD */
+                epoch_length_ms?: number;
+                /** @description Метод PSD: welch | multitaper (входит в ETag) */
+                psd_method?: string;
+                /** @description Референс (входит в ETag) */
+                reference?: string;
+                /** @description Каналы референса через запятую */
+                reference_channels?: string | null;
+            };
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
                 band: string;
             };
             cookie?: never;
