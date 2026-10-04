@@ -20,6 +20,7 @@ import type {
   PreprocessStage,
   RecordingMeta,
   ReportBandSummary,
+  ReportHtmlOut,
   ReportResult,
   RoiAggregate,
   RoiBandCell,
@@ -839,6 +840,21 @@ export function reportResultFixture(overrides: Partial<ReportResult> = {}): Repo
     roi: roiAggregateFixture(),
     warnings: ['[Фильтр и референс] Переходный процесс FIR-фильтра: ±0.42 с у краёв записи'],
     duration_sec_calc: 12.3,
+    ...overrides,
+  }
+}
+
+/**
+ * Метаданные HTML-отчёта «Итогов» по результату группового анализа
+ * (`GET …/report`): ленивая сборка — сервер отдаёт подпись и ссылку на ассет.
+ */
+export function reportHtmlOutFixture(overrides: Partial<ReportHtmlOut> = {}): ReportHtmlOut {
+  return {
+    title: 'Сравнение: Покой ↔ Деятельность',
+    html_sig: 'sig0000abcd0000ef',
+    report_version: 'ghrep0rt0000abcd',
+    html_url: '/api/v1/compare/job-compare-1/report/html',
+    warnings: [],
     ...overrides,
   }
 }

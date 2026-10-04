@@ -48,6 +48,15 @@ describe('раздел «Итоги»', () => {
       jobId: null,
       result: null,
       error: null,
+      kind: 'record',
+      compareJobId: null,
+      compareReport: null,
+      compareBuilding: false,
+      compareError: null,
+      groupRunId: null,
+      groupReport: null,
+      groupBuilding: false,
+      groupError: null,
     })
     setRecording(false)
   })

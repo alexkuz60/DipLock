@@ -47,6 +47,13 @@ logger = logging.getLogger(__name__)
 # парные файлы с мёртвым B под живой A уходят при удалении B (``_drop_signal_cache``).
 RECORDING_CACHE_SUBDIRS = ("signals", "spectra", "spectrograms", "prepared", "reports", "compare")
 
+# Подкаталоги ``reports``, ключ которых — не recording_id: HTML отчётов
+# группового анализа (раздел «Итоги», ``services/group_reports.py``). Их чистка
+# своя: ``compare`` привязана к файлу задачи (``_sweep_compare_reports``),
+# ``group`` — к строке ``group_analyses``, а истории прогонов не удаляются,
+# поэтому сирот там не бывает.
+RESERVED_REPORT_SUBDIRS = ("compare", "group")
+
 
 @dataclass
 class SweepReport:
@@ -111,6 +118,10 @@ def _sweep_cache_dirs(cfg: Settings, protected_ids: set[str]) -> tuple[list[str]
         for name in sorted(os.listdir(root)):
             if name in protected_ids:
                 continue
+            # Свои ключи у ``reports``: HTML отчётов группового анализа — не
+            # запись, их чистит ``_sweep_compare_reports`` (см. константу).
+            if subdir == "reports" and name in RESERVED_REPORT_SUBDIRS:
+                continue
             path = os.path.join(root, name)
             freed += _size_of(path)
             if os.path.isdir(path):
@@ -118,6 +129,37 @@ def _sweep_cache_dirs(cfg: Settings, protected_ids: set[str]) -> tuple[list[str]
             else:
                 _drop_path(path)
             removed.append(f"{subdir}/{name}")
+    return removed, freed
+
+
+def _sweep_compare_reports(cfg: Settings) -> tuple[list[str], int]:
+    """HTML отчётов сравнений, чья задача уже вышла из истории (A8).
+
+    Файлы задач прогона ``prune_records`` по ``jobs_history_limit``, а отчёт
+    строится из результата задачи — значит, вместе с ним файл кэша сирота.
+    Прогонам группы отчёт сиротой не бывает: строки ``group_analyses`` —
+    история и не удаляются («история не UPSERT», §8.4.2).
+    """
+    root = cache_path(cfg.cache_dir, "reports", "compare")
+    if not os.path.isdir(root):
+        return [], 0
+    removed: list[str] = []
+    freed = 0
+    for name in sorted(os.listdir(root)):
+        try:
+            known = os.path.exists(job_store.job_path(cfg, name))
+        except ValueError:
+            # Имя не похоже на job_id: к задаче его не привязать — сирота.
+            known = False
+        if known:
+            continue
+        path = os.path.join(root, name)
+        freed += _size_of(path)
+        if os.path.isdir(path):
+            cache_clear(cfg.cache_dir, "reports", "compare", name)
+        else:
+            _drop_path(path)
+        removed.append(f"reports/compare/{name}")
     return removed, freed
 
 
@@ -160,6 +202,11 @@ def sweep_orphans(
                 limit=cfg.jobs_history_limit,
             )
         )
+        # После prune_records: HTML отчёта compare живёт с файлом задачи,
+        # поэтому в тот же проход убираем и его сирот (A8)
+        stale_reports, report_bytes = _sweep_compare_reports(cfg)
+        report.cache_dirs += stale_reports
+        report.freed_bytes += report_bytes
     except Exception:
         logger.exception("Обход сирот прерван")
 

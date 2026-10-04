@@ -416,12 +416,12 @@ class Raw(str):
     """Ячейка таблицы, которую не надо экранировать (уже готовый HTML)."""
 
 
-def _esc(value: Any) -> str:
+def esc(value: Any) -> str:
     """HTML-экранирование: имена каналов/структур приходят из данных записи."""
     return html.escape(str(value))
 
 
-def _num(value: Any, digits: int = 1) -> str:
+def num(value: Any, digits: int = 1) -> str:
     """Число с фиксированной точностью; ``None`` — честное «—»."""
     if value is None:
         return "—"
@@ -431,35 +431,35 @@ def _num(value: Any, digits: int = 1) -> str:
         return str(value)
 
 
-def _pct(share: Any, digits: int = 1) -> str:
+def pct(share: Any, digits: int = 1) -> str:
     """Доля 0..1 → проценты для таблиц отчёта."""
     if share is None:
         return "—"
     return f"{100.0 * float(share):.{digits}f}"
 
 
-def _table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
+def table(headers: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
     """Простая HTML-таблица: оформление даёт сам MNE.Report, здесь только разметка."""
-    head = "".join(f"<th>{_esc(h)}</th>" for h in headers)
+    head = "".join(f"<th>{esc(h)}</th>" for h in headers)
     cells: list[str] = []
     for row in rows:
         row_html = "".join(
-            f"<td>{cell if isinstance(cell, Raw) else _esc(cell)}</td>" for cell in row
+            f"<td>{cell if isinstance(cell, Raw) else esc(cell)}</td>" for cell in row
         )
         cells.append(f"<tr>{row_html}</tr>")
     return f"<table><thead><tr>{head}</tr></thead><tbody>{''.join(cells)}</tbody></table>"
 
 
-def _kv(pairs: Sequence[tuple[str, Any]]) -> str:
+def kv(pairs: Sequence[tuple[str, Any]]) -> str:
     """Таблица «параметр → значение» (двухколоночная)."""
-    return _table(("Параметр", "Значение"), [[key, value] for key, value in pairs])
+    return table(("Параметр", "Значение"), [[key, value] for key, value in pairs])
 
 
-def _bullets(items: Sequence[str]) -> str:
+def bullets(items: Sequence[str]) -> str:
     """Маркированный список (причины светофора, предупреждения стадий)."""
     if not items:
         return "<p>нет</p>"
-    return "<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in items) + "</ul>"
+    return "<ul>" + "".join(f"<li>{esc(item)}</li>" for item in items) + "</ul>"
 
 
 def _edf_stage_match(
@@ -624,9 +624,9 @@ def _cross_checks(
 def _cross_checks_html(info: Sequence[str], warns: Sequence[str]) -> str:
     """Блок «Контроли пайплайна» в шапке отчёта (вердикт №2 — первой строкой)."""
     parts: list[str] = ["<h3>Контроли сквозного пайплайна</h3>"]
-    parts.extend(f"<p><strong>⚠ {_esc(item)}</strong></p>" for item in warns)
+    parts.extend(f"<p><strong>⚠ {esc(item)}</strong></p>" for item in warns)
     if info:
-        parts.append("<ul>" + "".join(f"<li>{_esc(item)}</li>" for item in info) + "</ul>")
+        parts.append("<ul>" + "".join(f"<li>{esc(item)}</li>" for item in info) + "</ul>")
     return "".join(parts)
 
 
@@ -655,7 +655,7 @@ def _fingerprint_html(
     )
     return (
         "<details><summary>Полный отпечаток параметров (сверка двух отчётов парами)</summary>"
-        + _kv(rows)
+        + kv(rows)
         + "</details>"
     )
 
@@ -682,11 +682,11 @@ def _part1_html(
     if meta.get("units_autoscaled"):
         units += "; масштаб трактован как микровольты"
     unmatched = ", ".join(str(c) for c in (meta.get("unmatched_channels") or [])) or "—"
-    passport = _kv(
+    passport = kv(
         [
             ("Файл записи", filt.get("recording_id", "")),
-            ("Длительность, с", _num(filt.get("duration_sec"), 1)),
-            ("Частота дискретизации, Гц", _num(filt.get("sfreq"), 1)),
+            ("Длительность, с", num(filt.get("duration_sec"), 1)),
+            ("Частота дискретизации, Гц", num(filt.get("sfreq"), 1)),
             (
                 "Верхняя граница пакета / Nyquist, Гц",
                 f"{band_top_hz:g} / {sfreq / 2:g}"
@@ -704,26 +704,26 @@ def _part1_html(
             ("Метод фильтра", filt.get("filter_method", "none")),
             (
                 "Длина FIR-ядра, с",
-                _num(filt.get("filter_length_sec"), 2)
+                num(filt.get("filter_length_sec"), 2)
                 if filt.get("filter_length_sec") is not None
                 else "—",
             ),
-            ("Краевой буфер, с", _num(filt.get("edge_buffer_sec"), 2)),
+            ("Краевой буфер, с", num(filt.get("edge_buffer_sec"), 2)),
         ]
     )
 
     status = str(art.get("record_status", "ok"))
-    qc_numbers = _kv(
+    qc_numbers = kv(
         [
             ("Светофор записи", {"ok": "ок", "warn": "внимание", "bad": "плохо"}.get(status, status)),
-            ("Чистые данные, %", _num(art.get("good_data_percent"), 1)),
+            ("Чистые данные, %", num(art.get("good_data_percent"), 1)),
             (
                 "Сетевой шум (пик/фон)",
-                "—" if art.get("line_noise_level") is None else f"×{_num(art['line_noise_level'], 1)}",
+                "—" if art.get("line_noise_level") is None else f"×{num(art['line_noise_level'], 1)}",
             ),
             (
                 "SNR-медиана, дБ",
-                "—" if art.get("snr_db_median") is None else _num(art["snr_db_median"], 1),
+                "—" if art.get("snr_db_median") is None else num(art["snr_db_median"], 1),
             ),
             ("Плохие каналы (авто)", ", ".join(art.get("bad_channels") or []) or "—"),
             ("Мёртвые каналы", ", ".join(art.get("dead_channels") or []) or "—"),
@@ -733,15 +733,15 @@ def _part1_html(
     shares = sorted(
         (art.get("artifact_share_by_kind") or {}).items(), key=lambda item: -float(item[1]),
     )
-    kinds_table = _table(
+    kinds_table = table(
         ("Вид артефакта", "Доля времени, %"),
-        [[ARTIFACT_TITLES.get(kind, kind), _pct(share)] for kind, share in shares],
+        [[ARTIFACT_TITLES.get(kind, kind), pct(share)] for kind, share in shares],
     ) if shares else "<p>зоны не найдены</p>"
 
     zone_counts = sorted(
         (art.get("artifact_types") or {}).items(), key=lambda item: -int(item[1]),
     )
-    zones_table = _table(
+    zones_table = table(
         ("Вид артефакта", "Зон найдено"),
         [[ARTIFACT_TITLES.get(kind, kind), int(count)] for kind, count in zone_counts],
     ) if zone_counts else "<p>—</p>"
@@ -749,15 +749,15 @@ def _part1_html(
     channel_rows = [
         [
             qc.get("channel", ""),
-            _num(qc.get("artifact_sec"), 1),
-            _pct(qc.get("artifact_share")),
-            "—" if qc.get("snr_db") is None else _num(qc["snr_db"], 1),
+            num(qc.get("artifact_sec"), 1),
+            pct(qc.get("artifact_share")),
+            "—" if qc.get("snr_db") is None else num(qc["snr_db"], 1),
             "да" if qc.get("dead") else "",
         ]
         for qc in (art.get("channel_qc") or [])
     ]
     channel_rows.sort(key=lambda row: -float(str(row[2]).replace("—", "0") or 0))
-    channels_table = _table(
+    channels_table = table(
         ("Канал", "Секунд в зонах", "Доля времени, %", "SNR, дБ", "Мёртвый"),
         channel_rows,
     ) if channel_rows else "<p>QC-сводка по каналам не посчитана</p>"
@@ -776,12 +776,12 @@ def _part1_html(
             ("Удалено компонентов ICA", int(clean.get("n_components_removed", 0))),
             (
                 "p95 |x| до → после, мкВ",
-                f"{_num(clean.get('amplitude_p95_uv_before'), 1)} → "
-                f"{_num(clean.get('amplitude_p95_uv_after'), 1)}",
+                f"{num(clean.get('amplitude_p95_uv_before'), 1)} → "
+                f"{num(clean.get('amplitude_p95_uv_after'), 1)}",
             ),
             (
                 "Удалённая дисперсия (L5), %",
-                _num(loss.get("removed_variance_percent"), 1),
+                num(loss.get("removed_variance_percent"), 1),
             ),
         ]
         # №6 §3.9.4: остаток наводки (L1) — числом «было/стало» прямо в части 1,
@@ -792,20 +792,20 @@ def _part1_html(
             clean_rows.append(
                 (
                     f"Сетевой шум {freq_text} Гц (L1), дБ было → стало",
-                    f"{_num(line_row.get('before_db'), 1)} → "
-                    f"{_num(line_row.get('after_db'), 1)}",
+                    f"{num(line_row.get('before_db'), 1)} → "
+                    f"{num(line_row.get('after_db'), 1)}",
                 )
             )
-        clean_html = _kv(clean_rows)
+        clean_html = kv(clean_rows)
 
     rejected = [int(i) for i in (epochs.get("rejected_epochs") or [])]
     rejected_text = ", ".join(str(i) for i in rejected[:100])
     if len(rejected) > 100:
         rejected_text += f" … (всего {len(rejected)})"
-    epochs_html = _kv(
+    epochs_html = kv(
         [
             ("Режим нарезки", epochs.get("epoch_mode", "fixed")),
-            ("Длина эпохи, мс", _num(epochs.get("epoch_length_ms"), 0)),
+            ("Длина эпохи, мс", num(epochs.get("epoch_length_ms"), 0)),
             ("Эпох нарезано", int(epochs.get("n_epochs_total", 0))),
             ("Эпох прошло отбраковку", int(epochs.get("n_epochs_used", 0))),
             ("Отброшено (BAD_)", len(rejected)),
@@ -823,13 +823,13 @@ def _part1_html(
         + passport
         + "<h2>Качество сырого файла (числа QC)</h2>"
         + qc_numbers
-        + f"<h3>Причины вердикта</h3>{_bullets(art.get('record_status_reasons') or [])}"
+        + f"<h3>Причины вердикта</h3>{bullets(art.get('record_status_reasons') or [])}"
         + f"<h3>Доли времени по видам артефактов</h3>{kinds_table}"
         + f"<h3>Найденные зоны</h3>{zones_table}"
         + f"<h3>QC по каналам</h3>{channels_table}"
         + (f"<h2>Очистка сигнала</h2>{clean_html}" if clean_html else "")
         + f"<h2>Нарезка эпох</h2>{epochs_html}"
-        + f"<h2>Предупреждения стадий</h2>{_bullets(warning_items)}"
+        + f"<h2>Предупреждения стадий</h2>{bullets(warning_items)}"
     )
 
 
@@ -837,28 +837,28 @@ def _band_html(summary: dict[str, Any]) -> str:
     """Часть 2, одна полоса: сводка + топы структур/BA + динамика по бинам."""
     key = summary["band_key"]
     low, high = summary["band_hz"]
-    head = _kv(
+    head = kv(
         [
             ("Ключ полосы", key),
             ("Полоса, Гц", f"{low:g} … {high:g}"),
             ("Эпох в расчёте (прошло отбраковку)", int(summary["n_epochs_used"])),
             ("Точек (одна на эпоху)", int(summary["n_points"])),
             ("Точек без атрибуции структуры", int(summary["n_no_attribution"])),
-            ("Медианный GOF (только внутри полосы)", _num(summary["median_gof"], 3)),
-            ("Медианный RIV (кросс-полосной)", _num(summary["median_riv"], 3)),
+            ("Медианный GOF (только внутри полосы)", num(summary["median_gof"], 3)),
+            ("Медианный RIV (кросс-полосной)", num(summary["median_riv"], 3)),
         ]
     )
 
     def _name_rows(rows: Sequence[dict[str, Any]]) -> list[list[Any]]:
         return [
-            [row["name"], int(row["count"]), _pct(row["share"]), _num(row["median_gof"], 3)]
+            [row["name"], int(row["count"]), pct(row["share"]), num(row["median_gof"], 3)]
             for row in rows
         ]
 
     name_headers = ("Название", "Эпох активно", "Доля, %", "Медианный GOF")
-    structures = _table(name_headers, _name_rows(summary["top_structures"])) \
+    structures = table(name_headers, _name_rows(summary["top_structures"])) \
         if summary["top_structures"] else "<p>структуры не названы (атлас недоступен?)</p>"
-    brodmann = _table(name_headers, _name_rows(summary["top_brodmann"])) \
+    brodmann = table(name_headers, _name_rows(summary["top_brodmann"])) \
         if summary["top_brodmann"] else "<p>поля Бродмана не названы (атлас недоступен?)</p>"
 
     dynamics = summary["dynamics"]
@@ -867,9 +867,9 @@ def _band_html(summary: dict[str, Any]) -> str:
             "Структура",
             *(f"Бин {index + 1}, %" for index in range(TIME_BINS)),
         )
-        dynamics_table = _table(
+        dynamics_table = table(
             bin_headers,
-            [[row["name"]] + [_pct(share) for share in row["shares"]] for row in dynamics],
+            [[row["name"]] + [pct(share) for share in row["shares"]] for row in dynamics],
         )
         dynamics_note = (
             f"<p>Бины — {TIME_BINS} равных отрезков по индексам эпох записи; "
@@ -880,7 +880,7 @@ def _band_html(summary: dict[str, Any]) -> str:
         dynamics_note = ""
 
     warnings = summary.get("warnings") or []
-    warn_html = f"<h3>Предупреждения расчёта</h3>{_bullets(warnings)}" if warnings else ""
+    warn_html = f"<h3>Предупреждения расчёта</h3>{bullets(warnings)}" if warnings else ""
 
     return (
         head
@@ -955,20 +955,20 @@ def _roi_html(roi: dict[str, Any] | None) -> str:
                 )
             cells.append(int(row.get("count") or 0))
             body.append(cells)
-        return _table(("ROI", "Полушарие", *bands, "Всего точек"), body)
+        return table(("ROI", "Полушарие", *bands, "Всего точек"), body)
 
     hemi = dict(roi.get("hemisphere_counts") or {})
     total = int(roi.get("n_points_total") or 0)
-    asymmetry = _table(
+    asymmetry = table(
         ("Полушарие", "Точек", "Доля, %"),
         [
-            [label, int(hemi.get(key) or 0), _pct((hemi.get(key) or 0) / total if total else 0.0)]
+            [label, int(hemi.get(key) or 0), pct((hemi.get(key) or 0) / total if total else 0.0)]
             for key, label in (("lh", "слева"), ("rh", "справа"), ("mid", "срединные"))
         ]
         + [[
             "без названной структуры",
             int(roi.get("n_without_structure") or 0),
-            _pct((roi.get("n_without_structure") or 0) / total if total else 0.0),
+            pct((roi.get("n_without_structure") or 0) / total if total else 0.0),
         ]],
     )
     top_note = ""
@@ -1245,10 +1245,10 @@ def _build_report(
         + "<p>Сквозной отчёт пайплайна DipLock: часть 1 пересказывает числа, которые "
         "уже считает препроцессинг (стадии filter / artifacts / epochs), часть 2 — "
         "пакетный быстрый расчёт диполей по именованным полосам.</p>"
-        f"<p>Запись: {_esc(recording.filename)} · полос пакета: {len(band_keys)} · "
+        f"<p>Запись: {esc(recording.filename)} · полос пакета: {len(band_keys)} · "
         f"длина эпохи: {params.preprocess.epoch_length_ms:g} мс · шаг сетки: "
         f"{params.grid_mm:g} мм · собрано: {built_at} · "
-        f"MNE {_esc(mne.__version__)}</p>"
+        f"MNE {esc(mne.__version__)}</p>"
         # №8: полный отпечаток параметров — два HTML сверяются парами
         + _fingerprint_html(params, band_keys, signature),
         title="О отчёте",

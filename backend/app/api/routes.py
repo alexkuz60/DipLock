@@ -92,6 +92,7 @@ from app.schemas.analysis import (
     PreprocessStage,
     RecordingMeta,
     RecordingSignalsHeader,
+    ReportHtmlOut,
     ReportResult,
     SessionDetailOut,
     SessionsPageOut,
@@ -139,6 +140,7 @@ from app.services.group_analysis import (
     list_group_analyses,
     save_group_analysis,
 )
+from app.services.group_reports import ensure_compare_report, ensure_group_report
 from app.services.job_manager import job_manager, noop_progress
 from app.services.mains import mains_component
 from app.services.mri_slices import (
@@ -816,6 +818,60 @@ async def get_compare_result(job_id: str) -> CompareResult:
     """Дельты, статистика и ссылки на карты разности. 409 — задача идёт/упала."""
     job = compare_job_result(job_id)
     return CompareResult(**job.result)
+
+
+@router.get(
+    "/compare/{job_id}/report", response_model=ReportHtmlOut,
+    summary="Отчёт по результату сравнения (Тип 1) — раздел «Итоги»",
+)
+async def get_compare_report(job_id: str) -> ReportHtmlOut:
+    """Сборка/чтение HTML-отчёта по готовому результату ``kind=compare``.
+
+    Ленивая сборка — тот же приём, что промах кэша карт разности: первый
+    запрос строит самодостаточный ``mne.Report`` в дисковый кэш, повторные
+    читают его. 404/409 — как у ``GET /compare/{job_id}`` (чужой вид задачи
+    или «ещё не завершена»).
+    """
+    job = compare_job_result(job_id)
+    doc = await asyncio.to_thread(
+        ensure_compare_report, settings, job_id, dict(job.result),
+    )
+    prefix = settings.api_prefix
+    return ReportHtmlOut(
+        title=doc.title,
+        html_sig=doc.sig,
+        report_version=doc.version,
+        html_url=f"{prefix}/compare/{job_id}/report/html",
+        warnings=doc.warnings,
+    )
+
+
+@router.get(
+    "/compare/{job_id}/report/html",
+    response_class=Response,
+    responses={200: {"content": {"text/html": {}}}},
+    summary="HTML отчёта по сравнению: самодостаточный MNE.Report (ETag)",
+)
+async def get_compare_report_html(
+    job_id: str,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """HTML отчёта Типа 1: та же сборка, что и метаданные, и ETag/304.
+
+    Документ самодостаточный (карты разности встроены base64 при наличии в
+    кэше), поэтому открывается в новой вкладке и печатается без запросов.
+    """
+    job = compare_job_result(job_id)
+    doc = await asyncio.to_thread(
+        ensure_compare_report, settings, job_id, dict(job.result),
+    )
+    return asset_response(
+        doc.data,
+        doc.version,
+        if_none_match=if_none_match,
+        media_type="text/html",
+        cache_control=CACHE_PRIVATE_DAY,
+    )
 
 
 @router.get(
@@ -1878,5 +1934,54 @@ async def get_group_analysis_route(run_id: int) -> GroupAnalysisDetailOut:
     return GroupAnalysisDetailOut(
         run=GroupAnalysisSummaryOut(**detail["run"]),
         aggregate=GroupAggregateOut(**detail["aggregate"]),
+    )
+
+
+@router.get(
+    "/group/analyses/{run_id}/report", response_model=ReportHtmlOut,
+    summary="Отчёт по прогону группового анализа (Тип 2) — раздел «Итоги»",
+)
+async def get_group_analysis_report_route(run_id: int) -> ReportHtmlOut:
+    """Сборка/чтение HTML-отчёта по прогону: паспорт + свежий пересчёт.
+
+    Числа в документе — те же, что в ``GET /group/analyses/{run_id}`` (свежий
+    пересчёт по живой БД): сменились данные — отпечаток другой и документ
+    собирается заново (история хранит определение, §8.4.2). 404 — нет.
+    """
+    detail = await get_group_analysis(run_id, settings)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Прогон {run_id} не найден")
+    doc = await asyncio.to_thread(ensure_group_report, settings, run_id, detail)
+    prefix = settings.api_prefix
+    return ReportHtmlOut(
+        title=doc.title,
+        html_sig=doc.sig,
+        report_version=doc.version,
+        html_url=f"{prefix}/group/analyses/{run_id}/report/html",
+        warnings=doc.warnings,
+    )
+
+
+@router.get(
+    "/group/analyses/{run_id}/report/html",
+    response_class=Response,
+    responses={200: {"content": {"text/html": {}}}},
+    summary="HTML отчёта по прогону группы: самодостаточный MNE.Report (ETag)",
+)
+async def get_group_analysis_report_html_route(
+    run_id: int,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """HTML отчёта Типа 2 из дискового кэша с ETag/304 (``assets.py``)."""
+    detail = await get_group_analysis(run_id, settings)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Прогон {run_id} не найден")
+    doc = await asyncio.to_thread(ensure_group_report, settings, run_id, detail)
+    return asset_response(
+        doc.data,
+        doc.version,
+        if_none_match=if_none_match,
+        media_type="text/html",
+        cache_control=CACHE_PRIVATE_DAY,
     )
 

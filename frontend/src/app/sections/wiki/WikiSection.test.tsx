@@ -90,6 +90,30 @@ describe('раздел Wiki', () => {
     expect(names.indexOf('Диполи: обзор')).toBeLessThan(names.indexOf('Глоссарий'))
   })
 
+  it('части «Итоги» об отчётах открываются по хешу и стоят в оглавлении', () => {
+    renderWithProviders(<WikiSection />, { route: '/wiki#summary-compare-report' })
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Итоги: отчёт по сравнению (Тип 1)' }),
+    ).toBeInTheDocument()
+
+    const toc = screen.getByRole('navigation', { name: 'Оглавление Wiki' })
+    const names = within(toc)
+      .getAllByRole('link')
+      .map((link) => link.textContent)
+    expect(names).toContain('Итоги: отчёт пары')
+    expect(names).toContain('Итоги: отчёт группы')
+    // Отчёты — после подготовки (групповой анализ) и до глоссария
+    expect(names.indexOf('Групповой анализ')).toBeLessThan(names.indexOf('Итоги: отчёт пары'))
+    expect(names.indexOf('Итоги: отчёт группы')).toBeLessThan(names.indexOf('Глоссарий'))
+  })
+
+  it('отчёт группы (Тип 2) открывается по хешу-пермалинку', () => {
+    renderWithProviders(<WikiSection />, { route: '/wiki#summary-group-report' })
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Итоги: отчёт по группе (Тип 2)' }),
+    ).toBeInTheDocument()
+  })
+
   it('неизвестный хеш открывает «Введение», а не пустой экран', () => {
     renderWithProviders(<WikiSection />, { route: '/wiki#nope' })
 

@@ -414,6 +414,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/compare/{job_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Отчёт по результату сравнения (Тип 1) — раздел «Итоги»
+         * @description Сборка/чтение HTML-отчёта по готовому результату ``kind=compare``.
+         *
+         *     Ленивая сборка — тот же приём, что промах кэша карт разности: первый
+         *     запрос строит самодостаточный ``mne.Report`` в дисковый кэш, повторные
+         *     читают его. 404/409 — как у ``GET /compare/{job_id}`` (чужой вид задачи
+         *     или «ещё не завершена»).
+         */
+        get: operations["get_compare_report_api_v1_compare__job_id__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/compare/{job_id}/report/html": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * HTML отчёта по сравнению: самодостаточный MNE.Report (ETag)
+         * @description HTML отчёта Типа 1: та же сборка, что и метаданные, и ETag/304.
+         *
+         *     Документ самодостаточный (карты разности встроены base64 при наличии в
+         *     кэше), поэтому открывается в новой вкладке и печатается без запросов.
+         */
+        get: operations["get_compare_report_html_api_v1_compare__job_id__report_html_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/compare/topomap/{band}.png": {
         parameters: {
             query?: never;
@@ -1201,6 +1249,50 @@ export interface paths {
          * @description Паспорт прогона и пересчёт его определения по живой БД; 404 — нет.
          */
         get: operations["get_group_analysis_route_api_v1_group_analyses__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/group/analyses/{run_id}/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Отчёт по прогону группового анализа (Тип 2) — раздел «Итоги»
+         * @description Сборка/чтение HTML-отчёта по прогону: паспорт + свежий пересчёт.
+         *
+         *     Числа в документе — те же, что в ``GET /group/analyses/{run_id}`` (свежий
+         *     пересчёт по живой БД): сменились данные — отпечаток другой и документ
+         *     собирается заново (история хранит определение, §8.4.2). 404 — нет.
+         */
+        get: operations["get_group_analysis_report_route_api_v1_group_analyses__run_id__report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/group/analyses/{run_id}/report/html": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * HTML отчёта по прогону группы: самодостаточный MNE.Report (ETag)
+         * @description HTML отчёта Типа 2 из дискового кэша с ETag/304 (``assets.py``).
+         */
+        get: operations["get_group_analysis_report_html_route_api_v1_group_analyses__run_id__report_html_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4989,6 +5081,42 @@ export interface components {
             shares: number[];
         };
         /**
+         * ReportHtmlOut
+         * @description Метаданные HTML-отчёта раздела «Итоги», собранного по готовому результату.
+         *
+         *     Оба отчёта группового анализа (Тип 1 «Сравнение», Тип 2 «Группа») — не
+         *     задача, а ленивая сборка документа из уже посчитанных чисел
+         *     (``services/group_reports.py``): здесь только подпись, версия ассета и
+         *     ссылка; сам HTML — отдельный ассет с ETag/304 ниже.
+         */
+        ReportHtmlOut: {
+            /**
+             * Title
+             * @description Заголовок документа — подпись в шапке раздела
+             */
+            title: string;
+            /**
+             * Html Sig
+             * @description Отпечаток источника — имя HTML в дисковом кэше
+             */
+            html_sig: string;
+            /**
+             * Report Version
+             * @description ETag HTML (хеш содержимого)
+             */
+            report_version: string;
+            /**
+             * Html Url
+             * @description GET HTML отчёта (заполняется роутом)
+             */
+            html_url: string;
+            /**
+             * Warnings
+             * @description Предупреждения источника — пилюля UI без чтения документа
+             */
+            warnings?: string[];
+        };
+        /**
          * ReportNameCountOut
          * @description Строка «название | эпох активно | доля | медианный GOF» одной полосы.
          */
@@ -6577,6 +6705,70 @@ export interface operations {
             };
         };
     };
+    get_compare_report_api_v1_compare__job_id__report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportHtmlOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_compare_report_html_api_v1_compare__job_id__report_html_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_compare_topomap_api_v1_compare_topomap__band__png_get: {
         parameters: {
             query: {
@@ -7732,6 +7924,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupAnalysisDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_group_analysis_report_route_api_v1_group_analyses__run_id__report_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportHtmlOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_group_analysis_report_html_route_api_v1_group_analyses__run_id__report_html_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": unknown;
                 };
             };
             /** @description Validation Error */

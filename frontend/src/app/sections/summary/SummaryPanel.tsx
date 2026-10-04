@@ -24,9 +24,143 @@ import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
+import { SelectField, type SelectOption } from '@/shared/ui/SelectField'
 import { StatusPill } from '@/shared/ui/StatusPill'
 
+/** Дата из ISO-строки задачи/прогона: короткая подпись для пункта списка. */
+function fmtWhen(iso: string | null | undefined): string {
+  if (!iso) return ''
+  return String(iso).slice(0, 16).replace('T', ' ')
+}
+
+/**
+ * Панель отчётов группового анализа (Тип 1/Тип 2): выбор источника из
+ * истории и справка о собранном документе. Панель, как и в остальных
+ * состояниях раздела, **ничего не запускает** — сборка только кнопкой
+ * «Собрать отчёт» в шапке (`docs/rules/frontend-state.md`).
+ */
+function GroupReportPanel({ source }: { source: 'compare' | 'group' }) {
+  const isCompare = source === 'compare'
+  const jobsQuery = useQuery({
+    queryKey: ['summary-compare-jobs'],
+    queryFn: () => api.jobs(50),
+    enabled: isCompare,
+  })
+  const runsQuery = useQuery({
+    queryKey: ['summary-group-runs'],
+    queryFn: () => api.group.runs({ limit: 50 }),
+    enabled: !isCompare,
+  })
+
+  const compareJobId = useSummaryReport((state) => state.compareJobId)
+  const setCompareJobId = useSummaryReport((state) => state.setCompareJobId)
+  const compareReport = useSummaryReport((state) => state.compareReport)
+  const compareError = useSummaryReport((state) => state.compareError)
+  const groupRunId = useSummaryReport((state) => state.groupRunId)
+  const setGroupRunId = useSummaryReport((state) => state.setGroupRunId)
+  const groupReport = useSummaryReport((state) => state.groupReport)
+  const groupError = useSummaryReport((state) => state.groupError)
+
+  const compareJobs = (jobsQuery.data ?? []).filter(
+    (job) => job.kind === 'compare' && job.status === 'succeeded',
+  )
+  const runs = runsQuery.data?.items ?? []
+  const report = isCompare ? compareReport : groupReport
+  const error = isCompare ? compareError : groupError
+
+  const jobOptions: SelectOption<string>[] = [
+    {
+      value: '',
+      label: compareJobs.length ? '— выберите сравнение —' : 'Нет завершённых сравнений',
+    },
+    ...compareJobs.map((job) => ({
+      value: job.job_id,
+      label: `${job.filename ?? job.job_id}${job.created_at ? ` · ${fmtWhen(job.created_at)}` : ''}`,
+    })),
+  ]
+  const runOptions: SelectOption<string>[] = [
+    { value: '', label: runs.length ? '— выберите прогон —' : 'Нет сохранённых прогонов' },
+    ...runs.map((run) => ({
+      value: String(run.id),
+      label: `${run.name ?? `Прогон №${run.id}`} · ${run.band_key ?? '—'}${
+        run.created_at ? ` · ${fmtWhen(run.created_at)}` : ''
+      }`,
+    })),
+  ]
+
+  return (
+    <>
+      <Panel
+        title="Источник отчёта"
+        hint={
+          isCompare
+            ? 'Отчёт собирается по результату задачи «Сравнение» (история задач). Задача без сохранённого результата сюда не попадает; список — только чтение.'
+            : 'Отчёт собирается по сохранённому прогону группового анализа: числа пересчитываются по живой БД в момент сборки (история хранит определение, §8.4.2).'
+        }
+      >
+        {isCompare ? (
+          <SelectField
+            label="Сравнение"
+            value={compareJobId ?? ''}
+            options={jobOptions}
+            onChange={(value) => setCompareJobId(value || null)}
+            hint="Завершённые задачи «Сравнение» двух записей"
+            disabled={jobsQuery.isFetching}
+          />
+        ) : (
+          <SelectField
+            label="Прогон"
+            value={groupRunId === null ? '' : String(groupRunId)}
+            options={runOptions}
+            onChange={(value) => setGroupRunId(value ? Number(value) : null)}
+            hint="Сохранённые прогоны («Сохранить прогон» в разделе «Групповой анализ»)"
+            disabled={runsQuery.isFetching}
+          />
+        )}
+        {(isCompare ? jobsQuery.isError : runsQuery.isError) ? (
+          <p className="mt-2 text-sm text-warn" data-testid="summary-source-error">
+            Не удалось загрузить список источников — обновите страницу.
+          </p>
+        ) : null}
+      </Panel>
+
+      <Panel
+        title="Результат"
+        hint="Справка о собранном отчёте: сам документ — в рабочей области (HTML MNE.Report, iframe)."
+      >
+        <div className="mb-2 flex flex-wrap gap-2">
+          <StatusPill tone={report ? 'ok' : 'neutral'}>
+            {report ? 'Отчёт собран' : 'Отчёта нет'}
+          </StatusPill>
+          {report ? <StatusPill tone="neutral">Отпечаток: {report.html_sig}</StatusPill> : null}
+        </div>
+        {report ? (
+          <ul className="space-y-1 text-sm text-fg-2">
+            <li>{`Документ: ${report.title}`}</li>
+            <li>{`Предупреждений источника: ${(report.warnings ?? []).length}`}</li>
+            <li>{`Версия ассета: ${report.report_version}`}</li>
+          </ul>
+        ) : (
+          <p className="text-sm text-fg-2">
+            {error
+              ? `Последняя попытка: ${error}`
+              : 'Результат появится после сборки отчёта кнопкой в шапке.'}
+          </p>
+        )}
+      </Panel>
+    </>
+  )
+}
+
 export function SummaryPanel() {
+  const kind = useSummaryReport((state) => state.kind)
+  if (kind === 'compare' || kind === 'group') {
+    return <GroupReportPanel source={kind} />
+  }
+  return <RecordPanel />
+}
+
+function RecordPanel() {
   const meta = useQuery({ queryKey: ['meta'], queryFn: () => api.meta() })
   const options = bandKeyOptions(meta.data ?? null)
   const allKeys = options.map((option) => option.value)

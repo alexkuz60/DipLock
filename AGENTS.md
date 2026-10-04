@@ -51,7 +51,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 55 роутов (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 59 роутов (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -80,6 +80,7 @@ backend/app/
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
 │   ├── compare.py         # дифференциальный анализ двух записей (B9): дельты B − A, FDR/бутстрап, кластерный тест MNE, карты разности
 │   ├── report.py          # автоотчёт «Итоги»: MNE.Report (часть 1) + пакет диполей по полосам (§3.9) + тема (THEME_CSS/THEME_JS)
+│   ├── group_reports.py   # отчёты «Итогов» по групповым анализам (Тип 1 «Сравнение», Тип 2 «Группа», §3.9.8)
 │   ├── roi.py             # ROI-анализ (4.5): агрегат «строка ROI × полосы» из точек пакета — один источник для отчёта и вкладки UI
 │   ├── analysis_pipeline.py # пайплайн файлового анализа (/analyze, /jobs) + запись в БД (A1)
 │   ├── cache_store.py     # единый дисковый кэш: путь/чтение/атомарная запись/очистка (этап 2)
@@ -183,7 +184,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (996 Vitest / 708 pytest, без `integration` — 690), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (1003 Vitest / 716 pytest, без `integration` — 698), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

@@ -196,3 +196,35 @@ def test_sweep_on_empty_dirs_does_nothing(tmp_path, monkeypatch):
 
     assert report.total == 0
     assert json.loads(json.dumps(report.as_dict()))["freed_bytes"] == 0
+
+
+def test_sweep_keeps_group_report_subdirs_and_prunes_compare_reports(isolated):
+    """HTML отчётов «Итогов»: своя чистка — compare по файлу задачи, group не трогаем.
+
+    ``reports/compare|group`` — не recording_id: общий обход кэшей их щадит
+    (иначе снёс бы как «запись compare»), а отчёт сравнения сиротеет вместе с
+    выходом задачи из истории. Прогонам группы отчёт не сирота — строки
+    ``group_analyses`` не удаляются (§8.4.2).
+    """
+    _, cache, _, registry = isolated
+    alive_job = "44444444-4444-4444-4444-444444444444"
+    ghost_job = "55555555-5555-5555-5555-555555555555"
+    job_store.save_record(
+        settings,
+        {"job_id": alive_job, "kind": "compare", "status": "succeeded", "meta": {}},
+    )
+    _touch(os.path.join(cache, "reports", "compare", alive_job, "sig1.html"))
+    _touch(os.path.join(cache, "reports", "compare", ghost_job, "sig1.html"))
+    _touch(os.path.join(cache, "reports", "group", "7", "sig1.html"))
+    # Имя не похоже на job_id: к задаче его не привязать — сирота
+    _touch(os.path.join(cache, "reports", "compare", "weird.name", "sig1.html"))
+
+    report = sweep_orphans(settings, registry=registry)
+
+    assert os.path.isfile(os.path.join(cache, "reports", "compare", alive_job, "sig1.html"))
+    assert os.path.isfile(os.path.join(cache, "reports", "group", "7", "sig1.html"))
+    assert "reports/compare" not in report.cache_dirs
+    assert "reports/group" not in report.cache_dirs
+    assert f"reports/compare/{ghost_job}" in report.cache_dirs
+    assert "reports/compare/weird.name" in report.cache_dirs
+    assert not os.path.exists(os.path.join(cache, "reports", "compare", ghost_job))

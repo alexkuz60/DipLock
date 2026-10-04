@@ -29,9 +29,64 @@ export function SummaryToolActions() {
   const bandKeys = useSummaryReport((state) => state.bandKeys)
   const run = useSummaryReport((state) => state.run)
   const cancel = useSummaryReport((state) => state.cancel)
+  const kind = useSummaryReport((state) => state.kind)
+  const compareJobId = useSummaryReport((state) => state.compareJobId)
+  const compareReport = useSummaryReport((state) => state.compareReport)
+  const compareBuilding = useSummaryReport((state) => state.compareBuilding)
+  const buildCompareReport = useSummaryReport((state) => state.buildCompareReport)
+  const groupRunId = useSummaryReport((state) => state.groupRunId)
+  const groupReport = useSummaryReport((state) => state.groupReport)
+  const groupBuilding = useSummaryReport((state) => state.groupBuilding)
+  const buildGroupReport = useSummaryReport((state) => state.buildGroupReport)
 
   // Метаданные — только для подсказки (список полос рисует панель)
   useQuery({ queryKey: ['meta'], queryFn: () => api.meta() })
+
+  // Отчёты группового анализа (Тип 1/Тип 2): сборка — ленивый GET готовых
+  // чисел (без задачи и поллинга), поэтому вместо полосы прогресса — состояние
+  // кнопки, а документ открывается той же ссылкой «Открыть отчёт».
+  if (kind === 'compare' || kind === 'group') {
+    const isCompare = kind === 'compare'
+    const selected = isCompare ? compareJobId : groupRunId
+    const building = isCompare ? compareBuilding : groupBuilding
+    const report = isCompare ? compareReport : groupReport
+    const typeLabel = isCompare ? 'Тип 1 (сравнение двух записей)' : 'Тип 2 (прогон группы)'
+    return (
+      <div className="flex items-center gap-2">
+        <Button
+          icon={<FileText className="size-4" />}
+          disabled={!selected || building}
+          title={
+            !selected
+              ? 'Сначала выберите источник отчёта в панели справа.'
+              : building
+                ? 'Идёт сборка документа…'
+                : `Собрать самодостаточный HTML-отчёт: ${typeLabel}`
+          }
+          onClick={() => void (isCompare ? buildCompareReport() : buildGroupReport())}
+          data-testid="summary-run"
+        >
+          {building ? 'Собираем…' : report ? 'Пересобрать отчёт' : 'Собрать отчёт'}
+        </Button>
+        {report ? (
+          <a
+            href={`${report.html_url}?v=${report.report_version}`}
+            target="_blank"
+            rel="noreferrer"
+            title="Открыть самодостаточный HTML MNE.Report в новой вкладке"
+            data-testid="summary-open"
+            className={cx(
+              'inline-flex items-center gap-2 rounded-lg border border-border bg-bg-2 px-3 py-1.5',
+              'text-sm text-fg-1 transition-colors hover:border-accent hover:text-accent',
+            )}
+          >
+            <ExternalLink className="size-4" aria-hidden />
+            Открыть отчёт
+          </a>
+        ) : null}
+      </div>
+    )
+  }
 
   const running = job?.status === 'running'
   const noBands = bandKeys !== null && bandKeys.length === 0

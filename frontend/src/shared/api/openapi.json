@@ -1219,6 +1219,98 @@
         }
       }
     },
+    "/api/v1/compare/{job_id}/report": {
+      "get": {
+        "summary": "Отчёт по результату сравнения (Тип 1) — раздел «Итоги»",
+        "description": "Сборка/чтение HTML-отчёта по готовому результату ``kind=compare``.\n\nЛенивая сборка — тот же приём, что промах кэша карт разности: первый\nзапрос строит самодостаточный ``mne.Report`` в дисковый кэш, повторные\nчитают его. 404/409 — как у ``GET /compare/{job_id}`` (чужой вид задачи\nили «ещё не завершена»).",
+        "operationId": "get_compare_report_api_v1_compare__job_id__report_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportHtmlOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/compare/{job_id}/report/html": {
+      "get": {
+        "summary": "HTML отчёта по сравнению: самодостаточный MNE.Report (ETag)",
+        "description": "HTML отчёта Типа 1: та же сборка, что и метаданные, и ETag/304.\n\nДокумент самодостаточный (карты разности встроены base64 при наличии в\nкэше), поэтому открывается в новой вкладке и печатается без запросов.",
+        "operationId": "get_compare_report_html_api_v1_compare__job_id__report_html_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/compare/topomap/{band}.png": {
       "get": {
         "summary": "Карта разности B−A по полосе (PNG, ETag)",
@@ -3053,6 +3145,98 @@
                   "$ref": "#/components/schemas/GroupAnalysisDetailOut"
                 }
               }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/group/analyses/{run_id}/report": {
+      "get": {
+        "summary": "Отчёт по прогону группового анализа (Тип 2) — раздел «Итоги»",
+        "description": "Сборка/чтение HTML-отчёта по прогону: паспорт + свежий пересчёт.\n\nЧисла в документе — те же, что в ``GET /group/analyses/{run_id}`` (свежий\nпересчёт по живой БД): сменились данные — отпечаток другой и документ\nсобирается заново (история хранит определение, §8.4.2). 404 — нет.",
+        "operationId": "get_group_analysis_report_route_api_v1_group_analyses__run_id__report_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportHtmlOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/group/analyses/{run_id}/report/html": {
+      "get": {
+        "summary": "HTML отчёта по прогону группы: самодостаточный MNE.Report (ETag)",
+        "description": "HTML отчёта Типа 2 из дискового кэша с ETag/304 (``assets.py``).",
+        "operationId": "get_group_analysis_report_html_route_api_v1_group_analyses__run_id__report_html_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/html": {}
             }
           },
           "422": {
@@ -9677,6 +9861,47 @@
         ],
         "title": "ReportDynamicsOut",
         "description": "Динамика активности структуры: доля эпох по 5 равным бинам времени."
+      },
+      "ReportHtmlOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Заголовок документа — подпись в шапке раздела"
+          },
+          "html_sig": {
+            "type": "string",
+            "title": "Html Sig",
+            "description": "Отпечаток источника — имя HTML в дисковом кэше"
+          },
+          "report_version": {
+            "type": "string",
+            "title": "Report Version",
+            "description": "ETag HTML (хеш содержимого)"
+          },
+          "html_url": {
+            "type": "string",
+            "title": "Html Url",
+            "description": "GET HTML отчёта (заполняется роутом)"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "Предупреждения источника — пилюля UI без чтения документа"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "html_sig",
+          "report_version",
+          "html_url"
+        ],
+        "title": "ReportHtmlOut",
+        "description": "Метаданные HTML-отчёта раздела «Итоги», собранного по готовому результату.\n\nОба отчёта группового анализа (Тип 1 «Сравнение», Тип 2 «Группа») — не\nзадача, а ленивая сборка документа из уже посчитанных чисел\n(``services/group_reports.py``): здесь только подпись, версия ассета и\nссылка; сам HTML — отдельный ассет с ETag/304 ниже."
       },
       "ReportNameCountOut": {
         "properties": {

@@ -26,6 +26,7 @@ import type {
   MetaResponse,
   PreprocessResult,
   RecordingMeta,
+  ReportHtmlOut,
   ReportResult,
   ServerRestart,
   SessionsPage,
@@ -211,6 +212,12 @@ export const api = {
       request<JobCreated>(`${API_PREFIX}/compare`, { method: 'POST', body: form, signal }),
     result: (jobId: string, signal?: AbortSignal) =>
       request<CompareResult>(`${API_PREFIX}/compare/${jobId}`, { signal }),
+    /**
+     * Отчёт по результату сравнения — раздел «Итоги» (Тип 1): ленивая сборка
+     * самодостаточного HTML, адрес ассета — в ответе (`html_url`).
+     */
+    report: (jobId: string, signal?: AbortSignal) =>
+      request<ReportHtmlOut>(`${API_PREFIX}/compare/${jobId}/report`, { signal }),
   },
 
   /**
@@ -249,6 +256,12 @@ export const api = {
     /** Прогон: паспорт + свежий пересчёт (`GET /group/analyses/{id}`; 404 — нет). */
     run: (runId: number, signal?: AbortSignal) =>
       request<GroupAnalysisDetail>(`${API_PREFIX}/group/analyses/${runId}`, { signal }),
+    /**
+     * Отчёт по прогону — раздел «Итоги» (Тип 2): ленивая сборка самодостаточного
+     * HTML по свежему пересчёту агрегата, адрес ассета — в ответе (`html_url`).
+     */
+    report: (runId: number, signal?: AbortSignal) =>
+      request<ReportHtmlOut>(`${API_PREFIX}/group/analyses/${runId}/report`, { signal }),
   },
 
   /** Состояние задачи: этап, прогресс 0..1, ошибка. */

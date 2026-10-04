@@ -16,12 +16,14 @@ import {
   FileText,
   Filter,
   FolderOpen,
+  GitCompareArrows,
   Layers,
   Monitor,
   Play,
   ScanSearch,
   Scissors,
   Sparkles,
+  Users,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -39,6 +41,8 @@ export type WikiArticleId =
   | 'eeg-screen'
   | 'summary-report'
   | 'group-analysis'
+  | 'summary-compare-report'
+  | 'summary-group-report'
   | 'glossary'
 
 export type WikiArticle = {
@@ -144,6 +148,20 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'Групповой анализ',
     hint: 'Участники и фильтры, методики расчёта, кластеры, чтение результата',
     icon: Layers,
+  },
+  {
+    id: 'summary-compare-report',
+    title: 'Итоги: отчёт по сравнению (Тип 1)',
+    short: 'Итоги: отчёт пары',
+    hint: 'Подготовка, сборка в «Итогах», секции документа, кэш и печать',
+    icon: GitCompareArrows,
+  },
+  {
+    id: 'summary-group-report',
+    title: 'Итоги: отчёт по группе (Тип 2)',
+    short: 'Итоги: отчёт группы',
+    hint: 'Сохранённый прогон, два знаменателя share, тепловые карты, кластеры',
+    icon: Users,
   },
   {
     id: 'glossary',

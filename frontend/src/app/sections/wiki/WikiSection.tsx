@@ -25,6 +25,8 @@ import { IntroArticle } from './articles/IntroArticle'
 import { OpenArticle } from './articles/OpenArticle'
 import { ScreenArticle } from './articles/ScreenArticle'
 import { SummaryReportArticle } from './articles/SummaryReportArticle'
+import { SummaryCompareReportArticle } from './articles/SummaryCompareReportArticle'
+import { SummaryGroupReportArticle } from './articles/SummaryGroupReportArticle'
 import {
   adjacentArticle,
   parseWikiHash,
@@ -49,6 +51,8 @@ const ARTICLE_COMPONENTS: Record<WikiArticleId, ComponentType> = {
   'eeg-screen': EegScreenArticle,
   'summary-report': SummaryReportArticle,
   'group-analysis': GroupAnalysisArticle,
+  'summary-compare-report': SummaryCompareReportArticle,
+  'summary-group-report': SummaryGroupReportArticle,
   glossary: GlossaryArticle,
 }
 

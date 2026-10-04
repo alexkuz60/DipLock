@@ -199,6 +199,12 @@ export type ServerRestart = Schemas['ServerRestartOut']
  */
 export type ReportResult = Schemas['ReportResult']
 
+/**
+ * Метаданные HTML-отчёта «Итогов» по готовому результату (Тип 1 «Сравнение»,
+ * Тип 2 «Группа»): ленивая сборка документа, ссылка и версия ассета.
+ */
+export type ReportHtmlOut = Schemas['ReportHtmlOut']
+
 /** Агрегаты одной полосы пакета в части 2 отчёта */
 export type ReportBandSummary = Schemas['ReportBandSummaryOut']
 

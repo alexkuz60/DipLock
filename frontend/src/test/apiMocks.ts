@@ -18,6 +18,7 @@ import {
   preprocessJobFixture,
   preprocessResultFixture,
   recordingFixture,
+  reportHtmlOutFixture,
   reportResultFixture,
   sessionsFixture,
   spectrogramResultFixture,
@@ -42,6 +43,7 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  ReportHtmlOut,
   ReportResult,
   SessionSummary,
   SpectrogramResult,
@@ -144,6 +146,10 @@ export type MockApiOptions = {
   spectrogramJob?: JobStatus
   /** Явный результат автоотчёта (раздел «Итоги») */
   reportResult?: ReportResult
+  /** Метаданные отчёта группового анализа (`GET …/report`, Тип 1/Тип 2) */
+  reportHtml?: ReportHtmlOut
+  /** Текст ошибки сборки отчёта (404: прогона нет в БД) */
+  groupReportFails?: string
   /** Результат дифференциального анализа (`GET /compare/{id}`) */
   compareResult?: CompareResult
   /** Текст ошибки запуска сравнения (400 с текстом шлюза пары) */
@@ -286,6 +292,32 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'dipoles'), 202)
       }
       return jsonResponse(options.dipoleScanResult ?? dipoleScanResultFixture())
+    }
+    // Отчёты группового анализа в «Итогах» (Тип 1/Тип 2): метаданные ленивой
+    // сборки. Ветка строго по хвосту `/report` — иначе её перехватывает
+    // общая ветка автоотчёта записи ниже (подстрока `/report` в URL).
+    if (/\/compare\/[^/]+\/report$/.test(url)) {
+      const jobId = url.split('/').filter(Boolean).at(-2) ?? 'job-compare-1'
+      return jsonResponse(
+        options.reportHtml
+          ?? reportHtmlOutFixture({
+            title: 'Сравнение: Покой ↔ Деятельность',
+            html_url: `/api/v1/compare/${jobId}/report/html`,
+          }),
+      )
+    }
+    if (/\/group\/analyses\/\d+\/report$/.test(url)) {
+      if (options.groupReportFails) {
+        return jsonResponse({ detail: options.groupReportFails }, 404)
+      }
+      const runId = url.split('/').filter(Boolean).at(-2) ?? '7'
+      return jsonResponse(
+        options.reportHtml
+          ?? reportHtmlOutFixture({
+            title: 'Группа: покой vs деятельность (полоса alpha)',
+            html_url: `/api/v1/group/analyses/${runId}/report/html`,
+          }),
+      )
     }
     if (url.includes('/report')) {
       // Автоотчёт (раздел «Итоги»): 202 + задача, результат — агрегаты;

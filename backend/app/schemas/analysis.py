@@ -1488,6 +1488,25 @@ class ReportResult(BaseModel):
     duration_sec_calc: float = 0.0
 
 
+class ReportHtmlOut(BaseModel):
+    """Метаданные HTML-отчёта раздела «Итоги», собранного по готовому результату.
+
+    Оба отчёта группового анализа (Тип 1 «Сравнение», Тип 2 «Группа») — не
+    задача, а ленивая сборка документа из уже посчитанных чисел
+    (``services/group_reports.py``): здесь только подпись, версия ассета и
+    ссылка; сам HTML — отдельный ассет с ETag/304 ниже.
+    """
+
+    title: str = Field(description="Заголовок документа — подпись в шапке раздела")
+    html_sig: str = Field(description="Отпечаток источника — имя HTML в дисковом кэше")
+    report_version: str = Field(description="ETag HTML (хеш содержимого)")
+    html_url: str = Field(description="GET HTML отчёта (заполняется роутом)")
+    warnings: list[str] = Field(
+        default_factory=list,
+        description="Предупреждения источника — пилюля UI без чтения документа",
+    )
+
+
 class MetaResponse(BaseModel):
     """GET /api/v1/meta — версия схемы, окружение и параметры (для UI и provenance)."""
 

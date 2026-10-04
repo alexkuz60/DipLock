@@ -19,7 +19,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api, apiErrorText } from '@/shared/api/client'
-import type { JobStatus, ReportResult } from '@/shared/api/types'
+import type { JobStatus, ReportHtmlOut, ReportResult } from '@/shared/api/types'
 import { clamp } from '@/shared/lib/calcFilter'
 import { GRID_MM_RANGE } from '@/shared/lib/dipoleCalcModel'
 import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
@@ -28,6 +28,17 @@ import { buildPreprocessForm } from '@/shared/state/edfRecording'
 
 /** Токен запуска: новый сбор/сброс/закрытие записи делают ответ прежней задачи чужим. */
 const runToken = createRunToken()
+
+/** Токены сборки отчётов группового анализа: ответ устаревшего выбора не показываем. */
+const compareReportToken = createRunToken()
+const groupReportToken = createRunToken()
+
+/**
+ * Вид отчёта в разделе «Итоги»: сквозной автоотчёт записи (задача `kind=report`)
+ * или отчёты по результатам групповых анализа обоих типов — ленивая сборка
+ * документа из готовых чисел (`services/group_reports.py`).
+ */
+export type SummaryReportKind = 'record' | 'compare' | 'group'
 
 /** Задача «только поставлена»: поллинг ещё не дал ни одного опроса. */
 function pendingJob(): JobStatus {
@@ -74,6 +85,20 @@ export type SummaryReportState = {
   jobId: string | null
   result: ReportResult | null
   error: string | null
+  /** Вид отчёта: запись | Сравнение (Тип 1) | Группа (Тип 2) */
+  kind: SummaryReportKind
+  /** Выбранная задача сравнения (`GET /jobs`, kind=compare) для отчёта Типа 1 */
+  compareJobId: string | null
+  /** Собранный отчёт Типа 1 (`GET /compare/{id}/report`) */
+  compareReport: ReportHtmlOut | null
+  compareBuilding: boolean
+  compareError: string | null
+  /** Выбранный прогон (`GET /group/analyses`) для отчёта Типа 2 */
+  groupRunId: number | null
+  /** Собранный отчёт Типа 2 (`GET /group/analyses/{id}/report`) */
+  groupReport: ReportHtmlOut | null
+  groupBuilding: boolean
+  groupError: string | null
   /** Явный набор полос (`null` — «все») */
   setBandKeys: (keys: string[] | null) => void
   /** Переключение полосы: `null` («все») при первом клике раскрывается в список */
@@ -85,6 +110,16 @@ export type SummaryReportState = {
   cancel: () => void
   /** Сброс результата и задачи (закрытие/смена записи) — параметры остаются */
   reset: () => void
+  /** Вид отчёта (переключатель в шапке рабочей области) — запросов не шлёт */
+  setKind: (kind: SummaryReportKind) => void
+  /** Выбор источника Типа 1: правка только меняет выбор, сборка — кнопка в шапке */
+  setCompareJobId: (jobId: string | null) => void
+  /** Выбор источника Типа 2: правка только меняет выбор, сборка — кнопка в шапке */
+  setGroupRunId: (runId: number | null) => void
+  /** Сборка отчёта Типа 1 по кнопке (ленивый `GET …/report`, без задачи) */
+  buildCompareReport: () => Promise<void>
+  /** Сборка отчёта Типа 2 по кнопке (ленивый `GET …/report`, без задачи) */
+  buildGroupReport: () => Promise<void>
 }
 
 export const useSummaryReport = create<SummaryReportState>()(
@@ -96,6 +131,15 @@ export const useSummaryReport = create<SummaryReportState>()(
       jobId: null,
       result: null,
       error: null,
+      kind: 'record',
+      compareJobId: null,
+      compareReport: null,
+      compareBuilding: false,
+      compareError: null,
+      groupRunId: null,
+      groupReport: null,
+      groupBuilding: false,
+      groupError: null,
 
       setBandKeys: (bandKeys) => set({ bandKeys }),
 
@@ -161,6 +205,49 @@ export const useSummaryReport = create<SummaryReportState>()(
       reset: () => {
         runToken.cancel()
         set({ job: null, jobId: null, result: null, error: null })
+      },
+
+      setKind: (kind) => set({ kind }),
+
+      setCompareJobId: (jobId) =>
+        // Результат принадлежит выбранной задаче: при смене источника прежний
+        // документ уходит (новый появится только по кнопке «Собрать отчёт»)
+        set({ compareJobId: jobId, compareReport: null, compareError: null }),
+
+      setGroupRunId: (runId) =>
+        // Как и у Типа 1: смена прогона не запускает сборку, прежний документ уходит
+        set({ groupRunId: runId, groupReport: null, groupError: null }),
+
+      buildCompareReport: async () => {
+        const { compareJobId } = get()
+        if (!compareJobId) return
+        const token = compareReportToken.next()
+        const isCurrent = () => compareReportToken.isCurrent(token)
+        set({ compareBuilding: true, compareError: null, compareReport: null })
+        try {
+          const report = await api.compare.report(compareJobId)
+          if (!isCurrent()) return
+          set({ compareReport: report, compareBuilding: false })
+        } catch (error) {
+          if (!isCurrent()) return
+          set({ compareBuilding: false, compareError: apiErrorText(error) })
+        }
+      },
+
+      buildGroupReport: async () => {
+        const { groupRunId } = get()
+        if (!groupRunId) return
+        const token = groupReportToken.next()
+        const isCurrent = () => groupReportToken.isCurrent(token)
+        set({ groupBuilding: true, groupError: null, groupReport: null })
+        try {
+          const report = await api.group.report(groupRunId)
+          if (!isCurrent()) return
+          set({ groupReport: report, groupBuilding: false })
+        } catch (error) {
+          if (!isCurrent()) return
+          set({ groupBuilding: false, groupError: apiErrorText(error) })
+        }
       },
     }),
     {
