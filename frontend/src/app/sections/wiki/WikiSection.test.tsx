@@ -114,6 +114,50 @@ describe('раздел Wiki', () => {
     ).toBeInTheDocument()
   })
 
+  it('новые статьи (eLORETA, сравнение, экспорт, события «Итогов») открываются по хешу', () => {
+    const { unmount } = renderWithProviders(<WikiSection />, { route: '/wiki#eloreta' })
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Диполи: eLORETA — пик и ROI' }),
+    ).toBeInTheDocument()
+    unmount()
+
+    const second = renderWithProviders(<WikiSection />, { route: '/wiki#compare' })
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Сравнение двух записей: дельты B − A' }),
+    ).toBeInTheDocument()
+    second.unmount()
+
+    const third = renderWithProviders(<WikiSection />, { route: '/wiki#export' })
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Экспорт записи: пакет (zip) и CSV' }),
+    ).toBeInTheDocument()
+    third.unmount()
+
+    renderWithProviders(<WikiSection />, { route: '/wiki#summary-events' })
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'Итоги: событийная нарезка (часть 1 по событиям)',
+      }),
+    ).toBeInTheDocument()
+  })
+
+  it('статьи о новшествах стоят в оглавлении в порядке чтения и перед глоссарием', () => {
+    renderWithProviders(<WikiSection />, { route: '/wiki#compare' })
+
+    const toc = screen.getByRole('navigation', { name: 'Оглавление Wiki' })
+    const names = within(toc)
+      .getAllByRole('link')
+      .map((link) => link.textContent)
+    // eLORETA — в части «Диполи», после кадра и до «ЭЭГ/Спектр»
+    expect(names.indexOf('Диполи: кадр')).toBeLessThan(names.indexOf('Диполи: eLORETA'))
+    expect(names.indexOf('Диполи: eLORETA')).toBeLessThan(names.indexOf('ЭЭГ/Спектр'))
+    // Сравнение — между «Итоги: события» и групповым анализом, экспорт — перед глоссарием
+    expect(names.indexOf('Итоги: события')).toBeLessThan(names.indexOf('Сравнение пары'))
+    expect(names.indexOf('Сравнение пары')).toBeLessThan(names.indexOf('Групповой анализ'))
+    expect(names.indexOf('Экспорт записи')).toBeLessThan(names.indexOf('Глоссарий'))
+  })
+
   it('неизвестный хеш открывает «Введение», а не пустой экран', () => {
     renderWithProviders(<WikiSection />, { route: '/wiki#nope' })
 

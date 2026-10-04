@@ -13,10 +13,12 @@ import { cx } from '@/shared/ui/cx'
 import { Button } from '@/shared/ui/Button'
 import { ArtifactsArticle } from './articles/ArtifactsArticle'
 import { CleanArticle } from './articles/CleanArticle'
+import { CompareArticle } from './articles/CompareArticle'
 import { DipoleCalcArticle } from './articles/DipoleCalcArticle'
 import { DipolePlaybackArticle } from './articles/DipolePlaybackArticle'
 import { DipolesOverviewArticle } from './articles/DipolesOverviewArticle'
 import { EegScreenArticle } from './articles/EegScreenArticle'
+import { EloretaArticle } from './articles/EloretaArticle'
 import { EpochsArticle } from './articles/EpochsArticle'
 import { FilterArticle } from './articles/FilterArticle'
 import { GlossaryArticle } from './articles/GlossaryArticle'
@@ -24,6 +26,8 @@ import { GroupAnalysisArticle } from './articles/GroupAnalysisArticle'
 import { IntroArticle } from './articles/IntroArticle'
 import { OpenArticle } from './articles/OpenArticle'
 import { ScreenArticle } from './articles/ScreenArticle'
+import { SessionExportArticle } from './articles/SessionExportArticle'
+import { SummaryEventsArticle } from './articles/SummaryEventsArticle'
 import { SummaryReportArticle } from './articles/SummaryReportArticle'
 import { SummaryCompareReportArticle } from './articles/SummaryCompareReportArticle'
 import { SummaryGroupReportArticle } from './articles/SummaryGroupReportArticle'
@@ -48,11 +52,15 @@ const ARTICLE_COMPONENTS: Record<WikiArticleId, ComponentType> = {
   dipoles: DipolesOverviewArticle,
   'dipole-calc': DipoleCalcArticle,
   'dipole-playback': DipolePlaybackArticle,
+  eloreta: EloretaArticle,
   'eeg-screen': EegScreenArticle,
   'summary-report': SummaryReportArticle,
+  'summary-events': SummaryEventsArticle,
+  compare: CompareArticle,
   'group-analysis': GroupAnalysisArticle,
   'summary-compare-report': SummaryCompareReportArticle,
   'summary-group-report': SummaryGroupReportArticle,
+  export: SessionExportArticle,
   glossary: GlossaryArticle,
 }
 

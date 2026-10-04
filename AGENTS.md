@@ -189,9 +189,9 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (1018 Vitest / 767 pytest, без `integration` — 749), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (1020 Vitest / 767 pytest, без `integration` — 749), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
-| `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
+| `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF, «Диполи», «Итоги», сравнение, экспорт), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |
 | `docs/ui.md` + `docs/ui/*.md` | функциональная спецификация UI (номера §) и дорожная карта |
 | `docs/strategy.md` + `docs/strategy/*.md` | стратегия: видение (части 1–4), Часть 1 — качество сигнала и реставрация |

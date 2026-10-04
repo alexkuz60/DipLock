@@ -9,16 +9,20 @@
 import { createContext, useContext } from 'react'
 import {
   Activity,
+  ArrowLeftRight,
   BookMarked,
   Brain,
   Calculator,
   Compass,
+  Crosshair,
   FileText,
   Filter,
   FolderOpen,
+  Flag,
   GitCompareArrows,
   Layers,
   Monitor,
+  Package,
   Play,
   ScanSearch,
   Scissors,
@@ -38,11 +42,15 @@ export type WikiArticleId =
   | 'dipoles'
   | 'dipole-calc'
   | 'dipole-playback'
+  | 'eloreta'
   | 'eeg-screen'
   | 'summary-report'
+  | 'summary-events'
+  | 'compare'
   | 'group-analysis'
   | 'summary-compare-report'
   | 'summary-group-report'
+  | 'export'
   | 'glossary'
 
 export type WikiArticle = {
@@ -129,6 +137,13 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     icon: Play,
   },
   {
+    id: 'eloreta',
+    title: 'Диполи: eLORETA — пик и ROI',
+    short: 'Диполи: eLORETA',
+    hint: 'Кнопка Crosshair: пик распределения и ROI-доли энергии эпохи',
+    icon: Crosshair,
+  },
+  {
     id: 'eeg-screen',
     title: 'Работа со страницей ЭЭГ/Спектр',
     short: 'ЭЭГ/Спектр',
@@ -141,6 +156,20 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'Итоги: автоотчёт',
     hint: 'Подготовка к сборке, две части отчёта, кросс-проверки, чтение результата',
     icon: FileText,
+  },
+  {
+    id: 'summary-events',
+    title: 'Итоги: событийная нарезка (часть 1 по событиям)',
+    short: 'Итоги: события',
+    hint: 'Как нарезка EDF по событиям попадает в отчёт и почему пакет остаётся fixed',
+    icon: Flag,
+  },
+  {
+    id: 'compare',
+    title: 'Сравнение двух записей: дельты B − A',
+    short: 'Сравнение пары',
+    hint: 'Одинаковая обработка, таблица дельт, кластерный тест, карты разности, TFR/ERDS',
+    icon: ArrowLeftRight,
   },
   {
     id: 'group-analysis',
@@ -162,6 +191,13 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'Итоги: отчёт группы',
     hint: 'Сохранённый прогон, два знаменателя share, тепловые карты, кластеры',
     icon: Users,
+  },
+  {
+    id: 'export',
+    title: 'Экспорт записи: пакет (zip) и CSV',
+    short: 'Экспорт записи',
+    hint: 'Пакет session/BIDS фоновой задачей, CSV диполей, кэш и квота',
+    icon: Package,
   },
   {
     id: 'glossary',
