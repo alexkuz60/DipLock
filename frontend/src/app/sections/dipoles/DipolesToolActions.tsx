@@ -31,6 +31,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleHelp,
+  Crosshair,
   Gauge,
   Glasses,
   Grid2x2,
@@ -223,6 +224,9 @@ export function DipolesToolHeaderActions() {
   const refinedPoints = useDipoleCalc((state) => state.refinedPoints)
   const refineEpoch = useDipoleCalc((state) => state.refineEpoch)
   const refineHalfwinMs = useDipoleCalc((state) => state.refineHalfwinMs)
+  const eloretaJob = useDipoleCalc((state) => state.eloretaJob)
+  const eloretaEpochIndex = useDipoleCalc((state) => state.eloretaEpochIndex)
+  const runEloreta = useDipoleCalc((state) => state.runEloreta)
   // Оценка времени уточнения берётся из чисел `/meta` (замер сервера): кнопка
   // обещает «≈N с», а не «десятки секунд» наугад (шаг 1.5). Тот же запрос уже
   // делает панель раздела — кэш react-query общий.
@@ -240,6 +244,13 @@ export function DipolesToolHeaderActions() {
   const selectedEpoch = epochIndexOfPointId(selectedPointId)
   const refinedSelected = selectedEpoch !== null ? refinedPoints[selectedEpoch] : undefined
   const refineRunning = refineJob?.status === 'running' && refiningEpoch !== null
+  const eloretaRunning = eloretaJob?.status === 'running' && eloretaEpochIndex !== null
+  const eloretaTooltipText =
+    result === null
+      ? 'eLORETA доступно после расчёта диполей'
+      : selectedEpoch === null
+        ? 'Выберите точку диполя — кнопка посчитает пик и ROI-доли eLORETA для её эпохи'
+        : `eLORETA эпохи ${selectedEpoch + 1}: пик распределения и ROI-доли (не полные карты, dipoles.md п.5). Окно: ${refineHalfwinLabel(refineHalfwinMs)}`
   const refineCost = refineCostHint(meta.data, result?.sfreq ?? null, refineHalfwinMs)
   const refineTooltipText =
     result === null
@@ -298,6 +309,28 @@ export function DipolesToolHeaderActions() {
         onClick={() => {
           if (selectedEpoch !== null) {
             void refineEpoch(recording?.recording_id ?? null, selectedEpoch)
+          }
+        }}
+      />
+
+      {/* eLORETA (остаток B9): пик/ROI той же эпохи — форма нарезки и окно
+          общие с «Уточнить», но результат иной (распределение, не точечный фит)
+          и не полные карты (dipoles.md п.5) */}
+      <IconButton
+        data-testid="eloreta-selected-button"
+        icon={
+          eloretaRunning && eloretaEpochIndex === selectedEpoch ? (
+            <Loader2 className="size-5 animate-spin" />
+          ) : (
+            <Crosshair className="size-5" />
+          )
+        }
+        label={eloretaRunning ? 'eLORETA считается…' : 'eLORETA выбранной эпохи'}
+        tooltip={eloretaTooltipText}
+        disabled={result === null || selectedEpoch === null || eloretaRunning || refineRunning}
+        onClick={() => {
+          if (selectedEpoch !== null) {
+            void runEloreta(recording?.recording_id ?? null, selectedEpoch)
           }
         }}
       />

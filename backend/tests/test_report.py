@@ -574,3 +574,134 @@ def test_report_unknown_recording_is_404(client):
     response = client.post(f"{_PREFIX}/recordings/rec-nope/report")
     assert response.status_code == 404
 
+
+# --- 3c: событийный режим части 1 (остаток B9) -------------------------------
+
+
+def _events_edf(tmp_path):
+    """EDF+ с событиями «Stim»: та же синтетика, что у отчёта, + аннотации."""
+    from tests.conftest import write_minimal_edf
+
+    channels = list(settings.standard_channels[:8])
+    sfreq = 250.0
+    times = np.arange(int(8.0 * sfreq)) / sfreq
+    data = np.stack([
+        np.sin(2 * np.pi * (6 + index) * times) * (10.0 + 3.0 * index)
+        for index in range(len(channels))
+    ])
+    path = tmp_path / "report_events.edf"
+    write_minimal_edf(
+        path, channels, data, sfreq,
+        annotations=[(2.0, 0.0, "Stim"), (5.0, 0.0, "Stim")],
+    )
+    return path
+
+
+def _events_params() -> ReportParams:
+    return ReportParams(
+        preprocess=PreprocessParams(
+            epoch_length_ms=1000.0, epoch_mode="events", event_id="Stim",
+            epoch_pre_ms=200.0, epoch_post_ms=600.0,
+        ),
+        grid_mm=7.0,
+        band_keys=_two_bands(),
+    )
+
+
+def test_run_report_events_mode_signs_both_narezki(tmp_path):
+    """Событийный режим: часть 1 по событиям, пакет fixed — и обе нарезки подписаны.
+
+    Контракт и HTML: кросс-проверка №3 не пугает предупреждением (расхождение
+    по построению), а подписывает; секция «Как читать часть 2» объясняет, почему
+    пакет на другой нарезке (`events.md` п.8).
+    """
+    edf = _events_edf(tmp_path)
+    recording = _register(tmp_path, edf, "rec-report-events")
+
+    result = run_report(recording, settings, _events_params())
+    out = ReportResult(**result)
+
+    # Часть 1 нарезана по событиям:2 события → окна, а не фиксированные эпохи
+    assert out.n_epochs_total > 0
+    data, _version = read_report_html(settings, recording.recording_id, out.html_sig)
+    assert data is not None
+    text = data.decode("utf-8")
+    # Режим нарезки честно назван в части 1
+    assert "events" in text
+    # №3: подпись «по событиям», а не предупреждение о расхождении
+    assert "часть 1 — по событиям" in text
+    assert "Нарезка пакета расходится" not in text
+    # Подпись пакета в секции «Как читать часть 2»
+    assert "Нарезка пакета — фиксированная" in text
+    # Предупреждений о расхождении нарезок в результате быть не должно
+    assert not any("расходится с частью 1" in w for w in out.warnings)
+
+
+def test_run_report_events_mode_requires_valid_event(tmp_path):
+    """Неизвестное событие — задача падает с читаемым текстом, не500-молчанием."""
+    edf = _events_edf(tmp_path)
+    recording = _register(tmp_path, edf, "rec-report-events-bad")
+    params = _events_params()
+    params.preprocess.event_id = "Нет такого"
+
+    with pytest.raises(ValueError, match="не найдены"):
+        run_report(recording, settings, params)
+
+
+def test_report_params_events_validates_window_and_length():
+    """Форма отчёта в событийном режиме: окно событий и длина эпохи пакета."""
+    from fastapi import HTTPException
+
+    from app.api.params import report_params
+
+    base = dict(
+        band_min=1.0, band_max=40.0, notch_hz=None, reference="average",
+        reference_channels=None, z_threshold=5.0, pp_threshold_uv=100.0,
+        flat_line_uv=5.0, flat_line_ms=200.0, run_ica=False,
+    )
+    # Окно события валидируется общим правилом стадии (400 с текстом)
+    with pytest.raises(HTTPException) as excinfo:
+        report_params(**base, epoch_length_ms=1000.0, epoch_mode="events",
+                      event_id="Stim", epoch_pre_ms=200.0, epoch_post_ms=50.0)
+    assert excinfo.value.status_code == 400
+    # Длина эпохи для пакета обязательна и в событийном режиме
+    with pytest.raises(HTTPException):
+        report_params(**base, epoch_length_ms=123.0, epoch_mode="events",
+                      event_id="Stim", epoch_pre_ms=200.0, epoch_post_ms=600.0)
+    # Без события — режим fixed, как прежде
+    params = report_params(**base, epoch_length_ms=1000.0)
+    assert params.preprocess.epoch_mode == "fixed"
+
+
+def test_report_job_flow_passes_events_fields(client, tmp_path):
+    """POST /report передаёт событийный режим в задачу (форма → контракт)."""
+    from tests.test_dipole_scanner import _wait_finished
+
+    edf = _events_edf(tmp_path)
+    recording = _register(tmp_path, edf, "rec-report-events-job")
+    created = client.post(
+        f"{_PREFIX}/recordings/{recording.recording_id}/report",
+        data={
+            "bands": "theta,alpha",
+            "epoch_mode": "events",
+            "event_id": "Stim",
+            "epoch_pre_ms": 200,
+            "epoch_post_ms": 600,
+        },
+    )
+    assert created.status_code == 202, created.text
+    status = _wait_finished(client, created.json()["job_id"], timeout=120.0)
+    assert status["status"] == "succeeded", status.get("error")
+
+    body = client.get(status["result_url"]).json()
+    assert body["n_epochs_total"] > 0
+    # Несобытийный режим с несуществующим событием — 400 до старта задачи
+    bad = client.post(
+        f"{_PREFIX}/recordings/{recording.recording_id}/report",
+        data={"epoch_mode": "events", "event_id": "Нет", "epoch_post_ms": 600},
+    )
+    assert bad.status_code == 400
+    detail = bad.json()["detail"]
+    assert "не найдено" in detail
+    assert "«Stim»" in detail  # перечень доступных событий честно показан
+

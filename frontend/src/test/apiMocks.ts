@@ -7,6 +7,7 @@ import {
   compareResultFixture,
   dipoleRefineResultFixture,
   dipoleScanResultFixture,
+  eloretaResultFixture,
   evokedResultFixture,
   filterResponseFixture,
   groupAggregateFixture,
@@ -20,6 +21,7 @@ import {
   recordingFixture,
   reportHtmlOutFixture,
   reportResultFixture,
+  bundleResultFixture,
   sessionsFixture,
   spectrogramResultFixture,
   spectrumResultFixture,
@@ -31,8 +33,10 @@ import type {
   ContourSlice,
   DipoleRefineResult,
   DipoleScanResult,
+  EloretaResult,
   EvokedResult,
   FilterResponse,
+  BundleResult,
   GroupAggregateOut,
   GroupAnalysisSummary,
   InitStatus,
@@ -60,7 +64,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 /** 202-ответ запуска задачи расчёта (срез 3.4): id задачи и адреса поллинга. */
 function calcJobCreated(
   jobId: string,
-  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine' | 'evoked' | 'report',
+  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine' | 'evoked' | 'report' | 'bundle' | 'eloreta',
 ): Record<string, string> {
   return {
     job_id: jobId,
@@ -140,12 +144,16 @@ export type MockApiOptions = {
   dipoleScanResult?: DipoleScanResult
   /** Явный результат точного уточнения эпохи (кнопка «Уточнить…») */
   dipoleRefineResult?: DipoleRefineResult
+  /** Явный результат eLORETA (остаток B9); иначе — фикстура */
+  eloretaResult?: EloretaResult
   /** Явный результат спектрограммы («ЭЭГ») */
   spectrogramResult?: SpectrogramResult
   /** Статус задачи спектрограммы (поллинг) */
   spectrogramJob?: JobStatus
   /** Явный результат автоотчёта (раздел «Итоги») */
   reportResult?: ReportResult
+  /** Результат задачи пакета сессии (`GET …/bundle/{job_id}`) */
+  bundleResult?: BundleResult
   /** Метаданные отчёта группового анализа (`GET …/report`, Тип 1/Тип 2) */
   reportHtml?: ReportHtmlOut
   /** Текст ошибки сборки отчёта (404: прогона нет в БД) */
@@ -220,6 +228,33 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         202,
       )
     }
+    if (url.includes('/bundle')) {
+      // Пакет сессии (4.6): POST → задача, GET результата → zip_url, zip → 404
+      if (method === 'POST') {
+        if (options.calcStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(calcJobCreated('job-bundle-1', 'bundle'), 202)
+      }
+      if (url.endsWith('/zip')) {
+        return new Response(new Uint8Array([80, 75, 3, 4]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/zip', ETag: '"mock-bundle"' },
+        })
+      }
+      return jsonResponse(
+        options.bundleResult
+          ?? bundleResultFixture({
+            zip_url: `/api/v1/recordings/${recordingFixture.recording_id}/bundle/job-bundle-1/zip`,
+          }),
+      )
+    }
+    if (url.includes('/dipoles.csv')) {
+      return new Response('session_id,epoch_id\r\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/csv' },
+      })
+    }
     if (url.includes('/preprocess')) {
       if (method === 'POST') {
         const form = init?.body as FormData | undefined
@@ -283,6 +318,17 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'dipole_refine'), 202)
       }
       return jsonResponse(options.dipoleRefineResult ?? dipoleRefineResultFixture())
+    }
+    // eLORETA (остаток B9): пик/ROI эпохи. Ветка строго по `/eloreta` —
+    // подстрока не пересекается с `/dipole_refine` и `/dipoles`.
+    if (url.includes('/eloreta')) {
+      if (method === 'POST') {
+        if (options.calcStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'eloreta'), 202)
+      }
+      return jsonResponse(options.eloretaResult ?? eloretaResultFixture())
     }
     if (url.includes('/dipoles')) {
       if (method === 'POST') {

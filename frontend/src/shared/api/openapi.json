@@ -1690,10 +1690,109 @@
         }
       }
     },
+    "/api/v1/recordings/{recording_id}/eloreta": {
+      "post": {
+        "summary": "eLORETA: пик и ROI-доли распределения одной эпохи (остаток B9)",
+        "description": "Пик/ROI eLORETA на одной эпохе (dipoles.md п.5: **не полные карты**).\n\nФорма — та же, что у «Уточнить»: нарезка обязана повторять быстрый расчёт\n(``epoch_index`` привязан к ней). Результат: пик распределения (координата +\nанатомия из общего источника) и доли энергии по структурам — объём честно\nограничен, полные карты не отдаются.",
+        "operationId": "create_eloreta_job_api_v1_recordings__recording_id__eloreta_post",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_eloreta_job_api_v1_recordings__recording_id__eloreta_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/eloreta/{job_id}": {
+      "get": {
+        "summary": "Результат eLORETA: пик и ROI-доли эпохи",
+        "description": "Пик + ROI одной эпохи. 409 — задача идёт/упала.",
+        "operationId": "get_eloreta_result_api_v1_recordings__recording_id__eloreta__job_id__get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EloretaResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/recordings/{recording_id}/report": {
       "post": {
         "summary": "Собрать сквозной автоотчёт (MNE.Report + пакет диполей по полосам)",
-        "description": "Автоотчёт раздела «Итоги» — одна задача в три ступени.\n\nСтупени: три стадии препроцессинга (часть 1 — **те же** параметры и числа,\nчто раздел EDF: форма здесь повторяет форму стадий; нарезка только\n``fixed``) → пакетный быстрый расчёт диполей по полосам (часть 2,\nагрегаты структур/BA) → сборка самодостаточного ``mne.Report`` в\nдисковый кэш. Результат задачи — агрегаты и ссылка ``html_url``;\nсам HTML — отдельный ассет с ETag ниже.",
+        "description": "Автоотчёт раздела «Итоги» — одна задача в три ступени.\n\nСтупени: три стадии препроцессинга (часть 1 — **те же** параметры и числа,\nчто раздел EDF: форма здесь повторяет форму стадий; нарезка fixed/events —\nкакой бы ни была нарезка EDF, отчёт её пересказывает) → пакетный быстрый\nрасчёт диполей по полосам (часть 2, агрегаты структур/BA; пакет **всегда**\nна fixed-нарезке — событийные диполи отдельная задача, events.md п.8) →\nсборка самодостаточного ``mne.Report`` в дисковый кэш. Результат задачи —\nагрегаты и ссылка ``html_url``; сам HTML — отдельный ассет с ETag ниже.",
         "operationId": "create_report_job_api_v1_recordings__recording_id__report_post",
         "parameters": [
           {
@@ -1996,6 +2095,241 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SpectrogramGridHeader"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/bundle": {
+      "post": {
+        "summary": "Собрать пакет сессии (zip: EDF + параметры + результаты или BIDS)",
+        "description": "Пакет сессии (N40/4.6) — фоновой задачей `kind=bundle` (202 + `job_id`).\n\nZip собирается потоково в дисковый кэш по входному отпечатку: те же\nвходы → кэш-попадание без пересборки. Результат — список файлов и\n`zip_url`; сам ассет отдаётся ниже с ETag/304. Формат `bids` даёт\nминимальную BIDS-структуру (dataset_description, participants, сайдкар,\nсобытия), `session` — полный набор «EDF + параметры + результаты».",
+        "operationId": "create_bundle_job_api_v1_recordings__recording_id__bundle_post",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/bundle/{job_id}": {
+      "get": {
+        "summary": "Результат задачи пакета",
+        "description": "Список файлов пакета и ссылка на zip. 409 — задача идёт/упала.\n\n``zip_url`` собирается здесь, а не в воркере: воркер не знает ``job_id``\n(задача создаётся после него), а адрес адресуется именно задаче — как у\n``html_url`` автоотчёта.",
+        "operationId": "get_bundle_result_api_v1_recordings__recording_id__bundle__job_id__get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BundleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/bundle/{job_id}/zip": {
+      "get": {
+        "summary": "Zip пакета сессии из дискового кэша (ETag)",
+        "description": "Zip пакета с ETag/304 (единая отдача — ``assets.py``).\n\nETag — входной отпечаток сборки (``sig`` из результата): он меняется при\nлюбом изменении входов (EDF, паспорт, задачи, версии), поэтому браузер не\nотдаёт устаревший архив. Кэш очищен вместе с записью — 404 с просьбой\nсобрать пакет заново (как у HTML автоотчёта).",
+        "operationId": "get_bundle_zip_api_v1_recordings__recording_id__bundle__job_id__zip_get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/zip": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/dipoles.csv": {
+      "get": {
+        "summary": "Экспорт таблицы диполей записи в CSV (RFC 4180)",
+        "description": "CSV всех диполей записи (все сессии, все полосы) — выгрузка готовых строк.\n\nНе задача: чтение ``read-API сессий`` и сериализация — секунды, а\n«задача = job» относится к расчёту (правило 2). Пустой результат —\nчестный CSV с одной шапкой («данных нет», а не ошибка). Кавычки/CRLF —\nRFC 4180 (``services/session_bundle.py::dipoles_csv``).",
+        "operationId": "export_dipoles_csv_api_v1_recordings__recording_id__dipoles_csv_get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/csv": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/manifest": {
+      "get": {
+        "summary": "Run manifest задачи (версии + параметры + отпечатки ассетов)",
+        "description": "На чём, чем и на каких данных посчитана задача (N40/4.6).\n\nМанифест строится на лету из ``meta`` задачи (``params_sig`` и\n``recording_id`` — то, что уже есть у любой задачи) плюс текущие версии\nсреды и отпечатки ассетов — для задачи этого процесса/хоста они\nсоответствуют её окружению. В отличие от результата, манифест честен\nи для идущей, и для упавшей задачи («с чем запускали»). 404 — неизвестна.",
+        "operationId": "get_job_manifest_api_v1_jobs__job_id__manifest_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunManifestOut"
                 }
               }
             }
@@ -3829,6 +4163,18 @@
         ],
         "title": "Body_create_analysis_job_api_v1_jobs_post"
       },
+      "Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "title": "Format",
+            "description": "Формат пакета: session (EDF + манифест + паспорт + задачи) | bids",
+            "default": "session"
+          }
+        },
+        "type": "object",
+        "title": "Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post"
+      },
       "Body_create_compare_job_api_v1_compare_post": {
         "properties": {
           "recording_id_a": {
@@ -3918,6 +4264,42 @@
             "title": "Psd Method",
             "description": "Метод PSD: welch | multitaper (N17)",
             "default": "welch"
+          },
+          "tfr_event": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tfr Event",
+            "description": "Описание события для TFR/ERDS-карт; пусто — без событийной ветки"
+          },
+          "tfr_tmin_ms": {
+            "type": "number",
+            "title": "Tfr Tmin Ms",
+            "description": "Начало окна TFR относительно события, мс",
+            "default": -500.0
+          },
+          "tfr_tmax_ms": {
+            "type": "number",
+            "title": "Tfr Tmax Ms",
+            "description": "Конец окна TFR, мс",
+            "default": 1500.0
+          },
+          "tfr_baseline_start_ms": {
+            "type": "number",
+            "title": "Tfr Baseline Start Ms",
+            "description": "Baseline TFR: начало, мс",
+            "default": -500.0
+          },
+          "tfr_baseline_end_ms": {
+            "type": "number",
+            "title": "Tfr Baseline End Ms",
+            "description": "Baseline TFR: конец, мс до события",
+            "default": -100.0
           }
         },
         "type": "object",
@@ -4095,6 +4477,101 @@
         },
         "type": "object",
         "title": "Body_create_dipole_scan_job_api_v1_recordings__recording_id__dipoles_post"
+      },
+      "Body_create_eloreta_job_api_v1_recordings__recording_id__eloreta_post": {
+        "properties": {
+          "epoch_index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Epoch Index",
+            "description": "Номер эпохи нарезки быстрого расчёта (с 0)"
+          },
+          "band_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Min",
+            "description": "Нижняя граница полосы, Гц"
+          },
+          "band_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Max",
+            "description": "Верхняя граница полосы, Гц"
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz",
+            "description": "Сетевой фильтр 50/60 Гц"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference",
+            "description": "average | custom",
+            "default": "average"
+          },
+          "reference_channels": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Channels",
+            "description": "Каналы референса через запятую"
+          },
+          "epoch_length_ms": {
+            "type": "number",
+            "title": "Epoch Length Ms",
+            "description": "Длина эпохи — как в быстром расчёте",
+            "default": 1000.0
+          },
+          "grid_mm": {
+            "type": "number",
+            "maximum": 20.0,
+            "minimum": 2.0,
+            "title": "Grid Mm",
+            "description": "Шаг сетки быстрого расчёта, мм",
+            "default": 7.0
+          },
+          "halfwin_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Halfwin Ms",
+            "description": "Половина окна вокруг пика GFP, мс (0 — отсчёт пика; пусто — дефолт сервера)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "epoch_index"
+        ],
+        "title": "Body_create_eloreta_job_api_v1_recordings__recording_id__eloreta_post"
       },
       "Body_create_evoked_job_api_v1_recordings__recording_id__evoked_post": {
         "properties": {
@@ -4613,6 +5090,36 @@
             ],
             "title": "Bands",
             "description": "Ключи полос пакета через запятую (δ,θ,…); пусто — все полосы /meta"
+          },
+          "epoch_mode": {
+            "type": "string",
+            "title": "Epoch Mode",
+            "description": "Нарезка части 1: fixed | events (событийная — часть 2 пакета не меняет)",
+            "default": "fixed"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id",
+            "description": "Описание события (режим events)"
+          },
+          "epoch_pre_ms": {
+            "type": "number",
+            "title": "Epoch Pre Ms",
+            "description": "Окно до события, мс (режим events)",
+            "default": 200.0
+          },
+          "epoch_post_ms": {
+            "type": "number",
+            "title": "Epoch Post Ms",
+            "description": "Окно после события, мс (режим events)",
+            "default": 800.0
           }
         },
         "type": "object",
@@ -4854,6 +5361,62 @@
         ],
         "title": "BrodmannLabelsOut",
         "description": "GET /api/v1/brodmann-labels — только имена меток (лёгкий ответ для UI)."
+      },
+      "BundleResult": {
+        "properties": {
+          "format": {
+            "type": "string",
+            "title": "Format",
+            "description": "Формат пакета: session (EDF+параметры+результаты) | bids"
+          },
+          "sig": {
+            "type": "string",
+            "title": "Sig",
+            "description": "Входной отпечаток сборки — ключ zip в дисковом кэше и ETag"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "Внутренние пути файлов архива"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes",
+            "description": "Размер zip на диске"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "Честные предупреждения (EDF не найден и т.п.)"
+          },
+          "zip_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip Url",
+            "description": "Ссылка на скачивание (собирается роутом, как html_url отчёта)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "format",
+          "sig",
+          "files",
+          "size_bytes"
+        ],
+        "title": "BundleResult",
+        "description": "Результат задачи пакета сессии (kind=bundle): zip в дисковом кэше."
       },
       "ChannelMixOut": {
         "properties": {
@@ -5134,6 +5697,17 @@
               }
             ],
             "description": "Метрики потерь L1/L3/L4/L5 (null — очистки не было)"
+          },
+          "covariance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CovarianceQcOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "QC-слой ковариации: λ, % дисперсии, heatmap корреляций и топокарты ПК «до/после» (null — очистки не было)"
           },
           "iclabel_labels": {
             "anyOf": [
@@ -5488,6 +6062,241 @@
         "title": "CompareClusterOut",
         "description": "Значимый кластер «частота × канал» из пермутационного теста."
       },
+      "CompareErdsBandOut": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Ключ диапазона (delta…gamma)"
+          },
+          "fmin": {
+            "type": "number",
+            "title": "Fmin"
+          },
+          "fmax": {
+            "type": "number",
+            "title": "Fmax"
+          },
+          "erds_a_post": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Erds A Post",
+            "description": "Средний ERDS% в пост-окне [0; tmax] у A; None — частоты вне сетки"
+          },
+          "erds_b_post": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Erds B Post",
+            "description": "То же у B"
+          },
+          "delta_post": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Post",
+            "description": "B − A в %-пунктах ERDS (знак = направление изменения)"
+          },
+          "p_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "P Value",
+            "description": "Welch t-тест по эпоховым пост-средним ERDS%, p"
+          },
+          "q_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q Value",
+            "description": "p после поправки FDR по всем полосам ERDS-результата"
+          },
+          "ci95_delta_pct": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci95 Delta Pct",
+            "description": "95% bootstrap-ИИ дельты ERDS [низ, верх], %-пункты; 0 внутри — различие не подтверждено"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "fmin",
+          "fmax"
+        ],
+        "title": "CompareErdsBandOut",
+        "description": "Сводка ERDS одной полосы ``freq_bands`` в пост-стимульном окне."
+      },
+      "CompareErdsOut": {
+        "properties": {
+          "event_id": {
+            "type": "string",
+            "title": "Event Id",
+            "description": "Описание события, по которому выровнены эпохи"
+          },
+          "tmin": {
+            "type": "number",
+            "title": "Tmin",
+            "description": "Начало окна TFR относительно события, с"
+          },
+          "tmax": {
+            "type": "number",
+            "title": "Tmax",
+            "description": "Конец окна TFR относительно события, с"
+          },
+          "baseline": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Baseline",
+            "description": "Baseline-окно [начало, конец] относительно события, с"
+          },
+          "freqs": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Freqs",
+            "description": "Частотная сетка TFR (лог), Гц"
+          },
+          "times": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Times",
+            "description": "Временная сетка TFR (с декимацией), с"
+          },
+          "n_channels": {
+            "type": "integer",
+            "title": "N Channels",
+            "description": "Каналов в усреднении (общий набор пары)"
+          },
+          "n_epochs_a": {
+            "type": "integer",
+            "title": "N Epochs A",
+            "description": "Событий вошло в расчёт A (после отбраковки)"
+          },
+          "n_epochs_b": {
+            "type": "integer",
+            "title": "N Epochs B",
+            "description": "Событий вошло в расчёт B"
+          },
+          "erds_a": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Erds A",
+            "description": "ERDS% A: (n_freq × n_time), среднее по каналам и эпохам"
+          },
+          "erds_b": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Erds B",
+            "description": "ERDS% B: (n_freq × n_time)"
+          },
+          "delta": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Delta",
+            "description": "B − A в %-пунктах ERDS: (n_freq × n_time)"
+          },
+          "delta_png": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta Png",
+            "description": "Heatmap дельты B − A (base64 PNG, RdBu) — картинка того же пересчёта"
+          },
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/CompareErdsBandOut"
+            },
+            "type": "array",
+            "title": "Bands",
+            "description": "Сводка по полосам freq_bands: средний ERDS% в пост-окне"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_id",
+          "tmin",
+          "tmax",
+          "baseline",
+          "freqs",
+          "times",
+          "n_channels",
+          "n_epochs_a",
+          "n_epochs_b",
+          "erds_a",
+          "erds_b",
+          "delta"
+        ],
+        "title": "CompareErdsOut",
+        "description": "TFR/ERDS-карты пары: событийные эпохи, морле-вейвлеты, baseline-нормировка.\n\nERDS% = (P(t, f) − P_base(f)) / P_base(f) × 100, где P_base — средняя\nмощность в baseline-окне. Карты **усреднены по общим каналам пары и по\nэпохам** (отдельные электроды в карте не различаются — топография\nсравнивается топокартами разности по полосам). Честны только при\nвыравнивании по событию — иначе бы TFR смазывает артефакты переходов."
+      },
       "CompareIndicesOut": {
         "properties": {
           "iaf_a_hz": {
@@ -5744,6 +6553,17 @@
           },
           "stats": {
             "$ref": "#/components/schemas/CompareStatsOut"
+          },
+          "erds": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CompareErdsOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "TFR/ERDS-карты по событию (отдельная ветка, включается полем event_id); None — событийное сравнение не запрашивалось"
           },
           "topomap_version": {
             "type": "string",
@@ -6223,6 +7043,141 @@
         ],
         "title": "ContoursRef",
         "description": "Ссылка на контуры для ``/meta``: считается без сборки объёмов, O(1)."
+      },
+      "CovariancePcOut": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index",
+            "description": "Номер компоненты (1 — ведущая, по убыванию λ)"
+          },
+          "variance_percent": {
+            "type": "number",
+            "title": "Variance Percent",
+            "description": "Доля дисперсии этой компоненты, %"
+          },
+          "topomap_png_b64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topomap Png B64",
+            "description": "Топокарта собственного вектора, base64 PNG (RdBu_r, знак якорен по максимуму |загрузки|); None — позиций монтажа нет или сбой рендера"
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "variance_percent"
+        ],
+        "title": "CovariancePcOut",
+        "description": "Ведущая компонента PCA ковариации: её доля дисперсии и топокарта."
+      },
+      "CovarianceQcOut": {
+        "properties": {
+          "channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Channels",
+            "description": "Каналы, по которым считалась ковариация"
+          },
+          "before": {
+            "$ref": "#/components/schemas/CovarianceQcSideOut"
+          },
+          "after": {
+            "$ref": "#/components/schemas/CovarianceQcSideOut"
+          },
+          "tail_ratio": {
+            "type": "number",
+            "title": "Tail Ratio",
+            "description": "Порог шумового хвоста effective_rank, доля от λ1 (из конфига)"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "Что не построилось и почему (тексты для UI)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channels",
+          "before",
+          "after",
+          "tail_ratio"
+        ],
+        "title": "CovarianceQcOut",
+        "description": "QC-слой ковариации для отчёта стадии filter: числа и картинки «до/после» (п.6).\n\nДиагностика той же конфигурации, что L1/L3/L4/L5 (с отменами зон): heatmap\nкорреляций, топокарты ведущих ПК (PC1 с фронтальным максимумом — «моргание»),\nшумовой хвост λ≈0 читается по ``effective_rank``. Картинки — base64 внутри\nотчёта (числа и картинка обязаны быть одного пересчёта)."
+      },
+      "CovarianceQcSideOut": {
+        "properties": {
+          "eigenvalues_uv2": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Eigenvalues Uv2",
+            "description": "Собственные значения ковариации каналов, мкВ² (по убыванию)"
+          },
+          "variance_percent": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Variance Percent",
+            "description": "Доля дисперсии по компонентам, % (пусто — нулевая дисперсия)"
+          },
+          "cumulative_percent": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Cumulative Percent",
+            "description": "Накопленная доля дисперсии, %"
+          },
+          "effective_rank": {
+            "type": "integer",
+            "title": "Effective Rank",
+            "description": "Компонент с λ ≥ covariance_qc_tail_ratio·λ1 — «эффективный ранг»: видимая проверка, что фит ICA не посчитан на шумовом хвосте"
+          },
+          "heatmap_png_b64": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heatmap Png B64",
+            "description": "Heatmap корреляций каналов (−1…1), base64 PNG; None — сбой рендера"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/CovariancePcOut"
+            },
+            "type": "array",
+            "title": "Components",
+            "description": "Ведущие ПК (топокарты, число — из конфига)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eigenvalues_uv2",
+          "variance_percent",
+          "cumulative_percent",
+          "effective_rank"
+        ],
+        "title": "CovarianceQcSideOut",
+        "description": "Числа и картинки QC-слоя ковариации одной стороны — «до» или «после» чистки."
       },
       "DipoleFit": {
         "properties": {
@@ -6775,6 +7730,209 @@
         ],
         "title": "DipoleScanResult",
         "description": "Результат задачи быстрого расчёта диполей (``kind=dipoles``)."
+      },
+      "EloretaPeakOut": {
+        "properties": {
+          "mni_mm": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Mni Mm",
+            "description": "Координата пика, мм (кадр fsaverage-MNI — тот же, что у диполей)"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value",
+            "description": "|амплитуда| пика, условные единицы eLORETA (не калиброваны в нАм)"
+          },
+          "time_ms": {
+            "type": "number",
+            "title": "Time Ms",
+            "description": "Время пика внутри окна эпохи, мс (отсчёт эпохи)"
+          },
+          "structure_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structure Name",
+            "description": "Ближайшая структура aparc+aseg; None — атлас недоступен"
+          },
+          "structure_distance_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structure Distance Mm"
+          },
+          "area_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Name",
+            "description": "Ближайшее поле Бродмана"
+          },
+          "area_distance_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Distance Mm"
+          },
+          "outside_brain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outside Brain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mni_mm",
+          "value",
+          "time_ms"
+        ],
+        "title": "EloretaPeakOut",
+        "description": "Пик eLORETA-распределения на одной эпохе (остаток B9, dipoles.md п.5)."
+      },
+      "EloretaResult": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "description": "Метод: `eloreta`"
+          },
+          "epoch_index": {
+            "type": "integer",
+            "title": "Epoch Index",
+            "description": "Номер эпохи нарезки быстрого расчёта (с 0)"
+          },
+          "time_ms": {
+            "type": "number",
+            "title": "Time Ms",
+            "description": "Время пика GFP эпохи, мс"
+          },
+          "window_ms": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Window Ms",
+            "description": "Окно усреднения вокруг пика GFP [от, до], мс"
+          },
+          "halfwin_ms": {
+            "type": "number",
+            "title": "Halfwin Ms",
+            "description": "Половина окна, мс (0 — один отсчёт пика GFP)",
+            "default": 0.0
+          },
+          "peak": {
+            "$ref": "#/components/schemas/EloretaPeakOut",
+            "description": "Пик распределения |amplitude|"
+          },
+          "roi": {
+            "items": {
+              "$ref": "#/components/schemas/EloretaRoiOut"
+            },
+            "type": "array",
+            "title": "Roi",
+            "description": "Топ структур по доле энергии; пусто — атлас недоступен"
+          },
+          "other_share": {
+            "type": "number",
+            "title": "Other Share",
+            "description": "Доля энергии вне топ-структур (включая вершины вне атласа), 0..1"
+          },
+          "n_sources": {
+            "type": "integer",
+            "title": "N Sources",
+            "description": "Вершин в source space fsaverage"
+          },
+          "n_channels": {
+            "type": "integer",
+            "title": "N Channels",
+            "description": "Каналов в расчёте"
+          },
+          "lambda2": {
+            "type": "number",
+            "title": "Lambda2",
+            "description": "Регуляризация inverse-оператора (из конфига)"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "duration_sec_calc": {
+            "type": "number",
+            "title": "Duration Sec Calc",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "method",
+          "epoch_index",
+          "time_ms",
+          "window_ms",
+          "peak",
+          "other_share",
+          "n_sources",
+          "n_channels",
+          "lambda2"
+        ],
+        "title": "EloretaResult",
+        "description": "Результат eLORETA одной эпохи (``kind=eloreta``, остаток B9).\n\n**Не полные карты** (п.5 `docs/rules/dipoles.md`): объём stc × N полос\nупирается в ``JOB_RESULT_MAX_BYTES`` и в отсутствующую концепцию\nвизуализации — на выходе пик распределения (координата + анатомия из\nобщего источника ``atlas_contours``) и доли энергии по структурам\n(топ-8 + «прочие»). eLORETA-значения условные (не откалиброваны в нАм);\nпик — ориентир для перекрёстной проверки с быстрым расчётом и refine,\nа не замена точечного фита."
+      },
+      "EloretaRoiOut": {
+        "properties": {
+          "structure": {
+            "type": "string",
+            "title": "Structure"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share",
+            "description": "Доля суммарной энергии, 0..1"
+          }
+        },
+        "type": "object",
+        "required": [
+          "structure",
+          "share"
+        ],
+        "title": "EloretaRoiOut",
+        "description": "Доля энергии eLORETA на структуре (от суммарной по эпохе)."
       },
       "EpochOut": {
         "properties": {
@@ -10320,6 +11478,98 @@
         ],
         "title": "RoiRowOut",
         "description": "Строка ROI (структура или поле Бродмана): итог по полосам + ячейки."
+      },
+      "RunManifestOut": {
+        "properties": {
+          "manifest_version": {
+            "type": "integer",
+            "title": "Manifest Version",
+            "description": "Версия формата манифеста"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind",
+            "description": "Вид задачи (analyze/preprocess/…)"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id",
+            "description": "Запись задачи; None — файловый анализ"
+          },
+          "params_sig": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params Sig",
+            "description": "Отпечаток параметров прогона (repr формы)"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At",
+            "description": "Завершение задачы (ISO); None — ещё идёт"
+          },
+          "versions": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Versions",
+            "description": "Python/MNE/NumPy/SciPy/SQLAlchemy и др. — как в /meta"
+          },
+          "assets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Assets",
+            "description": "Отпечатки ассетов FSAverage (меш, МРТ, атлас) — как в /meta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "manifest_version",
+          "kind",
+          "recording_id",
+          "params_sig",
+          "finished_at",
+          "versions",
+          "assets"
+        ],
+        "title": "RunManifestOut",
+        "description": "Run manifest задачи: на чём, чем и на каких данных посчитано (N40/4.6).\n\nВерсии/отпечатки — те же источники, что `/meta` и manifest внутри\nsession-пакета: задача обязана честно сказать про своё окружение рядом\nсо своим результатом, а не заставлять сверять сборки вручную."
       },
       "ServerRestartOut": {
         "properties": {

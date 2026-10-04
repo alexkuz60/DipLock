@@ -262,6 +262,65 @@ class CleanLossOut(BaseModel):
     )
 
 
+class CovariancePcOut(BaseModel):
+    """Ведущая компонента PCA ковариации: её доля дисперсии и топокарта."""
+
+    index: int = Field(description="Номер компоненты (1 — ведущая, по убыванию λ)")
+    variance_percent: float = Field(description="Доля дисперсии этой компоненты, %")
+    topomap_png_b64: str | None = Field(
+        default=None,
+        description=(
+            "Топокарта собственного вектора, base64 PNG (RdBu_r, знак якорен "
+            "по максимуму |загрузки|); None — позиций монтажа нет или сбой рендера"
+        ),
+    )
+
+
+class CovarianceQcSideOut(BaseModel):
+    """Числа и картинки QC-слоя ковариации одной стороны — «до» или «после» чистки."""
+
+    eigenvalues_uv2: list[float] = Field(
+        description="Собственные значения ковариации каналов, мкВ² (по убыванию)"
+    )
+    variance_percent: list[float] = Field(
+        description="Доля дисперсии по компонентам, % (пусто — нулевая дисперсия)"
+    )
+    cumulative_percent: list[float] = Field(description="Накопленная доля дисперсии, %")
+    effective_rank: int = Field(
+        description=(
+            "Компонент с λ ≥ covariance_qc_tail_ratio·λ1 — «эффективный ранг»: "
+            "видимая проверка, что фит ICA не посчитан на шумовом хвосте"
+        ),
+    )
+    heatmap_png_b64: str | None = Field(
+        default=None,
+        description="Heatmap корреляций каналов (−1…1), base64 PNG; None — сбой рендера",
+    )
+    components: list[CovariancePcOut] = Field(
+        default_factory=list, description="Ведущие ПК (топокарты, число — из конфига)"
+    )
+
+
+class CovarianceQcOut(BaseModel):
+    """QC-слой ковариации для отчёта стадии filter: числа и картинки «до/после» (п.6).
+
+    Диагностика той же конфигурации, что L1/L3/L4/L5 (с отменами зон): heatmap
+    корреляций, топокарты ведущих ПК (PC1 с фронтальным максимумом — «моргание»),
+    шумовой хвост λ≈0 читается по ``effective_rank``. Картинки — base64 внутри
+    отчёта (числа и картинка обязаны быть одного пересчёта).
+    """
+
+    channels: list[str] = Field(description="Каналы, по которым считалась ковариация")
+    before: CovarianceQcSideOut
+    after: CovarianceQcSideOut
+    tail_ratio: float = Field(
+        description="Порог шумового хвоста effective_rank, доля от λ1 (из конфига)"
+    )
+    warnings: list[str] = Field(
+        default_factory=list, description="Что не построилось и почему (тексты для UI)"
+    )
+
+
 class CleanReportOut(BaseModel):
     """Отчёт очистки сигнала (стадия ``filter``, этап 4): что сделано и «до/после».
 
@@ -297,6 +356,13 @@ class CleanReportOut(BaseModel):
     )
     loss: CleanLossOut | None = Field(
         default=None, description="Метрики потерь L1/L3/L4/L5 (null — очистки не было)"
+    )
+    covariance: CovarianceQcOut | None = Field(
+        default=None,
+        description=(
+            "QC-слой ковариации: λ, % дисперсии, heatmap корреляций и топокарты ПК "
+            "«до/после» (null — очистки не было)"
+        ),
     )
     iclabel_labels: list[str] | None = Field(
         default=None,
@@ -1183,6 +1249,68 @@ class DipoleRefineResult(BaseModel):
     duration_sec_calc: float = 0.0
 
 
+class EloretaPeakOut(BaseModel):
+    """Пик eLORETA-распределения на одной эпохе (остаток B9, dipoles.md п.5)."""
+
+    mni_mm: list[float] = Field(
+        description="Координата пика, мм (кадр fsaverage-MNI — тот же, что у диполей)",
+    )
+    value: float = Field(
+        description="|амплитуда| пика, условные единицы eLORETA (не калиброваны в нАм)",
+    )
+    time_ms: float = Field(description="Время пика внутри окна эпохи, мс (отсчёт эпохи)")
+    structure_name: str | None = Field(
+        default=None, description="Ближайшая структура aparc+aseg; None — атлас недоступен",
+    )
+    structure_distance_mm: float | None = None
+    area_name: str | None = Field(default=None, description="Ближайшее поле Бродмана")
+    area_distance_mm: float | None = None
+    outside_brain: bool | None = None
+
+
+class EloretaRoiOut(BaseModel):
+    """Доля энергии eLORETA на структуре (от суммарной по эпохе)."""
+
+    structure: str
+    share: float = Field(description="Доля суммарной энергии, 0..1")
+
+
+class EloretaResult(BaseModel):
+    """Результат eLORETA одной эпохи (``kind=eloreta``, остаток B9).
+
+    **Не полные карты** (п.5 `docs/rules/dipoles.md`): объём stc × N полос
+    упирается в ``JOB_RESULT_MAX_BYTES`` и в отсутствующую концепцию
+    визуализации — на выходе пик распределения (координата + анатомия из
+    общего источника ``atlas_contours``) и доли энергии по структурам
+    (топ-8 + «прочие»). eLORETA-значения условные (не откалиброваны в нАм);
+    пик — ориентир для перекрёстной проверки с быстрым расчётом и refine,
+    а не замена точечного фита.
+    """
+
+    recording_id: str
+    method: str = Field(description="Метод: `eloreta`")
+    epoch_index: int = Field(description="Номер эпохи нарезки быстрого расчёта (с 0)")
+    time_ms: float = Field(description="Время пика GFP эпохи, мс")
+    window_ms: list[float] = Field(description="Окно усреднения вокруг пика GFP [от, до], мс")
+    halfwin_ms: float = Field(
+        default=0.0,
+        description="Половина окна, мс (0 — один отсчёт пика GFP)",
+    )
+    peak: EloretaPeakOut = Field(description="Пик распределения |amplitude|")
+    roi: list[EloretaRoiOut] = Field(
+        default_factory=list,
+        description="Топ структур по доле энергии; пусто — атлас недоступен",
+    )
+    other_share: float = Field(
+        description="Доля энергии вне топ-структур (включая вершины вне атласа), 0..1",
+    )
+    n_sources: int = Field(description="Вершин в source space fsaverage")
+    n_channels: int = Field(description="Каналов в расчёте")
+    lambda2: float = Field(description="Регуляризация inverse-оператора (из конфига)")
+    warnings: list[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
+
+
 class SpectrogramResult(BaseModel):
     """Результат задачи спектрограммы канала (``kind=spectrogram``).
 
@@ -1302,6 +1430,43 @@ class JobStatus(BaseModel):
         default=None, description="Хвост traceback при провале задачи (для разворота в UI, N31)"
     )
     result_url: str | None = None
+
+
+class RunManifestOut(BaseModel):
+    """Run manifest задачи: на чём, чем и на каких данных посчитано (N40/4.6).
+
+    Версии/отпечатки — те же источники, что `/meta` и manifest внутри
+    session-пакета: задача обязана честно сказать про своё окружение рядом
+    со своим результатом, а не заставлять сверять сборки вручную.
+    """
+
+    manifest_version: int = Field(description="Версия формата манифеста")
+    kind: str | None = Field(description="Вид задачи (analyze/preprocess/…)")
+    recording_id: str | None = Field(description="Запись задачи; None — файловый анализ")
+    params_sig: str | None = Field(description="Отпечаток параметров прогона (repr формы)")
+    finished_at: str | None = Field(description="Завершение задачы (ISO); None — ещё идёт")
+    versions: dict[str, str | None] = Field(
+        description="Python/MNE/NumPy/SciPy/SQLAlchemy и др. — как в /meta",
+    )
+    assets: dict[str, str] = Field(
+        description="Отпечатки ассетов FSAverage (меш, МРТ, атлас) — как в /meta",
+    )
+
+
+class BundleResult(BaseModel):
+    """Результат задачи пакета сессии (kind=bundle): zip в дисковом кэше."""
+
+    format: str = Field(description="Формат пакета: session (EDF+параметры+результаты) | bids")
+    sig: str = Field(description="Входной отпечаток сборки — ключ zip в дисковом кэше и ETag")
+    files: list[str] = Field(description="Внутренние пути файлов архива")
+    size_bytes: int = Field(description="Размер zip на диске")
+    warnings: list[str] = Field(
+        default_factory=list, description="Честные предупреждения (EDF не найден и т.п.)",
+    )
+    zip_url: str | None = Field(
+        default=None,
+        description="Ссылка на скачивание (собирается роутом, как html_url отчёта)",
+    )
 
 
 class ArtifactThresholds(BaseModel):

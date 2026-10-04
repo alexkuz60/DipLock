@@ -41,9 +41,11 @@ from app.api.assets import (
     asset_response,
 )
 from app.api.params import (
+    bundle_params,
     compare_params,
     dipole_refine_params,
     dipole_scan_params,
+    eloreta_params,
     evoked_params,
     parse_filter_band,
     preprocess_params,
@@ -71,6 +73,7 @@ from app.schemas.analysis import (
     BrodmannAreaOut,
     BrodmannIndexOut,
     BrodmannLabelsOut,
+    BundleResult,
     ChannelMixOut,
     ContourSliceOut,
     ContoursOut,
@@ -78,6 +81,7 @@ from app.schemas.analysis import (
     DipoleOut,
     DipoleRefineResult,
     DipoleScanResult,
+    EloretaResult,
     EpochOut,
     EvokedResult,
     FilterResponseOut,
@@ -94,6 +98,7 @@ from app.schemas.analysis import (
     RecordingSignalsHeader,
     ReportHtmlOut,
     ReportResult,
+    RunManifestOut,
     SessionDetailOut,
     SessionsPageOut,
     SessionSummaryOut,
@@ -159,6 +164,8 @@ from app.services.recording_signals import (
 )
 from app.services.recordings import Recording, ensure_record_events, recording_registry
 from app.services.report import read_report_html
+from app.services.run_manifest import build_manifest
+from app.services.session_bundle import dipoles_csv, read_bundle_zip
 from app.services.spectral import cached_topomap, head_map_positions
 from app.services.spectrogram import (
     cached_grid as cached_spectrogram_grid,
@@ -769,6 +776,14 @@ async def create_compare_job(
     reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
     epoch_length_ms: float = Form(2000.0, description="Длина эпохи для PSD"),
     psd_method: str = Form("welch", description="Метод PSD: welch | multitaper (N17)"),
+    tfr_event: str | None = Form(
+        None,
+        description="Описание события для TFR/ERDS-карт; пусто — без событийной ветки",
+    ),
+    tfr_tmin_ms: float = Form(-500.0, description="Начало окна TFR относительно события, мс"),
+    tfr_tmax_ms: float = Form(1500.0, description="Конец окна TFR, мс"),
+    tfr_baseline_start_ms: float = Form(-500.0, description="Baseline TFR: начало, мс"),
+    tfr_baseline_end_ms: float = Form(-100.0, description="Baseline TFR: конец, мс до события"),
 ) -> JobCreated:
     """Две записи → общая обработка → дельты по полосам, статистика, карты разности.
 
@@ -806,7 +821,27 @@ async def create_compare_job(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
         epoch_length_ms=epoch_length_ms, psd_method=psd_method,
+        tfr_event=tfr_event, tfr_tmin_ms=tfr_tmin_ms, tfr_tmax_ms=tfr_tmax_ms,
+        tfr_baseline_start_ms=tfr_baseline_start_ms,
+        tfr_baseline_end_ms=tfr_baseline_end_ms,
     )
+    # Событийная ветка: шлюз «событие есть в обеих записях» до старта задачи —
+    # иначе 404 на середине дороги, когда PSD уже посчитан.
+    if params.tfr is not None:
+        for side, recording in (("A", recording_a), ("B", recording_b)):
+            counts = recording.meta.get("event_counts") or {}
+            if not counts:
+                ensure_record_events(recording, settings)
+                counts = recording.meta.get("event_counts") or {}
+            if params.tfr.event_id not in counts:
+                available = ", ".join(f"«{key}»" for key in sorted(counts)) or "нет"
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Событие «{params.tfr.event_id}» не найдено в записи {side}: "
+                        f"доступные события — {available}"
+                    ),
+                )
     return submit_compare_job(recording_a, recording_b, params)
 
 
@@ -1019,6 +1054,60 @@ async def get_dipole_refine_result(recording_id: str, job_id: str) -> DipoleRefi
 
 
 @router.post(
+    "/recordings/{recording_id}/eloreta", status_code=202, response_model=JobCreated,
+    summary="eLORETA: пик и ROI-доли распределения одной эпохи (остаток B9)",
+)
+async def create_eloreta_job(
+    recording_id: str,
+    epoch_index: int = Form(..., ge=0, description="Номер эпохи нарезки быстрого расчёта (с 0)"),
+    band_min: float | None = Form(None, description="Нижняя граница полосы, Гц"),
+    band_max: float | None = Form(None, description="Верхняя граница полосы, Гц"),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
+    epoch_length_ms: float = Form(1000.0, description="Длина эпохи — как в быстром расчёте"),
+    grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг сетки быстрого расчёта, мм"),
+    halfwin_ms: float | None = Form(
+        None,
+        description=(
+            "Половина окна вокруг пика GFP, мс (0 — отсчёт пика; "
+            "пусто — дефолт сервера)"
+        ),
+    ),
+) -> JobCreated:
+    """Пик/ROI eLORETA на одной эпохе (dipoles.md п.5: **не полные карты**).
+
+    Форма — та же, что у «Уточнить»: нарезка обязана повторять быстрый расчёт
+    (``epoch_index`` привязан к ней). Результат: пик распределения (координата +
+    анатомия из общего источника) и доли энергии по структурам — объём честно
+    ограничен, полные карты не отдаются.
+    """
+    recording = require_recording(recording_id)
+    params = eloreta_params(
+        epoch_index=epoch_index,
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms,
+        grid_mm=grid_mm,
+        halfwin_ms=halfwin_ms,
+    )
+    return submit_recording_job(
+        "eloreta", recording, params,
+        meta={"epoch_index": epoch_index, "halfwin_ms": params.halfwin_ms},
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/eloreta/{job_id}", response_model=EloretaResult,
+    summary="Результат eLORETA: пик и ROI-доли эпохи",
+)
+async def get_eloreta_result(recording_id: str, job_id: str) -> EloretaResult:
+    """Пик + ROI одной эпохи. 409 — задача идёт/упала."""
+    job = recording_job_result(recording_id, job_id, "eloreta")
+    return EloretaResult(**job.result)
+
+
+@router.post(
     "/recordings/{recording_id}/report", status_code=202, response_model=JobCreated,
     summary="Собрать сквозной автоотчёт (MNE.Report + пакет диполей по полосам)",
 )
@@ -1048,15 +1137,23 @@ async def create_report_job(
         None,
         description="Ключи полос пакета через запятую (δ,θ,…); пусто — все полосы /meta",
     ),
+    epoch_mode: str = Form(
+        "fixed",
+        description="Нарезка части 1: fixed | events (событийная — часть 2 пакета не меняет)",
+    ),
+    event_id: str | None = Form(None, description="Описание события (режим events)"),
+    epoch_pre_ms: float = Form(200.0, description="Окно до события, мс (режим events)"),
+    epoch_post_ms: float = Form(800.0, description="Окно после события, мс (режим events)"),
 ) -> JobCreated:
     """Автоотчёт раздела «Итоги» — одна задача в три ступени.
 
     Ступени: три стадии препроцессинга (часть 1 — **те же** параметры и числа,
-    что раздел EDF: форма здесь повторяет форму стадий; нарезка только
-    ``fixed``) → пакетный быстрый расчёт диполей по полосам (часть 2,
-    агрегаты структур/BA) → сборка самодостаточного ``mne.Report`` в
-    дисковый кэш. Результат задачи — агрегаты и ссылка ``html_url``;
-    сам HTML — отдельный ассет с ETag ниже.
+    что раздел EDF: форма здесь повторяет форму стадий; нарезка fixed/events —
+    какой бы ни была нарезка EDF, отчёт её пересказывает) → пакетный быстрый
+    расчёт диполей по полосам (часть 2, агрегаты структур/BA; пакет **всегда**
+    на fixed-нарезке — событийные диполи отдельная задача, events.md п.8) →
+    сборка самодостаточного ``mne.Report`` в дисковый кэш. Результат задачи —
+    агрегаты и ссылка ``html_url``; сам HTML — отдельный ассет с ETag ниже.
     """
     recording = require_recording(recording_id)
     params = report_params(
@@ -1070,7 +1167,25 @@ async def create_report_job(
         clean_method=clean_method, ica_n_components=ica_n_components,
         exclude_zone_ids=exclude_zone_ids,
         grid_mm=grid_mm, bands=bands,
+        epoch_mode=epoch_mode, event_id=event_id,
+        epoch_pre_ms=epoch_pre_ms, epoch_post_ms=epoch_post_ms,
     )
+    # Шлюз «событие есть в записи» — до старта задачи (как у сравнения):
+    # иначе на середине дороги, когда стадии уже посчитаны.
+    if params.preprocess.epoch_mode == "events":
+        counts = recording.meta.get("event_counts") or {}
+        if not counts:
+            ensure_record_events(recording, settings)
+            counts = recording.meta.get("event_counts") or {}
+        if (params.preprocess.event_id or "") not in counts:
+            available = ", ".join(f"«{key}»" for key in sorted(counts)) or "нет"
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Событие «{params.preprocess.event_id}» не найдено в записи "
+                    f"{recording.filename}: доступные события — {available}"
+                ),
+            )
     return submit_recording_job(
         "report", recording, params, meta={"bands": params.band_keys},
     )
@@ -1219,6 +1334,144 @@ async def get_spectrogram_grid(
         },
     )
 
+
+@router.post(
+    "/recordings/{recording_id}/bundle", status_code=202, response_model=JobCreated,
+    summary="Собрать пакет сессии (zip: EDF + параметры + результаты или BIDS)",
+)
+async def create_bundle_job(
+    recording_id: str,
+    format: str = Form(
+        "session",
+        description="Формат пакета: session (EDF + манифест + паспорт + задачи) | bids",
+    ),
+) -> JobCreated:
+    """Пакет сессии (N40/4.6) — фоновой задачей `kind=bundle` (202 + `job_id`).
+
+    Zip собирается потоково в дисковый кэш по входному отпечатку: те же
+    входы → кэш-попадание без пересборки. Результат — список файлов и
+    `zip_url`; сам ассет отдаётся ниже с ETag/304. Формат `bids` даёт
+    минимальную BIDS-структуру (dataset_description, participants, сайдкар,
+    события), `session` — полный набор «EDF + параметры + результаты».
+    """
+    recording = require_recording(recording_id)
+    params = bundle_params(format=format)
+    return submit_recording_job("bundle", recording, params)
+
+
+@router.get(
+    "/recordings/{recording_id}/bundle/{job_id}", response_model=BundleResult,
+    summary="Результат задачи пакета",
+)
+async def get_bundle_result(recording_id: str, job_id: str) -> BundleResult:
+    """Список файлов пакета и ссылка на zip. 409 — задача идёт/упала.
+
+    ``zip_url`` собирается здесь, а не в воркере: воркер не знает ``job_id``
+    (задача создаётся после него), а адрес адресуется именно задаче — как у
+    ``html_url`` автоотчёта.
+    """
+    job = recording_job_result(recording_id, job_id, "bundle")
+    result = dict(job.result)
+    result["zip_url"] = (
+        f"{settings.api_prefix}/recordings/{recording_id}/bundle/{job_id}/zip"
+    )
+    return BundleResult(**result)
+
+
+@router.get(
+    "/recordings/{recording_id}/bundle/{job_id}/zip",
+    response_class=Response,
+    responses={200: {"content": {"application/zip": {}}}},
+    summary="Zip пакета сессии из дискового кэша (ETag)",
+)
+async def get_bundle_zip(
+    recording_id: str,
+    job_id: str,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """Zip пакета с ETag/304 (единая отдача — ``assets.py``).
+
+    ETag — входной отпечаток сборки (``sig`` из результата): он меняется при
+    любом изменении входов (EDF, паспорт, задачи, версии), поэтому браузер не
+    отдаёт устаревший архив. Кэш очищен вместе с записью — 404 с просьбой
+    собрать пакет заново (как у HTML автоотчёта).
+    """
+    job = recording_job_result(recording_id, job_id, "bundle")
+    signature = str((job.result or {}).get("sig") or "")
+    cached = await asyncio.to_thread(read_bundle_zip, settings, recording_id, signature)
+    if cached is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Пакет сессии очищен — соберите пакет заново",
+        )
+    data, version = cached
+    return asset_response(
+        data,
+        version,
+        if_none_match=if_none_match,
+        media_type="application/zip",
+        cache_control=CACHE_PRIVATE_HOUR,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="bundle-{recording_id[:8]}.zip"'
+            ),
+        },
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/dipoles.csv",
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {}}}},
+    summary="Экспорт таблицы диполей записи в CSV (RFC 4180)",
+)
+async def export_dipoles_csv(recording_id: str) -> Response:
+    """CSV всех диполей записи (все сессии, все полосы) — выгрузка готовых строк.
+
+    Не задача: чтение ``read-API сессий`` и сериализация — секунды, а
+    «задача = job» относится к расчёту (правило 2). Пустой результат —
+    честный CSV с одной шапкой («данных нет», а не ошибка). Кавычки/CRLF —
+    RFC 4180 (``services/session_bundle.py::dipoles_csv``).
+    """
+    recording = require_recording(recording_id)
+    _, sessions = await results_store.list_sessions(
+        recording_id=recording.recording_id, limit=1000, offset=0,
+    )
+    rows: list[dict[str, Any]] = []
+    for session in sessions:
+        session_rows = await results_store.list_session_dipoles(
+            str(session["id"]), limit=100_000, offset=0,
+        )
+        rows.extend(session_rows or [])
+    text = dipoles_csv(rows)
+    return Response(
+        content=text,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="dipoles-{recording_id[:8]}.csv"'
+            ),
+        },
+    )
+
+
+@router.get(
+    "/jobs/{job_id}/manifest", response_model=RunManifestOut,
+    summary="Run manifest задачи (версии + параметры + отпечатки ассетов)",
+)
+async def get_job_manifest(job_id: str) -> RunManifestOut:
+    """На чём, чем и на каких данных посчитана задача (N40/4.6).
+
+    Манифест строится на лету из ``meta`` задачи (``params_sig`` и
+    ``recording_id`` — то, что уже есть у любой задачи) плюс текущие версии
+    среды и отпечатки ассетов — для задачи этого процесса/хоста они
+    соответствуют её окружению. В отличие от результата, манифест честен
+    и для идущей, и для упавшей задачи («с чем запускали»). 404 — неизвестна.
+    """
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Задача {job_id} не найдена")
+    return RunManifestOut(**build_manifest(settings, job.to_record()))
 
 
 @router.post(

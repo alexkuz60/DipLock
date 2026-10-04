@@ -81,7 +81,9 @@ REPORT_STAGES: tuple[PreprocessStage, ...] = ("filter", "artifacts", "epochs")
 # 2 — кросс-проверки сквозного пайплайна (02.10.2026).
 # 3 — строка кавета редкого монтажа в шапке кросс-проверок (срез A, 02.10.2026).
 # 4 — секция «ROI-анализ» части 2 (срез B/4.5, 02.10.2026).
-REPORT_HTML_VERSION = 4
+# 5 — событийный режим части 1 (остаток B9, 04.10.2026): подпись нарезки
+#     пакета в секции «Как читать часть 2» и кросс-проверка №3.
+REPORT_HTML_VERSION = 5
 
 
 class ReportError(ValueError):
@@ -95,8 +97,10 @@ class ReportParams:
     ``preprocess`` — **те же** параметры, что формы стадий раздела EDF (фильтр,
     пороги детекторов, очистка, длина эпохи): часть 1 обязана пересказывать
     ровно те числа, что видит пользователь в EDF, а не дефолты сервера.
-    ``epoch_mode`` отчёта всегда ``fixed`` — событийная нарезка в сквозной
-    отчёт пока не входит (решение среза, `docs/ui/summary.md`).
+    ``epoch_mode`` — **как в EDF** (fixed/events, 3c остатка B9): событийная
+    нарезка меняет только часть 1; пакет (часть 2) всегда на fixed —
+    событийные диполи отдельная задача (`docs/rules/events.md` п.8), и HTML
+    это подписывает.
 
     Часть 2 — пакет диполей: набор именованных полос и шаг сетки поиска.
     ``band_keys`` пуст — берутся все полосы ``freq_bands`` + ``functional_bands``.
@@ -552,8 +556,16 @@ def _cross_checks(
         warns.append(line)
     info.append(line)
 
-    # №3 — нарезка части 1 против пакета (у каждой полосы свой segment_epochs)
-    if n_used and summaries:
+    # №3 — нарезка части 1 против пакета (у каждой полосы свой segment_epochs).
+    # В событийном режиме нарезки обязаны расходиться (пакет всегда fixed,
+    # events.md п.8) — это подпись, а не предупреждение.
+    if params.preprocess.epoch_mode == "events":
+        info.append(
+            f"Нарезка: часть 1 — по событиям «{params.preprocess.event_id}» "
+            f"({n_used} эпох), пакет — фиксированная "
+            f"({params.preprocess.epoch_length_ms:g} мс): нарезки разные по построению"
+        )
+    elif n_used and summaries:
         diff = [
             (str(s["band_key"]), int(s["n_epochs_used"]))
             for s in summaries
@@ -1263,7 +1275,17 @@ def _build_report(
     rep.add_html(
         "<p>Метод: быстрый расчёт (fast_grid) — одна точка на эпоху в пике GFP, "
         f"перебор сетки с шагом {params.grid_mm:g} мм на сферической модели головы; "
-        "точный BEM-фитинг в пакет не входит (docs/rules/dipoles.md).</p>" + GOF_NOTE,
+        "точный BEM-фитинг в пакет не входит (docs/rules/dipoles.md).</p>"
+        + (
+            "<p><strong>Нарезка пакета — фиксированная, "
+            f"{params.preprocess.epoch_length_ms:g} мс</strong>: событийные диполи "
+            "не считаются (docs/rules/events.md, п.8), поэтому нарезка части 2 "
+            "не совпадает с событийной нарезкой части 1 — это подписано в "
+            "контролях выше.</p>"
+            if params.preprocess.epoch_mode == "events"
+            else ""
+        )
+        + GOF_NOTE,
         title="Как читать часть 2",
         section=section2,
     )

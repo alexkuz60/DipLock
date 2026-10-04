@@ -6,10 +6,12 @@
  */
 import type {
   AnalyzeResponse,
+  BundleResult,
   CompareResult,
   ContourSlice,
   DipoleRefineResult,
   DipoleScanResult,
+  EloretaResult,
   EvokedResult,
   FilterResponse,
   GroupAggregateIn,
@@ -118,6 +120,8 @@ export type RecordingJobKind =
   | 'dipole_refine'
   | 'evoked'
   | 'report'
+  | 'bundle'
+  | 'eloreta'
 
 /**
  * Пара запросов «запустить задачу / прочитать результат» (A10).
@@ -392,6 +396,13 @@ export const api = {
   dipoleRefine: recordingJob<DipoleRefineResult>('dipole_refine'),
 
   /**
+   * eLORETA (остаток B9, dipoles.md п.5): пик/ROI распределения одной эпохи.
+   * Форма та же, что у «Уточнить» (нарезка быстрого расчёта); полные карты
+   * не отдаются — контракт ограничен пиком и ROI-долями.
+   */
+  eloreta: recordingJob<EloretaResult>('eloreta'),
+
+  /**
    * Спектрограмма канала («ЭЭГ»): в форме — канал, полоса фильтра и окно STFT.
    * Сетку чисел (`DPS2`) читает отдельный запрос — `api.spectrogramGrid`.
    */
@@ -403,6 +414,18 @@ export const api = {
    * результат — агрегаты + `html_url` (самодостаточный MNE.Report).
    */
   report: recordingJob<ReportResult>('report'),
+
+  /**
+   * Пакет сессии (N40/4.6): zip «EDF + параметры + результаты» (`format=session`)
+   * или минимальный BIDS (`format=bids`). Результат — `zip_url` для скачивания.
+   */
+  bundle: recordingJob<BundleResult>('bundle'),
+
+  /**
+   * CSV таблицы диполей записи (RFC 4180, `Content-Disposition: attachment`) —
+   * синхронная выгрузка готовых строк, задача не нужна.
+   */
+  dipolesCsv: (recordingId: string) => `${API_PREFIX}/recordings/${recordingId}/dipoles.csv`,
 
   /**
    * Сетка спектрограммы: бинарный контейнер float32 (``DPS2``, частото-мажорно).

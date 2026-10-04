@@ -36,6 +36,7 @@ from typing import Any
 
 from app.core.config import Settings
 from app.services.cache_store import cache_path, cache_write
+from app.services.run_manifest import build_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,12 @@ def save_record(cfg: Settings, record: dict[str, Any]) -> str | None:
     payload = dict(record)
     payload["version"] = RECORD_VERSION
     payload["saved_at"] = datetime.utcnow().isoformat()
+    # Run manifest (4.6): версии/параметры/отпечатки — рядом с результатом.
+    # Сбой манифеста не лишает истории: файл задачи важнее полей внутри него.
+    try:
+        payload["manifest"] = build_manifest(cfg, payload)
+    except Exception:
+        logger.warning("Manifest задачи %s не собран", job_id, exc_info=True)
     data = _serialize(payload)
     if data is None:
         return None

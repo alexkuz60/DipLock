@@ -24,6 +24,12 @@
 в проекте нет, а цена обхода — листинг нескольких каталогов; что именно он
 удалил, видно по отчёту (``SweepReport``) в логе.
 
+4. **квота по объёму** (N40/4.6, ``cache_quota_mb``): если ``data/cache`` занят
+   больше лимита, в том же проходе уходят **самые старые** кэши записей (LRU по
+   mtime) — не только сироты, а любой переживший TTL. Квота выключена по
+   умолчанию (``0``): лимит — осознанное решение владельца, а не дефолт,
+   сносящий кэш «потому что много».
+
 Чего обход **не** делает: не трогает ассеты (``surface``/``mri``/``contours`` —
 они живут по версии, а не по записи), журнал шагов и корневые файлы каталога
 загрузок (``data/edf/test.edf`` из репозитория).
@@ -41,11 +47,14 @@ from app.services.recordings import RecordingRegistry, recording_registry
 
 logger = logging.getLogger(__name__)
 
-# Кэши, ключ которых — recording_id: у сироты их не чистит никто (см. правило 3
-# в ``docs/rules/data-and-caches.md``). ``compare`` — карты разности пар записей:
-# верхний уровень по id_A, второй (``{id_A}/{signature}``) чистится вместе с A,
-# парные файлы с мёртвым B под живой A уходят при удалении B (``_drop_signal_cache``).
-RECORDING_CACHE_SUBDIRS = ("signals", "spectra", "spectrograms", "prepared", "reports", "compare")
+# Кэши записей: ключ верхнего уровня — recording_id, поэтому сирота сносится
+# обходом, а квота (N40/4.6) видит их как единицы LRU-чистки.
+# ``compare`` — карты разности пар записей: верхний уровень по id_A, второй
+# (``{id_A}/{signature}``) чистится вместе с A, парные файлы с мёртвым B под
+# живой A уходят при удалении B (``_drop_signal_cache``).
+RECORDING_CACHE_SUBDIRS = (
+    "signals", "spectra", "spectrograms", "prepared", "reports", "compare", "bundles",
+)
 
 # Подкаталоги ``reports``, ключ которых — не recording_id: HTML отчётов
 # группового анализа (раздел «Итоги», ``services/group_reports.py``). Их чистка
@@ -62,12 +71,19 @@ class SweepReport:
     upload_dirs: list[str] = field(default_factory=list)
     cache_dirs: list[str] = field(default_factory=list)
     job_files: list[str] = field(default_factory=list)
+    # Убрано квотой (N40/4.6): это не сироты, а самые старые кэши живых записей
+    quota_dirs: list[str] = field(default_factory=list)
     freed_bytes: int = 0
 
     @property
     def total(self) -> int:
         """Сколько объектов удалено всего."""
-        return len(self.upload_dirs) + len(self.cache_dirs) + len(self.job_files)
+        return (
+            len(self.upload_dirs)
+            + len(self.cache_dirs)
+            + len(self.job_files)
+            + len(self.quota_dirs)
+        )
 
     def as_dict(self) -> dict[str, Any]:
         """Отчёт примитивами — для лога и печати в скрипте."""
@@ -75,6 +91,7 @@ class SweepReport:
             "upload_dirs": len(self.upload_dirs),
             "cache_dirs": len(self.cache_dirs),
             "job_files": len(self.job_files),
+            "quota_dirs": len(self.quota_dirs),
             "freed_bytes": self.freed_bytes,
         }
 
@@ -175,6 +192,88 @@ def _disk_recording_ids(root: str) -> set[str]:
     return {name for name in os.listdir(root) if os.path.isdir(os.path.join(root, name))}
 
 
+def _mtime_of(path: str) -> float:
+    """mtime файла/каталога (0 — не читается: нужен только для LRU-порядка)."""
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+def _quota_units(cfg: Settings) -> list[tuple[float, int, tuple[str, ...], str]]:
+    """Единицы кэша «запись × подкаталог»: ``(mtime, размер, parts, метка)``.
+
+    Части ``parts`` кладутся в ``cache_clear(cfg.cache_dir, *parts)``.
+    Для ``reports`` единица — глубже на уровень (``reports/compare/{id}``): ключ
+    отчёта — не recording_id верхнего уровня (см. ``RESERVED_REPORT_SUBDIRS``).
+    """
+    units: list[tuple[float, int, tuple[str, ...], str]] = []
+    for subdir in RECORDING_CACHE_SUBDIRS:
+        root = cache_path(cfg.cache_dir, subdir)
+        if not os.path.isdir(root):
+            continue
+        for name in sorted(os.listdir(root)):
+            path = os.path.join(root, name)
+            if subdir == "reports" and name in RESERVED_REPORT_SUBDIRS:
+                if not os.path.isdir(path):
+                    continue
+                for child in sorted(os.listdir(path)):
+                    child_path = os.path.join(path, child)
+                    units.append((
+                        _mtime_of(child_path), _size_of(child_path),
+                        (subdir, name, child), f"{subdir}/{name}/{child}",
+                    ))
+            else:
+                units.append((
+                    _mtime_of(path), _size_of(path),
+                    (subdir, name), f"{subdir}/{name}",
+                ))
+    return units
+
+
+def cache_usage(cfg: Settings) -> dict[str, int]:
+    """Занятость кэша записей: ``(usage_bytes, units, quota_bytes)`` примитивами.
+
+    Для ``/init-status`` (панель «Состояние сервера») и для квоты: один листинг
+    каталогов, содержимое файлов не читается. ``quota_bytes = 0`` — квота не
+    задана (``cache_quota_mb = 0``).
+    """
+    units = _quota_units(cfg)
+    return {
+        "usage_bytes": sum(size for _, size, _, _ in units),
+        "units": len(units),
+        "quota_bytes": max(0, int(cfg.cache_quota_mb)) * 1024 * 1024,
+    }
+
+
+def _enforce_cache_quota(cfg: Settings) -> tuple[list[str], int]:
+    """Квота N40/4.6: пока занято больше лимита, уходят самые старые кэши (LRU).
+
+    Стирание — тем же ``cache_clear`` (правило 9 в ``docs/rules/data-and-caches.md``).
+    Пустой результат — обычное состояние (квота выключена или её хватает).
+    """
+    if cfg.cache_quota_mb <= 0:
+        return [], 0
+    quota_bytes = cfg.cache_quota_mb * 1024 * 1024
+    units = sorted(_quota_units(cfg), key=lambda item: item[0])  # старые первыми
+    total = sum(size for _, size, _, _ in units)
+    removed: list[str] = []
+    freed = 0
+    for _, size, parts, label in units:
+        if total <= quota_bytes:
+            break
+        cache_clear(cfg.cache_dir, *parts)
+        total -= size
+        freed += size
+        removed.append(label)
+    if removed:
+        logger.info(
+            "Квота кэша %d МБ: удалено единиц %d, освобождено %.1f МБ",
+            cfg.cache_quota_mb, len(removed), freed / (1024 * 1024),
+        )
+    return removed, freed
+
+
 def sweep_orphans(
     cfg: Settings | None = None,
     *,
@@ -207,6 +306,10 @@ def sweep_orphans(
         stale_reports, report_bytes = _sweep_compare_reports(cfg)
         report.cache_dirs += stale_reports
         report.freed_bytes += report_bytes
+        # Квота (N40/4.6) — последним шагом: сироты убраны, теперь у живых
+        # записей по объёму и mtime уходят самые старые кэши.
+        report.quota_dirs, quota_freed = _enforce_cache_quota(cfg)
+        report.freed_bytes += quota_freed
     except Exception:
         logger.exception("Обход сирот прерван")
 

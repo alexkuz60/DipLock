@@ -2,10 +2,12 @@
  * Фикстуры ответов бэкенда для тестов UI (совпадают по форме со схемами API).
  */
 import type {
+  BundleResult,
   CompareResult,
   ContourSlice,
   DipoleScanPoint,
   DipoleRefineResult,
+  EloretaResult,
   DipoleScanResult,
   EvokedResult,
   FilterResponse,
@@ -218,6 +220,8 @@ export const initStatusFixture: InitStatus = {
     results_dir: '/home/user/DipLock/data/results',
     cache_dir: '/home/user/DipLock/data/cache',
   },
+  // Занятость кэша записей (N40/4.6): 12.5 МБ, 3 единицы, квота 256 МБ
+  cache: { usage_bytes: 13_107_200, units: 3, quota_bytes: 268_435_456 },
   api: { prefix: '/api/v1', docs_url: '/docs', meta_url: '/api/v1/meta' },
 }
 
@@ -628,6 +632,47 @@ export function dipoleRefineResultFixture(
   }
 }
 
+/** Результат eLORETA одной эпохи (остаток B9): пик + ROI-доли, без карт. */
+export function eloretaResultFixture(
+  overrides: Partial<EloretaResult> = {},
+): EloretaResult {
+  const scan = dipoleScanResultFixture()
+  const fast = scan.points?.[0]
+  if (!fast) throw new Error('eloretaResultFixture: неожиданно пустые точки')
+  return {
+    recording_id: recordingFixture.recording_id,
+    method: 'eloreta',
+    epoch_index: fast.epoch_index,
+    time_ms: fast.time_ms,
+    window_ms: [fast.time_ms - 4, fast.time_ms + 4],
+    halfwin_ms: 0,
+    peak: {
+      mni_mm: [-42.0, -18.0, 61.0],
+      value: 0.0031,
+      time_ms: fast.time_ms,
+      structure_name: 'Left Precentral',
+      structure_distance_mm: 1.8,
+      area_name: 'BA4',
+      area_distance_mm: 3.1,
+      outside_brain: false,
+    },
+    roi: [
+      { structure: 'Left Precentral', share: 0.42 },
+      { structure: 'Right Precentral', share: 0.18 },
+      { structure: 'Left Superior Frontal', share: 0.11 },
+    ],
+    other_share: 0.29,
+    n_sources: 4098,
+    n_channels: 18,
+    lambda2: 1 / 9,
+    warnings: [
+      'eLORETA-решение на одной эпохе: пик и ROI — ориентир для перекрёстной проверки с быстрым расчётом и refine, а не замена точечного фита',
+    ],
+    duration_sec_calc: 4.7,
+    ...overrides,
+  }
+}
+
 /** URL топокарты диапазона — как его отдаёт бэкенд (версия добавляется клиентом). */
 export function topomapUrl(band: string): string {
   return `/api/v1/recordings/${recordingFixture.recording_id}/spectrum/topomap/${band}.png`
@@ -960,6 +1005,41 @@ export function compareResultFixture(
   }
 }
 
+/** Событийная ветка TFR/ERDS результата сравнения (остаток B9): 2 полосы, малая карта. */
+export function compareErdsFixture(): NonNullable<CompareResult['erds']> {
+  const times = Array.from({ length: 5 }, (_, index) => -0.4 + index * 0.2)
+  const freqs = [4, 8, 12]
+  const grid = (value: number) => freqs.map((freq) => times.map((_t, index) => value + freq * 0.1 + index))
+  return {
+    event_id: 'STIM/5',
+    tmin: -0.5,
+    tmax: 1.5,
+    baseline: [-500, -100],
+    freqs,
+    times,
+    n_channels: 8,
+    n_epochs_a: 12,
+    n_epochs_b: 11,
+    erds_a: grid(0),
+    erds_b: grid(40),
+    delta: grid(40),
+    delta_png: 'data:image/png;base64,AAAA',
+    bands: [
+      {
+        name: 'alpha', fmin: 8, fmax: 13,
+        erds_a_post: 2.5, erds_b_post: 55.4, delta_post: 52.9,
+        p_value: 0.002, q_value: 0.01, ci95_delta_pct: [30.1, 71.2],
+      },
+      {
+        name: 'theta', fmin: 4, fmax: 8,
+        erds_a_post: -1.2, erds_b_post: 3.4, delta_post: 4.6,
+        p_value: 0.4, q_value: 0.6, ci95_delta_pct: null,
+      },
+    ],
+    warnings: ['TFR по 12 (A) и 11 (B) событиям «STIM/5», сетка 40 × 101, 8 каналов (усреднение)'],
+  }
+}
+
 /** Агрегат «BA × сессии» (остаток 4.7): две записи, две строки в каждом словаре. */
 export function groupAggregateFixture(
   overrides: Partial<GroupAggregateOut> = {},
@@ -1063,6 +1143,19 @@ export function groupRunSummaryFixture(
     n_sessions_requested: 2,
     n_members_alive: 2,
     params_sig: 'abcdef0123456789',
+    ...overrides,
+  }
+}
+
+/** Результат задачи пакета сессии (`kind=bundle`, 4.6). */
+export function bundleResultFixture(overrides: Partial<BundleResult> = {}): BundleResult {
+  return {
+    format: 'session',
+    sig: 'a1b2c3d4e5f60718',
+    files: ['manifest.json', 'passport.json', 'edf/probe.edf'],
+    size_bytes: 4_194_304,
+    warnings: [],
+    zip_url: null,
     ...overrides,
   }
 }

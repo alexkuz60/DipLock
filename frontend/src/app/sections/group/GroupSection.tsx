@@ -22,7 +22,7 @@ import { WarnList } from '@/shared/ui/WarnList'
 import { cx } from '@/shared/ui/cx'
 import { BandDeltaBar, CompareStackChart, IndexDumbbell } from './GroupCharts'
 import { GroupRunSection } from './GroupRunSection'
-import { bandDeltaScale, formatDb, formatP } from './chartFormat'
+import { bandDeltaScale, formatCi, formatDb, formatP, formatPct } from './chartFormat'
 
 /** Паспорт пары: что сравнивается и что совпало (B9 «совпадение параметров»). */
 function PairPassport({ result }: { result: CompareResult }) {
@@ -278,6 +278,87 @@ function DeltaTopomaps({ result }: { result: CompareResult }) {
   )
 }
 
+/** Окно в мс → подпись «[start; end]» (ERDS-блок: baseline и окно TFR). */
+function formatMsRange(range: number[]): string {
+  if (range.length < 2) return '—'
+  return `[${Math.round(range[0])}; ${Math.round(range[1])}]`
+}
+
+/** Событийная ветка TFR/ERDS (остаток B9): heatmap дельты + сводка по полосам. */
+function ErdsPanel({ result }: { result: CompareResult }) {
+  const erds = result.erds
+  if (!erds) return null
+  return (
+    <Panel
+      title="TFR/ERDS по событию (B − A)"
+      hint={`ERDS% = (P − P_base)/P_base × 100 к baseline ${formatMsRange(erds.baseline)} мс; карты усреднены по общим каналам и эпохам. Знак: положительная дельта — в B сильнее послесобытийный рост мощности (синхронизация), отрицательная — десинхронизация.`}
+    >
+      <div className="space-y-3" data-testid="compare-erds">
+        <p className="text-sm text-fg-2">
+          {`Событие «${erds.event_id}» · окно ${formatMsRange([erds.tmin * 1000, erds.tmax * 1000])} мс · события: A — ${erds.n_epochs_a}, B — ${erds.n_epochs_b} · каналов в усреднении: ${erds.n_channels}`}
+        </p>
+        {erds.delta_png ? (
+          <figure className="text-center">
+            <img
+              src={erds.delta_png}
+              alt="Карта дельты ERDS B − A (время × частота)"
+              className="mx-auto max-w-full"
+              loading="lazy"
+              data-testid="compare-erds-png"
+            />
+            <figcaption className="mt-1 text-sm text-fg-2">
+              Δ ERDS B − A, %: ось X — время от события, ось Y — частота (лог-сетка)
+            </figcaption>
+          </figure>
+        ) : null}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm" data-testid="compare-erds-table">
+            <thead>
+              <tr className="border-b border-border text-left text-fg-2">
+                <th className="py-1.5 pr-3 font-normal">Полоса</th>
+                <th className="py-1.5 pr-3 text-right font-normal">ERDS A, %</th>
+                <th className="py-1.5 pr-3 text-right font-normal">ERDS B, %</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Δ, %-п.</th>
+                <th className="py-1.5 pr-3 font-normal">95% ИИ Δ</th>
+                <th className="py-1.5 pr-3 text-right font-normal">p</th>
+                <th className="py-1.5 pr-3 text-right font-normal">q (FDR)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(erds.bands ?? []).map((band) => (
+                <tr
+                  key={band.name}
+                  className="border-b border-border/50 text-fg-1"
+                  data-testid={`compare-erds-band-${band.name}`}
+                >
+                  <td className="py-1.5 pr-3" title={`${band.fmin}–${band.fmax} Гц`}>
+                    {bandLabel(band.name)}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-right">
+                    {formatPct(band.erds_a_post)}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-right">
+                    {formatPct(band.erds_b_post)}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-right font-medium">
+                    {formatPct(band.delta_post)}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-fg-2">
+                    {formatCi(band.ci95_delta_pct)}
+                  </td>
+                  <td className="tnum py-1.5 pr-3 text-right">{formatP(band.p_value)}</td>
+                  <td className="tnum py-1.5 pr-3 text-right">{formatP(band.q_value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <WarnList items={erds.warnings ?? []} testId="compare-erds-warnings" />
+      </div>
+    </Panel>
+  )
+}
+
 /** Скалярные индексы сторон: IAF и отношения ритмов с дельтами + стрелки A→B. */
 function IndicesPanel({ result }: { result: CompareResult }) {
   const { indices, specparam } = result
@@ -391,6 +472,7 @@ export function GroupSection() {
       <BandDeltas result={result} />
       <SpectrumStats result={result} />
       <DeltaTopomaps result={result} />
+      <ErdsPanel result={result} />
       <IndicesPanel result={result} />
       <Panel title="Каветы и предупреждения" hint="Интерпретация результата — часть контракта: показывается без редактирования.">
         <ul className="list-inside list-disc space-y-1 text-sm text-fg-2" data-testid="compare-notes">

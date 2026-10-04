@@ -31,11 +31,13 @@ from app.services.dipole_scanner import (
     compute_dipole_scan,
     refine_dipole_point,
 )
+from app.services.eloreta import EloretaParams, run_eloreta
 from app.services.evoked import EvokedParams, run_evoked
 from app.services.job_manager import ProgressCallback, job_manager
 from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recordings import Recording, recording_registry
 from app.services.report import ReportParams, run_report
+from app.services.session_bundle import BundleParams, run_bundle
 from app.services.spectral import SpectrumParams, compute_spectrum
 from app.services.spectrogram import SpectrogramParams, compute_spectrogram
 
@@ -44,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Виды задач, чей результат лежит рядом с записью, а не в `/jobs/{id}/result`
 RECORDING_JOB_KINDS: tuple[str, ...] = (
     "preprocess", "spectrum", "dipoles", "spectrogram", "dipole_refine", "evoked",
-    "report",
+    "report", "bundle", "eloreta",
 )
 
 
@@ -116,6 +118,17 @@ def worker_dipole_refine(
     return refine_dipole_point(recording, settings, params, progress)
 
 
+def worker_eloreta(
+    progress: ProgressCallback, recording: Recording, params: EloretaParams,
+) -> dict[str, Any]:
+    """Воркер eLORETA (поток): пик/ROI распределения одной эпохи (остаток B9).
+
+    Дисковых кэшей записи не создаёт (как ``evoked``) — в ``_drop_signal_cache``
+    чистить нечего.
+    """
+    return run_eloreta(recording, settings, params, progress)
+
+
 def worker_report(
     progress: ProgressCallback, recording: Recording, params: ReportParams,
 ) -> dict[str, Any]:
@@ -123,14 +136,23 @@ def worker_report(
     return run_report(recording, settings, params, progress)
 
 
+def worker_bundle(
+    progress: ProgressCallback, recording: Recording, params: BundleParams,
+) -> dict[str, Any]:
+    """Воркер пакета сессии (поток): zip «EDF + параметры + результаты» или BIDS."""
+    return run_bundle(recording, settings, params, progress)
+
+
 WORKERS: dict[str, Callable[..., dict[str, Any]]] = {
     "dipole_refine": worker_dipole_refine,
+    "eloreta": worker_eloreta,
     "preprocess": worker_preprocess,
     "spectrum": worker_spectrum,
     "spectrogram": worker_spectrogram,
     "dipoles": worker_dipole_scan,
     "evoked": worker_evoked,
     "report": worker_report,
+    "bundle": worker_bundle,
 }
 
 

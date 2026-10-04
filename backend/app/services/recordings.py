@@ -319,6 +319,13 @@ def _drop_signal_cache(recording_id: str) -> None:
         return
     clear_report_cache(settings, recording_id)
 
+    # Zip пакетов сессии (4.6): EDF-пакет — производный кэш записи
+    try:
+        from app.services.session_bundle import clear_bundle_cache
+    except ImportError:  # pragma: no cover — модуль всегда есть
+        return
+    clear_bundle_cache(settings, recording_id)
+
 
 class RecordingRegistry:
     """In-memory реестр записей с TTL-очисткой каталогов и лимитом истории."""

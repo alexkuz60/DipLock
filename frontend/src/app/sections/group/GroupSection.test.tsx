@@ -15,7 +15,7 @@ import { GroupSection } from './GroupSection'
 import { GroupToolActions } from './GroupToolActions'
 import { useGroupCompare } from '@/shared/state/groupCompare'
 import { mockApiFetch } from '@/test/apiMocks'
-import { compareResultFixture, sessionsFixture } from '@/test/fixtures'
+import { compareResultFixture, compareErdsFixture, sessionsFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 function renderGroup() {
@@ -52,6 +52,7 @@ describe('раздел «Групповой анализ» (сравнение)'
       labelA: 'Покой',
       labelB: 'Деятельность',
       psdMethod: 'welch',
+      tfrEvent: '',
       job: null,
       jobId: null,
       result: null,
@@ -164,6 +165,37 @@ describe('раздел «Групповой анализ» (сравнение)'
     expect(bar.querySelectorAll('line').length).toBeGreaterThanOrEqual(3)
     // Незначимая θ: подпись 0.2 и приглушённая заливка (opacity 0.55)
     expect(screen.getByTestId('compare-band-bar-theta').textContent).toContain('+0.2')
+  })
+
+  it('ERDS-ветка (erds в контракте): heatmap, таблица полос и сводка окна', () => {
+    const erds = compareErdsFixture()
+    const result = compareResultFixture({ erds })
+    mockApiFetch({ compareResult: result })
+    useGroupCompare.setState({ result })
+    renderGroup()
+
+    const block = screen.getByTestId('compare-erds')
+    // Событие, окно и число событий — в сводной строке блока
+    expect(block.textContent).toContain('STIM/5')
+    expect(block.textContent).toContain('A — 12')
+    // Heatmap дельты — data-URI картинка из контракта
+    const image = screen.getByTestId('compare-erds-png') as HTMLImageElement
+    expect(image.getAttribute('src')).toBe('data:image/png;base64,AAAA')
+    // Таблица полос: α значима (p=0.002, q=0.01), CI не нулевой
+    const alphaRow = screen.getByTestId('compare-erds-band-alpha')
+    expect(alphaRow.textContent).toContain('+52.9')
+    expect(alphaRow.textContent).toContain('[30.1; 71.2]')
+    expect(alphaRow.textContent).toContain('0.002')
+    // Каветы ERDS-ветки доехали вместе с блоком
+    expect(screen.getByTestId('compare-erds-warnings')).toBeInTheDocument()
+  })
+
+  it('без erds в контракте ERDS-панель не показывается', () => {
+    mockApiFetch({ compareResult: compareResultFixture() })
+    useGroupCompare.setState({ result: compareResultFixture() })
+    renderGroup()
+
+    expect(screen.queryByTestId('compare-erds')).not.toBeInTheDocument()
   })
 
   it('курсор графика: сквозная линия и параметры «диапазон · частота · уровень»', async () => {

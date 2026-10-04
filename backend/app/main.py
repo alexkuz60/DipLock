@@ -150,11 +150,28 @@ async def legacy_page():
     )
 
 
+async def _cache_usage() -> dict[str, int]:
+    """Занятость кэша записей для ``/init-status`` (N40/4.6).
+
+    Листинг каталогов — синхронная операция, поэтому в ``async def`` она
+    уходит через ``to_thread`` (правило 3 ``docs/rules/api-jobs.md``); сбой
+    не валит статус — отдаём единицы ``-1`` как «не измерено».
+    """
+    import asyncio
+
+    from app.services.orphans import cache_usage
+
+    try:
+        return await asyncio.to_thread(cache_usage, settings)
+    except Exception:
+        logger.warning("Занятость кэша не посчиталась", exc_info=True)
+        return {"usage_bytes": -1, "units": -1, "quota_bytes": -1}
+
+
 @app.get("/init-status")
 async def init_status() -> dict:
     """Проверка готовности всех компонентов для стартовой страницы."""
     import mne
-
     checks: dict[str, str] = {}
 
     # 1. MNE-Python
@@ -252,6 +269,9 @@ async def init_status() -> dict:
             "results_dir": settings.results_dir,
             "cache_dir": settings.cache_dir,
         },
+        # Занятость кэша записей (N40/4.6): объём/квота/единицы для панели
+        # «Состояние сервера»; листинг каталогов дёшев, но и сбой не валит статус.
+        "cache": await _cache_usage(),
         "api": {
             "prefix": settings.api_prefix,
             "docs_url": "/docs",

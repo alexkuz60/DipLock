@@ -33,6 +33,11 @@ type RestartPhase = 'idle' | 'confirm' | 'restarting' | 'done'
 /** Сколько ждать подъёма нового процесса, прежде чем сдаться (мс). */
 const RESTART_TIMEOUT_MS = 60_000
 
+/** Байты → МБ с одним знаком (занятость кэша в «Состоянии сервера», 4.6). */
+function formatMb(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
+}
+
 function Column({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="min-w-0 flex-1 space-y-3">
@@ -67,6 +72,9 @@ export function ServerStatusSection() {
     staleTime: 60_000,
     retry: false,
   })
+  // Занятость кэша: поля может не быть у бэкенда, запущенного до N40 — тогда
+  // строка честно просит перезапустить сервер, а не падает (см. комментарий ниже)
+  const cache = init.data?.cache
 
   // Новый процесс поднялся: server_started_at разошёлся с зафиксированным.
   useEffect(() => {
@@ -180,6 +188,27 @@ export function ServerStatusSection() {
               {Object.entries(init.data.paths).map(([name, path]) => (
                 <InfoRow key={name} label={name} value={path} mono />
               ))}
+              {/* Занятость кэша записей (N40/4.6): −1 сервер честно отдаёт как
+                  «не посчиталось» — показываем прочерк, а не «0 МБ».
+                  Поля может не быть вовсе: бэкенд, запущенный до N40 (без
+                  перезагрузки), его не отдаёт — это подсказка оператору
+                  перезапустить сервер, а не краш раздела (случай 04.10.2026). */}
+              <div data-testid="cache-usage">
+                <InfoRow
+                  label="Кэш записей"
+                  value={
+                    cache === undefined
+                      ? '— (бэкенд не отчитался: перезапустите сервер)'
+                      : cache.usage_bytes < 0
+                        ? '— (не посчиталось)'
+                        : `${formatMb(cache.usage_bytes)}${
+                            cache.quota_bytes > 0
+                              ? ` из ${formatMb(cache.quota_bytes)} (квота)`
+                              : ' (без квоты)'
+                          } · единиц: ${cache.units}`
+                  }
+                />
+              </div>
             </Panel>
 
             <Panel title="API и UI">

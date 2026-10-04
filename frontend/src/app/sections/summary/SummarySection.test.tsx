@@ -14,6 +14,7 @@ import { SummarySection } from './SummarySection'
 import { SummaryToolActions } from './SummaryToolActions'
 import { EmoLabSection, NeuroAudioSection } from '../Stubs'
 import { EMPTY_PASSPORT, useEdfRecording } from '@/shared/state/edfRecording'
+import { EDF_PARAM_DEFAULTS, useEdfParams } from '@/shared/state/edfParams'
 import { useSummaryReport } from '@/shared/state/summaryReport'
 import { mockApiFetch } from '@/test/apiMocks'
 import { recordingFixture, reportResultFixture } from '@/test/fixtures'
@@ -33,6 +34,7 @@ function renderSummary() {
   return renderWithProviders(
     <>
       <SummarySection />
+      <SummaryPanel />
       <SummaryToolActions />
     </>,
   )
@@ -58,6 +60,7 @@ describe('раздел «Итоги»', () => {
       groupBuilding: false,
       groupError: null,
     })
+    useEdfParams.setState({ params: { ...EDF_PARAM_DEFAULTS } })
     setRecording(false)
   })
 
@@ -98,6 +101,42 @@ describe('раздел «Итоги»', () => {
     expect(screen.getByTestId('summary-open')).toHaveAttribute('href', `${htmlUrl}?v=rep1234abcd0000`)
     // Запуск — только POST задачи отчёта (плюс чтение /meta)
     expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/report'))).toBe(true)
+  })
+
+  it('событийный режим EDF уходит в форму отчёта (3c: части 1 — как в EDF)', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    setRecording(true)
+    // Режим событийной нарезки вкладки EDF (stор edfParams)
+    useEdfParams.setState({
+      params: {
+        ...EDF_PARAM_DEFAULTS,
+        epochMode: 'events',
+        eventId: 'STIM/5',
+        epochPreMs: 200,
+        epochPostMs: 600,
+      },
+    })
+    renderSummary()
+
+    // Панель честно подписывает разницу нарезок (часть 1 vs пакет)
+    expect(screen.getByTestId('summary-events-note')).toHaveTextContent(
+      'в части 1 отчёта, как в EDF',
+    )
+
+    await user.click(screen.getByRole('button', { name: /Собрать отчёт/ }))
+
+    const post = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith('/report') && init?.method === 'POST',
+    )
+    expect(post).toBeTruthy()
+    const form = post?.[1]?.body as FormData
+    expect(form.get('epoch_mode')).toBe('events')
+    expect(form.get('event_id')).toBe('STIM/5')
+    expect(form.get('epoch_pre_ms')).toBe('200')
+    expect(form.get('epoch_post_ms')).toBe('600')
+    // Длина эпохи пакета уезжает всегда (часть 2 — fixed)
+    expect(form.get('epoch_length_ms')).toBe(String(EDF_PARAM_DEFAULTS.epochLengthMs))
   })
 
   it('правки параметров панели не запускают сборку (запросов не прибавилось)', async () => {

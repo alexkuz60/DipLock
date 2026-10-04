@@ -69,6 +69,7 @@ import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { Button } from '@/shared/ui/Button'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { Brain3D } from './Brain3D'
+import { EloretaCard } from './EloretaCard'
 import { MriProjection } from './MriProjection'
 import { PlaybackAnatomyLine } from './PlaybackAnatomyLine'
 import { PlaybackFrameProvider } from './PlaybackFrame'
@@ -93,6 +94,16 @@ export function DipolesSection() {
   const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
   const toggleSelectedPoint = useDipoleCalc((state) => state.toggleSelectedPoint)
   const clearSelectedPoint = useDipoleCalc((state) => state.clearSelectedPoint)
+  const eloretaResults = useDipoleCalc((state) => state.eloretaResults)
+  const eloretaError = useDipoleCalc((state) => state.eloretaError)
+  /** Карточки eLORETA по возрастанию номера эпохи (детерминированный порядок). */
+  const eloretaCards = useMemo(
+    () =>
+      Object.entries(eloretaResults)
+        .map(([epochIndex, value]) => [Number(epochIndex), value] as const)
+        .sort(([left], [right]) => left - right),
+    [eloretaResults],
+  )
   /**
    * Режим кадра воспроизведения (срез 3.7). Раздел подписан только на **признак**
    * кадра, а не на его номер или время: номер эпохи меняется несколько раз в
@@ -273,6 +284,21 @@ export function DipolesSection() {
           ближайшая смена. Строка подписана на номер эпохи из состояния, а не на
           контекст кадра, поэтому облако при движении кадра не перерисовывается. */}
       <PlaybackAnatomyLine />
+
+      {/* eLORETA (остаток B9): карточки посчитанных эпох — пик и ROI-доли.
+          Порядок — по номеру эпохи; ошибки отдельной строкой (не карточкой). */}
+      {eloretaError ? (
+        <p className="text-sm text-warn" data-testid="eloreta-error">
+          {`eLORETA не посчитано: ${eloretaError}`}
+        </p>
+      ) : null}
+      {eloretaCards.length > 0 ? (
+        <div className="space-y-2">
+          {eloretaCards.map(([epochIndex, eloreta]) => (
+            <EloretaCard key={epochIndex} epochIndex={epochIndex} result={eloreta} />
+          ))}
+        </div>
+      ) : null}
 
       {/*
         Колонки пропорциональны ширине фигур (`projectionBox`), а не равны: фигуры

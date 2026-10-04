@@ -93,6 +93,7 @@ def test_sweep_removes_orphan_caches_and_keeps_live_ones(isolated, edf_file):
     assert os.path.isfile(os.path.join(cache, "journal.jsonl"))
     assert RECORDING_CACHE_SUBDIRS == (
         "signals", "spectra", "spectrograms", "prepared", "reports", "compare",
+        "bundles",
     )
 
 
@@ -182,7 +183,8 @@ def test_sweep_is_safe_when_registry_fails(isolated):
 
     assert report.total == 0
     assert report.as_dict() == {
-        "upload_dirs": 0, "cache_dirs": 0, "job_files": 0, "freed_bytes": 0,
+        "upload_dirs": 0, "cache_dirs": 0, "job_files": 0,
+        "quota_dirs": 0, "freed_bytes": 0,
     }
 
 
@@ -228,3 +230,52 @@ def test_sweep_keeps_group_report_subdirs_and_prunes_compare_reports(isolated):
     assert f"reports/compare/{ghost_job}" in report.cache_dirs
     assert "reports/compare/weird.name" in report.cache_dirs
     assert not os.path.exists(os.path.join(cache, "reports", "compare", ghost_job))
+
+
+def test_cache_quota_removes_oldest_live_caches_lru(isolated, edf_file, monkeypatch):
+    """Квота (N40/4.6): при превышении уходит самый старый кэш живой записи."""
+    upload, cache, _, registry = isolated
+    monkeypatch.setattr(settings, "cache_quota_mb", 1)  # лимит 1 МБ
+    old_id = _register(registry, upload, edf_file, "old-rec")
+    new_id = _register(registry, upload, edf_file, "new-rec")
+    payload = b"x" * (600 * 1024)  # два кэша по 600 КБ > 1 МБ
+    _touch(os.path.join(cache, "signals", old_id, "level1.bin"), payload)
+    _touch(os.path.join(cache, "signals", new_id, "level1.bin"), payload)
+    # Возраст: старый каталог старше нового (LRU выбирает по mtime)
+    os.utime(os.path.join(cache, "signals", old_id), (1_700_000_000.0,) * 2)
+
+    report = sweep_orphans(settings, registry=registry)
+
+    assert report.quota_dirs == [f"signals/{old_id}"]
+    assert not os.path.exists(os.path.join(cache, "signals", old_id))
+    assert os.path.isfile(os.path.join(cache, "signals", new_id, "level1.bin"))
+    assert report.freed_bytes >= 600 * 1024
+
+
+def test_cache_quota_off_by_default_keeps_everything(isolated, edf_file, monkeypatch):
+    """Квота по умолчанию выключена (0): сколько бы ни было — ничего не сносится."""
+    upload, cache, _, registry = isolated
+    assert settings.cache_quota_mb == 0, "квота выключена, пока её не включили"
+    live = _register(registry, upload, edf_file, "big-rec")
+    _touch(os.path.join(cache, "spectra", live, "sig1", "alpha.png"), b"y" * 50_000)
+
+    report = sweep_orphans(settings, registry=registry)
+
+    assert report.quota_dirs == []
+    assert os.path.isfile(os.path.join(cache, "spectra", live, "sig1", "alpha.png"))
+
+
+def test_cache_usage_reports_bytes_and_quota(isolated, edf_file, monkeypatch):
+    """``cache_usage`` — примитивы для /init-status: занято, единицы, квота."""
+    from app.services.orphans import cache_usage
+
+    upload, cache, _, registry = isolated
+    monkeypatch.setattr(settings, "cache_quota_mb", 2)
+    live = _register(registry, upload, edf_file, "usage-rec")
+    _touch(os.path.join(cache, "bundles", live, "sig1.zip"), b"z" * 1024)
+
+    usage = cache_usage(settings)
+
+    assert usage["usage_bytes"] >= 1024
+    assert usage["units"] >= 1
+    assert usage["quota_bytes"] == 2 * 1024 * 1024

@@ -16,9 +16,10 @@ import time
 import numpy as np
 import pytest
 
+from app.api.params import compare_params
 from app.core.config import settings
 from app.schemas.compare import CompareResult
-from app.services.compare import CompareParams, clear_compare_cache, run_compare
+from app.services.compare import CompareParams, TfrSpec, clear_compare_cache, run_compare
 from app.services.recordings import recording_registry
 from app.services.spectral import SpectrumParams
 from tests.conftest import write_minimal_edf
@@ -286,5 +287,152 @@ def test_unknown_band_on_topomap_is_400(client, pair):
     )
     assert response.status_code == 400
     assert "Неизвестный диапазон" in response.json()["detail"]
+
+
+# --- TFR/ERDS: событийная ветка (остаток B9) --------------------------------
+
+
+def _event_edf(tmp_path, name: str, post_gain: float = 1.0):
+    """EDF+ с событиями «Stim» и α-сигналом, усиленным **после** события.
+
+    ``post_gain`` — множитель амплитуды в окне [событие; событие + 1 с]:
+    gain=1 → ERDS≈0 (постоянная α), gain=3 → мощность ×9 → ERDS > 0 по α.
+    Baseline [-0.5; -0.1] с до-событийной α — честная опорная точка.
+    """
+    path = tmp_path / name
+    channels = list(settings.standard_channels[:8])
+    sfreq = 250.0
+    rng = np.random.RandomState(11)
+    # 14 с и события в полном центре: краевой буфер фильтра 1 Гц (N12, ~1.65 с
+    # в этом прогоне) роняет эпохи, задевающие границы записи.
+    times = np.arange(int(14.0 * sfreq)) / sfreq
+    gain_by_channel = 1.0 + np.arange(len(channels), dtype=float)
+    data = np.sin(2 * np.pi * 10 * times)[None, :] * (5.0 * gain_by_channel[:, None])
+    events = (4.0, 7.0, 10.0)
+    for onset in events:
+        mask = (times >= onset) & (times <= onset + 1.0)
+        data[:, mask] *= post_gain
+    data += rng.randn(len(channels), len(times)) * 0.5
+    annotations = [(onset, 0.0, "Stim") for onset in events]
+    write_minimal_edf(path, channels, data, sfreq, annotations=annotations)
+    return path
+
+
+@pytest.fixture
+def event_pair(tmp_path):
+    """Пара с событиями: A — постоянная α (ERDS≈0), B — послесобытийный всплеск."""
+    rec_a = _register(tmp_path, _event_edf(tmp_path, "ev-rest.edf"), "ev-rest")
+    rec_b = _register(tmp_path, _event_edf(tmp_path, "ev-task.edf", post_gain=3.0), "ev-task")
+    return rec_a, rec_b
+
+
+def _erds_params() -> CompareParams:
+    params = _params()
+    params.tfr = TfrSpec(
+        event_id="Stim", tmin_ms=-500.0, tmax_ms=1500.0,
+        baseline_start_ms=-500.0, baseline_end_ms=-100.0,
+    )
+    return params
+
+
+def test_erds_block_when_event_requested(event_pair):
+    """Событийная ветка: карты сетки, знак дельты по α, ИИ, PNG, каветы в notes."""
+    rec_a, rec_b = event_pair
+    result = CompareResult(**run_compare(rec_a, rec_b, settings, _erds_params()))
+
+    erds = result.erds
+    assert erds is not None
+    assert erds.event_id == "Stim"
+    assert erds.n_epochs_a == erds.n_epochs_b == 3
+    # Сетка: 40 лог-частот × ~100 точек времени, карты согласованы между собой
+    assert len(erds.freqs) == 40
+    assert len(erds.erds_a) == len(erds.erds_b) == len(erds.delta) == 40
+    assert len(erds.erds_a[0]) == len(erds.times)
+    # Послесобытийный всплеск α в B → положительная дельта ERDS по α в пост-окне
+    alpha = next(row for row in erds.bands if row.name == "alpha")
+    assert alpha.delta_post is not None and alpha.delta_post > 50.0
+    assert alpha.ci95_delta_pct is not None and alpha.ci95_delta_pct[0] > 0
+    assert alpha.p_value is not None and alpha.q_value is not None
+    # Каветы ERDS обязаны доехать до UI (notes), warnings несут сетку расчёта
+    assert any("ERDS-карты" in note for note in result.notes)
+    assert any("TFR по 3" in warning for warning in erds.warnings)
+    assert erds.delta_png is not None and erds.delta_png.startswith("data:image/png;base64,")
+
+
+def test_erds_absent_without_event(pair):
+    """Без события — чисто спектральное сравнение: erds=None, каветов ERDS нет."""
+    rec_a, rec_b = pair
+    result = CompareResult(**run_compare(rec_a, rec_b, settings, _params()))
+
+    assert result.erds is None
+    assert not any("ERDS" in note for note in result.notes)
+
+
+def test_compare_params_rejects_bad_tfr_windows():
+    """Событийная ветка валидируется до задачи: окно и baseline обязаны быть честными."""
+    from fastapi import HTTPException
+
+    base = dict(
+        label_a="A", label_b="B", band_min=1.0, band_max=40.0, notch_hz=None,
+        reference="average", reference_channels=None, epoch_length_ms=1000.0,
+    )
+    # Окно обязано начинаться до события (tmin < 0)
+    with pytest.raises(HTTPException) as excinfo:
+        compare_params(**base, tfr_event="Stim", tfr_tmin_ms=100.0)
+    assert excinfo.value.status_code == 400
+    assert "до события" in excinfo.value.detail
+    # Baseline обязан лежать до события (end ≤ 0) и внутри окна
+    with pytest.raises(HTTPException) as excinfo:
+        compare_params(**base, tfr_event="Stim", tfr_baseline_end_ms=50.0)
+    assert excinfo.value.status_code == 400
+    assert "до события" in excinfo.value.detail
+    with pytest.raises(HTTPException) as excinfo:
+        compare_params(**base, tfr_event="Stim", tfr_baseline_start_ms=-800.0)
+    assert excinfo.value.status_code == 400
+    # Без события окна не проверяются — tfr выключен честно
+    params = compare_params(**base, tfr_event="")
+    assert params.tfr is None
+
+
+def test_compare_route_requires_event_in_both_sides(client, event_pair):
+    """Шлюз роута: неизвестное событие — 400 до старта задачи, с перечнем доступных."""
+    rec_a, rec_b = event_pair
+    response = client.post(
+        f"{_PREFIX}/compare",
+        data={
+            "recording_id_a": rec_a.recording_id,
+            "recording_id_b": rec_b.recording_id,
+            "band_min": 1, "band_max": 40, "epoch_length_ms": 1000,
+            "tfr_event": "Нет такого события",
+        },
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "не найдено" in detail
+    assert "«Stim»" in detail  # перечень доступных событий честно показан
+
+
+def test_compare_job_with_event_keeps_contract(client, event_pair):
+    """Полный круг через роут: задача с tfr_event → контракт CompareResult жив."""
+    rec_a, rec_b = event_pair
+    created = client.post(
+        f"{_PREFIX}/compare",
+        data={
+            "recording_id_a": rec_a.recording_id,
+            "recording_id_b": rec_b.recording_id,
+            "band_min": 1, "band_max": 40, "epoch_length_ms": 1000,
+            "tfr_event": "Stim",
+        },
+    )
+    assert created.status_code == 202
+    job_id = created.json()["job_id"]
+    body = _wait_finished(client, job_id, timeout=120.0)
+    assert body["status"] == "succeeded", body.get("error")
+
+    payload = CompareResult(**client.get(f"{_PREFIX}/compare/{job_id}").json())
+    assert payload.erds is not None
+    assert payload.erds.event_id == "Stim"
+    # Спектральная ветка при этом посчитана, как обычно
+    assert payload.bands
 
 

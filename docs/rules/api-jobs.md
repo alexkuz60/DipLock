@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **59 роутов**, префикс `/api/v1` из `settings.api_prefix`.
+- `backend/app/api/routes.py` — **64 роута**, префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
   - `api/params.py` — формы → параметры сервисов и проверки с текстом для UI (400);
@@ -25,14 +25,14 @@
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
-  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **56 HTTP-путей** (51 в `routes.py` + 5 уровня приложения).
+  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **63 HTTP-путь** (58 в `routes.py` + 5 уровня приложения).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/schema.d.ts` (`npm run gen:api`;
   выгрузка `openapi.json` — `venv/bin/python -m scripts.export_openapi`, свежесть — pytest
   `test_openapi_json_is_up_to_date` и CI-шаг `git diff`, 4.2).
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (59 в `routes.py`, порядок файла)
+## Инвентарь эндпоинтов (64 в `routes.py`, порядок файла)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -52,14 +52,14 @@
 | 14 | `POST /recordings/{id}/spectrum` | спектр δ…γ (Welch или multitaper PSD, `psd_method`; 1/f + пики specparam) |
 | 15 | `GET /recordings/{id}/spectrum/{job_id}` | результат спектра |
 | 16 | `GET /recordings/{id}/spectrum/topomap/{band}.png` | топокарта диапазона (PNG, ETag) |
-| 17 | `POST /compare` | **дифференциальный анализ двух записей** (B9, задача «Сравнение»): шлюз пары (разные записи, одинаковый sfreq, ≥1 общий канал — 400), затем задача `kind=compare` (пара — не запись, поэтому не в `RECORDING_JOB_KINDS`) |
+| 17 | `POST /compare` | **дифференциальный анализ двух записей** (B9, задача «Сравнение»): шлюз пары (разные записи, одинаковый sfreq, ≥1 общий канал — 400), затем задача `kind=compare` (пара — не запись, поэтому не в `RECORDING_JOB_KINDS`); опциональные поля `tfr_*` включают событийную ветку TFR/ERDS (шлюз «событие в обеих записях» — 400 с перечнем) |
 | 18 | `GET /compare/{job_id}` | результат сравнения (`CompareResult`): дельты по полосам (B − A), кластерный тест MNE, ссылки на карты разности; 404 — чужой/неизвестный job, 409 — идёт/упал |
 | 19 | `GET /compare/topomap/{band}.png` | карта разности B−A полосы (PNG, ETag; подпись включает параметры и **обе** записи; промах кэша — ленивый пересчёт пары) |
 | 20 | `POST /recordings/{id}/dipoles` | быстрый расчёт диполей (перебор сетки; одна точка на эпоху) |
 | 21 | `GET /recordings/{id}/dipoles/{job_id}` | результат быстрого расчёта |
 | 22 | `POST /recordings/{id}/dipole_refine` | точное уточнение одной эпохи (BEM fit_dipole, F19) |
 | 23 | `GET /recordings/{id}/dipole_refine/{job_id}` | результат уточнения («было/стало») |
-| 24 | `POST /recordings/{id}/report` | **автоотчёт** (раздел «Итоги», §3.9): три стадии EDF (часть 1, `fixed`-нарезка) → пакет диполей по полосам (`bands` через запятую, `grid_mm`) → HTML `mne.Report` в кэш |
+| 24 | `POST /recordings/{id}/report` | **автоотчёт** (раздел «Итоги», §3.9): три стадии EDF (часть 1, нарезка `fixed`/`events` — как в EDF, 3c остатка B9; шлюз «событие в записи» — 400) → пакет диполей по полосам (`bands` через запятую, `grid_mm`; пакет **всегда** fixed, events.md п.8) → HTML `mne.Report` в кэш |
 | 25 | `GET /recordings/{id}/report/{job_id}` | агрегаты отчёта (QC, эпохи, полосы) + `html_url` |
 | 26 | `GET /recordings/{id}/report/{job_id}/html` | HTML отчёта из дискового кэша (самодостаточный MNE.Report, ETag/304) |
 | 27 | `POST /recordings/{id}/spectrogram` | спектрограмма канала (STFT) |
@@ -92,6 +92,13 @@
 | 57 | `GET /compare/{job_id}/report/html` | HTML отчёта Типа 1 из дискового кэша (`reports/compare/{job_id}/{sig}.html`); ETag/304 через `assets.py` |
 | 58 | `GET /group/analyses/{run_id}/report` | **отчёт по прогону (Тип 2 «Итогов»)**: та же ленивая сборка по свежему пересчёту агрегата (сменились числа → другой отпечаток → пересборка); 404 — нет прогона |
 | 59 | `GET /group/analyses/{run_id}/report/html` | HTML отчёта Типа 2 из дискового кэша (`reports/group/{run_id}/{sig}.html`); ETag/304 |
+| 60 | `POST /recordings/{id}/bundle` | **пакет сессии** (N40/4.6): задача `kind=bundle` (202), форма `format=session\|bids` (400 — неизвестный формат); zip «EDF + манифест + паспорт + задачи» или минимальная BIDS-структура, сборка потоково в дисковый кэш по входному отпечатку |
+| 61 | `GET /recordings/{id}/bundle/{job_id}` | результат пакета: `BundleResult` — список файлов, размер, `warnings` + `zip_url` (собирается роутом, как `html_url`) |
+| 62 | `GET /recordings/{id}/bundle/{job_id}/zip` | сам zip из дискового кэша (ETag = входной отпечаток `sig`; 404 после очистки — «соберите пакет заново») |
+| 63 | `GET /recordings/{id}/dipoles.csv` | экспорт таблицы диполей записи в CSV (RFC 4180, `Content-Disposition`); синхронная выгрузка готовых строк read-API (не задача); пусто — честная шапка |
+| 64 | `GET /jobs/{job_id}/manifest` | **run manifest** задачи (N40/4.6): версии среды + отпечатки ассетов + `params_sig`; честен и для идущей, и для упавшей задачи; 404 — неизвестна |
+| 65 | `POST /recordings/{id}/eloreta` | **eLORETA одной эпохи** (остаток B9, dipoles.md п.5): задача `kind=eloreta` (202), форма — та же, что у «Уточнить» (нарезка быстрого расчёта + `halfwin_ms`); результат — только пик/ROI, полные карты не отдаются |
+| 66 | `GET /recordings/{id}/eloreta/{job_id}` | результат eLORETA (`EloretaResult`): пик (координата + анатомия из `atlas_contours`) и топ-8 ROI-долей + «прочие»; 404/409 — как у других задач записи |
 
 **Чего в API нет осознанно:** листинга записей. «Закрыть запись» в UI остаётся **клиентским**
 действием (сброс состояния), а явное удаление — `DELETE /recordings/{id}` (4.4): TTL записей
@@ -111,7 +118,10 @@
    (сборка `result_url` и запуск), и в `_drop_signal_cache` (чистка кэшей записи — дисковых и
    RAM-кэша подготовленного сигнала) — иначе результат «потеряется» после вытеснения.
    Сейчас kind: `analyze`, `preprocess`, `spectrum`, `dipoles`, `spectrogram`, `dipole_refine`,
-   `evoked` (его результат кэшей записи не создаёт — чистить в `_drop_signal_cache` нечего).
+   `evoked` (его результат кэшей записи не создаёт — чистить в `_drop_signal_cache` нечего),
+   `eloreta` (так же без дисковых кэшей — только RAM-кэш чтения src),
+   `report` (чистит HTML в `reports/`) и `bundle` (чистит zip в `bundles/`) — оба через свои
+   `clear_*_cache` в конце `_drop_signal_cache`.
    На стороне UI задача описана **одной парой** методов клиента (`recordingJob(kind)` в
    `shared/api/client.ts`: `start` + `result`), а ожидание завершения — единым `waitForJob`
    (`shared/lib/jobPolling.ts`); своих копий поллинга в сторах нет (правило 7 —

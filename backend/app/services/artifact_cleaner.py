@@ -31,6 +31,7 @@ eye/heart), результат уходит в отчёт чистки. **Adviso
 результате стадии `filter`.
 """
 import logging
+import time
 import warnings
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
@@ -40,9 +41,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.core.config import Settings
-from app.services import gpu
+from app.services import gpu, journal
 from app.services.cardio import ecg_proxy
 from app.services.clean_metrics import clean_loss, detect_clean_zones, zone_channels
+from app.services.covariance_qc import covariance_qc
 from app.services.filter_design import band_filter_kwargs, harmonic_frequencies
 
 logger = logging.getLogger(__name__)
@@ -139,6 +141,9 @@ class CleanReport:
     zones: list[dict[str, Any]] = field(default_factory=list)
     # Метрики потерь L1/L3/L4/L5 для текущей конфигурации (с отменами)
     loss: dict[str, Any] | None = None
+    # QC-слой ковариации (п.6): числа λ/% дисперсии и картинки heatmap/ПК
+    # «до/после» — словарь для `CovarianceQcOut` (None — QC не считалась)
+    covariance: dict[str, Any] | None = None
     # Внутренности L5: оценка компонент ICA (не отдаётся наружу отдельно —
     # входит в loss.removed_variance_percent с подписью источника)
     removed_variance_percent: float | None = None
@@ -165,6 +170,7 @@ class CleanReport:
             "warnings": list(self.warnings),
             "zones": [{k: v for k, v in zone.items() if not k.startswith("_")} for zone in self.zones],
             "loss": self.loss,
+            "covariance": self.covariance,
             "iclabel_labels": list(self.iclabel_labels) if self.iclabel_labels is not None else None,
             "iclabel_probabilities": (
                 list(self.iclabel_probabilities)
@@ -202,6 +208,9 @@ def apply_cleaning(
        из сырого сигнала** — «чистка здесь не применена», включая bad-каналы;
     5. **метрики потерь** L1/L3/L4/L5 считаются для текущей конфигурации
        (после отмен): отменил зону — числа изменились.
+    6. **QC-слой ковариации** (п.6): числа λ/% дисперсии и картинки heatmap/ПК
+       «до/после» — в тот же отчёт, что L1/L3; сбой картинок гасится в
+       ``warnings``, чистка не страдает.
     """
     report = CleanReport(method=spec.method)
     before = raw.get_data().copy()
@@ -293,6 +302,20 @@ def apply_cleaning(
             else report.removed_variance_source
         ),
     )
+    # QC-слой ковариации (п.6): числа и картинки «до/после» в тот же отчёт, что
+    # L1/L3. Сбой гасится в warnings — QC вторична к самой чистке (как L5/ICLabel).
+    qc_started = time.perf_counter()
+    try:
+        report.covariance = covariance_qc(before, after, ch_names, settings)
+    except Exception as exc:
+        report.warnings.append(f"Ковариация (QC) не посчиталась: {exc}")
+        logger.debug("Ковариация (QC) не посчиталась", exc_info=True)
+    else:
+        journal.record(
+            "preprocess", "covariance_qc",
+            ms=(time.perf_counter() - qc_started) * 1000.0,
+            note=f"channels={len(ch_names)}",
+        )
     return report
 
 

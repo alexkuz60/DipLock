@@ -41,6 +41,8 @@ export function GroupPanel() {
   const setLabelA = useGroupCompare((state) => state.setLabelA)
   const setLabelB = useGroupCompare((state) => state.setLabelB)
   const psdMethod = useGroupCompare((state) => state.psdMethod)
+  const tfrEvent = useGroupCompare((state) => state.tfrEvent)
+  const setTfrEvent = useGroupCompare((state) => state.setTfrEvent)
   const setPsdMethod = useGroupCompare((state) => state.setPsdMethod)
 
   const edfParams = useEdfParams((state) => state.params)
@@ -109,6 +111,13 @@ export function GroupPanel() {
           onChange={setPsdMethod}
           hint="N17: multitaper точнее для коротких эпох; входит в отпечаток карт разности"
         />
+        <TextField
+          label="Событие (TFR/ERDS)"
+          value={tfrEvent}
+          onChange={setTfrEvent}
+          placeholder="например: STIM/5"
+          hint="Необязательно: описание события записи — и рядом посчитаются ERDS-карты B − A (окно −500…+1500 мс, baseline −500…−100 мс). Пусто — сравнение чисто спектральное. Событие должно быть в обеих записях."
+        />
         {recordingIdA && recordingIdA === recordingIdB ? (
           <p className="mt-2 text-sm text-warn" data-testid="compare-same-recording">
             Сравнивать нужно две разные записи.
@@ -127,7 +136,8 @@ export function GroupPanel() {
           <li>{`Референс: ${edfParams.reference}`}</li>
         </ul>
         <p className="mt-2 text-sm text-fg-2">
-          Событийная нарезка не участвует: сравнение режет эпохи фиксированной длиной.
+          Событийная нарезка PSD не участвует: спектральное сравнение режет эпохи
+          фиксированной длиной; TFR/ERDS-ветка считается отдельно по событию выше.
         </p>
       </Panel>
         </>

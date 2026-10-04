@@ -116,7 +116,9 @@ def test_failed_job_is_restored_with_error():
 
 def test_oversized_result_keeps_history_without_result(monkeypatch):
     """Результат сверх предела не сохраняется, а задача — остаётся (история важнее)."""
-    monkeypatch.setattr(settings, "job_result_max_bytes", 600)
+    # Предел меньше размера результата (4 КБ), но больше записи без него:
+    # файл задачи теперь несёт и run manifest (~0.5 КБ, 4.6) — предел на файл.
+    monkeypatch.setattr(settings, "job_result_max_bytes", 2000)
     manager = JobManager(max_concurrent=1, history_limit=10)
     job = _run_job(manager, result={"recording_id": "rec-2", "trajectory": "x" * 4000})
 

@@ -6,8 +6,8 @@
  * **ничего не запускает** — сравнение стартует только кнопкой в тулс-хедере
  * (`POST /compare`). Параметры спектра (фильтр, notch, референс, длина эпохи)
  * берутся из формы EDF — обе стороны пары обязаны обрабатываться одинаково,
- * иначе дельты не определены; событийная нарезка отбрасывается (сравнение
- * режет эпохи фиксированной длиной, как автоотчёт).
+ * иначе дельты не определены. Событийная ветка TFR/ERDS (остаток B9)
+ * включается полем «Событие»: пустое — чисто спектральное сравнение, как раньше.
  *
  * Кандидаты записей — `GET /sessions` (санкционированный вход: листинга записей
  * в API нет). Персистятся только ярлыки условий (текст пользователя); пара,
@@ -51,6 +51,7 @@ function buildCompareForm(
   labelA: string,
   labelB: string,
   psdMethod: string,
+  tfrEvent: string,
 ): FormData {
   const params = useEdfParams.getState().params
   const form = buildPreprocessForm('epochs', params)
@@ -67,6 +68,9 @@ function buildCompareForm(
   form.set('label_a', labelA)
   form.set('label_b', labelB)
   form.set('psd_method', psdMethod)
+  // TFR/ERDS: пустое событие — сервер честно выключает ветку (tfr=None).
+  // Окна TFR серверные дефолты (-500…+1500 мс, baseline −500…−100 мс).
+  form.set('tfr_event', tfrEvent.trim())
   return form
 }
 
@@ -81,6 +85,8 @@ export type GroupCompareState = {
   labelB: string
   /** Метод PSD: welch | multitaper */
   psdMethod: string
+  /** Событие для TFR/ERDS-карт (пусто — без событийной ветки) */
+  tfrEvent: string
   /** Идущая задача (поллинг) — null, когда расчёта нет */
   job: JobStatus | null
   /** id созданной задачи — для отмены до первого опроса (3.2) */
@@ -92,6 +98,7 @@ export type GroupCompareState = {
   setLabelA: (value: string) => void
   setLabelB: (value: string) => void
   setPsdMethod: (value: string) => void
+  setTfrEvent: (value: string) => void
   /** Сравнение по кнопке (202 + поллинг + результат) */
   run: () => Promise<void>
   /** Отмена идущего расчёта (3.2): DELETE на сервере + локальный статус */
@@ -108,6 +115,7 @@ export const useGroupCompare = create<GroupCompareState>()(
       labelA: 'Покой',
       labelB: 'Деятельность',
       psdMethod: 'welch',
+      tfrEvent: '',
       job: null,
       jobId: null,
       result: null,
@@ -118,9 +126,10 @@ export const useGroupCompare = create<GroupCompareState>()(
       setLabelA: (value) => set({ labelA: value }),
       setLabelB: (value) => set({ labelB: value }),
       setPsdMethod: (value) => set({ psdMethod: value }),
+      setTfrEvent: (value) => set({ tfrEvent: value, result: null }),
 
       run: async () => {
-        const { recordingIdA, recordingIdB, labelA, labelB, psdMethod } = get()
+        const { recordingIdA, recordingIdB, labelA, labelB, psdMethod, tfrEvent } = get()
         if (!recordingIdA || !recordingIdB) {
           set({ error: 'Выберите обе записи пары (A и B)' })
           return
@@ -134,7 +143,7 @@ export const useGroupCompare = create<GroupCompareState>()(
         set({ job: pendingJob(), jobId: null, error: null, result: null })
         try {
           const created = await api.compare.start(
-            buildCompareForm(recordingIdA, recordingIdB, labelA, labelB, psdMethod),
+            buildCompareForm(recordingIdA, recordingIdB, labelA, labelB, psdMethod, tfrEvent),
           )
           if (!isCurrent()) return
           // id задачи сразу после 202: отмена работает и до первого опроса (3.2)

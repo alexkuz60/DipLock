@@ -6,9 +6,10 @@
  * **ничего не запускает** — отчёт собирается только кнопкой в тулс-хедере
  * (`POST /recordings/{id}/report`). Форма запроса повторяет стадии EDF
  * (`buildPreprocessForm`): часть 1 обязана пересказывать те же числа, что видит
- * пользователь в EDF (фильтр, пороги детекторов, очистка, длина эпохи). Поля
- * событийной нарезки отбрасываются — сквозной отчёт режет эпохи только
- * фиксированной длиной (решение среза, `docs/ui/summary.md`).
+ * пользователь в EDF (фильтр, пороги детекторов, очистка, длина эпохи **и
+ * режим нарезки** — fixed/events, 3c остатка B9). Пакет диполей (часть 2)
+ * остаётся на фиксированной нарезке — это подписано в самом HTML
+ * (`docs/rules/events.md` п.8).
  *
  * Персистятся параметры пакета (полосы, шаг сетки): результат относится к
  * записи и после перезагрузки страницы бессмыслен. Результат и идущая задача
@@ -57,17 +58,14 @@ function pendingJob(): JobStatus {
 
 /**
  * Форма задачи автоотчёта: стадии EDF (фильтр/пороги/очистка/длина эпохи)
- * + поля пакета (`bands`, `grid_mm`). Событийная нарезка убирается — отчёт
- * её не поддерживает, и молча взять её из формы EDF нельзя.
+ * + поля пакета (`bands`, `grid_mm`). Нарезка (fixed/events) уходит **как в
+ * EDF**: часть 1 обязана пересказывать те же числа, что видит пользователь
+ * (3c, остаток B9); поле `stage` отчёту не нужно — стадии он запускает сам.
  */
 function buildReportForm(bandKeys: string[] | null, gridMm: number): FormData {
   const params = useEdfParams.getState().params
   const form = buildPreprocessForm('epochs', params)
   form.delete('stage')
-  form.delete('epoch_mode')
-  form.delete('event_id')
-  form.delete('epoch_pre_ms')
-  form.delete('epoch_post_ms')
   if (bandKeys) form.set('bands', bandKeys.join(','))
   else form.delete('bands')
   form.set('grid_mm', String(gridMm))

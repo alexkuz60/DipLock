@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { ServerStatusSection } from './ServerStatusSection'
 import { mockApiFetch } from '@/test/apiMocks'
+import type { InitStatus } from '@/shared/api/types'
 import { initStatusFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
@@ -30,6 +31,42 @@ describe('раздел «Состояние сервера»', () => {
     expect(screen.getByText('3.12.3')).toBeInTheDocument()
     expect(screen.getByText('/home/user/DipLock/data/cache')).toBeInTheDocument()
     expect(screen.getByText('/api/v1/meta')).toBeInTheDocument()
+  })
+
+  it('показывает занятость кэша записей с квотой (N40/4.6)', async () => {
+    mockApiFetch()
+    renderWithProviders(<ServerStatusSection />)
+
+    const cache = await screen.findByTestId('cache-usage')
+    // фикстура: 12.5 МБ из 256 МБ (квота), единиц 3
+    expect(cache).toHaveTextContent('12.5 МБ из 256.0 МБ (квота) · единиц: 3')
+  })
+
+  it('кэш, который сервер не посчитал (−1), показывается прочерком, а не нулём', async () => {
+    mockApiFetch({
+      initStatus: {
+        ...initStatusFixture,
+        cache: { usage_bytes: -1, units: -1, quota_bytes: -1 },
+      },
+    })
+    renderWithProviders(<ServerStatusSection />)
+
+    const cache = await screen.findByTestId('cache-usage')
+    expect(cache).toHaveTextContent('— (не посчиталось)')
+  })
+
+  it('ответ без поля cache (бэкенд до N40) — подсказка, а не краш раздела', async () => {
+    // Регрессия 04.10.2026: свежий бандл + старый процесс → data.cache is
+    // undefined и React падал в ServerStatusSection. Поля в ответе может не быть.
+    const withoutCache: InitStatus = { ...initStatusFixture }
+    delete withoutCache.cache
+    mockApiFetch({ initStatus: withoutCache })
+    renderWithProviders(<ServerStatusSection />)
+
+    const cache = await screen.findByTestId('cache-usage')
+    expect(cache).toHaveTextContent('— (бэкенд не отчитался: перезапустите сервер)')
+    // Раздел жив: остальные блоки на месте
+    expect(screen.getByText('Параметры расчёта')).toBeInTheDocument()
   })
 
   it('показывает параметры расчёта из /meta', async () => {

@@ -71,7 +71,7 @@ import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shar
 import { recommendedEpochLengthMs, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import { canPlayback, clampEpochIndex, normalizePlaybackSpeed } from '@/shared/lib/playback'
-import type { DipoleRefineResult, DipoleScanResult, SpectrumResult } from '@/shared/api/types'
+import type { DipoleRefineResult, DipoleScanResult, EloretaResult, SpectrumResult } from '@/shared/api/types'
 
 /**
  * Токен запуска расчёта: новый расчёт, новый спектр или сброс делают ответы
@@ -125,6 +125,18 @@ export type DipoleCalcState = {
   refinedPoints: Record<number, DipoleRefineResult>
   /** Текст последней ошибки уточнения — отдельно от ошибки расчёта */
   refineError: string | null
+  /**
+   * Задача eLORETA (остаток B9): пик/ROI распределения одной эпохи. Окно —
+   * общее с refine (`refineHalfwinMs`, один физический параметр «окно вокруг
+   * пика GFP»), полные карты не отдаются (dipoles.md п.5).
+   */
+  eloretaJob: CalcJob | null
+  /** Эпоха, которая считается eLORETA прямо сейчас (с 0); null — нет */
+  eloretaEpochIndex: number | null
+  /** Результаты eLORETA по номеру эпохи (как `refinedPoints`) */
+  eloretaResults: Record<number, EloretaResult>
+  /** Текст последней ошибки eLORETA — отдельно от ошибки расчёта */
+  eloretaError: string | null
   setView: (view: CalcView) => void
   /** Открыть панель, а повторное нажатие — закрыть (кнопки тулс-хедера) */
   toggleView: (view: Exclude<CalcView, 'none'>) => void
@@ -189,6 +201,11 @@ export type DipoleCalcState = {
    */
   refineEpoch: (recordingId: string | null, epochIndex: number) => Promise<void>
   /**
+   * eLORETA одной эпохи (остаток B9): форма нарезки — та же, что у refine
+   * (`buildRefineForm`), окно — общий `refineHalfwinMs`.
+   */
+  runEloreta: (recordingId: string | null, epochIndex: number) => Promise<void>
+  /**
    * Окно свободного фитинга уточнения, мс (0 — только пик GFP, шаг 1.5).
    * Предпочтение просмотра и персистится: «сколько ждать» пользователь выбирает
    * один раз, а не перед каждым уточнением. Значение — из списка вариантов.
@@ -219,6 +236,10 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       refiningEpoch: null,
       refinedPoints: {},
       refineError: null,
+      eloretaJob: null,
+      eloretaEpochIndex: null,
+      eloretaResults: {},
+      eloretaError: null,
       // Окно уточнения — предпочтение просмотра (персистится): по умолчанию
       // только пик GFP, то есть ≈8 с вместо ≈80 с на окне ±10 мс (шаг 1.5)
       refineHalfwinMs: 0,
@@ -406,6 +427,11 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             refineJob: null,
             refiningEpoch: null,
             refineError: null,
+            // eLORETA — та же нарезка: результаты прежней становятся чужими
+            eloretaResults: {},
+            eloretaJob: null,
+            eloretaEpochIndex: null,
+            eloretaError: null,
             playback: {
               ...get().playback,
               playing: false,
@@ -486,6 +512,41 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         }
       },
 
+      runEloreta: async (recordingId, epochIndex) => {
+        const result = get().result
+        if (!recordingId || !result) return
+        const token = calcRunToken.next()
+        const isCurrent = () => calcRunToken.isCurrent(token)
+        set({
+          eloretaJob: runningJob(),
+          eloretaEpochIndex: epochIndex,
+          eloretaError: null,
+        })
+        try {
+          const created = await api.eloreta.start(
+            recordingId, buildRefineForm(result, epochIndex, get().refineHalfwinMs),
+          )
+          await waitForJob(created.job_id, isCurrent, (status) =>
+            set({ eloretaJob: calcJobFromStatus(status) }),
+          )
+          if (!isCurrent()) return
+          const eloreta = await api.eloreta.result(recordingId, created.job_id)
+          if (!isCurrent()) return
+          set({
+            eloretaResults: { ...get().eloretaResults, [epochIndex]: eloreta },
+            eloretaJob: succeededJob(get().eloretaJob),
+            eloretaEpochIndex: null,
+          })
+        } catch (error) {
+          if (isCancelled(error) || !isCurrent()) return
+          set({
+            eloretaJob: failedJob(get().eloretaJob, apiErrorText(error)),
+            eloretaError: apiErrorText(error),
+            eloretaEpochIndex: null,
+          })
+        }
+      },
+
       cancelCalculation: () => {
         const job = get().job
         if (job === null || job.status !== 'running' || !job.jobId) return
@@ -514,6 +575,10 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           refiningEpoch: null,
           refinedPoints: {},
           refineError: null,
+          eloretaJob: null,
+          eloretaEpochIndex: null,
+          eloretaResults: {},
+          eloretaError: null,
           // Выделенный диполь жил в результате задачи — вместе с ним он исчезает
           selectedPointId: null,
           // Кадр воспроизведения привязан к нарезке эпох результата: вместе с ним

@@ -41,6 +41,7 @@ import { epochRuleWarnings, recommendedEpochLengthMs, type EpochSignalInfo } fro
 import { Button } from '@/shared/ui/Button'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
+import { CleanCovariance } from '@/shared/ui/CleanCovariance'
 import { EvokedChart } from '@/shared/ui/EvokedChart'
 import { FilterResponse } from '@/shared/ui/FilterResponse'
 import { HeadChannelMap } from '@/shared/ui/HeadChannelMap'
@@ -49,6 +50,7 @@ import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
+import { SessionExport } from '@/shared/ui/SessionExport'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { TextField } from '@/shared/ui/TextField'
 import { WarnList } from '@/shared/ui/WarnList'
@@ -415,6 +417,9 @@ export function EdfPanel() {
               пересчёта.
             </p>
           </div>
+        ) : null}
+        {cleanReport?.covariance ? (
+          <CleanCovariance covariance={cleanReport.covariance} />
         ) : null}
         {filterDesign ? (
           <p className="mt-1 text-sm text-fg-2" data-testid="filter-passport">
@@ -914,6 +919,11 @@ export function EdfPanel() {
         расшифровка жестов переехали из инфо-строки над треками (правка 29.09.2026) —
         рабочая область отдана трекам, место под чтение есть в панели опций.
       */}
+      {/* Экспорт (N40/4.6): zip-пакет задачей и CSV-ссылка; демо-режим записи
+          не имеет — экспортировать нечего */}
+      <SessionExport
+        recordingId={recording && !demo ? recording.recording_id : null}
+      />
       <Panel title="Справка">
         <div className="flex flex-wrap items-center gap-2">
           <ViewerSignalCaption

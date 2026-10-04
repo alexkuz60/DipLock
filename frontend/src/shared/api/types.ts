@@ -133,6 +133,7 @@ export type DipoleScanPoint = Schemas['DipoleScanPointOut']
 export type DipoleScanResult = Schemas['DipoleScanResult']
 
 export type DipoleRefineResult = Schemas['DipoleRefineResult']
+export type EloretaResult = Schemas['EloretaResult']
 
 /** Виртуальный канал «ЭЭГ» из паспорта записи (микс групп 10-20) */
 export type RecordingMix = Schemas['ChannelMixOut']
@@ -194,6 +195,18 @@ export type SpectrogramResult = Schemas['SpectrogramResult']
 export type ServerRestart = Schemas['ServerRestartOut']
 
 /**
+ * Пакет сессии (`kind=bundle`, 4.6): zip в дисковом кэше, `zip_url` —
+ * скачивание; `sig` — входной отпечаток сборки (он же ETag ассета).
+ */
+export type BundleResult = Schemas['BundleResult']
+
+/**
+ * Run manifest задачи (`GET /jobs/{id}/manifest`, 4.6): версии среды,
+ * отпечатки ассетов и параметры прогона рядом с результатом.
+ */
+export type RunManifest = Schemas['RunManifestOut']
+
+/**
  * Сквозной автоотчёт («Итоги», `GET /recordings/{id}/report/{job}`): агрегаты
  * QC/эпох и по каждой полосе пакета; сам HTML — отдельный ассет `html_url`.
  */
@@ -241,6 +254,13 @@ export type InitStatus = {
     results_dir: string
     cache_dir: string
   }
+  /**
+   * Занятость кэша записей (N40/4.6): −1 — не посчиталось (честно, не «ноль»).
+   * **Опционально**: `/init-status` — «сырой» dict, и бэкенд, запущенный до N40
+   * (без перезагрузки), поля не отдаёт — UI обязан это переживать, а не падать
+   * (случай 04.10.2026: краш `data.cache is undefined` на живом прогона).
+   */
+  cache?: { usage_bytes: number; units: number; quota_bytes: number }
   api: { prefix: string; docs_url: string; meta_url: string }
 }
 

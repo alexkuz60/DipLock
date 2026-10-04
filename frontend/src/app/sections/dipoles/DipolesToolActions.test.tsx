@@ -49,6 +49,10 @@ describe('тулс-хедер раздела «Диполи»', () => {
       refiningEpoch: null,
       refinedPoints: {},
       refineError: null,
+      eloretaJob: null,
+      eloretaEpochIndex: null,
+      eloretaResults: {},
+      eloretaError: null,
       selectedPointId: null,
     })
     useEdfRecording.setState({ recording: null })
@@ -335,6 +339,42 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     // После уточнения кнопка помечает эпоху как уточнённую
     await screen.findByRole('button', { name: 'Эпоха 3 уточнена точным профилем' })
+  })
+
+  it('кнопка eLORETA активна только с выбором и шлёт свою задачу (остаток B9)', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+    const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
+    renderWithProviders(<DipolesToolHeaderActions />)
+
+    // Без выбора точки — кнопка выключена, запросов нет
+    const button = screen.getByTestId('eloreta-selected-button')
+    expect(button).toBeDisabled()
+    await user.click(button)
+    expect(stateCalls(fetchSpy)).toEqual([])
+
+    // Выбор точки активирует: POST уходит на /eloreta с той же нарезкой
+    act(() => useDipoleCalc.setState({ selectedPointId: '2-60' }))
+    const enabled = screen.getByTestId('eloreta-selected-button')
+    expect(enabled).toBeEnabled()
+    await user.click(enabled)
+
+    const post = fetchSpy.mock.calls.find(
+      ([url, init]) => String(url).includes('/eloreta') && init?.method === 'POST',
+    )
+    expect(post).toBeTruthy()
+    const form = post?.[1]?.body as FormData
+    expect(form.get('epoch_index')).toBe('2')
+    expect(form.get('grid_mm')).toBe('7')
+
+    // Результат фикстуры осел в сторе — карточка покажет его в разделе
+    await vi.waitFor(() => {
+      expect(Object.keys(useDipoleCalc.getState().eloretaResults)).toEqual(['2'])
+    })
+    const stored = useDipoleCalc.getState().eloretaResults[2]
+    expect(stored.method).toBe('eloreta')
+    expect(stored.peak.structure_name).toBe('Left Precentral')
   })
 
   it('переключатель «Проекции / 3D» меняет только вид (3.5, без запросов)', async () => {

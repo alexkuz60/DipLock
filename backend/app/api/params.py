@@ -17,8 +17,9 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.schemas.analysis import PreprocessStage
 from app.services.artifact_cleaner import CLEAN_METHODS, CleanSpec
-from app.services.compare import CompareParams
+from app.services.compare import CompareParams, TfrSpec
 from app.services.dipole_scanner import DipoleRefineParams, DipoleScanParams
+from app.services.eloreta import EloretaParams
 from app.services.evoked import EvokedParams
 from app.services.preprocess import PreprocessParams
 from app.services.recording_signals import (
@@ -27,6 +28,7 @@ from app.services.recording_signals import (
     SignalsLayerQuery,
 )
 from app.services.report import ReportParams, report_band_catalog
+from app.services.session_bundle import BUNDLE_FORMATS, BundleParams
 from app.services.spectral import SPECTRUM_PSD_METHODS, SpectrumParams
 from app.services.spectrogram import SpectrogramParams
 from app.services.spectrogram import validate_params as _validate_spectrogram_params
@@ -234,6 +236,41 @@ def _require_clean_options(clean_method: str, notch_harmonics: int, ica_n_compon
         )
 
 
+def require_event_window(event_id: str | None, epoch_pre_ms: float, epoch_post_ms: float) -> str:
+    """Проверка событийного окна нарезки (N2/2.7); возвращает нормализованный ``event_id``.
+
+    Общая для стадии ``epochs``/ERP (``preprocess_params``/``evoked_params``) и
+    TFR/ERDS-ветки сравнения (``compare_params``): тексты 400 не дублируются,
+    а правила одни — описание события обязательно, окно 0…10000 мс до события,
+    100…10000 мс после и не длиннее 10000 мс суммарно.
+    """
+    cleaned = (event_id or "").strip()
+    if not cleaned:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Событийный режим требует event_id: выберите событие записи "
+                "в блоке «Эпохи» панели"
+            ),
+        )
+    if epoch_pre_ms < 0 or epoch_pre_ms > 10000:
+        raise HTTPException(
+            status_code=400,
+            detail=f"epoch_pre_ms — окно до события от 0 до 10000 мс (получено: {epoch_pre_ms})",
+        )
+    if epoch_post_ms < 100 or epoch_post_ms > 10000:
+        raise HTTPException(
+            status_code=400,
+            detail=f"epoch_post_ms — окно после события от 100 до 10000 мс (получено: {epoch_post_ms})",
+        )
+    if epoch_pre_ms + epoch_post_ms > 10000:
+        raise HTTPException(
+            status_code=400,
+            detail="Окно эпохи (до + после) не должно быть длиннее 10000 мс",
+        )
+    return cleaned
+
+
 def preprocess_params(
     *,
     stage: PreprocessStage,
@@ -278,29 +315,7 @@ def preprocess_params(
         if epoch_mode == "fixed":
             require_epoch_length(epoch_length_ms)
         else:
-            if not (event_id or "").strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Событийный режим требует event_id: выберите событие записи "
-                        "в блоке «Эпохи» панели"
-                    ),
-                )
-            if epoch_pre_ms < 0 or epoch_pre_ms > 10000:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"epoch_pre_ms — окно до события от 0 до 10000 мс (получено: {epoch_pre_ms})",
-                )
-            if epoch_post_ms < 100 or epoch_post_ms > 10000:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"epoch_post_ms — окно после события от 100 до 10000 мс (получено: {epoch_post_ms})",
-                )
-            if epoch_pre_ms + epoch_post_ms > 10000:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Окно эпохи (до + после) не должно быть длиннее 10000 мс",
-                )
+            require_event_window(event_id, epoch_pre_ms, epoch_post_ms)
     _require_clean_options(clean_method, notch_harmonics, ica_n_components)
 
     return PreprocessParams(
@@ -434,22 +449,70 @@ def compare_params(
     reference_channels: str | None,
     epoch_length_ms: float,
     psd_method: str = "welch",
+    tfr_event: str | None = None,
+    tfr_tmin_ms: float = -500.0,
+    tfr_tmax_ms: float = 1500.0,
+    tfr_baseline_start_ms: float = -500.0,
+    tfr_baseline_end_ms: float = -100.0,
 ) -> CompareParams:
     """Параметры дифференциального анализа: спектр пары + ярлыки условий.
 
     Ярлыки — подпись условия в результате («покой», «деятельность»): пустой
     ярлык заменяется нейтральным («Условие A/B»), длина режется — форма
     приходит от пользователя и не должна ломать контракт.
+
+    **Событийная ветка TFR/ERDS** (остаток B9) включается полем ``tfr_event``:
+    без события ``tfr=None`` и окна не проверяются — сравнение чисто
+    спектральное, как раньше. С событием окна обязаны честно определять
+    baseline-нормировку: ``tmin < 0 ≤ tmax`` (окно вокруг события), baseline
+    строго **до** события (``end ≤ 0``) и внутри окна — иначе ERDS% не
+    определён (400 с текстом, правило 8).
     """
     spectrum = spectrum_params(
         band_min=band_min, band_max=band_max,
         notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
         epoch_length_ms=epoch_length_ms, psd_method=psd_method,
     )
+    tfr: TfrSpec | None = None
+    if (tfr_event or "").strip():
+        if tfr_tmin_ms >= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Окно TFR должно начинаться до события: tmin < 0 мс "
+                    f"(получено: {tfr_tmin_ms})"
+                ),
+            )
+        if tfr_tmax_ms <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Окно TFR должно заканчиваться после события: tmax > 0 мс "
+                    f"(получено: {tfr_tmax_ms})"
+                ),
+            )
+        event_id = require_event_window(tfr_event, -tfr_tmin_ms, tfr_tmax_ms)
+        if not (tfr_tmin_ms <= tfr_baseline_start_ms < tfr_baseline_end_ms <= 0):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Baseline [{tfr_baseline_start_ms}; {tfr_baseline_end_ms}] мс должен "
+                    f"лежать внутри окна [{tfr_tmin_ms}; 0] и до события (start < end ≤ 0): "
+                    "ERDS без pre-стимульного baseline не определён"
+                ),
+            )
+        tfr = TfrSpec(
+            event_id=event_id,
+            tmin_ms=tfr_tmin_ms,
+            tmax_ms=tfr_tmax_ms,
+            baseline_start_ms=tfr_baseline_start_ms,
+            baseline_end_ms=tfr_baseline_end_ms,
+        )
     return CompareParams(
         spectrum=spectrum,
         label_a=label_a.strip()[:64] or "Условие A",
         label_b=label_b.strip()[:64] or "Условие B",
+        tfr=tfr,
     )
 
 
@@ -584,6 +647,38 @@ def dipole_refine_params(
     )
 
 
+def eloreta_params(
+    *,
+    epoch_index: int,
+    band_min: float | None,
+    band_max: float | None,
+    notch_hz: float | None,
+    reference: str,
+    reference_channels: str | None,
+    epoch_length_ms: float,
+    grid_mm: float,
+    halfwin_ms: float | None = None,
+) -> EloretaParams:
+    """Параметры eLORETA (остаток B9): та же форма, что у «Уточнить» (F19).
+
+    Нарезка обязана совпасть с быстрым расчётом (``scan`` целиком — как в
+    ``dipole_refine_params``), окно — вокруг того же пика GFP.
+    """
+    scan = dipole_scan_params(
+        band_min=band_min, band_max=band_max,
+        notch_hz=notch_hz, reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms,
+        grid_mm=grid_mm,
+    )
+    if epoch_index < 0:
+        raise HTTPException(status_code=400, detail="Номер эпохи неотрицателен (с 0)")
+    return EloretaParams(
+        scan=scan,
+        epoch_index=epoch_index,
+        halfwin_ms=require_halfwin_ms(halfwin_ms),
+    )
+
+
 def report_band_keys(raw: str | None) -> list[str]:
     """Ключи полос пакета из формы: пусто — все полосы, опечатка — 400.
 
@@ -604,6 +699,16 @@ def report_band_keys(raw: str | None) -> list[str]:
             ),
         )
     return keys
+
+
+def bundle_params(*, format: str) -> BundleParams:
+    """Параметры пакета сессии: формат из белого списка, иначе 400 (правило 8)."""
+    if format not in BUNDLE_FORMATS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"format должен быть одним из {list(BUNDLE_FORMATS)} (получено: {format!r})",
+        )
+    return BundleParams(format=format)
 
 
 def report_params(
@@ -627,13 +732,19 @@ def report_params(
     exclude_zone_ids: str | None = None,
     grid_mm: float = 7.0,
     bands: str | None = None,
+    epoch_mode: str = "fixed",
+    event_id: str | None = None,
+    epoch_pre_ms: float = 200.0,
+    epoch_post_ms: float = 800.0,
 ) -> ReportParams:
     """Параметры автоотчёта: часть 1 — те же параметры стадий EDF, часть 2 — пакет.
 
     Разбор и проверки — общие с ``preprocess_params`` (пара границ, чистка,
-    длина эпохи из настроек): отчёт не изобретает своих правил. Нарезка —
-    только ``fixed``: событийный режим (ERP) в сквозной отчёт не входит и
-    поля формы ``epoch_mode``/``event_id`` здесь не читаются.
+    нарезка fixed/events): отчёт не изобретает своих правил. Событийный режим
+    (3c, остаток B9) меняет **только часть 1** — она пересказывает числа
+    нарезки EDF, какой бы она ни была; пакет диполей (часть 2) остаётся на
+    фиксированной нарезке (событийные диполи — отдельная задача,
+    `docs/rules/events.md` п.8) и подписывается в HTML.
     """
     base = preprocess_params(
         stage="epochs",
@@ -647,8 +758,14 @@ def report_params(
         interpolate_bads=interpolate_bads,
         clean_method=clean_method, ica_n_components=ica_n_components,
         exclude_zone_ids=exclude_zone_ids,
-        epoch_mode="fixed",
+        epoch_mode=epoch_mode, event_id=event_id,
+        epoch_pre_ms=epoch_pre_ms, epoch_post_ms=epoch_post_ms,
     )
+    if base.epoch_mode == "events":
+        # В событийном режиме preprocess не проверяет длину эпохи, но пакет
+        # диполей (часть 2) остаётся на fixed-нарезке — её значение обязано
+        # быть из списка, а не мусором из формы.
+        require_epoch_length(base.epoch_length_ms)
     return ReportParams(
         preprocess=base, grid_mm=grid_mm, band_keys=report_band_keys(bands),
     )

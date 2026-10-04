@@ -53,6 +53,13 @@ _BEM_FILE_NAMES: tuple[str, ...] = (
     "fsaverage-5120-5120-5120-bem.fif",
 )
 
+# Кандидаты source space fsaverage для обратных задач (eLORETA): штатный
+# файл установки (ico-5) или свободноватый oct6 — оба лежат в bem/ субъекта.
+_SRC_FILE_NAMES: tuple[str, ...] = (
+    "fsaverage-ico-5-src.fif",
+    "oct6-src.fif",
+)
+
 
 def _bem_cache_path(cfg: "Settings") -> str:
     """Путь дискового кэша расчётного BEM-решения (``cache_dir/bem/…``)."""
@@ -304,3 +311,33 @@ def trans_path(cfg: "Settings") -> str:
             + "; расчёт невозможен: "
             + str(exc)
         ) from exc
+
+
+def src_candidates(cfg: "Settings") -> list[str]:
+    """Кандидаты source space fsaverage (порядок = приоритет); пути только из ``subjects_dir``."""
+    root = cfg.subjects_dir
+    return [
+        os.path.join(root, "fsaverage", "bem", name)
+        for name in _SRC_FILE_NAMES
+    ] + [
+        os.path.join(root, "bem", name) for name in _SRC_FILE_NAMES
+    ]
+
+
+def src_path(cfg: "Settings") -> str:
+    """Путь к source space fsaverage для обратных задач (eLORETA).
+
+    Расчёт source space из ``.surf`` здесь **не** реализован: файл лежит в
+    штатной установке fsaverage (``bem/fsaverage-ico-5-src.fif``), а его
+    отсутствие — честный ``FileNotFoundError`` с перечнём путей (текст для
+    задачи, не отладка). Чтение/кэш — в ``services/eloreta.py`` (один путь —
+    один процесс, как с BEM-решением F19).
+    """
+    path = _first_existing(src_candidates(cfg))
+    if path is not None:
+        return path
+    raise FileNotFoundError(
+        "Source space fsaverage не найден. Ожидался один из файлов: "
+        + ", ".join(src_candidates(cfg))
+        + " (штатный файл установки fsaverage, расчёт здесь не выполняется)"
+    )

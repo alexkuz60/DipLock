@@ -573,6 +573,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recordings/{recording_id}/eloreta": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * eLORETA: пик и ROI-доли распределения одной эпохи (остаток B9)
+         * @description Пик/ROI eLORETA на одной эпохе (dipoles.md п.5: **не полные карты**).
+         *
+         *     Форма — та же, что у «Уточнить»: нарезка обязана повторять быстрый расчёт
+         *     (``epoch_index`` привязан к ней). Результат: пик распределения (координата +
+         *     анатомия из общего источника) и доли энергии по структурам — объём честно
+         *     ограничен, полные карты не отдаются.
+         */
+        post: operations["create_eloreta_job_api_v1_recordings__recording_id__eloreta_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/eloreta/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Результат eLORETA: пик и ROI-доли эпохи
+         * @description Пик + ROI одной эпохи. 409 — задача идёт/упала.
+         */
+        get: operations["get_eloreta_result_api_v1_recordings__recording_id__eloreta__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recordings/{recording_id}/report": {
         parameters: {
             query?: never;
@@ -587,11 +632,12 @@ export interface paths {
          * @description Автоотчёт раздела «Итоги» — одна задача в три ступени.
          *
          *     Ступени: три стадии препроцессинга (часть 1 — **те же** параметры и числа,
-         *     что раздел EDF: форма здесь повторяет форму стадий; нарезка только
-         *     ``fixed``) → пакетный быстрый расчёт диполей по полосам (часть 2,
-         *     агрегаты структур/BA) → сборка самодостаточного ``mne.Report`` в
-         *     дисковый кэш. Результат задачи — агрегаты и ссылка ``html_url``;
-         *     сам HTML — отдельный ассет с ETag ниже.
+         *     что раздел EDF: форма здесь повторяет форму стадий; нарезка fixed/events —
+         *     какой бы ни была нарезка EDF, отчёт её пересказывает) → пакетный быстрый
+         *     расчёт диполей по полосам (часть 2, агрегаты структур/BA; пакет **всегда**
+         *     на fixed-нарезке — событийные диполи отдельная задача, events.md п.8) →
+         *     сборка самодостаточного ``mne.Report`` в дисковый кэш. Результат задачи —
+         *     агрегаты и ссылка ``html_url``; сам HTML — отдельный ассет с ETag ниже.
          */
         post: operations["create_report_job_api_v1_recordings__recording_id__report_post"];
         delete?: never;
@@ -712,6 +758,132 @@ export interface paths {
          *     дискового кэша сетка пересчитывается (как топокарты, 3.4).
          */
         get: operations["get_spectrogram_grid_api_v1_recordings__recording_id__spectrogram__job_id__grid_bin_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Собрать пакет сессии (zip: EDF + параметры + результаты или BIDS)
+         * @description Пакет сессии (N40/4.6) — фоновой задачей `kind=bundle` (202 + `job_id`).
+         *
+         *     Zip собирается потоково в дисковый кэш по входному отпечатку: те же
+         *     входы → кэш-попадание без пересборки. Результат — список файлов и
+         *     `zip_url`; сам ассет отдаётся ниже с ETag/304. Формат `bids` даёт
+         *     минимальную BIDS-структуру (dataset_description, participants, сайдкар,
+         *     события), `session` — полный набор «EDF + параметры + результаты».
+         */
+        post: operations["create_bundle_job_api_v1_recordings__recording_id__bundle_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/bundle/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Результат задачи пакета
+         * @description Список файлов пакета и ссылка на zip. 409 — задача идёт/упала.
+         *
+         *     ``zip_url`` собирается здесь, а не в воркере: воркер не знает ``job_id``
+         *     (задача создаётся после него), а адрес адресуется именно задаче — как у
+         *     ``html_url`` автоотчёта.
+         */
+        get: operations["get_bundle_result_api_v1_recordings__recording_id__bundle__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/bundle/{job_id}/zip": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Zip пакета сессии из дискового кэша (ETag)
+         * @description Zip пакета с ETag/304 (единая отдача — ``assets.py``).
+         *
+         *     ETag — входной отпечаток сборки (``sig`` из результата): он меняется при
+         *     любом изменении входов (EDF, паспорт, задачи, версии), поэтому браузер не
+         *     отдаёт устаревший архив. Кэш очищен вместе с записью — 404 с просьбой
+         *     собрать пакет заново (как у HTML автоотчёта).
+         */
+        get: operations["get_bundle_zip_api_v1_recordings__recording_id__bundle__job_id__zip_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/dipoles.csv": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Экспорт таблицы диполей записи в CSV (RFC 4180)
+         * @description CSV всех диполей записи (все сессии, все полосы) — выгрузка готовых строк.
+         *
+         *     Не задача: чтение ``read-API сессий`` и сериализация — секунды, а
+         *     «задача = job» относится к расчёту (правило 2). Пустой результат —
+         *     честный CSV с одной шапкой («данных нет», а не ошибка). Кавычки/CRLF —
+         *     RFC 4180 (``services/session_bundle.py::dipoles_csv``).
+         */
+        get: operations["export_dipoles_csv_api_v1_recordings__recording_id__dipoles_csv_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/{job_id}/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run manifest задачи (версии + параметры + отпечатки ассетов)
+         * @description На чём, чем и на каких данных посчитана задача (N40/4.6).
+         *
+         *     Манифест строится на лету из ``meta`` задачи (``params_sig`` и
+         *     ``recording_id`` — то, что уже есть у любой задачи) плюс текущие версии
+         *     среды и отпечатки ассетов — для задачи этого процесса/хоста они
+         *     соответствуют её окружению. В отличие от результата, манифест честен
+         *     и для идущей, и для упавшей задачи («с чем запускали»). 404 — неизвестна.
+         */
+        get: operations["get_job_manifest_api_v1_jobs__job_id__manifest_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1603,6 +1775,15 @@ export interface components {
              */
             pp_threshold_uv: number;
         };
+        /** Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post */
+        Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post: {
+            /**
+             * Format
+             * @description Формат пакета: session (EDF + манифест + паспорт + задачи) | bids
+             * @default session
+             */
+            format: string;
+        };
         /** Body_create_compare_job_api_v1_compare_post */
         Body_create_compare_job_api_v1_compare_post: {
             /**
@@ -1665,6 +1846,35 @@ export interface components {
              * @default welch
              */
             psd_method: string;
+            /**
+             * Tfr Event
+             * @description Описание события для TFR/ERDS-карт; пусто — без событийной ветки
+             */
+            tfr_event?: string | null;
+            /**
+             * Tfr Tmin Ms
+             * @description Начало окна TFR относительно события, мс
+             * @default -500
+             */
+            tfr_tmin_ms: number;
+            /**
+             * Tfr Tmax Ms
+             * @description Конец окна TFR, мс
+             * @default 1500
+             */
+            tfr_tmax_ms: number;
+            /**
+             * Tfr Baseline Start Ms
+             * @description Baseline TFR: начало, мс
+             * @default -500
+             */
+            tfr_baseline_start_ms: number;
+            /**
+             * Tfr Baseline End Ms
+             * @description Baseline TFR: конец, мс до события
+             * @default -100
+             */
+            tfr_baseline_end_ms: number;
         };
         /** Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post */
         Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post: {
@@ -1757,6 +1967,57 @@ export interface components {
              * @default 7
              */
             grid_mm: number;
+        };
+        /** Body_create_eloreta_job_api_v1_recordings__recording_id__eloreta_post */
+        Body_create_eloreta_job_api_v1_recordings__recording_id__eloreta_post: {
+            /**
+             * Epoch Index
+             * @description Номер эпохи нарезки быстрого расчёта (с 0)
+             */
+            epoch_index: number;
+            /**
+             * Band Min
+             * @description Нижняя граница полосы, Гц
+             */
+            band_min?: number | null;
+            /**
+             * Band Max
+             * @description Верхняя граница полосы, Гц
+             */
+            band_max?: number | null;
+            /**
+             * Notch Hz
+             * @description Сетевой фильтр 50/60 Гц
+             */
+            notch_hz?: number | null;
+            /**
+             * Reference
+             * @description average | custom
+             * @default average
+             */
+            reference: string;
+            /**
+             * Reference Channels
+             * @description Каналы референса через запятую
+             */
+            reference_channels?: string | null;
+            /**
+             * Epoch Length Ms
+             * @description Длина эпохи — как в быстром расчёте
+             * @default 1000
+             */
+            epoch_length_ms: number;
+            /**
+             * Grid Mm
+             * @description Шаг сетки быстрого расчёта, мм
+             * @default 7
+             */
+            grid_mm: number;
+            /**
+             * Halfwin Ms
+             * @description Половина окна вокруг пика GFP, мс (0 — отсчёт пика; пусто — дефолт сервера)
+             */
+            halfwin_ms?: number | null;
         };
         /** Body_create_evoked_job_api_v1_recordings__recording_id__evoked_post */
         Body_create_evoked_job_api_v1_recordings__recording_id__evoked_post: {
@@ -2102,6 +2363,29 @@ export interface components {
              * @description Ключи полос пакета через запятую (δ,θ,…); пусто — все полосы /meta
              */
             bands?: string | null;
+            /**
+             * Epoch Mode
+             * @description Нарезка части 1: fixed | events (событийная — часть 2 пакета не меняет)
+             * @default fixed
+             */
+            epoch_mode: string;
+            /**
+             * Event Id
+             * @description Описание события (режим events)
+             */
+            event_id?: string | null;
+            /**
+             * Epoch Pre Ms
+             * @description Окно до события, мс (режим events)
+             * @default 200
+             */
+            epoch_pre_ms: number;
+            /**
+             * Epoch Post Ms
+             * @description Окно после события, мс (режим events)
+             * @default 800
+             */
+            epoch_post_ms: number;
         };
         /** Body_create_spectrogram_job_api_v1_recordings__recording_id__spectrogram_post */
         Body_create_spectrogram_job_api_v1_recordings__recording_id__spectrogram_post: {
@@ -2234,6 +2518,42 @@ export interface components {
             count: number;
             /** Version */
             version: string;
+        };
+        /**
+         * BundleResult
+         * @description Результат задачи пакета сессии (kind=bundle): zip в дисковом кэше.
+         */
+        BundleResult: {
+            /**
+             * Format
+             * @description Формат пакета: session (EDF+параметры+результаты) | bids
+             */
+            format: string;
+            /**
+             * Sig
+             * @description Входной отпечаток сборки — ключ zip в дисковом кэше и ETag
+             */
+            sig: string;
+            /**
+             * Files
+             * @description Внутренние пути файлов архива
+             */
+            files: string[];
+            /**
+             * Size Bytes
+             * @description Размер zip на диске
+             */
+            size_bytes: number;
+            /**
+             * Warnings
+             * @description Честные предупреждения (EDF не найден и т.п.)
+             */
+            warnings?: string[];
+            /**
+             * Zip Url
+             * @description Ссылка на скачивание (собирается роутом, как html_url отчёта)
+             */
+            zip_url?: string | null;
         };
         /**
          * ChannelMixOut
@@ -2436,6 +2756,8 @@ export interface components {
             zones?: components["schemas"]["CleanZoneOut"][];
             /** @description Метрики потерь L1/L3/L4/L5 (null — очистки не было) */
             loss?: components["schemas"]["CleanLossOut"] | null;
+            /** @description QC-слой ковариации: λ, % дисперсии, heatmap корреляций и топокарты ПК «до/после» (null — очистки не было) */
+            covariance?: components["schemas"]["CovarianceQcOut"] | null;
             /**
              * Iclabel Labels
              * @description Вторая разметка ICA (ICLabel): класс модели на каждый компонент (null — не считалась, причина в warnings)
@@ -2625,6 +2947,135 @@ export interface components {
             direction: string;
         };
         /**
+         * CompareErdsBandOut
+         * @description Сводка ERDS одной полосы ``freq_bands`` в пост-стимульном окне.
+         */
+        CompareErdsBandOut: {
+            /**
+             * Name
+             * @description Ключ диапазона (delta…gamma)
+             */
+            name: string;
+            /** Fmin */
+            fmin: number;
+            /** Fmax */
+            fmax: number;
+            /**
+             * Erds A Post
+             * @description Средний ERDS% в пост-окне [0; tmax] у A; None — частоты вне сетки
+             */
+            erds_a_post?: number | null;
+            /**
+             * Erds B Post
+             * @description То же у B
+             */
+            erds_b_post?: number | null;
+            /**
+             * Delta Post
+             * @description B − A в %-пунктах ERDS (знак = направление изменения)
+             */
+            delta_post?: number | null;
+            /**
+             * P Value
+             * @description Welch t-тест по эпоховым пост-средним ERDS%, p
+             */
+            p_value?: number | null;
+            /**
+             * Q Value
+             * @description p после поправки FDR по всем полосам ERDS-результата
+             */
+            q_value?: number | null;
+            /**
+             * Ci95 Delta Pct
+             * @description 95% bootstrap-ИИ дельты ERDS [низ, верх], %-пункты; 0 внутри — различие не подтверждено
+             */
+            ci95_delta_pct?: number[] | null;
+        };
+        /**
+         * CompareErdsOut
+         * @description TFR/ERDS-карты пары: событийные эпохи, морле-вейвлеты, baseline-нормировка.
+         *
+         *     ERDS% = (P(t, f) − P_base(f)) / P_base(f) × 100, где P_base — средняя
+         *     мощность в baseline-окне. Карты **усреднены по общим каналам пары и по
+         *     эпохам** (отдельные электроды в карте не различаются — топография
+         *     сравнивается топокартами разности по полосам). Честны только при
+         *     выравнивании по событию — иначе бы TFR смазывает артефакты переходов.
+         */
+        CompareErdsOut: {
+            /**
+             * Event Id
+             * @description Описание события, по которому выровнены эпохи
+             */
+            event_id: string;
+            /**
+             * Tmin
+             * @description Начало окна TFR относительно события, с
+             */
+            tmin: number;
+            /**
+             * Tmax
+             * @description Конец окна TFR относительно события, с
+             */
+            tmax: number;
+            /**
+             * Baseline
+             * @description Baseline-окно [начало, конец] относительно события, с
+             */
+            baseline: number[];
+            /**
+             * Freqs
+             * @description Частотная сетка TFR (лог), Гц
+             */
+            freqs: number[];
+            /**
+             * Times
+             * @description Временная сетка TFR (с декимацией), с
+             */
+            times: number[];
+            /**
+             * N Channels
+             * @description Каналов в усреднении (общий набор пары)
+             */
+            n_channels: number;
+            /**
+             * N Epochs A
+             * @description Событий вошло в расчёт A (после отбраковки)
+             */
+            n_epochs_a: number;
+            /**
+             * N Epochs B
+             * @description Событий вошло в расчёт B
+             */
+            n_epochs_b: number;
+            /**
+             * Erds A
+             * @description ERDS% A: (n_freq × n_time), среднее по каналам и эпохам
+             */
+            erds_a: number[][];
+            /**
+             * Erds B
+             * @description ERDS% B: (n_freq × n_time)
+             */
+            erds_b: number[][];
+            /**
+             * Delta
+             * @description B − A в %-пунктах ERDS: (n_freq × n_time)
+             */
+            delta: number[][];
+            /**
+             * Delta Png
+             * @description Heatmap дельты B − A (base64 PNG, RdBu) — картинка того же пересчёта
+             */
+            delta_png?: string | null;
+            /**
+             * Bands
+             * @description Сводка по полосам freq_bands: средний ERDS% в пост-окне
+             */
+            bands?: components["schemas"]["CompareErdsBandOut"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
          * CompareIndicesOut
          * @description Скалярные индексы обеих сторон и их дельты (IAF и отношения ритмов).
          */
@@ -2748,6 +3199,8 @@ export interface components {
             indices: components["schemas"]["CompareIndicesOut"];
             specparam: components["schemas"]["CompareSpecparamOut"];
             stats: components["schemas"]["CompareStatsOut"];
+            /** @description TFR/ERDS-карты по событию (отдельная ветка, включается полем event_id); None — событийное сравнение не запрашивалось */
+            erds?: components["schemas"]["CompareErdsOut"] | null;
             /**
              * Topomap Version
              * @description Версия карт разности (в URL — против «залипания» кэша)
@@ -3007,6 +3460,91 @@ export interface components {
              * @description Метод разметки полей Бродмана (производная разметка)
              */
             method: string;
+        };
+        /**
+         * CovariancePcOut
+         * @description Ведущая компонента PCA ковариации: её доля дисперсии и топокарта.
+         */
+        CovariancePcOut: {
+            /**
+             * Index
+             * @description Номер компоненты (1 — ведущая, по убыванию λ)
+             */
+            index: number;
+            /**
+             * Variance Percent
+             * @description Доля дисперсии этой компоненты, %
+             */
+            variance_percent: number;
+            /**
+             * Topomap Png B64
+             * @description Топокарта собственного вектора, base64 PNG (RdBu_r, знак якорен по максимуму |загрузки|); None — позиций монтажа нет или сбой рендера
+             */
+            topomap_png_b64?: string | null;
+        };
+        /**
+         * CovarianceQcOut
+         * @description QC-слой ковариации для отчёта стадии filter: числа и картинки «до/после» (п.6).
+         *
+         *     Диагностика той же конфигурации, что L1/L3/L4/L5 (с отменами зон): heatmap
+         *     корреляций, топокарты ведущих ПК (PC1 с фронтальным максимумом — «моргание»),
+         *     шумовой хвост λ≈0 читается по ``effective_rank``. Картинки — base64 внутри
+         *     отчёта (числа и картинка обязаны быть одного пересчёта).
+         */
+        CovarianceQcOut: {
+            /**
+             * Channels
+             * @description Каналы, по которым считалась ковариация
+             */
+            channels: string[];
+            before: components["schemas"]["CovarianceQcSideOut"];
+            after: components["schemas"]["CovarianceQcSideOut"];
+            /**
+             * Tail Ratio
+             * @description Порог шумового хвоста effective_rank, доля от λ1 (из конфига)
+             */
+            tail_ratio: number;
+            /**
+             * Warnings
+             * @description Что не построилось и почему (тексты для UI)
+             */
+            warnings?: string[];
+        };
+        /**
+         * CovarianceQcSideOut
+         * @description Числа и картинки QC-слоя ковариации одной стороны — «до» или «после» чистки.
+         */
+        CovarianceQcSideOut: {
+            /**
+             * Eigenvalues Uv2
+             * @description Собственные значения ковариации каналов, мкВ² (по убыванию)
+             */
+            eigenvalues_uv2: number[];
+            /**
+             * Variance Percent
+             * @description Доля дисперсии по компонентам, % (пусто — нулевая дисперсия)
+             */
+            variance_percent: number[];
+            /**
+             * Cumulative Percent
+             * @description Накопленная доля дисперсии, %
+             */
+            cumulative_percent: number[];
+            /**
+             * Effective Rank
+             * @description Компонент с λ ≥ covariance_qc_tail_ratio·λ1 — «эффективный ранг»: видимая проверка, что фит ICA не посчитан на шумовом хвосте
+             */
+            effective_rank: number;
+            /**
+             * Heatmap Png B64
+             * @description Heatmap корреляций каналов (−1…1), base64 PNG; None — сбой рендера
+             */
+            heatmap_png_b64?: string | null;
+            /**
+             * Components
+             * @description Ведущие ПК (топокарты, число — из конфига)
+             */
+            components?: components["schemas"]["CovariancePcOut"][];
         };
         /**
          * DipoleFit
@@ -3279,6 +3817,132 @@ export interface components {
              * @default 0
              */
             duration_sec_calc: number;
+        };
+        /**
+         * EloretaPeakOut
+         * @description Пик eLORETA-распределения на одной эпохе (остаток B9, dipoles.md п.5).
+         */
+        EloretaPeakOut: {
+            /**
+             * Mni Mm
+             * @description Координата пика, мм (кадр fsaverage-MNI — тот же, что у диполей)
+             */
+            mni_mm: number[];
+            /**
+             * Value
+             * @description |амплитуда| пика, условные единицы eLORETA (не калиброваны в нАм)
+             */
+            value: number;
+            /**
+             * Time Ms
+             * @description Время пика внутри окна эпохи, мс (отсчёт эпохи)
+             */
+            time_ms: number;
+            /**
+             * Structure Name
+             * @description Ближайшая структура aparc+aseg; None — атлас недоступен
+             */
+            structure_name?: string | null;
+            /** Structure Distance Mm */
+            structure_distance_mm?: number | null;
+            /**
+             * Area Name
+             * @description Ближайшее поле Бродмана
+             */
+            area_name?: string | null;
+            /** Area Distance Mm */
+            area_distance_mm?: number | null;
+            /** Outside Brain */
+            outside_brain?: boolean | null;
+        };
+        /**
+         * EloretaResult
+         * @description Результат eLORETA одной эпохи (``kind=eloreta``, остаток B9).
+         *
+         *     **Не полные карты** (п.5 `docs/rules/dipoles.md`): объём stc × N полос
+         *     упирается в ``JOB_RESULT_MAX_BYTES`` и в отсутствующую концепцию
+         *     визуализации — на выходе пик распределения (координата + анатомия из
+         *     общего источника ``atlas_contours``) и доли энергии по структурам
+         *     (топ-8 + «прочие»). eLORETA-значения условные (не откалиброваны в нАм);
+         *     пик — ориентир для перекрёстной проверки с быстрым расчётом и refine,
+         *     а не замена точечного фита.
+         */
+        EloretaResult: {
+            /** Recording Id */
+            recording_id: string;
+            /**
+             * Method
+             * @description Метод: `eloreta`
+             */
+            method: string;
+            /**
+             * Epoch Index
+             * @description Номер эпохи нарезки быстрого расчёта (с 0)
+             */
+            epoch_index: number;
+            /**
+             * Time Ms
+             * @description Время пика GFP эпохи, мс
+             */
+            time_ms: number;
+            /**
+             * Window Ms
+             * @description Окно усреднения вокруг пика GFP [от, до], мс
+             */
+            window_ms: number[];
+            /**
+             * Halfwin Ms
+             * @description Половина окна, мс (0 — один отсчёт пика GFP)
+             * @default 0
+             */
+            halfwin_ms: number;
+            /** @description Пик распределения |amplitude| */
+            peak: components["schemas"]["EloretaPeakOut"];
+            /**
+             * Roi
+             * @description Топ структур по доле энергии; пусто — атлас недоступен
+             */
+            roi?: components["schemas"]["EloretaRoiOut"][];
+            /**
+             * Other Share
+             * @description Доля энергии вне топ-структур (включая вершины вне атласа), 0..1
+             */
+            other_share: number;
+            /**
+             * N Sources
+             * @description Вершин в source space fsaverage
+             */
+            n_sources: number;
+            /**
+             * N Channels
+             * @description Каналов в расчёте
+             */
+            n_channels: number;
+            /**
+             * Lambda2
+             * @description Регуляризация inverse-оператора (из конфига)
+             */
+            lambda2: number;
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Duration Sec Calc
+             * @default 0
+             */
+            duration_sec_calc: number;
+        };
+        /**
+         * EloretaRoiOut
+         * @description Доля энергии eLORETA на структуре (от суммарной по эпохе).
+         */
+        EloretaRoiOut: {
+            /** Structure */
+            structure: string;
+            /**
+             * Share
+             * @description Доля суммарной энергии, 0..1
+             */
+            share: number;
         };
         /**
          * EpochOut
@@ -5392,6 +6056,55 @@ export interface components {
             };
         };
         /**
+         * RunManifestOut
+         * @description Run manifest задачи: на чём, чем и на каких данных посчитано (N40/4.6).
+         *
+         *     Версии/отпечатки — те же источники, что `/meta` и manifest внутри
+         *     session-пакета: задача обязана честно сказать про своё окружение рядом
+         *     со своим результатом, а не заставлять сверять сборки вручную.
+         */
+        RunManifestOut: {
+            /**
+             * Manifest Version
+             * @description Версия формата манифеста
+             */
+            manifest_version: number;
+            /**
+             * Kind
+             * @description Вид задачи (analyze/preprocess/…)
+             */
+            kind: string | null;
+            /**
+             * Recording Id
+             * @description Запись задачи; None — файловый анализ
+             */
+            recording_id: string | null;
+            /**
+             * Params Sig
+             * @description Отпечаток параметров прогона (repr формы)
+             */
+            params_sig: string | null;
+            /**
+             * Finished At
+             * @description Завершение задачы (ISO); None — ещё идёт
+             */
+            finished_at: string | null;
+            /**
+             * Versions
+             * @description Python/MNE/NumPy/SciPy/SQLAlchemy и др. — как в /meta
+             */
+            versions: {
+                [key: string]: string | null;
+            };
+            /**
+             * Assets
+             * @description Отпечатки ассетов FSAverage (меш, МРТ, атлас) — как в /meta
+             */
+            assets: {
+                [key: string]: string;
+            };
+        };
+        /**
          * ServerRestartOut
          * @description 202-ответ POST /api/v1/server/restart: процесс перезапустится после ответа.
          */
@@ -6955,6 +7668,73 @@ export interface operations {
             };
         };
     };
+    create_eloreta_job_api_v1_recordings__recording_id__eloreta_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_eloreta_job_api_v1_recordings__recording_id__eloreta_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_eloreta_result_api_v1_recordings__recording_id__eloreta__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EloretaResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_report_job_api_v1_recordings__recording_id__report_post: {
         parameters: {
             query?: never;
@@ -7145,6 +7925,169 @@ export interface operations {
                 content: {
                     "application/octet-stream": unknown;
                     "application/json": components["schemas"]["SpectrogramGridHeader"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_bundle_job_api_v1_recordings__recording_id__bundle_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_bundle_result_api_v1_recordings__recording_id__bundle__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BundleResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_bundle_zip_api_v1_recordings__recording_id__bundle__job_id__zip_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
+                recording_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_dipoles_csv_api_v1_recordings__recording_id__dipoles_csv_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/csv": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_job_manifest_api_v1_jobs__job_id__manifest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunManifestOut"];
                 };
             };
             /** @description Validation Error */

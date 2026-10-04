@@ -51,7 +51,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 59 роутов (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 66 роутов = 63 уникальных пути (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -78,8 +78,10 @@ backend/app/
 │   ├── spectrogram.py     # спектрограмма канала: STFT → сетка дБ (DPS2), кэш + ETag (5)
 │   ├── channel_mix.py     # виртуальные каналы «ЭЭГ»: миксы групп 10-20 из паспорта записи (5+)
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
+│   ├── eloreta.py         # eLORETA пик/ROI одной эпохи: forward+inverse MNE (остаток B9)
 │   ├── compare.py         # дифференциальный анализ двух записей (B9): дельты B − A, FDR/бутстрап, кластерный тест MNE, карты разности
 │   ├── report.py          # автоотчёт «Итоги»: MNE.Report (часть 1) + пакет диполей по полосам (§3.9) + тема (THEME_CSS/THEME_JS)
+│   ├── session_bundle.py  # пакет сессии (zip: EDF+манифест | BIDS), CSV-экспорт диполей (4.6)
 │   ├── group_reports.py   # отчёты «Итогов» по групповым анализам (Тип 1 «Сравнение», Тип 2 «Группа», §3.9.8)
 │   ├── roi.py             # ROI-анализ (4.5): агрегат «строка ROI × полосы» из точек пакета — один источник для отчёта и вкладки UI
 │   ├── analysis_pipeline.py # пайплайн файлового анализа (/analyze, /jobs) + запись в БД (A1)
@@ -87,8 +89,10 @@ backend/app/
 │   ├── journal.py         # журнал шагов пайплайнов: GET /journal (этап 5)
 │   ├── analytics_db.py    # SQLite-проекция журнала: steps + recording_id, суммы/медианы/топ SQL (4.3)
 │   ├── mains.py           # сигнал сетевого фона: уровни L1 и вырезанная notch-компонентная
-│   ├── job_store.py       # файл задачи на диске: история и результат (A8)
-│   ├── orphans.py         # обход сирот при старте (A6)
+│   ├── covariance_qc.py   # QC-слой ковариации: λ/% дисперсии + heatmap/топокарты ПК «до/после» (п.6)
+│   ├── job_store.py       # файл задачи на диске: история, результат и run manifest (A8, 4.6)
+│   ├── run_manifest.py    # отпечаток прогона: версии среды + ассеты + params_sig (4.6)
+│   ├── orphans.py         # обход сирот при старте (A6) + LRU-квота кэша (CACHE_QUOTA_MB, 4.6)
 │   ├── asset_versions.py  # единый отпечаток версий ассетов (A7)
 │   ├── prepared_signal.py # RAM-кэш подготовленного сигнала: EDF один раз на набор параметров (A4)
 │   ├── prepared_persist.py # дисковый персист массива по полосе: ключ band_key+notch+референс (Фаза B)
@@ -185,7 +189,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (1003 Vitest / 716 pytest, без `integration` — 698), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (1018 Vitest / 767 pytest, без `integration` — 749), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF + «Диполи»), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

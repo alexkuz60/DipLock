@@ -21,6 +21,18 @@ export function formatDb(value: number | null | undefined): string {
   return `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)}`
 }
 
+/** Формат процентов (ERDS%): знак и один знак после точки (+12.3 / −45.0). */
+export function formatPct(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  return `${value > 0 ? '+' : ''}${value.toFixed(1)}`
+}
+
+/** Формат bootstrap-ИИ в %-пунктах: [низ; верх], пропуск None. */
+export function formatCi(value: number[] | null | undefined): string {
+  if (!value || value.length < 2) return '—'
+  return `[${value[0].toFixed(1)}; ${value[1].toFixed(1)}]`
+}
+
 /** Симметричная шкала дельт: максимум по |Δ| и |CI| всех полос (min 1 дБ). */
 export function bandDeltaScale(bands: CompareBand[]): number {
   let maxAbs = 1

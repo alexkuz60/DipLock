@@ -111,6 +111,13 @@ class Settings(BaseSettings):
     cache_dir: str = Field(
         default=str(_REPO_DIR / "data" / "cache"),
     )
+    # Квота дискового кэша по объёму (N40/4.6): 0 — без ограничения; при
+    # превышении обход сирот удаляет самые старые кэши записей (LRU по mtime).
+    # Журнал, ассеты FreeSurfer и файлы задач в квоту не входят — они не «кэш
+    # записи» (см. docs/rules/data-and-caches.md, п.18).
+    cache_quota_mb: int = Field(
+        default=0, description="Квота data/cache, МБ (0 — без ограничения; чистка LRU)"
+    )
 
     # Журнал шагов (A5, этап 5): JSONL-файл пошаговых замеров под `cache_dir`
     # (`journal.jsonl`). Включён по умолчанию: измерение — один `perf_counter`
@@ -217,6 +224,11 @@ class Settings(BaseSettings):
     # только при установленном `joblib` (опциональная зависимость MNE): без него
     # MNE молча считает в один поток и обещание «-1» ничего не значит.
     dipole_refine_n_jobs: int = Field(default=-1)
+    # eLORETA (остаток B9, `docs/rules/dipoles.md` п.5): регуляризация lambda2
+    # inverse-оператора. 1/9 — классический SNR=3 (MNE-туториалы); «depth» MNE
+    # для eLORETA игнорирует (документация MNE ≥0.20) — параметр честно только
+    # про регуляризацию, а не про баланс глубин.
+    eloreta_lambda2: float = Field(default=1.0 / 9.0)
     # Оценки времени уточнения (с) — подсказка UI «сколько ждать» до запуска и
     # те же числа, что записаны в `docs/rules/dipoles.md` (замер 20.09.2026).
     dipole_refine_sec_fixed: float = Field(default=0.5)
@@ -300,6 +312,17 @@ class Settings(BaseSettings):
     clean_zone_mad_k: float = Field(default=6.0, description="Сколько MAD над медианой diff — зона вклада")
     clean_zone_min_duration_ms: float = Field(default=100.0, description="Короче — не зона (мусор разрезов)")
     clean_zone_merge_gap_ms: float = Field(default=300.0, description="Промежутки короче — сшиваются в одну зону")
+
+    # Ковариация как QC-слой (п.6 «визуализация препроцессинга», 01.10.2026):
+    # heatmap корреляций каналов + топокарты ведущих ПК (PCA ковариации) «до/после»
+    # чистки, числа (λ, % дисперсии) — в отчёт стадии filter рядом с L1/L3.
+    covariance_qc_top_components: int = Field(
+        default=3, description="Сколько ведущих компонент PCA показывать топокартами",
+    )
+    covariance_qc_tail_ratio: float = Field(
+        default=0.01,
+        description="Доля λ1, ниже которой компонента — шумовой хвост (effective_rank)",
+    )
 
     # Нарезка эпох (без overlap) — reject-фильтр MNE отключён: отбраковка идёт
     # только по аннотациям BAD_ от наших 11 детекторов (срез артефактов).

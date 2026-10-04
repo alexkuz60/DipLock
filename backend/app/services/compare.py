@@ -77,6 +77,22 @@ COMPARE_NOTES: tuple[str, ...] = (
     "(см. «совпадение параметров»); направление дельт — B − A.",
 )
 
+# Каветы ERDS-ветки: добавляются к notes только при включённом событийном режиме.
+ERDS_NOTES: tuple[str, ...] = (
+    "ERDS-карты считаются только при выравнивании по событию и усреднены по "
+    "общим каналам пары: отдельные электроды в карте не различаются, "
+    "топография — в топокартах разности по полосам.",
+    "ERDS-карта — проценты к baseline-окну; отдельные точки карты не "
+    "тестировались (множественные сравнения), значимость — по полосам ниже "
+    "(Welch + FDR, bootstrap-ИИ дельты).",
+    "Baseline короче периода нижней частоты TFR смазывает низкочастотный "
+    "ERDS — проверяйте длину baseline-окна.",
+    "Отбраковка событийных эпох: файловые BAD_ и край окна; детекторы "
+    "артефактов стадии artifacts в сравнении не применяются (как и в PSD-ветке).",
+)
+
+# Полос мощности для полосовой статистики ERDS берутся из конфига — DRY (п.1 AGENTS).
+
 # Пол мощности для логарифмов: ниже — околонулевой шум, дБ отсекается (не −3000).
 _PSD_FLOOR_UV2 = 1e-12
 
@@ -86,12 +102,46 @@ class CompareError(ValueError):
 
 
 @dataclass
+class TfrSpec:
+    """Событийная ветка TFR/ERDS (отдельная от PSD, включается полем ``event_id``).
+
+    Окна в мс относительно события: ``tmin`` < 0 ≤ ``tmax`` (иначе baseline и
+    пост-окно не определены), baseline обязан лежать внутри окна и **до**
+    события (до 0 включительно) — ERDS без pre-стимульного baseline не имеет
+    смысла. Проверки — `api/params.py::compare_params` (400 с текстом).
+    """
+
+    event_id: str
+    tmin_ms: float = -500.0
+    tmax_ms: float = 1500.0
+    baseline_start_ms: float = -500.0
+    baseline_end_ms: float = -100.0
+
+    @property
+    def tmin(self) -> float:
+        return self.tmin_ms / 1000.0
+
+    @property
+    def tmax(self) -> float:
+        return self.tmax_ms / 1000.0
+
+    @property
+    def baseline(self) -> tuple[float, float]:
+        return (self.baseline_start_ms / 1000.0, self.baseline_end_ms / 1000.0)
+
+
+@dataclass
 class CompareParams:
-    """Параметры сравнения: общие параметры спектра + ярлыки условий."""
+    """Параметры сравнения: общие параметры спектра + ярлыки условий.
+
+    ``tfr`` — опциональная событийная ветка TFR/ERDS: ``None`` (по умолчанию)
+    — чисто спектральное сравнение, как и раньше.
+    """
 
     spectrum: SpectrumParams
     label_a: str = "Покой"
     label_b: str = "Деятельность"
+    tfr: TfrSpec | None = None
 
 
 @dataclass
@@ -538,6 +588,313 @@ def _cluster_stats(
     }, []
 
 
+# --- TFR/ERDS: событийная ветка сравнения (остаток B9) ------------------------
+# Сетка TFR: лог-частоты и «~100 точек по времени» через декимацию — карта
+# 40 × 100 × 3 массива ≈ 50 КБ JSON, укладывается в лимит файла задачи.
+_TFR_N_FREQS = 40
+_TFR_N_CYCLES_BASE = 3.0
+_TFR_N_CYCLES_SLOPE = 1.0 / 6.0   # n_cycles = 3 + f/6 (растёт с частотой: 4 Гц→3.7, 40 Гц→9.7)
+_TFR_TIME_POINTS = 100            # целевое число точек оси времени (после декимации)
+_TFR_CHUNK = 32                   # эпохи в одном чанке TFR (память ≈ n_ch·n_f·n_t·32·8 Б)
+_TFR_DATA_BUDGET_BYTES = 1 << 30  # 1 ГБ под `epochs.get_data()` — выше честнее отказать
+
+
+def _erds_event_epochs(recording: Recording, cfg: Settings, params: CompareParams) -> Any:
+    """Событийные эпохи одной стороны для TFR: тот же подготовленный сигнал (A4).
+
+    Параметры подготовки — **те же**, что у PSD-ветки сравнения (``pipeline=
+    "spectrum"``): фильтр/notch/референс совпадают с парой, отличается только
+    нарезка (по событию, ``segment_epochs_events``). Артефактные аннотации
+    детекторов не передаются — в форме сравнения нет их порогов (как и в
+    PSD-ветке); файловые ``BAD_`` и краевые зоны нарезка применяет сама.
+    """
+    import mne
+
+    from app.services.epoch_segmenter import segment_epochs_events
+    from app.services.prepared_signal import prepared_raw
+
+    spec, tfr = params.spectrum, params.tfr
+    if tfr is None:  # защищает прямые вызовы: ветка включается только полем event_id
+        raise CompareError("ERDS требует событийного режима (event_id не задан)")
+    l_freq: float | None = None
+    h_freq: float | None = None
+    if spec.filter_band is not None:
+        l_freq, h_freq = spec.filter_band
+    try:
+        raw = prepared_raw(
+            recording, cfg,
+            l_freq=l_freq, h_freq=h_freq, notch_hz=spec.notch_hz,
+            reference_channels=spec.reference_channels, pipeline="spectrum",
+        )
+        epochs, _events = segment_epochs_events(
+            raw, mne.Annotations([], [], []),
+            event_id=tfr.event_id, tmin=tfr.tmin, tmax=tfr.tmax,
+            filter_band=spec.filter_band,
+        )
+    except ValueError as exc:
+        raise CompareError(str(exc)) from exc
+    return epochs
+
+
+def _erds_block(
+    recording_a: Recording, recording_b: Recording, cfg: Settings, params: CompareParams,
+) -> dict[str, Any] | None:
+    """TFR/ERDS-карты пары: ``None`` — событийная ветка не запрошена.
+
+    ERDS% = (P(t, f) − P_base(f)) / P_base(f) × 100 на морле-вейвлетах
+    (``tfr_array_morlet``, ``n_cycles = 3 + f/6``). Baseline считается **по
+    каждой эпохе**: карта — среднее ERDS% по эпохам и общим каналам; полосовая
+    сводка — по эпоховым средним в пост-окне [0; tmax] (Welch + FDR +
+    bootstrap-ИИ дельты в %-пунктах). TFR чанками (``_TFR_CHUNK``), набор эпох
+    ограничен бюджетом ``_TFR_DATA_BUDGET_BYTES`` — больше честнее отказать.
+    """
+    from mne.time_frequency import tfr_array_morlet
+
+    from app.services.filter_design import nyquist_ceiling_hz
+
+    tfr_spec = params.tfr
+    if tfr_spec is None:
+        return None
+    started = time.perf_counter()
+
+    epochs_a = _erds_event_epochs(recording_a, cfg, params)
+    epochs_b = _erds_event_epochs(recording_b, cfg, params)
+    sfreq_a = float(epochs_a.info["sfreq"])
+    sfreq_b = float(epochs_b.info["sfreq"])
+    if not np.isclose(sfreq_a, sfreq_b):
+        raise CompareError(
+            f"Частоты дискретизации различаются ({sfreq_a:g} vs {sfreq_b:g} Гц) — "
+            "TFR-сравнение не определено"
+        )
+    sfreq = sfreq_a
+
+    # Общие каналы — из самих эпох (метаданные могли разойтись с файлом).
+    common = [name for name in epochs_a.ch_names if name in set(epochs_b.ch_names)]
+    if not common:
+        raise CompareError("Событийные эпохи не имеют ни одного общего канала")
+
+    # Сетка частот: внутри полосы фильтра (вне её сигнал отфильтрован — числа
+    # там околонулевой шум) и Найквиста, как в `_compute_psd`.
+    spec = params.spectrum
+    f_lo, f_hi = 4.0, 40.0
+    if spec.filter_band is not None:
+        f_lo = max(f_lo, spec.filter_band[0])
+        f_hi = min(f_hi, spec.filter_band[1])
+    f_hi = min(f_hi, nyquist_ceiling_hz(sfreq))
+    if f_hi <= f_lo:
+        raise CompareError(
+            f"Полоса фильтра не оставляет частот для TFR (сетка {f_lo:g}…{f_hi:g} Гц) — "
+            "расширьте полосу или выключите событийное сравнение"
+        )
+    freqs = np.geomspace(f_lo, f_hi, _TFR_N_FREQS)
+    n_cycles = _TFR_N_CYCLES_BASE + freqs * _TFR_N_CYCLES_SLOPE
+    # Краевой чек окна: вейвлет обязан помещаться в окно, иначе MNE молча
+    # zero-pad'ит свёртку и карта краёв — фикция.
+    longest_wavelet = float(np.max(n_cycles / freqs))
+    window_len = tfr_spec.tmax - tfr_spec.tmin
+    if window_len < longest_wavelet:
+        raise CompareError(
+            f"Окно TFR ({window_len:.2f} с) короче самого длинного вейвлета "
+            f"({longest_wavelet:.2f} с при нижней частоте {f_lo:g} Гц) — "
+            "расширьте окно или поднимите нижнюю границу фильтра"
+        )
+
+    decim = max(1, round(window_len * sfreq / _TFR_TIME_POINTS))
+    times_tfr = epochs_a.times[::decim]
+    base_mask = (times_tfr >= tfr_spec.baseline[0]) & (times_tfr <= tfr_spec.baseline[1])
+    if not base_mask.any():
+        raise CompareError(
+            "Baseline-окно не содержит ни одного отсчёта TFR — расширьте baseline "
+            f"({tfr_spec.baseline[0] * 1000:g}…{tfr_spec.baseline[1] * 1000:g} мс)"
+        )
+    post_mask = times_tfr >= 0.0
+    if not post_mask.any():
+        raise CompareError("Пост-окно TFR не содержит отсчётов — расширьте окно после события")
+
+    # Полосовые маски частот (пустые полосы — честные None, как в PSD-ветке).
+    band_items = list(cfg.freq_bands.items())
+    band_freq_masks = [
+        (freqs >= float(bounds[0])) & (freqs <= float(bounds[1]))
+        for _name, bounds in band_items
+    ]
+
+    data_a = epochs_a.get_data()
+    data_b = epochs_b.get_data()
+    needed = (data_a.nbytes + data_b.nbytes) * (1 + len(freqs) / 4)
+    if needed > _TFR_DATA_BUDGET_BYTES:
+        raise CompareError(
+            f"Слишком много событий для TFR в памяти ({data_a.shape[0]} + "
+            f"{data_b.shape[0]} эпох, нужно ≈{needed / (1 << 30):.1f} ГБ) — "
+            "сократите окно или объедините редкие события"
+        )
+
+    n_freqs, n_times = len(freqs), len(times_tfr)
+
+    def _side(block_data: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """(карта ERDS (n_freq, n_t), эпоховые полосовые пост-средние (n_ep, n_bands))."""
+        n_ep = block_data.shape[0]
+        erds_sum = np.zeros((n_freqs, n_times), dtype=np.float64)
+        band_post = np.full((n_ep, len(band_items)), np.nan)
+        for start in range(0, n_ep, _TFR_CHUNK):
+            chunk = block_data[start:start + _TFR_CHUNK]
+            power = tfr_array_morlet(
+                chunk, sfreq, freqs, n_cycles=n_cycles, output="power",
+                decim=decim, n_jobs=1,
+            )  # (n_ep_c, n_ch, n_freq, n_t)
+            base = power[:, :, :, base_mask].mean(axis=3, keepdims=True)
+            # Пол — машинный tiny (единицы вольты; абсолютный 1e-12 «съедал» бы
+            # тихие сигналы — тот же урок, что в `_bootstrap_ci_db`).
+            base = np.maximum(base, np.finfo(np.float64).tiny)
+            erds = (power - base) / base * 100.0  # (n_ep_c, n_ch, n_freq, n_t)
+            erds = np.nan_to_num(erds, nan=0.0, posinf=0.0, neginf=0.0)
+            erds_sum += erds.sum(axis=(0, 1))  # по эпохам и каналам
+            # Канало-средний ERDS эпохи → скаляр на полосу в пост-окне.
+            erds_ch = erds.mean(axis=1)  # (n_ep_c, n_freq, n_t)
+            for band_index, fmask in enumerate(band_freq_masks):
+                if not fmask.any():
+                    continue
+                band_post[start:start + chunk.shape[0], band_index] = erds_ch[
+                    :, fmask, :
+                ][:, :, post_mask].mean(axis=(1, 2))
+        return erds_sum / max(n_ep, 1), band_post
+
+    map_a, series_a = _side(data_a)
+    map_b, series_b = _side(data_b)
+    del data_a, data_b
+
+    # Сводка по полосам: Welch p, FDR по полосам, bootstrap-ИИ дельты (%-пункты).
+    from mne.stats import fdr_correction
+
+    rows: list[dict[str, Any]] = []
+    raw_p: list[float] = []
+    digest = hashlib.sha256(
+        "|".join((
+            recording_a.recording_id, recording_b.recording_id, tfr_spec.event_id,
+        )).encode("utf-8")
+    ).hexdigest()
+    rng = np.random.default_rng(int(digest[:8], 16))  # детерминизм ИИ, как в `_band_rows`
+    for band_index, (name, bounds) in enumerate(band_items):
+        sa = series_a[:, band_index]
+        sb = series_b[:, band_index]
+        sa = sa[np.isfinite(sa)]
+        sb = sb[np.isfinite(sb)]
+        p_value = _welch_p(sa, sb)
+        raw_p.append(p_value if np.isfinite(p_value) else 1.0)
+        rows.append({
+            "name": name,
+            "fmin": float(bounds[0]),
+            "fmax": float(bounds[1]),
+            "erds_a_post": float(np.mean(sa)) if sa.size else None,
+            "erds_b_post": float(np.mean(sb)) if sb.size else None,
+            "delta_post": (
+                float(np.mean(sb) - np.mean(sa)) if sa.size and sb.size else None
+            ),
+            "p_value": p_value if np.isfinite(p_value) else None,
+            "q_value": None,  # заполняется после FDR
+            "ci95_delta_pct": _bootstrap_ci_delta(
+                sa, sb, cfg.compare_n_bootstraps, rng,
+            ),
+        })
+    if rows:
+        _, q_values = fdr_correction(np.asarray(raw_p), alpha=cfg.compare_alpha)
+        for row, q in zip(rows, q_values, strict=True):
+            row["q_value"] = float(q)
+
+    delta = map_b - map_a
+    warnings_out = [
+        f"TFR по {series_a.shape[0]} (A) и {series_b.shape[0]} (B) событиям "
+        f"«{tfr_spec.event_id}», сетка {n_freqs} × {n_times}, "
+        f"{len(common)} каналов (усреднение)",
+    ]
+    if series_a.shape[0] < 2 or series_b.shape[0] < 2:
+        warnings_out.append(
+            "Меньше двух событий у одной из сторон: Welch/ИИ для полос не определены"
+        )
+
+    block: dict[str, Any] = {
+        "event_id": tfr_spec.event_id,
+        "tmin": tfr_spec.tmin,
+        "tmax": tfr_spec.tmax,
+        "baseline": list(tfr_spec.baseline),
+        "freqs": [round(float(value), 2) for value in freqs],
+        "times": [round(float(value), 3) for value in times_tfr],
+        "n_channels": len(common),
+        "n_epochs_a": int(series_a.shape[0]),
+        "n_epochs_b": int(series_b.shape[0]),
+        "erds_a": [[round(float(value), 1) for value in row] for row in map_a],
+        "erds_b": [[round(float(value), 1) for value in row] for row in map_b],
+        "delta": [[round(float(value), 1) for value in row] for row in delta],
+        "delta_png": _erds_delta_png(times_tfr, freqs, delta),
+        "bands": rows,
+        "warnings": warnings_out,
+    }
+    journal.record(
+        "compare", "erds",
+        ms=(time.perf_counter() - started) * 1000.0,
+        note=f"event={tfr_spec.event_id}",
+        epochs=series_a.shape[0] + series_b.shape[0],
+    )
+    return block
+
+
+def _bootstrap_ci_delta(
+    series_a: np.ndarray, series_b: np.ndarray, n_bootstraps: int, rng: np.random.Generator,
+) -> list[float] | None:
+    """95% bootstrap-ИИ дельты ERDS (B − A, %-пункты): ресэмплинг внутри сторон.
+
+    Зеркало ``_bootstrap_ci_db`` для **линейной** шкалы (ERDS в процентах знак
+    меняет свободно — логарифм не определён). ``None`` — меньше двух эпох.
+    """
+    if series_a.size < 2 or series_b.size < 2:
+        return None
+    idx_a = rng.integers(0, series_a.size, size=(n_bootstraps, series_a.size))
+    idx_b = rng.integers(0, series_b.size, size=(n_bootstraps, series_b.size))
+    deltas = series_b[idx_b].mean(axis=1) - series_a[idx_a].mean(axis=1)
+    low, high = np.percentile(deltas, (2.5, 97.5))
+    return [float(low), float(high)]
+
+
+def _erds_delta_png(times: np.ndarray, freqs: np.ndarray, delta: np.ndarray) -> str | None:
+    """Heatmap дельты ERDS (время × частота) → data URI PNG; ``None`` — нет данных.
+
+    Палитра ``RdBu_r`` со шкалой ``(−m, m)`` — та же дивергенция, что у карт
+    разности PSD («рост в B / спад»), нулевая вертикаль — событие. Рендер —
+    matplotlib Agg без pyplot (как в ``covariance_qc``: расчёт в потоках, API
+    pyplot не дрейфует в тестах). Событие и baseline подписанными линиями не
+    размечаются — шкала времени от события и так несёт границы окон из полей.
+    """
+    if delta.size == 0 or not np.isfinite(delta).any():
+        return None
+    import base64
+    from io import BytesIO
+
+    import matplotlib
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    matplotlib.use("Agg", force=False)
+    finite = delta[np.isfinite(delta)]
+    m = float(np.max(np.abs(finite))) if finite.size else 0.0
+    if m <= 0:
+        m = 1.0
+    figure = Figure(figsize=(7.2, 4.0), dpi=100)
+    canvas = FigureCanvasAgg(figure)
+    axis = figure.add_subplot(111)
+    mesh = axis.pcolormesh(
+        times, freqs, delta, cmap="RdBu_r", vmin=-m, vmax=m, shading="auto",
+    )
+    axis.set_xlabel("Время от события, с")
+    axis.set_ylabel("Частота, Гц")
+    axis.set_title("Δ ERDS B − A, % (усреднено по каналам)")
+    axis.axvline(0.0, color="black", linewidth=0.8)
+    colorbar = figure.colorbar(mesh, ax=axis)
+    colorbar.set_label("Δ ERDS, %")
+    figure.tight_layout()
+    buffer = BytesIO()
+    canvas.print_png(buffer)
+    return "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 def clear_compare_cache(cfg: Settings, recording_id: str | None = None) -> None:
     """Удаляет дисковый кэш карт разности: один участник пары или весь.
 
@@ -648,6 +1005,14 @@ def run_compare(
     report("stats", 0.6, message="Кластерный тест MNE (пермутации)")
     stats, stats_warnings = _cluster_stats(pair, cfg, signature)
 
+    # Событийная ветка TFR/ERDS (остаток B9): опционально, по полю event_id.
+    erds: dict[str, Any] | None = None
+    erds_warnings: list[str] = []
+    if params.tfr is not None:
+        report("erds", 0.7, message="TFR/ERDS по событию (морле, baseline)")
+        erds = _erds_block(recording_a, recording_b, cfg, params)
+        erds_warnings = list(erds["warnings"]) if erds else []
+
     # Карты разности: рисуем один раз при задаче, кладём в кэш под signature.
     report("topomaps", 0.8, message="Карты разности B−A")
     for row in band_rows:
@@ -660,7 +1025,10 @@ def run_compare(
                 cfg, row["name"], recording_a, recording_b, params,
             )
 
-    warnings_out = [*pair.warnings, *stats_warnings]
+    warnings_out = [*pair.warnings, *stats_warnings, *erds_warnings]
+    notes_out = list(COMPARE_NOTES)
+    if params.tfr is not None:
+        notes_out.extend(ERDS_NOTES)
     if sum_a.specparam_warnings:
         warnings_out.extend(f"A: {item}" for item in sum_a.specparam_warnings)
     if sum_b.specparam_warnings:
@@ -739,8 +1107,9 @@ def run_compare(
             "peaks_b": list(spec_b.get("peaks") or []),
         },
         "stats": stats,
+        "erds": erds,
         "topomap_version": signature,
-        "notes": list(COMPARE_NOTES),
+        "notes": notes_out,
         "warnings": warnings_out,
         "duration_sec_calc": round(time.perf_counter() - started, 3),
     }

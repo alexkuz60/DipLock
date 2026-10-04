@@ -171,3 +171,34 @@ def test_spec_with_exclusions_is_a_different_cache_key():
     assert CleanSpec(exclude_zone_ids=("clean-1",)) != CleanSpec()
     assert "отмены=clean-1" in CleanSpec(exclude_zone_ids=("clean-1",)).label()
     assert CleanSpec().label() == "без очистки"
+
+
+def test_clean_report_carries_covariance_qc():
+    """Отчёт несёт QC-слой ковариации: числа «до/после» и картинки проходят контракт."""
+    from app.schemas.analysis import CleanReportOut
+
+    report = apply_cleaning(_line_raw(), CleanSpec(notch_harmonics=1), settings, notch_hz=50.0)
+
+    validated = CleanReportOut.model_validate(report.as_dict())
+    covariance = validated.covariance
+    assert covariance is not None, "QC-слой ковариации — метрика отчёта стадии (п.6)"
+    assert covariance.channels == _CHANNELS
+    assert covariance.before.eigenvalues_uv2 and covariance.after.eigenvalues_uv2
+    assert covariance.before.heatmap_png_b64 and covariance.after.heatmap_png_b64
+    # Монтаж в _line_raw стандартный — топокарты ПК обязаны построиться
+    assert all(pc.topomap_png_b64 for pc in covariance.before.components)
+
+
+def test_covariance_failure_warns_instead_of_raising(monkeypatch):
+    """Сбой QC-слоя — warning в отчёте: чистка и метрики потерь отработали."""
+    import app.services.artifact_cleaner as cleaner
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("нет памяти")
+
+    monkeypatch.setattr(cleaner, "covariance_qc", _boom)
+    report = apply_cleaning(_line_raw(), CleanSpec(notch_harmonics=1), settings, notch_hz=50.0)
+
+    assert report.covariance is None
+    assert any("Ковариация (QC)" in text for text in report.warnings)
+    assert report.loss is not None, "L1/L3/L4/L5 не должны пострадать от сбоя QC"

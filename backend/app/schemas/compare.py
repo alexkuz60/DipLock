@@ -134,6 +134,77 @@ class CompareSpecparamOut(BaseModel):
     peaks_b: list[SpectrumPeakOut] = Field(default_factory=list)
 
 
+class CompareErdsBandOut(BaseModel):
+    """Сводка ERDS одной полосы ``freq_bands`` в пост-стимульном окне."""
+
+    name: str = Field(description="Ключ диапазона (delta…gamma)")
+    fmin: float
+    fmax: float
+    erds_a_post: float | None = Field(
+        default=None,
+        description="Средний ERDS% в пост-окне [0; tmax] у A; None — частоты вне сетки",
+    )
+    erds_b_post: float | None = Field(default=None, description="То же у B")
+    delta_post: float | None = Field(
+        default=None,
+        description="B − A в %-пунктах ERDS (знак = направление изменения)",
+    )
+    p_value: float | None = Field(
+        default=None,
+        description="Welch t-тест по эпоховым пост-средним ERDS%, p",
+    )
+    q_value: float | None = Field(
+        default=None,
+        description="p после поправки FDR по всем полосам ERDS-результата",
+    )
+    ci95_delta_pct: list[float] | None = Field(
+        default=None,
+        description=(
+            "95% bootstrap-ИИ дельты ERDS [низ, верх], %-пункты; "
+            "0 внутри — различие не подтверждено"
+        ),
+    )
+
+
+class CompareErdsOut(BaseModel):
+    """TFR/ERDS-карты пары: событийные эпохи, морле-вейвлеты, baseline-нормировка.
+
+    ERDS% = (P(t, f) − P_base(f)) / P_base(f) × 100, где P_base — средняя
+    мощность в baseline-окне. Карты **усреднены по общим каналам пары и по
+    эпохам** (отдельные электроды в карте не различаются — топография
+    сравнивается топокартами разности по полосам). Честны только при
+    выравнивании по событию — иначе бы TFR смазывает артефакты переходов.
+    """
+
+    event_id: str = Field(description="Описание события, по которому выровнены эпохи")
+    tmin: float = Field(description="Начало окна TFR относительно события, с")
+    tmax: float = Field(description="Конец окна TFR относительно события, с")
+    baseline: list[float] = Field(
+        description="Baseline-окно [начало, конец] относительно события, с",
+    )
+    freqs: list[float] = Field(description="Частотная сетка TFR (лог), Гц")
+    times: list[float] = Field(description="Временная сетка TFR (с декимацией), с")
+    n_channels: int = Field(description="Каналов в усреднении (общий набор пары)")
+    n_epochs_a: int = Field(description="Событий вошло в расчёт A (после отбраковки)")
+    n_epochs_b: int = Field(description="Событий вошло в расчёт B")
+    erds_a: list[list[float]] = Field(
+        description="ERDS% A: (n_freq × n_time), среднее по каналам и эпохам",
+    )
+    erds_b: list[list[float]] = Field(description="ERDS% B: (n_freq × n_time)")
+    delta: list[list[float]] = Field(
+        description="B − A в %-пунктах ERDS: (n_freq × n_time)",
+    )
+    delta_png: str | None = Field(
+        default=None,
+        description="Heatmap дельты B − A (base64 PNG, RdBu) — картинка того же пересчёта",
+    )
+    bands: list[CompareErdsBandOut] = Field(
+        default_factory=list,
+        description="Сводка по полосам freq_bands: средний ERDS% в пост-окне",
+    )
+    warnings: list[str] = Field(default_factory=list)
+
+
 class CompareResult(BaseModel):
     """Результат задачи сравнения двух записей (``kind=compare``).
 
@@ -155,6 +226,13 @@ class CompareResult(BaseModel):
     indices: CompareIndicesOut
     specparam: CompareSpecparamOut
     stats: CompareStatsOut
+    erds: CompareErdsOut | None = Field(
+        default=None,
+        description=(
+            "TFR/ERDS-карты по событию (отдельная ветка, включается полем event_id); "
+            "None — событийное сравнение не запрашивалось"
+        ),
+    )
     topomap_version: str = Field(description="Версия карт разности (в URL — против «залипания» кэша)")
     notes: list[str] = Field(
         default_factory=list,

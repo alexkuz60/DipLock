@@ -243,9 +243,8 @@ function RecordPanel() {
           <li>{`Референс: ${edfParams.reference}`}</li>
         </ul>
         {eventsMode ? (
-          <p className="mt-2 text-sm text-warn" data-testid="summary-events-note">
-            Событийная нарезка EDF в отчёт не входит: эпохи будут нарезаны фиксированной
-            длиной (решение среза, docs/ui/summary.md).
+          <p className="mt-2 text-sm text-fg-2" data-testid="summary-events-note">
+            {`Событийная нарезка («${edfParams.eventId || 'событие не выбрано'}») — в части 1 отчёта, как в EDF. Пакет диполей (часть 2) считается на фиксированной нарезке${edfParams.epochLengthMs} мс — это подписано в самом HTML (events.md, п.8).`}
           </p>
         ) : null}
       </Panel>

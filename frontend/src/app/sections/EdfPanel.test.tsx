@@ -162,6 +162,39 @@ describe('панель раздела EDF', () => {
     expect(recommend).not.toHaveTextContent('#4')
   })
 
+  it('QC-слой ковариации: числа, картинки base64 и ранг из отчёта стадии (п.6)', async () => {
+    act(() => {
+      useEdfRecording.setState({
+        cleanReport: { ...cleanReportFixture(), covariance: covarianceFixture() },
+      })
+    })
+    renderWithProviders(<EdfPanel />)
+
+    const block = await screen.findByTestId('clean-covariance')
+    expect(screen.getByTestId('clean-covariance-rank')).toHaveTextContent('Эфф. ранг: 6 → 4')
+    expect(screen.getByTestId('clean-covariance-rank')).toHaveTextContent('1 % от λ1')
+    for (const testid of ['clean-covariance-heatmap-before', 'clean-covariance-heatmap-after']) {
+      expect(screen.getByTestId(testid).getAttribute('src')).toMatch(/^data:image\/png;base64,/)
+    }
+    // Доли ПК читаются стрелкой «до → после», таблица — λ и проценты
+    expect(screen.getByTestId('clean-covariance-pc1-share')).toHaveTextContent('42.5 % → 12.3 %')
+    expect(screen.getByTestId('clean-covariance-row-1')).toHaveTextContent('2500')
+    expect(screen.getByTestId('clean-covariance-row-1')).toHaveTextContent('80.5')
+    // Сбой картинки из бэкенда — видимый warning, а не молчаливое отсутствие
+    expect(screen.getByTestId('clean-covariance-warning')).toHaveTextContent('Топокарта PC3')
+    expect(block).toHaveTextContent('с отменами')
+  })
+
+  it('без covariance в отчёте (старый результат) блока QC нет', async () => {
+    act(() => {
+      useEdfRecording.setState({ cleanReport: cleanReportFixture() })
+    })
+    renderWithProviders(<EdfPanel />)
+
+    await screen.findByTestId('clean-loss')
+    expect(screen.queryByTestId('clean-covariance')).not.toBeInTheDocument()
+  })
+
   it('без записи (и в демо) контрола слоя нет: нечего переключать', async () => {
     mockApiFetch()
     renderWithProviders(<EdfPanel />)
@@ -627,5 +660,43 @@ function cleanReportFixture(): CleanReport {
       removed_variance_percent: 15.5,
       removed_variance_source: 'ica_components',
     },
+  }
+}
+
+/**
+ * QC-слой ковариации отчёта стадии (п.6): числа + base64-картинки.
+ * PC3 «до» без топокарты — так бэкенд честно показывает сбой рендера (warning).
+ */
+function covarianceFixture(): NonNullable<CleanReport['covariance']> {
+  const png =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+  return {
+    channels: ['Fp1', 'Fp2', 'C3'],
+    before: {
+      eigenvalues_uv2: [2500, 400, 120, 30],
+      variance_percent: [80.5, 12.8, 3.9, 2.8],
+      cumulative_percent: [80.5, 93.3, 97.2, 100],
+      effective_rank: 6,
+      heatmap_png_b64: png,
+      components: [
+        { index: 1, variance_percent: 42.5, topomap_png_b64: png },
+        { index: 2, variance_percent: 18.3, topomap_png_b64: png },
+        { index: 3, variance_percent: 9.1, topomap_png_b64: null },
+      ],
+    },
+    after: {
+      eigenvalues_uv2: [600, 520, 480, 410],
+      variance_percent: [30.2, 26.1, 24.1, 19.6],
+      cumulative_percent: [30.2, 56.3, 80.4, 100],
+      effective_rank: 4,
+      heatmap_png_b64: png,
+      components: [
+        { index: 1, variance_percent: 12.3, topomap_png_b64: png },
+        { index: 2, variance_percent: 11.9, topomap_png_b64: png },
+        { index: 3, variance_percent: 11.5, topomap_png_b64: png },
+      ],
+    },
+    tail_ratio: 0.01,
+    warnings: ['Топокарта PC3 не построилась: ошибка рендера'],
   }
 }

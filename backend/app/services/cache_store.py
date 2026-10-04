@@ -30,6 +30,8 @@ import contextlib
 import logging
 import os
 import shutil
+from collections.abc import Callable
+from typing import BinaryIO
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +74,32 @@ def cache_write(path: str, data: bytes, label: str = "Кэш") -> bool:
         logger.warning("%s не записан (%s): %s", label, path, exc)
         # Обрывок временного файла не оставляем: следующий прогон прочитал бы
         # его как «объект не той длины» и упал вместо пересчёта.
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        return False
+
+
+def cache_write_stream(
+    path: str, produce: Callable[[BinaryIO], None], label: str = "Кэш",
+) -> bool:
+    """Атомарно записывает файл кэша потоком; ``True`` — запись состоялась.
+
+    Для артефактов, которые нельзя держать в памяти целиком (zip пакета
+    с EDF — сотни мегабайт): ``produce(fh)`` пишет содержимое в открытый
+    временный файл, публикация — тот же ``os.replace``, что и у
+    :func:`cache_write`. Свойства те же: кэш не бывает «наполовину
+    записан», сбой (включая ошибку самого производителя) логируется и не
+    поднимается наружу — промах кэша честно пересчитается.
+    """
+    tmp = f"{path}.tmp"
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(tmp, "wb") as fh:
+            produce(fh)
+        os.replace(tmp, path)
+        return True
+    except Exception as exc:
+        logger.warning("%s не записан потоком (%s): %s", label, path, exc)
         with contextlib.suppress(OSError):
             os.remove(tmp)
         return False
