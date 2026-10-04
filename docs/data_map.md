@@ -22,6 +22,7 @@
 | Диск, кэш ассетов | `data/cache/{surface,mri,contours,bem}/` | меш/BA, том T1 на MNI-сетке, объёмы меток атласа, **расчётные BEM/transform при отсутствии файлов установки** (`bem/fsaverage-ico-4-bem-sol.fif` ≈62 с один раз, `bem/fsaverage-computed-trans.fif` — задача FreeSurfer, `services/fsaverage_assets.py`) | surface 2.5 МБ, mri 1.7 МБ, contours 384 КБ, bem 236 МБ **только если посчитан** (иначе пусто) | по версии ассета, TTL нет; инвалидация — подъём версии сборки и правка входов в `services/asset_versions.py` (A7, этап 6): отпечаток считается одной функцией; расчётные `topomap_version`/`grid_version` к ассетам не относятся; файлы BEM/transform установки (`~/mne_data`) не трогаются никогда — кэш только их заменяет |
 | Диск, результаты | `data/results/` | дампы legacy-анализа `{session_id}.json` + **файлы задач** `jobs/<job_id>.json` | сейчас пусто; на задачу — единицы КБ (результат > `JOB_RESULT_MAX_BYTES` = 2 МБ не пишется) | дампы — только `/analyze`; файлы задач пишет `services/job_store.py` и поднимает в историю при старте (`JobManager.restore`, A8, этап 6), сносит обход сирот (A6): исчезнувшая запись и лимит `JOBS_HISTORY_LIMIT` |
 | Диск, журнал шагов | `data/cache/journal.jsonl` (+ `journal.jsonl.1`) | пошаговые замеры пайплайнов, JSON-объект на строку (§9) | не больше двух поколений по `JOURNAL_MAX_BYTES` = 5 МБ | дописывается под локом, ротация на `.1`; читается `GET /journal`; `JOURNAL_ENABLED=false` выключает запись; сам не чистится (кнопки в UI нет) |
+| Диск, аналитическая база | `data/analytics.db` (`ANALYTICS_DB_PATH`) | проекция строк журнала в SQL: таблица `steps` + `recording_id` — суммы/медианы/топ-шаги и «что посчитано по записи» одним запросом (§9) | растёт вместе со строками журнала (один штрих на строку, без ротации) | пишется `journal.record` → `insert_step`; наследие обоих поколений журнала дочитывается один раз на процесс; сбой гасится, вместе с записью не чистится и в ETag не участвует — `data-and-caches.md` п.17 |
 | БД | `backend/diplock.db` (SQLite; в прод — PostgreSQL через `DATABASE_URL`) | таблицы `recordings`, `sessions`, `epochs`, `dipoles`, `analyses`, `analysis_bands`, `dipole_points`, `report_runs`, `report_band_summaries`, `report_name_counts`, `report_dynamics`, `group_analyses`, `group_analysis_members` | 24 КБ, 13.09.2026 | схема — только alembic (`0001`…`0005`, страж паритета с моделями — `tests/test_migrations.py`, 4.2/4.4/остаток 4.7). Пишут **обе** ветки: legacy (`/analyze`, `/jobs` — `sessions`/`epochs`/`dipoles`, F21 закрыт 17.09.2026: `epoch_id` — настоящий FK) и **write-API 4.4** (`services/results_store.py` + `services/recording_store.py`): записи при `POST/DELETE /recordings`, задачи UI (`preprocess`/`dipoles`/`dipole_refine`/`spectrogram`) → `sessions`+`epochs`+`dipoles` (остаток F21), прогон автоотчёта → `analyses`/`report_*` (§8.3), **групповой анализ** → `group_analyses`/`group_analysis_members` (`services/group_analysis.py`, история не UPSERT + состав с каскадом «запись удалена → членство исчезает»). Read-API: `sessions`/`epochs`/`dipoles` — срез 02.10.2026, `analyses`/`dipole_points`/`report_*` — срезы G1–G4 03.10.2026 (групповой агрегат читает и пересчитывает по живой БД). Инварианты — `docs/rules/results-db.md` и `docs/rules/group-analysis.md` |
 | Браузер, localStorage | `diplock.ui`, `diplock.edf`, `diplock.eeg`, `diplock.dipoles`, `diplock.dipoleCalc`, `diplock.table`, `diplock.summary`, `diplock.group-compare`, `diplock.group-run` | параметры просмотра и формы расчета, свёрнутые секции панели опций (`diplock.ui.collapsedPanels`); `group-compare` — ярлыки условий пары, `group-run` — фильтры/подпись группового прогона (выборка и результат — состояние сессии) | 9 ключей | живут между сессиями; см. `docs/rules/frontend-state.md` |
 | Браузер, состояние сессии | zustand `edfRecording` + локальное состояние компонентов | запись, окно, курсор, результат расчёта, кадр playback | — | `edfRecording` **не** персистится; результат принадлежит записи и сбрасывается при загрузке новой/«Закрыть запись» |
@@ -185,13 +186,29 @@ ts | job_id | pipeline | step | params_key | bytes_in | bytes_out | ms | cache_h
 - **Первое обращение к ассету видно в том же журнале:** сборка объёмов атласа (≈1 с) попадает в шаг
   `asset-contours build`, а не «растворяется» в задаче, из-за которой она случилась.
 
-**Аналитический слой — план (решение владельца 17.09.2026).** Журнал — источник, но не средство
-запросов: чтобы ответить «сколько всего шло на `psd` за неделю», нужен SQL. Проекция будет
-**отдельным файлом `data/analytics.db`** (SQLite), наполняемым из `journal.jsonl` (или тем же
-`journal.step`), а **не** таблицами в `backend/diplock.db`: основная БД остаётся транзакционной
-(там `sessions`/`epochs`/`dipoles` анализа), а текстовые логи — на `logging` (обязаны работать до
-старта БД и при её падении). Схема — только вместе с alembic/CI (Фаза 6), чтобы её можно было
-версионировать; задача — `todo.md` §4.
+**Аналитический слой — `data/analytics.db` (решение владельца 17.09.2026, реализован 04.10.2026).**
+Журнал — источник, но не средство запросов: чтобы ответить «сколько всего шло на `psd` за неделю»,
+нужен SQL. Проекция — **отдельный файл `data/analytics.db`** (SQLite, путь — `ANALYTICS_DB_PATH`),
+а **не** таблицы в `backend/diplock.db`: основная БД остаётся транзакционной
+(`sessions`/`epochs`/`dipoles` анализа), а текстовые логи — на `logging` (обязаны работать до
+старта БД и при её падении). Устройство:
+
+- **Наполнение** — `services/analytics_db.py`: `journal.record` продублировал строку в базу
+  (`insert_step`, сбой гасится — свойство журнала «замер не ломает расчёт»), а перед первой
+  вставкой процесса дочитывает **оба поколения** `journal.jsonl` целиком (`journal.iter_entries`)
+  — ротация стирает историю, база её хранит. Идемпотентность — по `line_key` (sha1 содержимого
+  строки **без** `recording_id`): повторный импорт не задваивает, а прямая вставка обновляет
+  связь с записью (`ON CONFLICT … DO UPDATE`).
+- **`recording_id` — только в базе.** Формат JSONL (таблица выше) не меняется: связь «шаг → запись»
+  кладёт `insert_step` из ContextVar `journal.job_scope` (его получает `job_manager` из
+  `job.meta`), и вопрос «что посчитано по этой записи» отвечает `recording_summary` одним SQL.
+- **Схема** — таблица `steps` (проекция строки журнала + `recording_id`), версия —
+  `PRAGMA user_version` (шаги `_MIGRATIONS` в модуле): alembic ведёт только транзакционную БД,
+  а файл обязан подниматься и без неё.
+- **Запросы** — функции модуля (каждый — один SQL): `step_stats` (count/sum/mean/**median**/min/max
+  с фильтрами pipeline/step/recording_id и диапазоном дат `since`/`until`), `top_steps`,
+  `cache_ratio`, `recording_summary`. HTTP-роутов нет — слой для будущих подсказок UI и прямых
+  запросов `sqlite3 data/analytics.db`; инварианты — `docs/rules/data-and-caches.md` п.17.
 
 **Первые замеры из журнала** (17.09.2026, `data/edf/test.edf`: 130.7 с × 500 Гц × 18 кан., три задачи
 подряд на свежем `data/cache`, пауза между задачами — время на подготовку к следующей):

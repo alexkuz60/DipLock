@@ -47,6 +47,7 @@ from datetime import datetime
 from typing import Any
 
 from app.core.config import Settings, settings
+from app.services import analytics_db
 from app.services.cache_store import cache_path
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,9 @@ DASH = "-"
 # ``job_id`` текущей задачи: заполняет ``job_scope`` (job_manager), читают
 # ``step``/``record``. Сервисы не обязаны знать про задачи.
 _JOB_ID: ContextVar[str | None] = ContextVar("diplock_job_id", default=None)
+# ``recording_id`` текущей задачи записи (4.3): в JSONL-строку не входит —
+# связь «шаг → запись» живёт только в аналитической проекции (analytics_db).
+_RECORDING_ID: ContextVar[str | None] = ContextVar("diplock_recording_id", default=None)
 _LOCK = threading.Lock()
 
 
@@ -78,18 +82,27 @@ def current_job_id() -> str:
     return _JOB_ID.get() or DASH
 
 
+def current_recording_id() -> str:
+    """``recording_id`` текущей задачи записи или прочерк (нет задачи/сравнение)."""
+    return _RECORDING_ID.get() or DASH
+
+
 @contextmanager
-def job_scope(job_id: str) -> Iterator[None]:
+def job_scope(job_id: str, recording_id: str | None = None) -> Iterator[None]:
     """Помечает шаги внутри блока идентификатором задачи.
 
     Вызывается в ``job_manager._execute`` вокруг ``asyncio.to_thread``: контекст
     копируется в поток, поэтому сервисы пишут ``job_id`` без параметров.
+    ``recording_id`` (задачи записи, ``job.meta``) уходит только в аналитическую
+    проекцию — формат JSONL-строки не меняется (4.3).
     """
     token = _JOB_ID.set(job_id)
+    token_rec = _RECORDING_ID.set(recording_id)
     try:
         yield
     finally:
         _JOB_ID.reset(token)
+        _RECORDING_ID.reset(token_rec)
 
 
 @dataclass
@@ -184,14 +197,16 @@ def record(
     cfg = cfg or settings
     if not cfg.journal_enabled:
         return
-    _append(
-        _line(
-            pipeline, step, ms,
-            params_key=params_key, bytes_in=bytes_in, bytes_out=bytes_out,
-            cache_hit=cache_hit, epochs=epochs, note=note,
-        ),
-        cfg,
+    line = _line(
+        pipeline, step, ms,
+        params_key=params_key, bytes_in=bytes_in, bytes_out=bytes_out,
+        cache_hit=cache_hit, epochs=epochs, note=note,
     )
+    _append(line, cfg)
+    # Аналитическая проекция (4.3): та же строка плюс recording_id контекста
+    # задачи. Сбой гасится внутри insert_step — замер не ломает расчёт, как и
+    # запись файла журнала (свойство 2).
+    analytics_db.insert_step(line, recording_id=current_recording_id(), cfg=cfg)
 
 
 
@@ -301,6 +316,29 @@ def read_journal(
                 continue
             entries.append(parsed)
     return entries[-limit:] if limit > 0 else entries
+
+
+def iter_entries(cfg: Settings | None = None) -> Iterator[dict[str, Any]]:
+    """Все строки обоих поколений журнала — без ограничения «хвостом» (4.3).
+
+    Нужна аналитической проекции (`analytics_db.ingest_journal`): ротация
+    стирает историю, поэтому наследие дочитывается целиком, а не последними
+    ``READ_MAX_BYTES``, как в ``read_journal``. Битые и чужие строки
+    пропускаются тем же разбором.
+    """
+    base = journal_path(cfg)
+    for path in (f"{base}.1", base):
+        try:
+            with open(path, "rb") as fh:
+                data = fh.read()
+        except OSError:
+            continue
+        for line in data.split(b"\n"):
+            if not line.strip():
+                continue
+            parsed = _parse(line)
+            if parsed is not None:
+                yield parsed
 
 
 def clear_journal(cfg: Settings | None = None) -> None:

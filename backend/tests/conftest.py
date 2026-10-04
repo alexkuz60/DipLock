@@ -18,6 +18,9 @@ os.environ["RESULTS_DIR"] = os.path.join(_TMP_DATA, "results")
 # БД тоже изолируем: write-API (4.4) пишет строки при POST/задачах, а
 # DATABASE_URL из .env (backend/diplock.db) вёл бы тесты в рабочую базу.
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP_DATA}/diplock.db"
+# Аналитическая проекция журнала (4.3) — свой отдельный файл; без изоляции
+# record() писал бы в рабочее data/analytics.db.
+os.environ["ANALYTICS_DB_PATH"] = os.path.join(_TMP_DATA, "analytics.db")
 for _sub in ("edf", "cache", "results"):
     os.makedirs(os.path.join(_TMP_DATA, _sub), exist_ok=True)
 atexit.register(shutil.rmtree, _TMP_DATA, True)
@@ -68,6 +71,7 @@ def isolated_io(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "upload_dir", str(tmp_path / "edf"))
     monkeypatch.setattr(settings, "results_dir", str(tmp_path / "results"))
     monkeypatch.setattr(settings, "cache_dir", str(tmp_path / "cache"))
+    monkeypatch.setattr(settings, "analytics_db_path", str(tmp_path / "analytics.db"))
 
     async def _no_db(result):
         return None

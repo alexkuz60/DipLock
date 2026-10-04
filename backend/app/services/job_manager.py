@@ -392,8 +392,12 @@ class JobManager:
                 try:
                     # Шаги пайплайна помечаются `job_id` (журнал шагов, этап 5):
                     # `to_thread` копирует контекст, поэтому воркер и сервисы видят
-                    # его без передачи параметров.
-                    with journal.job_scope(job.job_id):
+                    # его без передачи параметров. `recording_id` из meta задачи
+                    # нужен только аналитической проекции (4.3) — «что посчитано
+                    # по записи»; JSONL-строка его не содержит.
+                    with journal.job_scope(
+                        job.job_id, recording_id=job.meta.get("recording_id"),
+                    ):
                         result = await asyncio.to_thread(fn, job.progress_cb(), *args, **kwargs)
                 except JobCancelledError:
                     job.mark_cancelled()
