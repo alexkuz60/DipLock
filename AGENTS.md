@@ -77,6 +77,7 @@ backend/app/
 │   ├── spectral.py        # спектр δ…γ (Welch/multitaper + 1/f-фит specparam) + топокарты PNG, кэш + ETag (3.4)
 │   ├── spectrogram.py     # спектрограмма канала: STFT → сетка дБ (DPS2), кэш + ETag (5)
 │   ├── channel_mix.py     # виртуальные каналы «ЭЭГ»: миксы групп 10-20 из паспорта записи (5+)
+│   ├── audio_render/      # «Нейромузыка» (эксперимент): ядро ×128, шины L/C/R, WAV+sidecar (docs/rules/neuromusic.md)
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
 │   ├── eloreta.py         # eLORETA пик/ROI одной эпохи: forward+inverse MNE (остаток B9)
 │   ├── compare.py         # дифференциальный анализ двух записей (B9): дельты B − A, FDR/бутстрап, кластерный тест MNE, карты разности
@@ -184,6 +185,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/api-jobs.md` | инвентарь роутов, правило «задача = job», ETag/304, ошибки |
 | `docs/rules/compare.md` | дифференциальный анализ двух записей (B9): дельты B − A, кластерный тест MNE, карты разности |
 | `docs/rules/group-analysis.md` | групповой анализ группы N>2 (остаток 4.7): агрегаты «BA × сессии», два знаменателя share, персист прогонов, тепловая карта, кластеры диполей (B8) |
+| `docs/rules/neuromusic.md` | раздел «Нейромузыка» (эксперимент): партитура ЭЭГ, ядро ×128, шины L/C/R, in-memory рендер, чек-лист приёмки |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |

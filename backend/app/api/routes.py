@@ -107,6 +107,7 @@ from app.schemas.analysis import (
     SpectrumResult,
     SurfaceOut,
 )
+from app.schemas.audio import AudioRenderRequest, AudioRenderStart, AudioRenderStatus
 from app.schemas.compare import CompareResult
 from app.schemas.group import (
     GroupAggregateIn,
@@ -135,6 +136,8 @@ from app.services.atlas_contours import (
 from app.services.atlas_contours import (
     contours_ref as contour_ref,
 )
+from app.services.audio_render import render as neuro_render
+from app.services.audio_render.mix import GAIN_MAX_DB, GAIN_MIN_DB
 from app.services.channel_mix import mixes_for
 from app.services.compare import cached_compare_topomap
 from app.services.filter_design import filter_response
@@ -2237,4 +2240,124 @@ async def get_group_analysis_report_html_route(
         media_type="text/html",
         cache_control=CACHE_PRIVATE_DAY,
     )
+
+
+# --- «Нейромузыка» (эксперимент, docs/rules/neuromusic.md) --------------------
+# Рендер без job-системы (ТЗ фазы 1): in-memory статус, один активный рендер.
+# Роуты только форма/контракт; цикл — services/audio_render/render.py.
+
+
+def _audio_artifacts(render_id: str) -> neuro_render.RenderArtifacts:
+    """Готовые артефакты рендера; 404 — нет/TTL, 409 — идёт или упал."""
+    try:
+        state = neuro_render.state_of(render_id)
+    except neuro_render.RenderNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Рендер {render_id} не найден (хранился {neuro_render.RENDER_TTL_SEC // 60} мин)",
+        ) from exc
+    if state.status == "running":
+        raise HTTPException(
+            status_code=409, detail=f"Рендер ещё идёт: {state.stage} ({state.pct:.0%})",
+        )
+    if state.status == "failed" or state.artifacts is None:
+        raise HTTPException(status_code=409, detail=f"Рендер не удался: {state.error}")
+    return state.artifacts
+
+
+@router.post(
+    "/audio/render",
+    status_code=202,
+    response_model=AudioRenderStart,
+    summary="Запустить рендер партитуры ЭЭГ → стерео (эксперимент «Нейромузыка»)",
+)
+async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
+    """Старт рендера: 7 треков ×128 (7 октав) + мастер, в памяти процесса.
+
+    Проценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —
+    отдельными GET. Гейны валидируются здесь (400 с текстом для UI).
+    """
+    recording = require_recording(payload.recording_id)
+    unknown = sorted(set(payload.gains_db) - set(settings.freq_bands))
+    if unknown:
+        raise HTTPException(
+            status_code=400, detail=f"Неизвестные полосы гейнов: {', '.join(unknown)}",
+        )
+    for band, value in sorted(payload.gains_db.items()):
+        if not GAIN_MIN_DB <= float(value) <= GAIN_MAX_DB:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Гейн {band}: {value} вне диапазона {GAIN_MIN_DB:g}…{GAIN_MAX_DB:g} дБ",
+            )
+    try:
+        render_id = neuro_render.start_render(recording, settings, payload.gains_db)
+    except neuro_render.RenderBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return AudioRenderStart(render_id=render_id)
+
+
+@router.get(
+    "/audio/render/{render_id}/status",
+    response_model=AudioRenderStatus,
+    summary="Статус рендера: шаг пайплайна и проценты (поллинг UI)",
+)
+async def audio_render_status(render_id: str) -> AudioRenderStatus:
+    """Прогресс-бар «Нейромузыки»: stage + pct 0..1, список готовых треков."""
+    try:
+        state = neuro_render.state_of(render_id)
+    except neuro_render.RenderNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"Рендер {render_id} не найден") from exc
+    return AudioRenderStatus(
+        render_id=state.render_id,
+        status=state.status,
+        stage=state.stage,
+        pct=state.pct,
+        message=state.message,
+        error=state.error,
+        tracks=sorted(state.artifacts.tracks_wav) if state.artifacts else [],
+    )
+
+
+@router.get(
+    "/audio/render/{render_id}/master.wav",
+    response_class=Response,
+    responses={200: {"content": {"audio/wav": {}}}},
+    summary="WAV мастера партитуры (48 кГц, PCM_24, стерео)",
+)
+async def audio_render_master(render_id: str) -> Response:
+    """Мастер-трек из памяти рендера (плеер и «Скачать WAV»)."""
+    artifacts = _audio_artifacts(render_id)
+    # Без Content-Disposition: файл должен проигрываться в <audio src=...>,
+    # а скачивание UI инициирует атрибутом download (same-origin).
+    return Response(content=artifacts.master_wav, media_type="audio/wav")
+
+
+@router.get(
+    "/audio/render/{render_id}/track/{band}.wav",
+    response_class=Response,
+    responses={200: {"content": {"audio/wav": {}}}},
+    summary="WAV отдельного трека партитуры (инструмент одной полосы)",
+)
+async def audio_render_track(render_id: str, band: str) -> Response:
+    """Соль-прослушивание: каждый трек полосы отдельным файлом (концепция M6)."""
+    artifacts = _audio_artifacts(render_id)
+    data = artifacts.tracks_wav.get(band)
+    if data is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Трек {band} не найден; доступны: {', '.join(artifacts.bands)}",
+        )
+    return Response(content=data, media_type="audio/wav")
+
+
+@router.get(
+    "/audio/render/{render_id}/sidecar.json",
+    response_class=Response,
+    responses={200: {"content": {"application/json": {}}}},
+    summary="Sidecar-«партитура» рендера (веса, гейны, checksum, extensions)",
+)
+async def audio_render_sidecar(render_id: str) -> Response:
+    """JSON-партитура эксперимента (ТЗ §6): что и из чего было сварено."""
+    artifacts = _audio_artifacts(render_id)
+    return Response(content=artifacts.sidecar, media_type="application/json")
 

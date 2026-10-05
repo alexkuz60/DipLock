@@ -3586,6 +3586,202 @@
         }
       }
     },
+    "/api/v1/audio/render": {
+      "post": {
+        "summary": "Запустить рендер партитуры ЭЭГ → стерео (эксперимент «Нейромузыка»)",
+        "description": "Старт рендера: 7 треков ×128 (7 октав) + мастер, в памяти процесса.\n\nПроценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —\nотдельными GET. Гейны валидируются здесь (400 с текстом для UI).",
+        "operationId": "start_audio_render_api_v1_audio_render_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioRenderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioRenderStart"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/render/{render_id}/status": {
+      "get": {
+        "summary": "Статус рендера: шаг пайплайна и проценты (поллинг UI)",
+        "description": "Прогресс-бар «Нейромузыки»: stage + pct 0..1, список готовых треков.",
+        "operationId": "audio_render_status_api_v1_audio_render__render_id__status_get",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioRenderStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/render/{render_id}/master.wav": {
+      "get": {
+        "summary": "WAV мастера партитуры (48 кГц, PCM_24, стерео)",
+        "description": "Мастер-трек из памяти рендера (плеер и «Скачать WAV»).",
+        "operationId": "audio_render_master_api_v1_audio_render__render_id__master_wav_get",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "audio/wav": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/render/{render_id}/track/{band}.wav": {
+      "get": {
+        "summary": "WAV отдельного трека партитуры (инструмент одной полосы)",
+        "description": "Соль-прослушивание: каждый трек полосы отдельным файлом (концепция M6).",
+        "operationId": "audio_render_track_api_v1_audio_render__render_id__track__band__wav_get",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          },
+          {
+            "name": "band",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Band"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "audio/wav": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/render/{render_id}/sidecar.json": {
+      "get": {
+        "summary": "Sidecar-«партитура» рендера (веса, гейны, checksum, extensions)",
+        "description": "JSON-партитура эксперимента (ТЗ §6): что и из чего было сварено.",
+        "operationId": "audio_render_sidecar_api_v1_audio_render__render_id__sidecar_json_get",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -3888,6 +4084,116 @@
         ],
         "title": "ArtifactZoneOut",
         "description": "Зона артефакта для слоёв вьюера: интервал + затронутые каналы.\n\nПлоская проекция аннотаций MNE: ``onset``/``duration``/``description`` плюс\nканалы, по которым сработал детектор (для тултипа зоны). Каналы могут быть\nпустыми, если детектор не сопоставил аннотацию с конкретным каналом\n(например, ICA находит компоненты, а не каналы)."
+      },
+      "AudioRenderRequest": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id",
+            "description": "Идентификатор записи из реестра просмотра"
+          },
+          "gains_db": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Gains Db",
+            "description": "Пользовательские гейны полос, dB (ключи — freq_bands); диапазон -24…12, по умолчанию 0"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id"
+        ],
+        "title": "AudioRenderRequest",
+        "description": "Тело ``POST /api/v1/audio/render``: запись и гейны полос (ТЗ M4)."
+      },
+      "AudioRenderStart": {
+        "properties": {
+          "render_id": {
+            "type": "string",
+            "title": "Render Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "default": "running"
+          }
+        },
+        "type": "object",
+        "required": [
+          "render_id"
+        ],
+        "title": "AudioRenderStart",
+        "description": "Ответ ``POST /audio/render`` (202): рендер запущен, поллите статус."
+      },
+      "AudioRenderStatus": {
+        "properties": {
+          "render_id": {
+            "type": "string",
+            "title": "Render Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage",
+            "description": "Текущий шаг, например «Полоса alpha (3/7)»"
+          },
+          "pct": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pct",
+            "description": "Готовность 0..1"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст ошибки (status=failed)"
+          },
+          "tracks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tracks",
+            "description": "Готовые треки (после успеха)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "render_id",
+          "status",
+          "stage",
+          "pct"
+        ],
+        "title": "AudioRenderStatus",
+        "description": "``GET /audio/render/{id}/status``: проценты и шаг пайплайна (ТЗ M5)."
       },
       "BestFitDipole": {
         "properties": {

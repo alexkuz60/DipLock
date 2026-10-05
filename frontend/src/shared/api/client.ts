@@ -6,6 +6,8 @@
  */
 import type {
   AnalyzeResponse,
+  AudioRenderStart,
+  AudioRenderStatus,
   BundleResult,
   CompareResult,
   ContourSlice,
@@ -177,6 +179,33 @@ export const api = {
    */
   serverRestart: (signal?: AbortSignal) =>
     request<ServerRestart>(`${API_PREFIX}/server/restart`, { method: 'POST', signal }),
+
+  /**
+   * «Нейромузыка» (эксперимент): рендер партитуры → 202 + render_id.
+   * Статус — `audioRenderStatus` (поллинг ~400 мс), файлы — по URL ниже;
+   * состояния рендера in-memory на сервере (TTL 15 мин).
+   */
+  audioRender: (recordingId: string, signal?: AbortSignal) =>
+    request<AudioRenderStart>(`${API_PREFIX}/audio/render`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recording_id: recordingId }),
+      signal,
+    }),
+
+  /** Шаг и проценты рендера (прогресс-бар раздела). */
+  audioRenderStatus: (renderId: string, signal?: AbortSignal) =>
+    request<AudioRenderStatus>(`${API_PREFIX}/audio/render/${renderId}/status`, { signal }),
+
+  /** URL мастер-WAV готового рендера (для `<audio src>` и скачивания). */
+  audioMasterUrl: (renderId: string) => `${API_PREFIX}/audio/render/${renderId}/master.wav`,
+
+  /** URL WAV одного трека полосы (соль-прослушивание инструмента). */
+  audioTrackUrl: (renderId: string, band: string) =>
+    `${API_PREFIX}/audio/render/${renderId}/track/${band}.wav`,
+
+  /** URL sidecar-«партитуры» (веса, гейны, checksum, extensions). */
+  audioSidecarUrl: (renderId: string) => `${API_PREFIX}/audio/render/${renderId}/sidecar.json`,
 
   /**
    * Контуры среза атласа (срез 3.9): структуры `aparc+aseg` и поля Бродмана.

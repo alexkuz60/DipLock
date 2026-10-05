@@ -31,6 +31,8 @@ import { SummaryToolActions } from './summary/SummaryToolActions'
 import { GroupPanel } from './group/GroupPanel'
 import { GroupSection } from './group/GroupSection'
 import { GroupToolActions } from './group/GroupToolActions'
+import { NeuromusicPanel } from './neuromusic/NeuromusicPanel'
+import { NeuromusicSection } from './neuromusic/NeuromusicSection'
 import {
   EmoLabPanel,
   EmoLabSection,
@@ -84,6 +86,7 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
   },
   emolab: { Component: EmoLabSection, Panel: EmoLabPanel },
   neuroaudio: { Component: NeuroAudioSection, Panel: NeuroAudioPanel },
+  neuromusic: { Component: NeuromusicSection, Panel: NeuromusicPanel },
   wiki: { Component: WikiSection },
   settings: { Component: SettingsSection },
   server: { Component: ServerStatusSection },

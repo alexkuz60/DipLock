@@ -12,6 +12,7 @@ import {
   Headphones,
   House,
   Layers,
+  Music2,
   Radar,
   ServerCog,
   Settings,
@@ -31,6 +32,7 @@ export type SectionId =
   | 'summary'
   | 'emolab'
   | 'neuroaudio'
+  | 'neuromusic'
   | 'wiki'
   | 'settings'
   | 'server'
@@ -159,6 +161,18 @@ export const SECTIONS: SectionConfig[] = [
     hotkey: '9',
     icon: Headphones,
     route: '/neuroaudio',
+    hasToolHeader: true,
+    hasRightPanel: true,
+    group: 'main',
+  },
+  {
+    id: 'neuromusic',
+    title: 'Нейромузыка — ЭЭГ в звук (эксперимент)',
+    shortTitle: 'Нейромузыка',
+    hint: 'Нейромузыка: партитура ЭЭГ — 7 треков полос ×128 и мастер (эксперимент)',
+    hotkey: '0',
+    icon: Music2,
+    route: '/neuromusic',
     hasToolHeader: true,
     hasRightPanel: true,
     group: 'main',

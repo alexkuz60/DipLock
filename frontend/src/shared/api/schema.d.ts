@@ -1473,6 +1473,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audio/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Запустить рендер партитуры ЭЭГ → стерео (эксперимент «Нейромузыка»)
+         * @description Старт рендера: 7 треков ×128 (7 октав) + мастер, в памяти процесса.
+         *
+         *     Проценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —
+         *     отдельными GET. Гейны валидируются здесь (400 с текстом для UI).
+         */
+        post: operations["start_audio_render_api_v1_audio_render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/render/{render_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Статус рендера: шаг пайплайна и проценты (поллинг UI)
+         * @description Прогресс-бар «Нейромузыки»: stage + pct 0..1, список готовых треков.
+         */
+        get: operations["audio_render_status_api_v1_audio_render__render_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/render/{render_id}/master.wav": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * WAV мастера партитуры (48 кГц, PCM_24, стерео)
+         * @description Мастер-трек из памяти рендера (плеер и «Скачать WAV»).
+         */
+        get: operations["audio_render_master_api_v1_audio_render__render_id__master_wav_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/render/{render_id}/track/{band}.wav": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * WAV отдельного трека партитуры (инструмент одной полосы)
+         * @description Соль-прослушивание: каждый трек полосы отдельным файлом (концепция M6).
+         */
+        get: operations["audio_render_track_api_v1_audio_render__render_id__track__band__wav_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/render/{render_id}/sidecar.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sidecar-«партитура» рендера (веса, гейны, checksum, extensions)
+         * @description JSON-партитура эксперимента (ТЗ §6): что и из чего было сварено.
+         */
+        get: operations["audio_render_sidecar_api_v1_audio_render__render_id__sidecar_json_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -1668,6 +1771,76 @@ export interface components {
             duration_sec: number;
             /** Channels */
             channels?: string[];
+        };
+        /**
+         * AudioRenderRequest
+         * @description Тело ``POST /api/v1/audio/render``: запись и гейны полос (ТЗ M4).
+         */
+        AudioRenderRequest: {
+            /**
+             * Recording Id
+             * @description Идентификатор записи из реестра просмотра
+             */
+            recording_id: string;
+            /**
+             * Gains Db
+             * @description Пользовательские гейны полос, dB (ключи — freq_bands); диапазон -24…12, по умолчанию 0
+             */
+            gains_db?: {
+                [key: string]: number;
+            };
+        };
+        /**
+         * AudioRenderStart
+         * @description Ответ ``POST /audio/render`` (202): рендер запущен, поллите статус.
+         */
+        AudioRenderStart: {
+            /** Render Id */
+            render_id: string;
+            /**
+             * Status
+             * @default running
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed";
+        };
+        /**
+         * AudioRenderStatus
+         * @description ``GET /audio/render/{id}/status``: проценты и шаг пайплайна (ТЗ M5).
+         */
+        AudioRenderStatus: {
+            /** Render Id */
+            render_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed";
+            /**
+             * Stage
+             * @description Текущий шаг, например «Полоса alpha (3/7)»
+             */
+            stage: string;
+            /**
+             * Pct
+             * @description Готовность 0..1
+             */
+            pct: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Error
+             * @description Текст ошибки (status=failed)
+             */
+            error?: string | null;
+            /**
+             * Tracks
+             * @description Готовые треки (после успеха)
+             */
+            tracks?: string[];
         };
         /**
          * BestFitDipole
@@ -8931,6 +9104,164 @@ export interface operations {
                 };
                 content: {
                     "text/html": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_audio_render_api_v1_audio_render_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AudioRenderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioRenderStart"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_render_status_api_v1_audio_render__render_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioRenderStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_render_master_api_v1_audio_render__render_id__master_wav_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_render_track_api_v1_audio_render__render_id__track__band__wav_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+                band: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_render_sidecar_api_v1_audio_render__render_id__sidecar_json_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

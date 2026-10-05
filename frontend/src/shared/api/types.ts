@@ -26,6 +26,10 @@ export type BestFitDipole = Schemas['BestFitDipole']
 /** Одна эпоха нарезки: окно, флаг отбраковки и мощности по диапазонам (F21) */
 export type EpochSummary = Schemas['EpochSummary']
 
+/** «Нейромузыка»: запуск рендера (202) и его статус для прогресс-бара */
+export type AudioRenderStart = Schemas['AudioRenderStart']
+export type AudioRenderStatus = Schemas['AudioRenderStatus']
+
 export type ArtifactKind = import('@/shared/lib/artifacts').ArtifactKind
 
 /** Счётчики артефактов по типам (ключи — `ArtifactKind`, их может стать больше) */
