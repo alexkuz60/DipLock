@@ -10,13 +10,24 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.services.audio_render.mix import GAIN_MAX_DB, GAIN_MIN_DB
+from app.services.audio_render.loudness import (
+    LOUDNESS_PHON_DEFAULT,
+    LOUDNESS_PHON_MAX,
+    LOUDNESS_PHON_MIN,
+)
+from app.services.audio_render.mix import (
+    BOOST_DEFAULT_DB,
+    BOOST_MAX_DB,
+    BOOST_MIN_DB,
+    GAIN_MAX_DB,
+    GAIN_MIN_DB,
+)
 
 AudioRenderState = Literal["running", "succeeded", "failed"]
 
 
 class AudioRenderRequest(BaseModel):
-    """Тело ``POST /api/v1/audio/render``: запись и гейны полос (ТЗ M4)."""
+    """Тело ``POST /api/v1/audio/render``: запись, гейны, boost, психоакустика."""
 
     recording_id: str = Field(description="Идентификатор записи из реестра просмотра")
     gains_db: dict[str, float] = Field(
@@ -24,6 +35,33 @@ class AudioRenderRequest(BaseModel):
         description=(
             f"Пользовательские гейны полос, dB (ключи — freq_bands); "
             f"диапазон {GAIN_MIN_DB:g}…{GAIN_MAX_DB:g}, по умолчанию 0"
+        ),
+    )
+    boost_db: float = Field(
+        default=BOOST_DEFAULT_DB,
+        description=(
+            f"Базовое усиление полосовых стерео-треков, dB (целевой RMS "
+            f"−18 + boost); диапазон {BOOST_MIN_DB:g}…{BOOST_MAX_DB:g}, "
+            f"по умолчанию {BOOST_DEFAULT_DB:g} (приёмка 05.10.2026)"
+        ),
+    )
+    loudness_phon: float | None = Field(
+        default=LOUDNESS_PHON_DEFAULT,
+        description=(
+            "Опорный уровень психоакустической компенсации ISO 226:2003, фон — "
+            "статические смещения целевого RMS полос для равной субъективной "
+            f"громкости; диапазон {LOUDNESS_PHON_MIN:g}…{LOUDNESS_PHON_MAX:g}, "
+            f"по умолчанию {LOUDNESS_PHON_DEFAULT:g}; null — выключить "
+            "(чистый RMS без поправок)"
+        ),
+    )
+    loudness_autobase: bool = Field(
+        default=True,
+        description=(
+            "Стратегия A: при включённой компенсации база рендера ограничивается "
+            "потолком «ямы» (θ/α/β выравниваются по перцептиву, boost срезается "
+            "до запаса потолка); false — «максимум громкости» (база −18+boost, "
+            "треки crest-limited)"
         ),
     )
 

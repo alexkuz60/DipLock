@@ -4,6 +4,8 @@ import pytest
 
 from app.core.config import settings
 from app.services.audio_render.mix import (
+    BOOST_DEFAULT_DB,
+    BOOST_MAX_DB,
     CHANNEL_ORDER,
     PEAK_CEILING,
     TRACK_RMS_DBFS,
@@ -84,18 +86,68 @@ def test_empty_channel_list_is_rejected() -> None:
 
 
 def test_normalize_track_hits_target_rms() -> None:
-    """Трек приводится к RMS −18 dBFS; пользовательский гейн сдвигает уровень."""
+    """Трек приводится к RMS −18 dBFS; гейн сдвигает уровень, потолок — только вниз."""
     rng = np.random.default_rng(1)
     track = rng.standard_normal((1000, 2)) * 0.05  # уровень «похожий на сигнал»
 
     quiet, gain, rms = normalize_track(track)
     assert rms == pytest.approx(10 ** (TRACK_RMS_DBFS / 20), rel=1e-6)
     assert gain is not None
-    # После нормализации +12 dB трек звучит на −6 dBFS.
+    # После +12 dB пик гауссова трека переваливает −1 dBFS: трек прижимается
+    # к потолку (только вниз), applied gain/rms честно уменьшаются на величину
+    # поджатия — PCM_24 не клипует значения >1.0.
     louder, gain_plus, rms_plus = normalize_track(track, gain_db=12.0)
-    assert rms_plus == pytest.approx(10 ** ((TRACK_RMS_DBFS + 12.0) / 20), rel=1e-6)
-    assert gain_plus == pytest.approx(gain + 12.0)
+    ideal = 10 ** ((TRACK_RMS_DBFS + 12.0) / 20)
+    ceiling_db = 20.0 * float(np.log10(rms_plus / ideal))
+    assert ceiling_db <= 1e-9  # поджатие может не сработать, но не раздувание
+    assert gain_plus == pytest.approx(gain + 12.0 + ceiling_db)
+    assert np.max(np.abs(louder)) <= PEAK_CEILING + 1e-9
     assert track_rms(louder) > track_rms(quiet)
+
+
+def test_normalize_track_boost_raises_target() -> None:
+    """boost_db поднимает целевой уровень: −18 + 6 = −12 dBFS (приёмка 05.10.2026)."""
+    t = np.linspace(0.0, 40.0 * np.pi, 4000)
+    track = np.stack([np.sin(t), np.cos(t)], axis=1) * 1e-3  # crest 3 дБ — без потолка
+
+    _, gain, rms = normalize_track(track, boost_db=BOOST_DEFAULT_DB)
+    assert gain is not None
+    assert rms == pytest.approx(
+        10 ** ((TRACK_RMS_DBFS + BOOST_DEFAULT_DB) / 20), rel=1e-6,
+    )
+    # Без boost прежний эталон −18 dBFS — контракт не изменился.
+    _, _, rms_base = normalize_track(track)
+    assert rms_base == pytest.approx(10 ** (TRACK_RMS_DBFS / 20), rel=1e-6)
+
+
+def test_track_peak_is_capped_at_ceiling_with_boost() -> None:
+    """Пик трека прижимается к 0.891: при boost громкий трек не клипнет в PCM_24."""
+    spike = np.zeros((2000, 2))
+    spike[1000, 0] = 1000.0  # импульсный трек с огромным crest-фактором
+
+    out, gain, rms = normalize_track(spike, boost_db=BOOST_MAX_DB)
+    assert gain is not None and rms is not None
+    assert float(np.max(np.abs(out))) == pytest.approx(PEAK_CEILING)
+    # Поджатие — только вниз: фактический RMS ниже целевого −18 + boost.
+    assert rms < 10 ** ((TRACK_RMS_DBFS + BOOST_MAX_DB) / 20)
+
+
+def test_normalize_track_applies_loudness_offset() -> None:
+    """Психоакустическая поправка сдвигает целевой RMS (ISO 226, знак важен)."""
+    t = np.linspace(0.0, 40.0 * np.pi, 4000)
+    track = np.stack([np.sin(t), np.cos(t)], axis=1) * 1e-3  # crest 3 дБ
+
+    # «Яма» 2–4 кГц (beta): отрицательное смещение — трек опускается ниже −18.
+    _, _, rms_beta = normalize_track(track, loudness_db=-2.2)
+    assert rms_beta == pytest.approx(10 ** ((TRACK_RMS_DBFS - 2.2) / 20), rel=1e-6)
+
+    # Глухая басовая полоса (delta): положительное — поднимается.
+    _, _, rms_delta = normalize_track(track, loudness_db=11.7)
+    assert rms_delta == pytest.approx(10 ** ((TRACK_RMS_DBFS + 11.7) / 20), rel=1e-6)
+
+    # Суммируется с boost: −18 + boost + loudness.
+    _, _, rms_both = normalize_track(track, boost_db=6.0, loudness_db=-2.2)
+    assert rms_both == pytest.approx(10 ** ((TRACK_RMS_DBFS + 6.0 - 2.2) / 20), rel=1e-6)
 
 
 def test_silent_track_is_not_amplified() -> None:

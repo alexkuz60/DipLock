@@ -182,14 +182,28 @@ export const api = {
 
   /**
    * «Нейромузыка» (эксперимент): рендер партитуры → 202 + render_id.
-   * Статус — `audioRenderStatus` (поллинг ~400 мс), файлы — по URL ниже;
-   * состояния рендера in-memory на сервере (TTL 15 мин).
+   * `boostDb` — базовое усиление полосовых треков, дБ (0…12, дефолт сервера +6);
+   * `loudnessPhon` — опорный уровень компенсации ISO 226, фон (60…90) или
+   * `null` — выключить; `loudnessAutobase` — стратегия A (автобаза «ямы») ↔
+   * «максимум громкости»; статус — `audioRenderStatus` (поллинг ~400 мс),
+   * файлы — по URL ниже; состояния рендера in-memory (TTL 15 мин).
    */
-  audioRender: (recordingId: string, signal?: AbortSignal) =>
+  audioRender: (
+    recordingId: string,
+    opts?: { boostDb?: number; loudnessPhon?: number | null; loudnessAutobase?: boolean },
+    signal?: AbortSignal,
+  ) =>
     request<AudioRenderStart>(`${API_PREFIX}/audio/render`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ recording_id: recordingId }),
+      body: JSON.stringify({
+        recording_id: recordingId,
+        ...(opts?.boostDb !== undefined ? { boost_db: opts.boostDb } : {}),
+        ...(opts?.loudnessPhon !== undefined ? { loudness_phon: opts.loudnessPhon } : {}),
+        ...(opts?.loudnessAutobase !== undefined
+          ? { loudness_autobase: opts.loudnessAutobase }
+          : {}),
+      }),
       signal,
     }),
 

@@ -137,7 +137,16 @@ from app.services.atlas_contours import (
     contours_ref as contour_ref,
 )
 from app.services.audio_render import render as neuro_render
-from app.services.audio_render.mix import GAIN_MAX_DB, GAIN_MIN_DB
+from app.services.audio_render.loudness import (
+    LOUDNESS_PHON_MAX,
+    LOUDNESS_PHON_MIN,
+)
+from app.services.audio_render.mix import (
+    BOOST_MAX_DB,
+    BOOST_MIN_DB,
+    GAIN_MAX_DB,
+    GAIN_MIN_DB,
+)
 from app.services.channel_mix import mixes_for
 from app.services.compare import cached_compare_topomap
 from app.services.filter_design import filter_response
@@ -2289,8 +2298,31 @@ async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
                 status_code=400,
                 detail=f"Гейн {band}: {value} вне диапазона {GAIN_MIN_DB:g}…{GAIN_MAX_DB:g} дБ",
             )
+    boost = float(payload.boost_db)
+    if not BOOST_MIN_DB <= boost <= BOOST_MAX_DB:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"boost_db: {boost} вне диапазона "
+                f"{BOOST_MIN_DB:g}…{BOOST_MAX_DB:g} дБ "
+                f"(базовое усиление полосовых стерео-треков)"
+            ),
+        )
+    loudness_phon = payload.loudness_phon
+    if loudness_phon is not None and not LOUDNESS_PHON_MIN <= float(loudness_phon) <= LOUDNESS_PHON_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"loudness_phon: {loudness_phon} вне диапазона "
+                f"{LOUDNESS_PHON_MIN:g}…{LOUDNESS_PHON_MAX:g} фон "
+                f"(опорный уровень компенсации ISO 226; null — выключить)"
+            ),
+        )
     try:
-        render_id = neuro_render.start_render(recording, settings, payload.gains_db)
+        render_id = neuro_render.start_render(
+            recording, settings, payload.gains_db, boost, loudness_phon,
+            payload.loudness_autobase,
+        )
     except neuro_render.RenderBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return AudioRenderStart(render_id=render_id)

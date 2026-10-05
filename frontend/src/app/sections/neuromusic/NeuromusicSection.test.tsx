@@ -21,8 +21,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 /** Мок рендера: POST 202, статус — running → succeeded, файлы — заглушки. */
 function audioFetchMock() {
   let statusCalls = 0
-  return vi.fn(async (input: RequestInfo | URL) => {
+  const postBodies: string[] = []
+  const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    if (init?.method === 'POST') postBodies.push(String(init.body ?? ''))
     if (url.includes('/audio/render') && url.includes('/status')) {
       statusCalls += 1
       if (statusCalls === 1) {
@@ -60,6 +62,7 @@ function audioFetchMock() {
     }
     return jsonResponse({ detail: `неизвестный путь в моке: ${url}` }, 404)
   })
+  return Object.assign(fn, { postBodies })
 }
 
 describe('Нейромузыка — раздел', () => {
@@ -116,5 +119,77 @@ describe('Нейромузыка — раздел', () => {
         expect.stringContaining('/track/alpha.wav'),
       ),
     )
+  })
+
+  it('усиление полос уходит в запрос рендера (дефолт +6, правка — 10)', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<NeuromusicSection />)
+
+    // Контрол параметра: диапазон 0…12, значение по умолчанию +6 (приёмка 05.10).
+    const field = screen.getByLabelText(/Усиление полос/)
+    expect(field).toHaveValue(6)
+
+    // Правка параметра НЕ запускает расчёт (правило UI) — только кнопка.
+    fireEvent.change(field, { target: { value: '10' } })
+    expect(fetchMock.postBodies).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
+    await waitFor(() => expect(fetchMock.postBodies).toHaveLength(1))
+    const body = JSON.parse(fetchMock.postBodies[0]) as Record<string, unknown>
+    // Дефолт компенсации ISO 226: включена на 75 фон, автобаза «ямы» (приёмка).
+    expect(body).toMatchObject({
+      recording_id: recordingFixture.recording_id,
+      boost_db: 10,
+      loudness_phon: 75,
+      loudness_autobase: true,
+    })
+  })
+
+  it('режим базы переключается: «Максимум (boost)» уходит в запрос как false', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<NeuromusicSection />)
+    fireEvent.click(screen.getByRole('button', { name: 'Максимум (boost)' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
+
+    await waitFor(() => expect(fetchMock.postBodies).toHaveLength(1))
+    const body = JSON.parse(fetchMock.postBodies[0]) as Record<string, unknown>
+    expect(body).toMatchObject({ loudness_autobase: false, loudness_phon: 75 })
+    // Другие режимы не пострадали (правка параметра не запускает расчёт).
+    expect(screen.getByLabelText(/Усиление полос/)).toHaveValue(6)
+  })
+
+  it('компенсация ISO 226 выключается чекбоксом, уровень правится полем', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<NeuromusicSection />)
+
+    // Уровень прослушивания виден только при включённой компенсации.
+    expect(screen.getByLabelText(/Уровень прослушивания/)).toHaveValue(75)
+    fireEvent.change(screen.getByLabelText(/Уровень прослушивания/), {
+      target: { value: '80' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
+    await waitFor(() => expect(fetchMock.postBodies).toHaveLength(1))
+    expect(JSON.parse(fetchMock.postBodies[0])).toMatchObject({ loudness_phon: 80 })
+
+    // Выключили чекбокс → в запрос уходит null (сервер считает без поправок).
+    // Ждём завершения первого рендера (плеер = succeeded, кнопка активна).
+    await waitFor(
+      () => expect(screen.getByTestId('neuromusic-player')).toBeInTheDocument(),
+      { timeout: 3000 },
+    )
+    fireEvent.click(screen.getByLabelText('Перцептуальный баланс (ISO 226)'))
+    fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
+    await waitFor(() => expect(fetchMock.postBodies).toHaveLength(2))
+    expect(JSON.parse(fetchMock.postBodies[1])).toMatchObject({ loudness_phon: null })
   })
 })

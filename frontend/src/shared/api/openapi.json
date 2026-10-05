@@ -4099,6 +4099,31 @@
             "type": "object",
             "title": "Gains Db",
             "description": "Пользовательские гейны полос, dB (ключи — freq_bands); диапазон -24…12, по умолчанию 0"
+          },
+          "boost_db": {
+            "type": "number",
+            "title": "Boost Db",
+            "description": "Базовое усиление полосовых стерео-треков, dB (целевой RMS −18 + boost); диапазон 0…12, по умолчанию 6 (приёмка 05.10.2026)",
+            "default": 6.0
+          },
+          "loudness_phon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loudness Phon",
+            "description": "Опорный уровень психоакустической компенсации ISO 226:2003, фон — статические смещения целевого RMS полос для равной субъективной громкости; диапазон 60…90, по умолчанию 75; null — выключить (чистый RMS без поправок)",
+            "default": 75.0
+          },
+          "loudness_autobase": {
+            "type": "boolean",
+            "title": "Loudness Autobase",
+            "description": "Стратегия A: при включённой компенсации база рендера ограничивается потолком «ямы» (θ/α/β выравниваются по перцептиву, boost срезается до запаса потолка); false — «максимум громкости» (база −18+boost, треки crest-limited)",
+            "default": true
           }
         },
         "type": "object",
@@ -4106,7 +4131,7 @@
           "recording_id"
         ],
         "title": "AudioRenderRequest",
-        "description": "Тело ``POST /api/v1/audio/render``: запись и гейны полос (ТЗ M4)."
+        "description": "Тело ``POST /api/v1/audio/render``: запись, гейны, boost, психоакустика."
       },
       "AudioRenderStart": {
         "properties": {

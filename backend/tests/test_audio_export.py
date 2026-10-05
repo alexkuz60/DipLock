@@ -53,6 +53,31 @@ def test_wav_peak_is_capped_by_pcm24() -> None:
     assert float(np.max(np.abs(back))) <= 0.891 + 1e-3
 
 
+def test_pcm24_sqnr_improves_with_boost() -> None:
+    """Тезис приёмки 05.10.2026: +6 дБ сигнала → лучший SQNR записи PCM_24.
+
+    Квантование 24 бит — главный шум выхода (ресемпл ядра идёт в float64 и
+    SNR не портит): громкий сигнал ближе к шкале → относительный шум меньше.
+    Проверка численная: «поднять сигнал при создании полосовых треков»
+    действительно улучшает отношение сигнал/шум ресемплированного файла.
+    """
+    t = np.arange(FS) / FS
+    # Синус −18 dBFS (crest 3 дБ — без клиппинга при подъёме на +6 дБ).
+    base = np.stack(
+        [np.sin(2 * np.pi * 440.0 * t), np.sin(2 * np.pi * 660.0 * t)], axis=1,
+    ) * 10 ** (-18 / 20)
+    boosted = base * 10 ** (6 / 20)
+
+    def sqnr_db(data: np.ndarray) -> float:
+        with sf.SoundFile(io.BytesIO(wav_bytes(data, FS))) as handle:
+            back = handle.read(dtype="float64")
+        noise = back - data
+        return 10.0 * float(np.log10(np.mean(data**2) / np.mean(noise**2)))
+
+    # Ожидалось ~6 дБ (точно вдвое громче при том же абсолютном квантовании).
+    assert sqnr_db(boosted) - sqnr_db(base) >= 5.0
+
+
 def test_input_checksum_is_stable_and_sensitive() -> None:
     """Отпечаток входа: одинаковые пакеты — один хеш, изменение — другой."""
     a = {"alpha": np.ones((3, 8)), "beta": np.zeros((3, 8))}
@@ -82,16 +107,22 @@ def test_sidecar_matches_contract_schema() -> None:
         bands=bands,
         checksum="abc123",
         gains_db={"delta": 0.0},
+        boost_db=6.0,
+        loudness={"method": "iso226", "phon": 75.0, "offsets_db": {"delta": 11.7},
+                  "autobase": True, "base_db": -17.1},
         warnings=["пример"],
         clean_label="гармоник notch=3, интерполяция bad, очистка=ica",
         interpolated=["C3"],
         notch_hz=50.0,
+        notch_harmonics=2,
         groups={"left": ["F3"], "right": ["F4"], "midline": ["Cz", "Fz"]},
     )
     assert sidecar["schema_version"] == SIDECAR_SCHEMA_VERSION == 1
     assert sidecar["fs_eeg"] == 500 and sidecar["fs_audio"] == FS
     assert sidecar["octave_shift"] == 7 and sidecar["pitch_factor"] == 128
     assert sidecar["duration_s"] == 103.7
+    assert sidecar["boost_db"] == 6.0
+    assert sidecar["notch_harmonics"] == 2
     assert sidecar["extensions"] == {"dipoles": None, "intracranial_ir": None, "doppler": None}
     assert sidecar["channel_order"] == ["F3", "F4", "Cz", "T7", "T8", "Fz"]
     assert sidecar["input_checksum_sha256"] == "abc123"

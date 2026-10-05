@@ -26,11 +26,24 @@ from app.services.audio_render.export import (
     sidecar_bytes,
     wav_bytes,
 )
-from app.services.audio_render.input import AUDIO_NOTCH_HZ, prepare_packages
+from app.services.audio_render.input import (
+    AUDIO_NOTCH_HARMONICS,
+    AUDIO_NOTCH_HZ,
+    prepare_packages,
+)
+from app.services.audio_render.loudness import (
+    LOUDNESS_PHON_DEFAULT,
+    autobase_db,
+    band_loudness_offsets,
+    pit_bands,
+)
 from app.services.audio_render.mix import (
+    BOOST_DEFAULT_DB,
+    TRACK_RMS_DBFS,
     apply_peak_ceiling,
     bus_weights,
     normalize_track,
+    track_rms,
 )
 from app.services.recordings import Recording
 
@@ -90,11 +103,21 @@ def _sweep_locked(now: float) -> None:
 
 def start_render(
     recording: Recording, cfg: Settings, gains_db: dict[str, float],
+    boost_db: float = BOOST_DEFAULT_DB,
+    loudness_phon: float | None = LOUDNESS_PHON_DEFAULT,
+    loudness_autobase: bool = True,
 ) -> str:
     """Запускает рендер в фоновом потоке; возвращает ``render_id``.
 
-    Один активный рендер за раз (``RenderBusy`` → 409 в API): FIFO-очередь
-    задач тут намеренно не вводится — это эксперимент, а не job-система.
+    ``boost_db`` — базовое усиление полос (0…12 дБ, дефолт +6): целевой RMS
+    трека −18 + boost (приёмка 05.10.2026). ``loudness_phon`` — опорный уровень
+    психоакустической компенсации ISO 226 (60…90, дефолт 75; ``None`` —
+    выключить, чистый RMS без поправок). ``loudness_autobase`` — стратегия A:
+    при включённой компенсации база ограничивается потолком «ямы» (θ/α/β
+    выравниваются по перцептиву, boost срезается до запаса потолка); ``False``
+    — «максимум громкости» (база −18+boost, треки crest-limited). Один активный
+    рендер за раз (``RenderBusy`` → 409 в API): FIFO-очередь задач тут
+    намеренно не вводится — это эксперимент, а не job-система.
     """
     with _LOCK:
         _sweep_locked(time.time())
@@ -105,7 +128,10 @@ def start_render(
         _RENDERS[render_id] = state
     thread = threading.Thread(
         target=_run_render,
-        args=(state, recording, cfg, dict(gains_db)),
+        args=(
+            state, recording, cfg, dict(gains_db), float(boost_db),
+            loudness_phon, bool(loudness_autobase),
+        ),
         name=f"audio-render-{render_id}",
         daemon=True,
     )
@@ -125,6 +151,9 @@ def state_of(render_id: str) -> RenderState:
 
 def _run_render(
     state: RenderState, recording: Recording, cfg: Settings, gains_db: dict[str, float],
+    boost_db: float = BOOST_DEFAULT_DB,
+    loudness_phon: float | None = LOUDNESS_PHON_DEFAULT,
+    loudness_autobase: bool = True,
 ) -> None:
     """Цикл рендера: подготовка → ядро по полосам → мастер → экспорт.
 
@@ -146,27 +175,68 @@ def _run_render(
         w_left, w_right, groups = bus_weights(packages.channels)
 
         bands = list(cfg.freq_bands)
+        # Психоакустические смещения ISO 226 (считаются один раз на рендер):
+        # None — режим «без компенсации» (loudness_phon=null в запросе).
+        offsets: dict[str, float] | None = None
+        if loudness_phon is not None:
+            offsets = band_loudness_offsets(cfg.freq_bands, float(loudness_phon), PITCH_STEPS)
         n_bands = max(1, len(bands))
         n_out = packages.n_times * RESAMPLE_UP
         master = np.zeros((n_out, 2), dtype=np.float64)
         tracks_wav: dict[str, bytes] = {}
-        band_rows: list[dict[str, Any]] = []
+        rows: dict[str, dict[str, Any]] = {}
+
+        # Фаза автобазы (стратегия A): стемы «ямы» считаются заранее — их crest
+        # ограничивает базу, чтобы θ/α/β не упирались в потолок 0.891 и
+        # выравнивались по перцептиву. Без этого при boost ≥ ~1 все треки
+        # становятся crest-limited и ни boost, ни компенсация не работают
+        # (приёмочный прогон 05.10.2026: дельта 0.00 дБ).
+        base_db = TRACK_RMS_DBFS + boost_db
+        pit: list[str] = []
+        if offsets is not None and loudness_autobase:
+            pit = pit_bands(cfg.freq_bands, PITCH_STEPS)
+        pit_stems: dict[str, np.ndarray] = {}
+        if pit:
+            crests: dict[str, float] = {}
+            for index, band in enumerate(pit):
+                state.stage = f"Автобаза: стем «ямы» {band} ({index + 1}/{len(pit)})"
+                state.pct = 0.3 + 0.15 * (index + 1) / len(pit)
+                state.message = "crest середины → ограничение базы (ISO 226)"
+                eeg_band = packages.packages.pop(band)
+                stem = band_stem(eeg_band, w_left, w_right)
+                del eeg_band
+                pit_stems[band] = stem
+                rms_stem = track_rms(stem)
+                peak_stem = float(np.max(np.abs(stem))) if stem.size else 0.0
+                if rms_stem > 0.0 and peak_stem > 0.0:
+                    crests[band] = 20.0 * float(np.log10(peak_stem / rms_stem))
+            base_db = autobase_db(base_db, crests, offsets or {}, pit)
+        # Фактический boost с учётом автобазы (в баланс-режиме срезается до
+        # запаса потолка «ямы» — физика без компрессии).
+        effective_boost = base_db - TRACK_RMS_DBFS
+        tracks_start = 0.3 + (0.15 if pit else 0.0)
 
         for index, band in enumerate(bands):
             state.stage = f"Трек {band} ({index + 1}/{n_bands})"
-            state.pct = 0.3 + 0.6 * index / n_bands
+            state.pct = tracks_start + (0.9 - tracks_start) * index / n_bands
             state.message = f"Ядро ×128: hilbert → ресемпл ×96 → 7 октав ({band})"
-            eeg_band = packages.packages.pop(band)
-            stem = band_stem(eeg_band, w_left, w_right)
-            del eeg_band
+            if band in pit_stems:
+                stem = pit_stems.pop(band)
+            else:
+                eeg_band = packages.packages.pop(band)
+                stem = band_stem(eeg_band, w_left, w_right)
+                del eeg_band
             gain_db = float(gains_db.get(band, 0.0))
-            normalized, applied_db, rms_dbfs = normalize_track(stem, gain_db=gain_db)
+            loudness_db = 0.0 if offsets is None else offsets.get(band, 0.0)
+            normalized, applied_db, rms_dbfs = normalize_track(
+                stem, gain_db=gain_db, boost_db=effective_boost, loudness_db=loudness_db,
+            )
             del stem
             master += normalized
             tracks_wav[band] = wav_bytes(normalized, FS_AUDIO)
             del normalized
             fmin, fmax = cfg.freq_bands[band]
-            band_rows.append({
+            rows[band] = {
                 "name": band,
                 "fmin": float(fmin),
                 "fmax": float(fmax),
@@ -175,9 +245,12 @@ def _run_render(
                 "weights_left": [float(value) for value in w_left],
                 "weights_right": [float(value) for value in w_right],
                 "gain_db": gain_db,
+                "loudness_offset_db": loudness_db,
                 "applied_gain_db": applied_db,
                 "rms_out_dbfs": rms_dbfs,
-            })
+            }
+        # Строки партитуры — в порядке freq_bands (порядок расчёта не важен).
+        band_rows = [rows[band] for band in bands]
 
         state.stage = "Сведение мастера"
         state.pct = 0.9
@@ -186,16 +259,28 @@ def _run_render(
         master_wav = wav_bytes(master, FS_AUDIO)
         del master
 
+        loudness_meta: dict[str, Any] | None = None
+        if loudness_phon is not None and offsets is not None:
+            loudness_meta = {
+                "method": "iso226",
+                "phon": float(loudness_phon),
+                "offsets_db": {name: float(value) for name, value in offsets.items()},
+                "autobase": bool(pit),
+                "base_db": float(base_db),
+            }
         sidecar = sidecar_bytes(build_sidecar(
             duration_s=packages.duration_s,
             channels=packages.channels,
             bands=band_rows,
             checksum=checksum,
             gains_db=gains_db,
+            boost_db=boost_db,
+            loudness=loudness_meta,
             warnings=packages.warnings,
             clean_label=packages.clean_label,
             interpolated=packages.interpolated,
             notch_hz=AUDIO_NOTCH_HZ,
+            notch_harmonics=AUDIO_NOTCH_HARMONICS,
             groups=groups,
         ))
         state.artifacts = RenderArtifacts(

@@ -13,8 +13,16 @@ import { api, ApiError } from '@/shared/api/client'
 import type { AudioRenderStatus } from '@/shared/api/types'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { Button } from '@/shared/ui/Button'
+import { CheckboxRow } from '@/shared/ui/CheckboxRow'
+import { NumberField } from '@/shared/ui/NumberField'
 import { Placeholder } from '@/shared/ui/Placeholder'
+import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { StatusPill } from '@/shared/ui/StatusPill'
+
+/** Дефолтное усиление полос (дБ) — как на сервере (приёмка 05.10.2026: +6…+12). */
+const DEFAULT_BOOST_DB = 6
+/** Дефолтный опорный уровень компенсации ISO 226 (фон) — как на сервере. */
+const DEFAULT_LOUDNESS_PHON = 75
 
 /**
  * Стиль ссылок-кнопок («Скачать…»): тот же набор, что ``Button variant="secondary"`` —
@@ -51,6 +59,14 @@ export function NeuromusicSection() {
   const [error, setError] = useState<string | null>(null)
   /** Что играет в плеере: мастер или трек полосы. */
   const [selected, setSelected] = useState<string>('master')
+  /** Базовое усиление полосовых треков, дБ (0…12): правка не запускает расчёт. */
+  const [boostDb, setBoostDb] = useState<number>(DEFAULT_BOOST_DB)
+  /** Компенсация ISO 226 (равная субъективная громкость инструментов). */
+  const [loudness, setLoudness] = useState<boolean>(true)
+  /** Опорный уровень компенсации, фон (60…90). */
+  const [loudnessPhon, setLoudnessPhon] = useState<number>(DEFAULT_LOUDNESS_PHON)
+  /** Режим базы при включённой компенсации: автобаза «ямы» ↔ максимум громкости. */
+  const [autobase, setAutobase] = useState<boolean>(true)
 
   const running = busy || status?.status === 'running'
 
@@ -61,13 +77,17 @@ export function NeuromusicSection() {
     setStatus(null)
     setSelected('master')
     try {
-      const started = await api.audioRender(recording.recording_id)
+      const started = await api.audioRender(recording.recording_id, {
+        boostDb,
+        loudnessPhon: loudness ? loudnessPhon : null,
+        loudnessAutobase: autobase,
+      })
       setRenderId(started.render_id)
     } catch (cause) {
       setError(errorText(cause))
       setBusy(false)
     }
-  }, [recording])
+  }, [recording, boostDb, loudness, loudnessPhon, autobase])
 
   // Поллинг статуса рендера: как у задач (jobPolling), но у своего контракта
   // (running/succeeded/failed, без отмены) — отдельный цикл здесь же.
@@ -156,6 +176,60 @@ export function NeuromusicSection() {
           {error}
         </p>
       )}
+
+      <section aria-label="Параметры рендера" className="flex max-w-xs flex-col gap-3">
+        <NumberField
+          label="Усиление полос"
+          unit="дБ"
+          value={boostDb}
+          onChange={setBoostDb}
+          min={0}
+          max={12}
+          step={1}
+          hint="Целевой уровень −18 дБ + усиление (0…12); считает кнопка"
+          disabled={running}
+        />
+        <CheckboxRow
+          label="Перцептуальный баланс (ISO 226)"
+          checked={loudness}
+          onChange={setLoudness}
+          hint="Равная субъективная громкость полос: середина опускается, басы поднимаются"
+          disabled={running}
+        />
+        {loudness && (
+          <NumberField
+            label="Уровень прослушивания"
+            unit="фон"
+            value={loudnessPhon}
+            onChange={setLoudnessPhon}
+            min={60}
+            max={90}
+            step={5}
+            hint="Опорный уровень кривых равной громкости (60…90)"
+            disabled={running}
+          />
+        )}
+        {loudness && (
+          <SegmentedControl
+            label="Режим базы"
+            value={autobase ? 'balance' : 'max'}
+            options={[
+              {
+                value: 'balance',
+                label: 'Баланс (≈ −17)',
+                title: 'Автобаза: середина θ/α/β выравнивается по ISO 226, boost — до запаса потолка',
+              },
+              {
+                value: 'max',
+                label: 'Максимум (boost)',
+                title: 'База −18+boost: треки громче, но crest-limited — компенсация почти не работает',
+              },
+            ]}
+            onChange={(value) => setAutobase(value === 'balance')}
+            hint="Без компрессии середину можно выровнять только опусканием — «баланс» и есть этот режим"
+          />
+        )}
+      </section>
 
       {running && status && (
         <section

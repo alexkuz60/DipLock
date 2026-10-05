@@ -7,8 +7,10 @@
    ``artifact_cleaner``: гармоники notch → bad-каналы → ICA по EOG/ECG-прокси)
    и **авто-notch 50 Гц** на входе — свист 6.4 кГц (50 × 128) невозможен
    (согласование по ТЗ §2: контроль остаётся предупреждением, не ошибкой).
-   Референс ``none`` — как у виртуальных миксов ``channel_mix``: среднее по
-   группе шины само является ссылкой.
+   К нему добавлен **обязательный режект двух первых гармоник 100/150 Гц**
+   (требование 05.10.2026): ``apply_line_harmonics`` в каждом прогоне, даже
+   когда очистка деградировала. Референс ``none`` — как у виртуальных миксов
+   ``channel_mix``: среднее по группе шины само является ссылкой.
 2. ``sfreq`` приводится к 500 Гц (``load_edf`` ресемплирует только записи
    **выше** 500 Гц; контракт ядра — фиксированные 500).
 3. Семь полосовых фильтров (``apply_band_filter`` по ``settings.freq_bands``)
@@ -26,6 +28,7 @@ from scipy.signal import welch
 from app.core.config import Settings
 from app.services.artifact_cleaner import CleanSpec
 from app.services.bandpass_filter import apply_band_filter
+from app.services.filter_design import harmonic_frequencies
 from app.services.prepared_signal import prepared_raw_report
 from app.services.recordings import Recording
 
@@ -44,6 +47,14 @@ AUDIO_DEFAULT_CLEAN = CleanSpec(
 
 # Авто-notch на входе рендера: 50 × 128 = 6.4 кГц — свист поверх партитуры.
 AUDIO_NOTCH_HZ = 50.0
+
+# Обязательный режект двух первых гармоник 100/150 Гц (требование владельца
+# 05.10.2026): в каждом прогоне рендера, **независимо от успеха дефолтной
+# очистки** — чистка задействует те же гармоники через CleanSpec.notch_harmonics,
+# но при её деградации в load_edf остаётся только 50 Гц. Частоты считает единый
+# helper filter_design.harmonic_frequencies (с учётом Nyquist), вызов — после
+# приведения к 500 Гц (Nyquist 250 > 150 для любой записи).
+AUDIO_NOTCH_HARMONICS = 2
 
 # Контроль остатка 50 Гц (ТЗ §2 «проверка подавления»). Буквальный порог
 # «ниже −60 дБ от медианы полосы» на шумовом фоне невыполним по построению:
@@ -125,6 +136,21 @@ def validate_packages(packages: dict[str, np.ndarray]) -> None:
             )
 
 
+def apply_line_harmonics(raw: Any, sfreq: float) -> list[float]:
+    """Обязательный режект первых гармоник notch (100/150 Гц для 50 Гц).
+
+    Вызывается в каждом прогоне ``prepare_packages`` после приведения к
+    500 Гц — независимо от того, применилась ли дефолтная очистка (при её
+    деградации это единственный режект после 50 Гц из ``load_edf``). Частоты
+    считает ``filter_design.harmonic_frequencies`` (единый источник, с учётом
+    Nyquist). Повторное применение к уже вырезанному чисткой идемпотентно.
+    """
+    freqs = harmonic_frequencies(AUDIO_NOTCH_HZ, AUDIO_NOTCH_HARMONICS, float(sfreq))
+    if freqs:
+        raw.notch_filter(freqs, verbose=False)
+    return list(freqs)
+
+
 
 def prepare_packages(
     recording: Recording,
@@ -185,6 +211,11 @@ def prepare_packages(
         _stage("Ресемпл сигнала к 500 Гц", 0.05)
         raw.resample(500.0, verbose=False)
         sfreq = 500.0
+
+    # Обязательный режект 100/150 Гц (требование 05.10.2026): после приведения
+    # к 500 Гц — до полосовых фильтров, в каждом прогоне.
+    _stage("Режект гармоник 100/150 Гц", 0.06)
+    apply_line_harmonics(raw, sfreq)
 
     channels = list(raw.ch_names)
     packages: dict[str, np.ndarray] = {}

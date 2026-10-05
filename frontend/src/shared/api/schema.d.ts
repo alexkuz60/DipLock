@@ -1774,7 +1774,7 @@ export interface components {
         };
         /**
          * AudioRenderRequest
-         * @description Тело ``POST /api/v1/audio/render``: запись и гейны полос (ТЗ M4).
+         * @description Тело ``POST /api/v1/audio/render``: запись, гейны, boost, психоакустика.
          */
         AudioRenderRequest: {
             /**
@@ -1789,6 +1789,24 @@ export interface components {
             gains_db?: {
                 [key: string]: number;
             };
+            /**
+             * Boost Db
+             * @description Базовое усиление полосовых стерео-треков, dB (целевой RMS −18 + boost); диапазон 0…12, по умолчанию 6 (приёмка 05.10.2026)
+             * @default 6
+             */
+            boost_db: number;
+            /**
+             * Loudness Phon
+             * @description Опорный уровень психоакустической компенсации ISO 226:2003, фон — статические смещения целевого RMS полос для равной субъективной громкости; диапазон 60…90, по умолчанию 75; null — выключить (чистый RMS без поправок)
+             * @default 75
+             */
+            loudness_phon: number | null;
+            /**
+             * Loudness Autobase
+             * @description Стратегия A: при включённой компенсации база рендера ограничивается потолком «ямы» (θ/α/β выравниваются по перцептиву, boost срезается до запаса потолка); false — «максимум громкости» (база −18+boost, треки crest-limited)
+             * @default true
+             */
+            loudness_autobase: boolean;
         };
         /**
          * AudioRenderStart
