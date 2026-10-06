@@ -51,7 +51,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 66 роутов = 63 уникальных пути (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 73 роута = 68 уникальных путей (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -78,6 +78,7 @@ backend/app/
 │   ├── spectrogram.py     # спектрограмма канала: STFT → сетка дБ (DPS2), кэш + ETag (5)
 │   ├── channel_mix.py     # виртуальные каналы «ЭЭГ»: миксы групп 10-20 из паспорта записи (5+)
 │   ├── audio_render/      # «Нейромузыка» (эксперимент): ядро ×128, шины L/C/R, WAV+sidecar (docs/rules/neuromusic.md)
+│   ├── audio_ir.py        # IR-ассеты реверберации плеера: pyroomacoustics → cache/ir/ + ETag (spatial-audio)
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
 │   ├── eloreta.py         # eLORETA пик/ROI одной эпохи: forward+inverse MNE (остаток B9)
 │   ├── compare.py         # дифференциальный анализ двух записей (B9): дельты B − A, FDR/бутстрап, кластерный тест MNE, карты разности
@@ -106,6 +107,7 @@ backend/app/
 │   └── atlas_contours.py  # контуры структур и полей Бродмана на срезе (вектор, ETag) (3.9)
 backend/scripts/       # dedupe_recordings.py (чистка дублей в data/edf),
                        # build_atlas_contours.py (прогрев кэша контуров, 3.9),
+                       # build_audio_ir.py (прогрев кэша IR «Нейромузыки», spatial-audio),
                        # export_openapi.py (выгрузка openapi.json для gen:api, 4.2)
 backend/alembic/       # миграции схемы БД: env.py (URL из settings/движка), versions/ (0001)
 backend/alembic.ini    # конфиг alembic (запуск из backend/)
@@ -186,6 +188,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/compare.md` | дифференциальный анализ двух записей (B9): дельты B − A, кластерный тест MNE, карты разности |
 | `docs/rules/group-analysis.md` | групповой анализ группы N>2 (остаток 4.7): агрегаты «BA × сессии», два знаменателя share, персист прогонов, тепловая карта, кластеры диполей (B8) |
 | `docs/rules/neuromusic.md` | раздел «Нейромузыка» (эксперимент): партитура ЭЭГ, ядро ×128, шины L/C/R, in-memory рендер, чек-лист приёмки |
+| `docs/rules/spatial-audio.md` | пространственная обработка треков нейромузыки: выбор аудио-библиотек (Tone.js в браузере, pyroomacoustics для IR; Resonance Audio архивирован) |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, персист, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей и артефактов, отпечаток ассетов, файл задачи |
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |

@@ -6,6 +6,7 @@
  */
 import type {
   AnalyzeResponse,
+  AudioIrCatalog,
   AudioRenderStart,
   AudioRenderStatus,
   BundleResult,
@@ -227,6 +228,13 @@ export const api = {
 
   /** URL sidecar-«партитуры» (веса, гейны, checksum, extensions). */
   audioSidecarUrl: (renderId: string) => `${API_PREFIX}/audio/render/${renderId}/sidecar.json`,
+
+  /** Каталог IR-пресетов для реверберации плеера (селект «Помещение»). */
+  audioIrCatalog: (signal?: AbortSignal) =>
+    request<AudioIrCatalog>(`${API_PREFIX}/audio/ir`, { signal }),
+
+  /** URL WAV одного IR-пресета (грузится в Tone.Convolver). */
+  audioIrUrl: (presetId: string) => `${API_PREFIX}/audio/ir/${presetId}.wav`,
 
   /**
    * Контуры среза атласа (срез 3.9): структуры `aparc+aseg` и поля Бродмана.

@@ -30,6 +30,10 @@ export type EpochSummary = Schemas['EpochSummary']
 export type AudioRenderStart = Schemas['AudioRenderStart']
 export type AudioRenderStatus = Schemas['AudioRenderStatus']
 
+/** «Нейромузыка»: каталог IR-пресетов реверберации и один пресет (spatial-audio) */
+export type AudioIrCatalog = Schemas['AudioIrCatalogOut']
+export type AudioIrPreset = Schemas['AudioIrPresetOut']
+
 export type ArtifactKind = import('@/shared/lib/artifacts').ArtifactKind
 
 /** Счётчики артефактов по типам (ключи — `ArtifactKind`, их может стать больше) */

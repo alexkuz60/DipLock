@@ -92,3 +92,21 @@ class AudioRenderStatus(BaseModel):
     message: str = ""
     error: str | None = Field(default=None, description="Текст ошибки (status=failed)")
     tracks: list[str] = Field(default_factory=list, description="Готовые треки (после успеха)")
+
+
+class AudioIrPresetOut(BaseModel):
+    """Один пресет IR в каталоге ``GET /audio/ir`` (селект «Помещение» UI)."""
+
+    id: str = Field(description="Идентификатор пресета (путь файла IR в кэше)")
+    label: str = Field(description="Человекочитаемое имя для селекта")
+    description: str = Field(description="Краткое описание акустики пресета")
+    tags: list[str] = Field(default_factory=list, description="Метки («комната», «эксперимент»)")
+
+
+class AudioIrCatalogOut(BaseModel):
+    """``GET /audio/ir``: каталог IR-пресетов для real-time реверберации плеера."""
+
+    presets: list[AudioIrPresetOut] = Field(
+        default_factory=list,
+        description="Пресеты в порядке показа UI; WAV каждого — GET /audio/ir/{id}.wav",
+    )

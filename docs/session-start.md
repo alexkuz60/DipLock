@@ -1,6 +1,24 @@
 # Памятка агенту: с чего начинать сессию
 
-> Обновляется в конце крупных срезов (последнее — **04.10.2026, закрытие трёх задач todo:
+> Обновляется в конце крупных срезов (последнее — **06.10.2026, «Пространственная
+> обработка „Нейромузыки“» (вердикт `docs/rules/spatial-audio.md`, пп.1–2 закрыты)**:
+> ① **3D-режим плеера** на Tone.js (`shared/lib/spatialPlayer.ts`: 7 × `Player →
+> StereoWidener → Panner3D(HRTF) → dry/wet Convolver`, общий момент старта =
+> семпл-точная синхронизация; `spatialLayout.ts` — дуга ±60°, чистая математика;
+> `NeuromusicPanel` — секция «Пространство», правка применяется к живому графу
+> **без POST/пересчёта**; соло-список в 3D скрыт), ② **IR-ассеты**
+> (`services/audio_ir.py`: pyroomacoustics image source, 3 пресета включая прокси
+> свода черепа, детерминизм байтов, кэш `cache/ir/` ≈205 КБ, ETag = sha256,
+> ленивая генерация в `asyncio.to_thread`, прогрев `scripts/build_audio_ir.py`),
+> роуты **№72–73** (инвентарь — **73**), `schemas/audio.py` +
+> `AudioIrPresetOut`/`AudioIrCatalogOut`; зависимости: `tone@^15.1.22`,
+> `pyroomacoustics>=0.10.0`; правило — `neuromusic.md` §«Пространственная
+> обработка»; ловушка среза — `vi.restoreAllMocks` в `vitest.setup.ts` сбрасывает
+> `mockResolvedValue` мока плеера (восстановление в `beforeEach`); валидация —
+> pytest **811** (без `integration`, всего **829**) / Vitest **1039**, ruff/mypy/
+> eslint/tsc чисты, openapi **70 путей** (+2), бандл собран (предупреждение о чанке
+> >500 кБ — Tone.js в основном бандле, кандидат на `manualChunks`); ранее —
+> **04.10.2026, закрытие трёх задач todo:
 > «Ковариация QC» + «4.6 manifest/квоты/пакет» + «отложенная часть дифф-анализа B9»**
 > (`docs/history.md`): ① `services/covariance_qc.py` (PCA ковариации, heatmap + топокарты
 > base64 в отчёте), ② `run_manifest.py`/LRU-квота кэша/`session_bundle.py` (zip session|BIDS)

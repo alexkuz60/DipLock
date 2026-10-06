@@ -37,6 +37,11 @@ specparam>=2.0.0rc7
 # Без звуковых библиотек обработки (librosa/rubberband/pydub запрещены ТЗ) — только
 # запись файла, libsndfile идёт в бинарном wheel soundfile.
 soundfile>=0.12.0
+# IR для свёрточной реверберации плеера (verdict docs/rules/spatial-audio.md):
+# image source model → стерео-IR WAV (services/audio_ir.py, ассет /audio/ir/*).
+# Только генерация ассета офлайн/лениво — в real-time цепочку плеера попадает
+# готовым файлом; librosa/rubberband/pydub остаются запрещёнными ТЗ.
+pyroomacoustics>=0.10.0
 # Вторая разметка ICA (ICLabel, вердикт 01.10.2026 — «внедрять как вторую
 # разметку», `docs/rules/artifacts.md`): ML-метки компонент рядом с нашим
 # корреляционным путём. `onnxruntime` ставим **явно**: mne-icalabel его

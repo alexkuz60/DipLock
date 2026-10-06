@@ -5,7 +5,8 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **64 роута**, префикс `/api/v1` из `settings.api_prefix`.
+- `backend/app/api/routes.py` — **73 роута** (68 уникальных путей; 5 путей принимают по два
+  метода), префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
   - `api/params.py` — формы → параметры сервисов и проверки с текстом для UI (400);
@@ -25,14 +26,14 @@
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
-  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **63 HTTP-путь** (58 в `routes.py` + 5 уровня приложения).
+  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **73 уникальный HTTP-путь** (68 в `routes.py` + 5 уровня приложения).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/schema.d.ts` (`npm run gen:api`;
   выгрузка `openapi.json` — `venv/bin/python -m scripts.export_openapi`, свежесть — pytest
   `test_openapi_json_is_up_to_date` и CI-шаг `git diff`, 4.2).
 - Swagger: `http://localhost:8000/docs`.
 
-## Инвентарь эндпоинтов (64 в `routes.py`, порядок файла)
+## Инвентарь эндпоинтов (73 в `routes.py`, порядок файла)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -99,6 +100,13 @@
 | 64 | `GET /jobs/{job_id}/manifest` | **run manifest** задачи (N40/4.6): версии среды + отпечатки ассетов + `params_sig`; честен и для идущей, и для упавшей задачи; 404 — неизвестна |
 | 65 | `POST /recordings/{id}/eloreta` | **eLORETA одной эпохи** (остаток B9, dipoles.md п.5): задача `kind=eloreta` (202), форма — та же, что у «Уточнить» (нарезка быстрого расчёта + `halfwin_ms`); результат — только пик/ROI, полные карты не отдаются |
 | 66 | `GET /recordings/{id}/eloreta/{job_id}` | результат eLORETA (`EloretaResult`): пик (координата + анатомия из `atlas_contours`) и топ-8 ROI-долей + «прочие»; 404/409 — как у других задач записи |
+| 67 | `POST /audio/render` | **рендер «Нейромузыки»** (синхронный, без job-системы): 202 `{render_id}`, 400 — гейны/boost/loudness/octave_shift вне диапазонов, 409 — уже идёт (один за раз) |
+| 68 | `GET /audio/render/{id}/status` | поллинг рендера (~400 мс): `{status, stage, pct, message, error, tracks}` |
+| 69 | `GET /audio/render/{id}/master.wav` | мастер-WAV 48 кГц/PCM_24 (без `Content-Disposition` — играется в `<audio>`) |
+| 70 | `GET /audio/render/{id}/track/{band}.wav` | WAV одного трека полосы (соль-прослушивание) |
+| 71 | `GET /audio/render/{id}/sidecar.json` | sidecar-«партитура»: веса, гейны, checksum входа, `extensions` |
+| 72 | `GET /audio/ir` | **каталог IR-пресетов** реверберации плеера (`AudioIrCatalogOut`; spatial-audio, п.2) |
+| 73 | `GET /audio/ir/{preset}.wav` | стерео-IR пресета (WAV 48 кГц, ETag/304; ленивая генерация pyroomacoustics → `cache_dir/ir/`; 404 — неизвестный пресет) |
 
 **Чего в API нет осознанно:** листинга записей. «Закрыть запись» в UI остаётся **клиентским**
 действием (сброс состояния), а явное удаление — `DELETE /recordings/{id}` (4.4): TTL записей

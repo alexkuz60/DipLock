@@ -1,15 +1,26 @@
 /**
- * Правый сайдбар («Опции раздела») «Нейромузыки»: параметры рендера и справка
+ * Правый сайдбар («Опции раздела») «Нейромузыки»: параметры рендера, секция
+ * «Пространство» (real-time цепочка плеера, spatial-audio) и справка
  * о партитуре (docs/rules/neuromusic.md).
  *
- * Контролы правят стор `shared/state/neuromusic.ts`; значения уходят на сервер
- * только с запуском — кнопкой-иконкой в тулс-хедере (правка ≠ расчёт).
+ * Контролы правят стор `shared/state/neuromusic.ts`; параметры рендера уходят
+ * на сервер только с запуском — кнопкой-иконкой в тулс-хедере (правка ≠
+ * расчёт). Параметры пространства и вовсе не создают запросов: они применяются
+ * к живому Tone-графу плеера мгновенно.
  */
-import { OCTAVE_SHIFTS, type OctaveShift, useNeuromusic } from '@/shared/state/neuromusic'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/shared/api/client'
+import {
+  MAX_SPATIAL_WIDTH_PCT,
+  OCTAVE_SHIFTS,
+  type OctaveShift,
+  useNeuromusic,
+} from '@/shared/state/neuromusic'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
+import { SelectField } from '@/shared/ui/SelectField'
 
 export function NeuromusicPanel() {
   const boostDb = useNeuromusic((state) => state.boostDb)
@@ -24,6 +35,27 @@ export function NeuromusicPanel() {
   const setLoudnessPhon = useNeuromusic((state) => state.setLoudnessPhon)
   const setAutobase = useNeuromusic((state) => state.setAutobase)
   const setOctaveShift = useNeuromusic((state) => state.setOctaveShift)
+
+  // Пространственная обработка (real-time, без запросов при правке).
+  const spatialEnabled = useNeuromusic((state) => state.spatialEnabled)
+  const spatialWidthPct = useNeuromusic((state) => state.spatialWidthPct)
+  const spatialSpreadPct = useNeuromusic((state) => state.spatialSpreadPct)
+  const spatialWetPct = useNeuromusic((state) => state.spatialWetPct)
+  const spatialIr = useNeuromusic((state) => state.spatialIr)
+  const setSpatialEnabled = useNeuromusic((state) => state.setSpatialEnabled)
+  const setSpatialWidthPct = useNeuromusic((state) => state.setSpatialWidthPct)
+  const setSpatialSpreadPct = useNeuromusic((state) => state.setSpatialSpreadPct)
+  const setSpatialWetPct = useNeuromusic((state) => state.setSpatialWetPct)
+  const setSpatialIr = useNeuromusic((state) => state.setSpatialIr)
+
+  // Каталог IR пресетов: один GET на сессию, только когда 3D-режим включён
+  // (TanStack Query, кэш по ключу).
+  const irCatalog = useQuery({
+    queryKey: ['audio-ir-catalog'],
+    queryFn: ({ signal }) => api.audioIrCatalog(signal),
+    enabled: spatialEnabled,
+    staleTime: Number.POSITIVE_INFINITY,
+  })
 
   // На время рендера контролы гаснут — параметры уже ушли в POST
   const running = busy || status?.status === 'running'
@@ -97,6 +129,69 @@ export function NeuromusicPanel() {
               hint="Без компрессии середину можно выровнять только опусканием — «баланс» и есть этот режим"
             />
           )}
+        </div>
+      </Panel>
+
+      <Panel
+        title="Пространство"
+        hint="3D-плеер (Tone.js): параметры применяются на лету к играющему треку — без пересчёта рендера (spatial-audio)."
+      >
+        <div className="flex flex-col gap-3">
+          <CheckboxRow
+            label="3D-режим плеера"
+            checked={spatialEnabled}
+            onChange={setSpatialEnabled}
+            hint="Вместо обычного плеера — 7 треков на дуге, HRTF-панорамирование и свёрточный ревербератор"
+          />
+          <NumberField
+            label="Ширина базы"
+            unit="%"
+            value={spatialWidthPct}
+            onChange={setSpatialWidthPct}
+            min={0}
+            max={MAX_SPATIAL_WIDTH_PCT}
+            step={10}
+            hint="Mid/Side стерео: 100 — без изменения, меньше — к моно, больше — шире"
+            disabled={!spatialEnabled}
+          />
+          <NumberField
+            label="Разброс по дуге"
+            unit="%"
+            value={spatialSpreadPct}
+            onChange={setSpatialSpreadPct}
+            min={0}
+            max={100}
+            step={10}
+            hint="100 — полная дуга ±60° (слева δ, справа γ-high), 0 — все треки перед слушателем"
+            disabled={!spatialEnabled}
+          />
+          <NumberField
+            label="Влажность реверберации"
+            unit="%"
+            value={spatialWetPct}
+            onChange={setSpatialWetPct}
+            min={0}
+            max={100}
+            step={5}
+            hint="Доля IR в миксе: 0 — сухой сигнал, 100 — только реверберация"
+            disabled={!spatialEnabled}
+          />
+          <SelectField
+            label="Помещение (IR)"
+            value={spatialIr}
+            options={(irCatalog.data?.presets ?? []).map((preset) => ({
+              value: preset.id,
+              label: preset.label,
+              title: preset.description,
+            }))}
+            onChange={setSpatialIr}
+            hint={
+              irCatalog.isError
+                ? 'Каталог IR не загрузился — реверберация использует прежний пресет'
+                : 'Импульсная характеристика помещения (сгенерирована pyroomacoustics, spatial-audio)'
+            }
+            disabled={!spatialEnabled || irCatalog.isPending}
+          />
         </div>
       </Panel>
 

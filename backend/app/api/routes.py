@@ -37,6 +37,7 @@ from fastapi import (
 from app.api.assets import (
     CACHE_PRIVATE_DAY,
     CACHE_PRIVATE_HOUR,
+    CACHE_PUBLIC_DAY,
     CACHE_PUBLIC_WEEK,
     asset_response,
 )
@@ -107,7 +108,13 @@ from app.schemas.analysis import (
     SpectrumResult,
     SurfaceOut,
 )
-from app.schemas.audio import AudioRenderRequest, AudioRenderStart, AudioRenderStatus
+from app.schemas.audio import (
+    AudioIrCatalogOut,
+    AudioIrPresetOut,
+    AudioRenderRequest,
+    AudioRenderStart,
+    AudioRenderStatus,
+)
 from app.schemas.compare import CompareResult
 from app.schemas.group import (
     GroupAggregateIn,
@@ -122,6 +129,7 @@ from app.schemas.resource import GpuStatusOut, LocalResourceOut, LocalResourceUp
 from app.schemas.server import ServerRestartOut
 from app.services import (
     analysis_pipeline,
+    audio_ir,
     fsaverage_assets,
     gpu,
     journal,
@@ -2405,4 +2413,65 @@ async def audio_render_sidecar(render_id: str) -> Response:
     """JSON-партитура эксперимента (ТЗ §6): что и из чего было сварено."""
     artifacts = _audio_artifacts(render_id)
     return Response(content=artifacts.sidecar, media_type="application/json")
+
+
+# --- IR для пространственной обработки (docs/rules/spatial-audio.md) -----------
+# Ассеты: генерация офлайн (скрипт build_audio_ir.py или лениво первым запросом),
+# отдача через asset_response (ETag/304). Real-time цепочка плеера грузит WAV
+# в Tone.Convolver; параметры реверберации живут на клиенте и не создают задач.
+
+
+@router.get(
+    "/audio/ir",
+    response_model=AudioIrCatalogOut,
+    summary="Каталог IR-пресетов для реверберации плеера («Нейромузыка»)",
+)
+async def audio_ir_catalog() -> AudioIrCatalogOut:
+    """Пресеты импульсных характеристик: id/label/для чего звучит.
+
+    WAV каждого пресета — ``GET /audio/ir/{preset_id}.wav`` (ETag/304);
+    генерация ленивая, первый запрос может занять ~10 мс на пресет.
+    """
+    return AudioIrCatalogOut(
+        presets=[
+            AudioIrPresetOut(
+                id=preset.id,
+                label=preset.label,
+                description=preset.description,
+                tags=list(preset.tags),
+            )
+            for preset in audio_ir.IR_PRESETS
+        ]
+    )
+
+
+@router.get(
+    "/audio/ir/{preset_id}.wav",
+    response_class=Response,
+    responses={200: {"content": {"audio/wav": {}}}},
+    summary="IR одного пресета (WAV 48 кГц, ETag/304)",
+)
+async def audio_ir_wav(
+    preset_id: str,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """Стерео-IR пресета для ``Tone.Convolver``; 404 — неизвестный пресет.
+
+    Первый запрос генерирует IR (pyroomacoustics, image source model) и кладёт
+    в кэш ``cache_dir/ir/``; дальше — чтение файла. ETag — отпечаток байтов,
+    смена параметров пресета меняет тег (старые файлы перезаписываются).
+    """
+    if audio_ir.get_preset(preset_id) is None:
+        known = ", ".join(audio_ir.preset_ids())
+        raise HTTPException(
+            status_code=404, detail=f"IR-пресет {preset_id!r} не найден; доступны: {known}"
+        )
+    data = await asyncio.to_thread(audio_ir.ir_bytes, preset_id)
+    return asset_response(
+        data,
+        audio_ir.ir_version(data),
+        if_none_match=if_none_match,
+        media_type="audio/wav",
+        cache_control=CACHE_PUBLIC_DAY,
+    )
 

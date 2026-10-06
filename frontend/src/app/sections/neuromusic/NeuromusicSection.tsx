@@ -17,6 +17,7 @@ import { useNeuromusic } from '@/shared/state/neuromusic'
 import { Button } from '@/shared/ui/Button'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { NeuromusicSpatialPlayer } from './NeuromusicSpatialPlayer'
 
 /**
  * Стиль ссылок-кнопок («Скачать…»): тот же набор, что ``Button variant="secondary"`` —
@@ -46,6 +47,8 @@ export function NeuromusicSection() {
   const busy = useNeuromusic((state) => state.busy)
   const error = useNeuromusic((state) => state.error)
   const octaveShift = useNeuromusic((state) => state.octaveShift)
+  /** 3D-режим: вместо `<audio>` — Tone-цепочка (spatial-audio, п.1). */
+  const spatialEnabled = useNeuromusic((state) => state.spatialEnabled)
   /** Что играет в плеере: мастер или трек полосы. */
   const [selected, setSelected] = useState<string>('master')
 
@@ -160,14 +163,18 @@ export function NeuromusicSection() {
 
       {status?.status === 'succeeded' && renderId && (
         <section aria-label="Прослушивание" className="flex flex-col gap-3">
-          <audio
-            key={source}
-            controls
-            preload="none"
-            src={source}
-            className="w-full"
-            data-testid="neuromusic-player"
-          />
+          {spatialEnabled ? (
+            <NeuromusicSpatialPlayer renderId={renderId} tracks={tracks} />
+          ) : (
+            <audio
+              key={source}
+              controls
+              preload="none"
+              src={source}
+              className="w-full"
+              data-testid="neuromusic-player"
+            />
+          )}
 
           <div className="flex flex-wrap gap-2">
             <a className={LINK_BUTTON_CLASS} href={source} download={downloadName}>
@@ -183,25 +190,33 @@ export function NeuromusicSection() {
           </div>
 
           <ul className="divide-y divide-border rounded-xl border border-border">
-            <li className="flex items-center gap-3 px-3 py-2">
-              <Button
-                variant="ghost"
-                className={selected === 'master' ? 'text-accent' : undefined}
-                onClick={() => setSelected('master')}
-              >
-                Мастер — партитура целиком
-              </Button>
-              <span className="ml-auto text-xs text-fg-2">все 7 инструментов</span>
-            </li>
-            {tracks.map((band) => (
-              <li key={band} className="flex items-center gap-3 px-3 py-2">
+            {!spatialEnabled && (
+              <li className="flex items-center gap-3 px-3 py-2">
                 <Button
                   variant="ghost"
-                  className={selected === band ? 'text-accent' : undefined}
-                  onClick={() => setSelected(band)}
+                  className={selected === 'master' ? 'text-accent' : undefined}
+                  onClick={() => setSelected('master')}
                 >
-                  {bandLabel(band)}
+                  Мастер — партитура целиком
                 </Button>
+                <span className="ml-auto text-xs text-fg-2">все 7 инструментов</span>
+              </li>
+            )}
+            {tracks.map((band) => (
+              <li key={band} className="flex items-center gap-3 px-3 py-2">
+                {/* Соло-прослушивание — только в обычном режиме: в 3D все семь
+                    треков звучат разом через Tone-цепочку. */}
+                {spatialEnabled ? (
+                  <span className="text-sm text-fg-1">{bandLabel(band)}</span>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    className={selected === band ? 'text-accent' : undefined}
+                    onClick={() => setSelected(band)}
+                  >
+                    {bandLabel(band)}
+                  </Button>
+                )}
                 <a
                   className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
                   href={api.audioTrackUrl(renderId, band)}

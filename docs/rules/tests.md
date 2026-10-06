@@ -920,3 +920,23 @@ ValueError; sidecar 5 → 32; `pit_bands` ×64/×32; API: рендер 5 окт�
 16–64 Гц, 4/8 → 400) **+1 Vitest** (сегмент 5 октав → `octave_shift: 5` в теле,
 правка ≠ расчёт). Контракт: `export_openapi` (68 путей) + `gen:api`. Итог:
 pytest — **805** (без `integration`), Vitest — **1026**.
+
+**Пространственная обработка «Нейромузыки»: Tone.js + IR (06.10.2026).**
+Реализация пп.1–2 `spatial-audio.md`: 3D-режим плеера (7 × `Player →
+StereoWidener → Panner3D` → dry/wet `Convolver`) и IR-ассеты на
+`pyroomacoustics`. pytest **+6** — новый `tests/test_audio_ir.py` (каталог
+пресетов; WAV 48 кГц/2ch/PCM_24 с пиком ≤0.891 и ненулевой энергией;
+детерминизм генерации — повтор идентичен байтам; запись и повторное чтение
+кэша; 404 с перечнем пресетов; ETag → 304). Vitest **+13** — новый
+`spatialLayout.test.ts` (9: геометрия дуги ±60°, spread=0 → точка перед
+слушателем, окружность дистанции, симметрия краёв, count≤1, NaN; проценты UI →
+width/wet со зажатием; **два бага формулы пойманы тестами**: схлопывание дуги
+умножением и width = pct/200) и `NeuromusicSection.test.tsx` +3 (включение 3D →
+`load` с семью треками и IR без POST; правка ширины/разброса/влажности/помещения
+→ вызовы сеттеров живого графа без запросов; выключение → `dispose` и возврат
+обычного плеера). Контракт: `schemas/audio.py` (+`AudioIrPresetOut`/
+`AudioIrCatalogOut`), `export_openapi` (70 путей) + `gen:api`. Ловушка среза:
+`vi.restoreAllMocks` в `vitest.setup.ts` сбрасывает `mockResolvedValue` между
+тестами — implementation мока плеера перепривязывается в `beforeEach`. Итог:
+pytest — **811** (без `integration`; всего с ними — **829**), Vitest — **1039**
+(90 файлов).

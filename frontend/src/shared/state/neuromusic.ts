@@ -27,6 +27,13 @@ export type OctaveShift = 5 | 6 | 7
 export const OCTAVE_SHIFTS: readonly OctaveShift[] = [5, 6, 7]
 /** Дефолт сервера — 7 октав (×128), как до появления выбора. */
 export const DEFAULT_OCTAVE_SHIFT: OctaveShift = 7
+/** Пространственная обработка (spatial-audio, п.1): дефолты параметров плеера. */
+export const DEFAULT_SPATIAL_WIDTH_PCT = 100
+export const DEFAULT_SPATIAL_SPREAD_PCT = 100
+export const DEFAULT_SPATIAL_WET_PCT = 25
+export const DEFAULT_SPATIAL_IR = 'room_small'
+/** Ширина базы UI ограничена 150 %: width Tone > 0.75 звучит как фазовый сдвиг. */
+export const MAX_SPATIAL_WIDTH_PCT = 150
 
 /** Токен запуска: новый рендер или сброс делают поллинг прежнего цикла чужим. */
 const renderToken = createRunToken()
@@ -53,6 +60,16 @@ export type NeuromusicState = {
   autobase: boolean
   /** Транспонирование партитуры, октав (5/6/7 → ×32/×64/×128, дефолт 7) */
   octaveShift: OctaveShift
+  /** 3D-режим плеера: Tone-цепочка вместо `<audio>` (правка ≠ расчёт) */
+  spatialEnabled: boolean
+  /** Ширина стереобазы, % (0…150, 100 — без изменения) */
+  spatialWidthPct: number
+  /** Разброс источников по дуге, % (0…100, 100 — ±60°) */
+  spatialSpreadPct: number
+  /** Влажность реверберации, % (0…100) */
+  spatialWetPct: number
+  /** Пресет IR из `GET /audio/ir` (id) */
+  spatialIr: string
   /** id запущенного рендера — `null`, пока не запускали */
   renderId: string | null
   /** Запись, для которой запущен рендер (сброс при закрытии/смене записи) */
@@ -68,6 +85,12 @@ export type NeuromusicState = {
   setLoudnessPhon: (value: number) => void
   setAutobase: (value: boolean) => void
   setOctaveShift: (value: OctaveShift) => void
+  /** Пространственная обработка: правка применяется к живому графу плеера */
+  setSpatialEnabled: (value: boolean) => void
+  setSpatialWidthPct: (value: number) => void
+  setSpatialSpreadPct: (value: number) => void
+  setSpatialWetPct: (value: number) => void
+  setSpatialIr: (value: string) => void
   /** Запуск рендера кнопкой тулс-хедера: текущая запись + параметры из формы */
   start: () => Promise<void>
   /** Сброс результата и поллинга (закрытие/смена записи) — параметры остаются */
@@ -80,6 +103,11 @@ export const useNeuromusic = create<NeuromusicState>()((set, get) => ({
   loudnessPhon: DEFAULT_LOUDNESS_PHON,
   autobase: true,
   octaveShift: DEFAULT_OCTAVE_SHIFT,
+  spatialEnabled: false,
+  spatialWidthPct: DEFAULT_SPATIAL_WIDTH_PCT,
+  spatialSpreadPct: DEFAULT_SPATIAL_SPREAD_PCT,
+  spatialWetPct: DEFAULT_SPATIAL_WET_PCT,
+  spatialIr: DEFAULT_SPATIAL_IR,
   renderId: null,
   renderRecordingId: null,
   status: null,
@@ -91,6 +119,11 @@ export const useNeuromusic = create<NeuromusicState>()((set, get) => ({
   setLoudnessPhon: (loudnessPhon) => set({ loudnessPhon }),
   setAutobase: (autobase) => set({ autobase }),
   setOctaveShift: (octaveShift) => set({ octaveShift }),
+  setSpatialEnabled: (spatialEnabled) => set({ spatialEnabled }),
+  setSpatialWidthPct: (spatialWidthPct) => set({ spatialWidthPct }),
+  setSpatialSpreadPct: (spatialSpreadPct) => set({ spatialSpreadPct }),
+  setSpatialWetPct: (spatialWetPct) => set({ spatialWetPct }),
+  setSpatialIr: (spatialIr) => set({ spatialIr }),
 
   start: async () => {
     const recording = useEdfRecording.getState().recording

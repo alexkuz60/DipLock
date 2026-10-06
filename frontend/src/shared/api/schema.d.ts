@@ -1578,6 +1578,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audio/ir": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Каталог IR-пресетов для реверберации плеера («Нейромузыка»)
+         * @description Пресеты импульсных характеристик: id/label/для чего звучит.
+         *
+         *     WAV каждого пресета — ``GET /audio/ir/{preset_id}.wav`` (ETag/304);
+         *     генерация ленивая, первый запрос может занять ~10 мс на пресет.
+         */
+        get: operations["audio_ir_catalog_api_v1_audio_ir_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/ir/{preset_id}.wav": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * IR одного пресета (WAV 48 кГц, ETag/304)
+         * @description Стерео-IR пресета для ``Tone.Convolver``; 404 — неизвестный пресет.
+         *
+         *     Первый запрос генерирует IR (pyroomacoustics, image source model) и кладёт
+         *     в кэш ``cache_dir/ir/``; дальше — чтение файла. ETag — отпечаток байтов,
+         *     смена параметров пресета меняет тег (старые файлы перезаписываются).
+         */
+        get: operations["audio_ir_wav_api_v1_audio_ir__preset_id__wav_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -1773,6 +1820,43 @@ export interface components {
             duration_sec: number;
             /** Channels */
             channels?: string[];
+        };
+        /**
+         * AudioIrCatalogOut
+         * @description ``GET /audio/ir``: каталог IR-пресетов для real-time реверберации плеера.
+         */
+        AudioIrCatalogOut: {
+            /**
+             * Presets
+             * @description Пресеты в порядке показа UI; WAV каждого — GET /audio/ir/{id}.wav
+             */
+            presets?: components["schemas"]["AudioIrPresetOut"][];
+        };
+        /**
+         * AudioIrPresetOut
+         * @description Один пресет IR в каталоге ``GET /audio/ir`` (селект «Помещение» UI).
+         */
+        AudioIrPresetOut: {
+            /**
+             * Id
+             * @description Идентификатор пресета (путь файла IR в кэше)
+             */
+            id: string;
+            /**
+             * Label
+             * @description Человекочитаемое имя для селекта
+             */
+            label: string;
+            /**
+             * Description
+             * @description Краткое описание акустики пресета
+             */
+            description: string;
+            /**
+             * Tags
+             * @description Метки («комната», «эксперимент»)
+             */
+            tags?: string[];
         };
         /**
          * AudioRenderRequest
@@ -9288,6 +9372,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_ir_catalog_api_v1_audio_ir_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioIrCatalogOut"];
+                };
+            };
+        };
+    };
+    audio_ir_wav_api_v1_audio_ir__preset_id__wav_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
+                preset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": unknown;
                 };
             };
             /** @description Validation Error */

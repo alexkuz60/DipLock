@@ -3782,6 +3782,77 @@
         }
       }
     },
+    "/api/v1/audio/ir": {
+      "get": {
+        "summary": "Каталог IR-пресетов для реверберации плеера («Нейромузыка»)",
+        "description": "Пресеты импульсных характеристик: id/label/для чего звучит.\n\nWAV каждого пресета — ``GET /audio/ir/{preset_id}.wav`` (ETag/304);\nгенерация ленивая, первый запрос может занять ~10 мс на пресет.",
+        "operationId": "audio_ir_catalog_api_v1_audio_ir_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioIrCatalogOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/ir/{preset_id}.wav": {
+      "get": {
+        "summary": "IR одного пресета (WAV 48 кГц, ETag/304)",
+        "description": "Стерео-IR пресета для ``Tone.Convolver``; 404 — неизвестный пресет.\n\nПервый запрос генерирует IR (pyroomacoustics, image source model) и кладёт\nв кэш ``cache_dir/ir/``; дальше — чтение файла. ETag — отпечаток байтов,\nсмена параметров пресета меняет тег (старые файлы перезаписываются).",
+        "operationId": "audio_ir_wav_api_v1_audio_ir__preset_id__wav_get",
+        "parameters": [
+          {
+            "name": "preset_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Preset Id"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "audio/wav": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -4084,6 +4155,56 @@
         ],
         "title": "ArtifactZoneOut",
         "description": "Зона артефакта для слоёв вьюера: интервал + затронутые каналы.\n\nПлоская проекция аннотаций MNE: ``onset``/``duration``/``description`` плюс\nканалы, по которым сработал детектор (для тултипа зоны). Каналы могут быть\nпустыми, если детектор не сопоставил аннотацию с конкретным каналом\n(например, ICA находит компоненты, а не каналы)."
+      },
+      "AudioIrCatalogOut": {
+        "properties": {
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/AudioIrPresetOut"
+            },
+            "type": "array",
+            "title": "Presets",
+            "description": "Пресеты в порядке показа UI; WAV каждого — GET /audio/ir/{id}.wav"
+          }
+        },
+        "type": "object",
+        "title": "AudioIrCatalogOut",
+        "description": "``GET /audio/ir``: каталог IR-пресетов для real-time реверберации плеера."
+      },
+      "AudioIrPresetOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Идентификатор пресета (путь файла IR в кэше)"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Человекочитаемое имя для селекта"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Краткое описание акустики пресета"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags",
+            "description": "Метки («комната», «эксперимент»)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "description"
+        ],
+        "title": "AudioIrPresetOut",
+        "description": "Один пресет IR в каталоге ``GET /audio/ir`` (селект «Помещение» UI)."
       },
       "AudioRenderRequest": {
         "properties": {
