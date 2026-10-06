@@ -137,6 +137,7 @@ from app.services.atlas_contours import (
     contours_ref as contour_ref,
 )
 from app.services.audio_render import render as neuro_render
+from app.services.audio_render.core import PITCH_STEPS_CHOICES
 from app.services.audio_render.loudness import (
     LOUDNESS_PHON_MAX,
     LOUDNESS_PHON_MIN,
@@ -2281,10 +2282,12 @@ def _audio_artifacts(render_id: str) -> neuro_render.RenderArtifacts:
     summary="Запустить рендер партитуры ЭЭГ → стерео (эксперимент «Нейромузыка»)",
 )
 async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
-    """Старт рендера: 7 треков ×128 (7 октав) + мастер, в памяти процесса.
+    """Старт рендера: 7 треков + мастер, транспонирование 5/6/7 октав
+    (``octave_shift``, дефолт 7 → ×128), в памяти процесса.
 
     Проценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —
-    отдельными GET. Гейны валидируются здесь (400 с текстом для UI).
+    отдельными GET. Гейны/boost/loudness_phon/octave_shift валидируются
+    здесь (400 с текстом для UI).
     """
     recording = require_recording(payload.recording_id)
     unknown = sorted(set(payload.gains_db) - set(settings.freq_bands))
@@ -2318,10 +2321,20 @@ async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
                 f"(опорный уровень компенсации ISO 226; null — выключить)"
             ),
         )
+    octave_shift = int(payload.octave_shift)
+    if octave_shift not in PITCH_STEPS_CHOICES:
+        choices = "/".join(str(value) for value in PITCH_STEPS_CHOICES)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"octave_shift: {payload.octave_shift} — число октав транспонирования, "
+                f"допустимо {choices} (×32/×64/×128)"
+            ),
+        )
     try:
         render_id = neuro_render.start_render(
             recording, settings, payload.gains_db, boost, loudness_phon,
-            payload.loudness_autobase,
+            payload.loudness_autobase, octave_shift,
         )
     except neuro_render.RenderBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

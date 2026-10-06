@@ -58,14 +58,20 @@ def build_sidecar(
     notch_hz: float,
     notch_harmonics: int,
     groups: dict[str, list[str]] | None = None,
+    octave_shift: int = 7,
 ) -> dict[str, Any]:
-    """Собирает sidecar по схеме ТЗ §6 (+ детали эксперимента для воспроизводимости)."""
+    """Собирает sidecar по схеме ТЗ §6 (+ детали эксперимента для воспроизводимости).
+
+    ``octave_shift`` — число октав транспонирования рендера (5/6/7, дефолт 7):
+    ключи схемы не меняются, поэтому ``schema_version`` остаётся прежним —
+    меняются только значения ``octave_shift``/``pitch_factor``.
+    """
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
         "fs_eeg": 500,
         "fs_audio": FS_AUDIO,
-        "octave_shift": 7,
-        "pitch_factor": 128,
+        "octave_shift": int(octave_shift),
+        "pitch_factor": 2 ** int(octave_shift),
         "duration_s": round(float(duration_s), 6),
         "bands": bands,
         "channel_order": list(channels),

@@ -1,13 +1,22 @@
 /**
- * Тесты раздела «Нейромузыка» (M5): подсказка без записи, кнопка → поллинг
- * статуса → прогресс-бар → плеер и список из семи треков.
+ * Тесты раздела «Нейромузыка» (M5): подсказка без записи, кнопка «Создать аудио»
+ * в тулс-хедере → поллинг статуса → прогресс-бар → плеер и список из семи
+ * треков; параметры — в панели опций, правка не запускает расчёт.
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { recordingFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import {
+  DEFAULT_BOOST_DB,
+  DEFAULT_LOUDNESS_PHON,
+  DEFAULT_OCTAVE_SHIFT,
+  useNeuromusic,
+} from '@/shared/state/neuromusic'
+import { NeuromusicPanel } from './NeuromusicPanel'
 import { NeuromusicSection } from './NeuromusicSection'
+import { NeuromusicToolActions } from './NeuromusicToolActions'
 
 const TRACKS = ['delta', 'delta_theta', 'theta', 'alpha', 'beta', 'gamma', 'high_gamma']
 
@@ -65,23 +74,56 @@ function audioFetchMock() {
   return Object.assign(fn, { postBodies })
 }
 
+/**
+ * Раздел целиком, как в каркасе: кнопка тулс-хедера + рабочая область +
+ * панель опций (без AppShell — панель вне RightPanel неаккордеонная).
+ */
+function renderNeuromusic() {
+  return renderWithProviders(
+    <>
+      <NeuromusicToolActions />
+      <NeuromusicSection />
+      <NeuromusicPanel />
+    </>,
+  )
+}
+
 describe('Нейромузыка — раздел', () => {
+  beforeEach(() => {
+    // Стор общий для всех компонентов раздела и живёт между тестами:
+    // параметры и результат каждого теста сбрасываются явно
+    useNeuromusic.setState({
+      boostDb: DEFAULT_BOOST_DB,
+      loudness: true,
+      loudnessPhon: DEFAULT_LOUDNESS_PHON,
+      autobase: true,
+      octaveShift: DEFAULT_OCTAVE_SHIFT,
+      renderId: null,
+      renderRecordingId: null,
+      status: null,
+      busy: false,
+      error: null,
+    })
+  })
+
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
   it('без открытой записи — честная подсказка открыть EDF', () => {
     useEdfRecording.setState({ recording: null })
-    renderWithProviders(<NeuromusicSection />)
+    renderNeuromusic()
     expect(screen.getByText(/Откройте ЭЭГ-запись/)).toBeInTheDocument()
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    // Кнопка в хедере есть, но выключена без записи (с объяснением в тултипе)
+    expect(screen.getByRole('button', { name: 'Создать аудио' })).toBeDisabled()
   })
 
   it('кнопка → прогресс с шагом пайплайна → плеер и семь треков', async () => {
     useEdfRecording.setState({ recording: recordingFixture })
     vi.stubGlobal('fetch', audioFetchMock())
 
-    renderWithProviders(<NeuromusicSection />)
+    renderNeuromusic()
     fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
 
     // Прогресс-бар с процентами и подписью шага (ТЗ M5).
@@ -94,25 +136,13 @@ describe('Нейромузыка — раздел', () => {
       () => expect(screen.getByTestId('neuromusic-player')).toBeInTheDocument(),
       { timeout: 3000 },
     )
-    expect(screen.getByRole('link', { name: /Скачать партитуру/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /δ — дельта/ })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /γ-high — высокая гамма/ })).toBeInTheDocument()
-    // Скачивание каждого из семи треков — отдельной ссылкой (соль-прослушивание).
-    expect(screen.getAllByRole('link', { name: /Скачать \.wav/ })).toHaveLength(7)
-  })
+    expect(screen.getByRole('link', { name: 'Скачать мастер' })).toBeInTheDocument()
+    for (const name of ['δ — дельта', 'θ — тета', 'α — альфа', 'γ-high — высокая гамма']) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument()
+    }
 
-  it('выбор трека меняет источник плеера на его WAV', async () => {
-    useEdfRecording.setState({ recording: recordingFixture })
-    vi.stubGlobal('fetch', audioFetchMock())
-
-    renderWithProviders(<NeuromusicSection />)
-    fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
-    await waitFor(
-      () => expect(screen.getByTestId('neuromusic-player')).toBeInTheDocument(),
-      { timeout: 3000 },
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /α — альфа/ }))
+    // Выбор трека меняет src плеера на соль-WAV.
+    fireEvent.click(screen.getByRole('button', { name: 'α — альфа' }))
     await waitFor(() =>
       expect(screen.getByTestId('neuromusic-player')).toHaveAttribute(
         'src',
@@ -126,9 +156,9 @@ describe('Нейромузыка — раздел', () => {
     const fetchMock = audioFetchMock()
     vi.stubGlobal('fetch', fetchMock)
 
-    renderWithProviders(<NeuromusicSection />)
+    renderNeuromusic()
 
-    // Контрол параметра: диапазон 0…12, значение по умолчанию +6 (приёмка 05.10).
+    // Контрол параметра — в панели опций: диапазон 0…12, дефолт +6 (приёмка 05.10).
     const field = screen.getByLabelText(/Усиление полос/)
     expect(field).toHaveValue(6)
 
@@ -153,7 +183,7 @@ describe('Нейромузыка — раздел', () => {
     const fetchMock = audioFetchMock()
     vi.stubGlobal('fetch', fetchMock)
 
-    renderWithProviders(<NeuromusicSection />)
+    renderNeuromusic()
     fireEvent.click(screen.getByRole('button', { name: 'Максимум (boost)' }))
     fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
 
@@ -164,12 +194,31 @@ describe('Нейромузыка — раздел', () => {
     expect(screen.getByLabelText(/Усиление полос/)).toHaveValue(6)
   })
 
+  it('транспонирование 5 октав уходит в запрос (×32), правка не запускает расчёт', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderNeuromusic()
+
+    // Дефолт — 7 октав (×128, как до появления выбора): сегмент выбран.
+    expect(screen.getByRole('button', { name: '7 октав' })).toBeInTheDocument()
+
+    // Выбор в панели опций не запускает рендер (правило UI).
+    fireEvent.click(screen.getByRole('button', { name: '5 октав' }))
+    expect(fetchMock.postBodies).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
+    await waitFor(() => expect(fetchMock.postBodies).toHaveLength(1))
+    expect(JSON.parse(fetchMock.postBodies[0])).toMatchObject({ octave_shift: 5 })
+  })
+
   it('компенсация ISO 226 выключается чекбоксом, уровень правится полем', async () => {
     useEdfRecording.setState({ recording: recordingFixture })
     const fetchMock = audioFetchMock()
     vi.stubGlobal('fetch', fetchMock)
 
-    renderWithProviders(<NeuromusicSection />)
+    renderNeuromusic()
 
     // Уровень прослушивания виден только при включённой компенсации.
     expect(screen.getByLabelText(/Уровень прослушивания/)).toHaveValue(75)

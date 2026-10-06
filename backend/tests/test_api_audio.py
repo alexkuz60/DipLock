@@ -142,8 +142,50 @@ def test_render_validates_gains_and_recording(client, tmp_path, edf_file):
     assert too_high.status_code == 400
     assert "boost_db" in too_high.json()["detail"]
 
+    for bad_octaves in (4, 8):
+        bad_shift = client.post(
+            f"{_PREFIX}/render",
+            json={"recording_id": recording.recording_id, "octave_shift": bad_octaves},
+        )
+        assert bad_shift.status_code == 400
+        assert "octave_shift" in bad_shift.json()["detail"]
+
     missing = client.post(f"{_PREFIX}/render", json={"recording_id": "no-such-recording"})
     assert missing.status_code == 404
+
+
+def test_render_with_five_octaves(client, tmp_path, edf_file):
+    """Выбор транспонирования: octave_shift=5 → sidecar 5/32, сетка delta ×32.
+
+    Контракт параметра 5/6/7 октав (эксперимент 06.10.2026): ядро, психоакустика
+    и партитура пересчитываются на выбранный множитель, дефолт остаётся 7.
+    """
+    recording = _register(tmp_path, edf_file)
+    started = client.post(
+        f"{_PREFIX}/render",
+        json={
+            "recording_id": recording.recording_id,
+            "boost_db": 0.0,
+            "loudness_phon": None,
+            "octave_shift": 5,
+        },
+    )
+    assert started.status_code == 202, started.text
+
+    done = _wait_render(client, started.json()["render_id"])
+    assert done["status"] == "succeeded", done.get("error")
+
+    sidecar = client.get(f"{_PREFIX}/render/{started.json()['render_id']}/sidecar.json").json()
+    assert sidecar["octave_shift"] == 5
+    assert sidecar["pitch_factor"] == 32
+    # Частотная сетка треков: delta 0.5–2 Гц × 32 = 16–64 Гц.
+    delta = next(band for band in sidecar["bands"] if band["name"] == "delta")
+    assert delta["audio_fmin"] == 16.0 and delta["audio_fmax"] == 64.0
+    # Форма WAV не зависит от числа октав: 48 кГц, стерео, длительность записи.
+    master = client.get(f"{_PREFIX}/render/{started.json()['render_id']}/master.wav")
+    with sf.SoundFile(io.BytesIO(master.content)) as handle:
+        assert handle.samplerate == 48000 and handle.channels == 2
+        assert abs(len(handle) / 48000 - 4.0) < 0.01
 
 
 def test_render_applies_default_boost(client, tmp_path, edf_file):

@@ -151,3 +151,26 @@ def test_audio_frequency_grid_matches_octave_shift() -> None:
         for name, bounds in settings.freq_bands.items()
     }
     assert grid == expected
+
+
+def test_sidecar_octave_shift_is_a_parameter() -> None:
+    """Партитура фиксирует выбранные октавы: 5 → octave_shift 5, pitch_factor 32."""
+    sidecar = build_sidecar(
+        duration_s=4.0,
+        channels=["Cz"],
+        bands=[],
+        checksum="abc",
+        gains_db={},
+        boost_db=6.0,
+        loudness=None,
+        warnings=[],
+        clean_label="",
+        interpolated=[],
+        notch_hz=50.0,
+        notch_harmonics=2,
+        octave_shift=5,
+    )
+    assert sidecar["octave_shift"] == 5
+    assert sidecar["pitch_factor"] == 32
+    # Ключи схемы не меняются — schema_version остаётся прежним.
+    assert sidecar["schema_version"] == SIDECAR_SCHEMA_VERSION

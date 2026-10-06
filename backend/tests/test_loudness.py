@@ -74,6 +74,16 @@ def test_pit_bands_are_middle_octaves() -> None:
     assert set(pit_bands(settings.freq_bands, PITCH_STEPS)) == {"theta", "alpha", "beta"}
 
 
+def test_pit_bands_follow_octave_choice() -> None:
+    """Выбор октав сдвигает набор «ямы» по абсолютным аудио-частотам 0.5–4 кГц.
+
+    ×64 (6 октав): α/β/γ; ×32 (5 октав): β/γ/γ-high — гамма и высокая гамма
+    становятся «серединой» слуха (эксперимент выбора транспонирования).
+    """
+    assert set(pit_bands(settings.freq_bands, 6)) == {"alpha", "beta", "gamma"}
+    assert set(pit_bands(settings.freq_bands, 5)) == {"beta", "gamma", "high_gamma"}
+
+
 def test_autobase_limits_base_to_pit_ceiling() -> None:
     """Автобаза: base = min(база, bound − offset) по полосам «ямы» (стратегия A).
 

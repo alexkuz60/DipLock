@@ -19,12 +19,14 @@ describe('uiStore', () => {
   })
 
   it('по умолчанию открывает панели рабочих разделов и закрывает новые', () => {
+    // neuromusic — с панелью опций (параметры рендера живут там, 06.10.2026)
     expect(useUiStore.getState().rightPanelOpen).toEqual({
       edf: true,
       eeg: true,
       dipoles: true,
       table: true,
       group: true,
+      neuromusic: true,
     })
     expect(useUiStore.getState().rightPanelOpen.server).toBeUndefined()
   })

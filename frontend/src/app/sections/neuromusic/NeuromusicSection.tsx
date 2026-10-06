@@ -1,28 +1,22 @@
 /**
  * Раздел «Нейромузыка» (эксперимент, docs/rules/neuromusic.md).
  *
- * Партитура ЭЭГ: 7 полосовых треков ×128 (7 октав вверх) + мастер-сведение.
- * Фаза 1 — по ТЗ без слайдеров и персиста: кнопка «Создать аудио» →
- * прогресс-бар с шагами пайплайна (поллинг in-memory статуса на сервере,
- * TTL 15 мин) → плеер мастера, соль-прослушивание треков и скачивание
- * WAV/партитуры (sidecar JSON).
+ * Рабочая область: подсказка без записи, статус и прогресс рендера, плеер
+ * мастера, соль-прослушивание треков и скачивание WAV/партитуры (sidecar JSON).
+ * Кнопка «Создать аудио» — иконка тулс-хедера (`NeuromusicToolActions`),
+ * параметры — секция «Параметры рендера» правого сайдбара (`NeuromusicPanel`):
+ * общее состояние — стор `shared/state/neuromusic.ts`, правка параметра рендер
+ * не запускает. Поллинг статуса живёт в сторе (у рендера свой контракт
+ * running/succeeded/failed, in-memory TTL 15 мин) и переживает уход из раздела.
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Music2 } from 'lucide-react'
-import { api, ApiError } from '@/shared/api/client'
-import type { AudioRenderStatus } from '@/shared/api/types'
+import { api } from '@/shared/api/client'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import { useNeuromusic } from '@/shared/state/neuromusic'
 import { Button } from '@/shared/ui/Button'
-import { CheckboxRow } from '@/shared/ui/CheckboxRow'
-import { NumberField } from '@/shared/ui/NumberField'
 import { Placeholder } from '@/shared/ui/Placeholder'
-import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { StatusPill } from '@/shared/ui/StatusPill'
-
-/** Дефолтное усиление полос (дБ) — как на сервере (приёмка 05.10.2026: +6…+12). */
-const DEFAULT_BOOST_DB = 6
-/** Дефолтный опорный уровень компенсации ISO 226 (фон) — как на сервере. */
-const DEFAULT_LOUDNESS_PHON = 75
 
 /**
  * Стиль ссылок-кнопок («Скачать…»): тот же набор, что ``Button variant="secondary"`` —
@@ -45,74 +39,31 @@ const BAND_LABELS: Record<string, string> = {
 
 const bandLabel = (band: string): string => BAND_LABELS[band] ?? band
 
-function errorText(error: unknown): string {
-  if (error instanceof ApiError) return error.message
-  if (error instanceof Error) return error.message
-  return 'Неизвестная ошибка'
-}
-
 export function NeuromusicSection() {
   const recording = useEdfRecording((state) => state.recording)
-  const [renderId, setRenderId] = useState<string | null>(null)
-  const [status, setStatus] = useState<AudioRenderStatus | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const renderId = useNeuromusic((state) => state.renderId)
+  const status = useNeuromusic((state) => state.status)
+  const busy = useNeuromusic((state) => state.busy)
+  const error = useNeuromusic((state) => state.error)
+  const octaveShift = useNeuromusic((state) => state.octaveShift)
   /** Что играет в плеере: мастер или трек полосы. */
   const [selected, setSelected] = useState<string>('master')
-  /** Базовое усиление полосовых треков, дБ (0…12): правка не запускает расчёт. */
-  const [boostDb, setBoostDb] = useState<number>(DEFAULT_BOOST_DB)
-  /** Компенсация ISO 226 (равная субъективная громкость инструментов). */
-  const [loudness, setLoudness] = useState<boolean>(true)
-  /** Опорный уровень компенсации, фон (60…90). */
-  const [loudnessPhon, setLoudnessPhon] = useState<number>(DEFAULT_LOUDNESS_PHON)
-  /** Режим базы при включённой компенсации: автобаза «ямы» ↔ максимум громкости. */
-  const [autobase, setAutobase] = useState<boolean>(true)
 
   const running = busy || status?.status === 'running'
 
-  const start = useCallback(async () => {
-    if (!recording) return
-    setBusy(true)
-    setError(null)
-    setStatus(null)
-    setSelected('master')
-    try {
-      const started = await api.audioRender(recording.recording_id, {
-        boostDb,
-        loudnessPhon: loudness ? loudnessPhon : null,
-        loudnessAutobase: autobase,
-      })
-      setRenderId(started.render_id)
-    } catch (cause) {
-      setError(errorText(cause))
-      setBusy(false)
-    }
-  }, [recording, boostDb, loudness, loudnessPhon, autobase])
-
-  // Поллинг статуса рендера: как у задач (jobPolling), но у своего контракта
-  // (running/succeeded/failed, без отмены) — отдельный цикл здесь же.
+  // Новый запуск кнопкой в хедере (busy=true): плеер снова с мастера —
+  // как и раньше при нажатии «Создать аудио» внутри секции.
   useEffect(() => {
-    if (!renderId || !busy) return
-    let cancelled = false
-    const tick = async () => {
-      try {
-        const next = await api.audioRenderStatus(renderId)
-        if (cancelled) return
-        setStatus(next)
-        if (next.status !== 'running') setBusy(false)
-      } catch (cause) {
-        if (cancelled) return
-        setError(errorText(cause))
-        setBusy(false)
-      }
-    }
-    void tick()
-    const timer = window.setInterval(() => void tick(), 400)
-    return () => {
-      cancelled = true
-      window.clearInterval(timer)
-    }
-  }, [renderId, busy])
+    if (busy) setSelected('master')
+  }, [busy])
+
+  // Результат принадлежит записи: закрытие/смена записи убирает чужой рендер
+  // (паттерн `summaryReport`: сброс результата + глушение поллинга токеном).
+  const recordingId = recording?.recording_id ?? null
+  useEffect(() => {
+    const state = useNeuromusic.getState()
+    if (state.renderId && state.renderRecordingId !== recordingId) state.reset()
+  }, [recordingId])
 
   if (!recording) {
     return (
@@ -122,7 +73,8 @@ export function NeuromusicSection() {
         description="Экспериментальный рендер: очищенная запись звучит как партитура оркестра — 7 полосовых треков, поднятых на 7 октав, и мастер-сведение."
       >
         <p className="text-sm text-fg-2">
-          Откройте ЭЭГ-запись в разделе «EDF», затем вернитесь сюда и нажмите «Создать аудио».
+          Откройте ЭЭГ-запись в разделе «EDF», затем вернитесь сюда и нажмите «Создать аудио»
+          (иконка в шапке раздела; параметры — в панели «Опции раздела» справа).
         </p>
       </Placeholder>
     )
@@ -145,11 +97,11 @@ export function NeuromusicSection() {
           <h2 className="text-lg font-medium text-fg-1">Нейромузыка — ЭЭГ в звук</h2>
           <p className="text-sm text-fg-2">
             Эксперимент: запись <span className="text-fg-1">{recording.filename}</span> → 7 треков
-            полос ×128 (7 октав) + мастер, WAV 48 кГц/24 бит.
+            полос ×{2 ** octaveShift} ({octaveShift} октав) + мастер, WAV 48 кГц/24 бит.
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          {status && (
+        {status && (
+          <div className="ml-auto">
             <StatusPill
               tone={
                 status.status === 'succeeded' ? 'ok' : status.status === 'failed' ? 'danger' : 'warn'
@@ -161,11 +113,8 @@ export function NeuromusicSection() {
                   ? 'Ошибка'
                   : 'Рендер…'}
             </StatusPill>
-          )}
-          <Button variant="primary" onClick={() => void start()} disabled={running}>
-            {running ? 'Рендеринг…' : 'Создать аудио'}
-          </Button>
-        </div>
+          </div>
+        )}
       </header>
 
       {error && (
@@ -176,60 +125,6 @@ export function NeuromusicSection() {
           {error}
         </p>
       )}
-
-      <section aria-label="Параметры рендера" className="flex max-w-xs flex-col gap-3">
-        <NumberField
-          label="Усиление полос"
-          unit="дБ"
-          value={boostDb}
-          onChange={setBoostDb}
-          min={0}
-          max={12}
-          step={1}
-          hint="Целевой уровень −18 дБ + усиление (0…12); считает кнопка"
-          disabled={running}
-        />
-        <CheckboxRow
-          label="Перцептуальный баланс (ISO 226)"
-          checked={loudness}
-          onChange={setLoudness}
-          hint="Равная субъективная громкость полос: середина опускается, басы поднимаются"
-          disabled={running}
-        />
-        {loudness && (
-          <NumberField
-            label="Уровень прослушивания"
-            unit="фон"
-            value={loudnessPhon}
-            onChange={setLoudnessPhon}
-            min={60}
-            max={90}
-            step={5}
-            hint="Опорный уровень кривых равной громкости (60…90)"
-            disabled={running}
-          />
-        )}
-        {loudness && (
-          <SegmentedControl
-            label="Режим базы"
-            value={autobase ? 'balance' : 'max'}
-            options={[
-              {
-                value: 'balance',
-                label: 'Баланс (≈ −17)',
-                title: 'Автобаза: середина θ/α/β выравнивается по ISO 226, boost — до запаса потолка',
-              },
-              {
-                value: 'max',
-                label: 'Максимум (boost)',
-                title: 'База −18+boost: треки громче, но crest-limited — компенсация почти не работает',
-              },
-            ]}
-            onChange={(value) => setAutobase(value === 'balance')}
-            hint="Без компрессии середину можно выровнять только опусканием — «баланс» и есть этот режим"
-          />
-        )}
-      </section>
 
       {running && status && (
         <section

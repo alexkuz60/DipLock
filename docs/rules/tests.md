@@ -906,3 +906,17 @@ phon. UI: чекбокс компенсации, поле «Уровень пр�
 `loudness_autobase`, переключение). sidecar: `loudness {method, phon,
 offsets_db, autobase, base_db}` + `loudness_offset_db` по бандам. Итог: pytest —
 **800** (без `integration`), Vitest — **1026**.
+
+**«Нейромузыка»: выбор транспонирования 5/6/7 октав (06.10.2026).** Параметр
+`octave_shift` (5/6/7 → ×32/×64/×128, дефолт 7): `core.band_stem(pitch_steps=…)`
+(число квадратов фазы), прокидывание через `render` → sidecar
+(`octave_shift`/`pitch_factor` из параметра), валидация 400 в роуте; выбор
+психоакустики (`band_loudness_offsets`/`pit_bands` уже принимали `pitch_steps` —
+набор «ямы» сдвигается сам: ×64 → α/β/γ, ×32 → β/γ/γ-high). UI: сегмент
+«Транспонирование» в панели опций (`NeuromusicPanel`), множитель в заголовке
+секции, `octave_shift` в теле POST (`client.ts` + стор `neuromusic`). Тесты
+**+5 pytest** (ядро: пик 320/640/1280 Гц по `pitch_steps`, `pitch_steps<1` →
+ValueError; sidecar 5 → 32; `pit_bands` ×64/×32; API: рендер 5 октав → сетка δ
+16–64 Гц, 4/8 → 400) **+1 Vitest** (сегмент 5 октав → `octave_shift: 5` в теле,
+правка ≠ расчёт). Контракт: `export_openapi` (68 путей) + `gen:api`. Итог:
+pytest — **805** (без `integration`), Vitest — **1026**.

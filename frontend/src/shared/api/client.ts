@@ -183,6 +183,7 @@ export const api = {
   /**
    * «Нейромузыка» (эксперимент): рендер партитуры → 202 + render_id.
    * `boostDb` — базовое усиление полосовых треков, дБ (0…12, дефолт сервера +6);
+   * `octaveShift` — транспонирование, октав (5/6/7 → ×32/×64/×128, дефолт 7);
    * `loudnessPhon` — опорный уровень компенсации ISO 226, фон (60…90) или
    * `null` — выключить; `loudnessAutobase` — стратегия A (автобаза «ямы») ↔
    * «максимум громкости»; статус — `audioRenderStatus` (поллинг ~400 мс),
@@ -190,7 +191,12 @@ export const api = {
    */
   audioRender: (
     recordingId: string,
-    opts?: { boostDb?: number; loudnessPhon?: number | null; loudnessAutobase?: boolean },
+    opts?: {
+      boostDb?: number
+      octaveShift?: number
+      loudnessPhon?: number | null
+      loudnessAutobase?: boolean
+    },
     signal?: AbortSignal,
   ) =>
     request<AudioRenderStart>(`${API_PREFIX}/audio/render`, {
@@ -199,6 +205,7 @@ export const api = {
       body: JSON.stringify({
         recording_id: recordingId,
         ...(opts?.boostDb !== undefined ? { boost_db: opts.boostDb } : {}),
+        ...(opts?.octaveShift !== undefined ? { octave_shift: opts.octaveShift } : {}),
         ...(opts?.loudnessPhon !== undefined ? { loudness_phon: opts.loudnessPhon } : {}),
         ...(opts?.loudnessAutobase !== undefined
           ? { loudness_autobase: opts.loudnessAutobase }

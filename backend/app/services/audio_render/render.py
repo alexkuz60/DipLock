@@ -19,7 +19,7 @@ from typing import Any, Literal
 import numpy as np
 
 from app.core.config import Settings
-from app.services.audio_render.core import FS_AUDIO, PITCH_STEPS, RESAMPLE_UP, band_stem
+from app.services.audio_render.core import FS_AUDIO, RESAMPLE_UP, band_stem
 from app.services.audio_render.export import (
     build_sidecar,
     input_checksum,
@@ -106,11 +106,14 @@ def start_render(
     boost_db: float = BOOST_DEFAULT_DB,
     loudness_phon: float | None = LOUDNESS_PHON_DEFAULT,
     loudness_autobase: bool = True,
+    octave_shift: int = 7,
 ) -> str:
     """Запускает рендер в фоновом потоке; возвращает ``render_id``.
 
     ``boost_db`` — базовое усиление полос (0…12 дБ, дефолт +6): целевой RMS
-    трека −18 + boost (приёмка 05.10.2026). ``loudness_phon`` — опорный уровень
+    трека −18 + boost (приёмка 05.10.2026). ``octave_shift`` — число октав
+    транспонирования ядра (5/6/7 → ×32/×64/×128, дефолт 7 — выбор
+    эксперимента 06.10.2026); валидируется в API. ``loudness_phon`` — опорный уровень
     психоакустической компенсации ISO 226 (60…90, дефолт 75; ``None`` —
     выключить, чистый RMS без поправок). ``loudness_autobase`` — стратегия A:
     при включённой компенсации база ограничивается потолком «ямы» (θ/α/β
@@ -130,7 +133,7 @@ def start_render(
         target=_run_render,
         args=(
             state, recording, cfg, dict(gains_db), float(boost_db),
-            loudness_phon, bool(loudness_autobase),
+            loudness_phon, bool(loudness_autobase), int(octave_shift),
         ),
         name=f"audio-render-{render_id}",
         daemon=True,
@@ -154,6 +157,7 @@ def _run_render(
     boost_db: float = BOOST_DEFAULT_DB,
     loudness_phon: float | None = LOUDNESS_PHON_DEFAULT,
     loudness_autobase: bool = True,
+    octave_shift: int = 7,
 ) -> None:
     """Цикл рендера: подготовка → ядро по полосам → мастер → экспорт.
 
@@ -179,7 +183,7 @@ def _run_render(
         # None — режим «без компенсации» (loudness_phon=null в запросе).
         offsets: dict[str, float] | None = None
         if loudness_phon is not None:
-            offsets = band_loudness_offsets(cfg.freq_bands, float(loudness_phon), PITCH_STEPS)
+            offsets = band_loudness_offsets(cfg.freq_bands, float(loudness_phon), octave_shift)
         n_bands = max(1, len(bands))
         n_out = packages.n_times * RESAMPLE_UP
         master = np.zeros((n_out, 2), dtype=np.float64)
@@ -194,7 +198,7 @@ def _run_render(
         base_db = TRACK_RMS_DBFS + boost_db
         pit: list[str] = []
         if offsets is not None and loudness_autobase:
-            pit = pit_bands(cfg.freq_bands, PITCH_STEPS)
+            pit = pit_bands(cfg.freq_bands, octave_shift)
         pit_stems: dict[str, np.ndarray] = {}
         if pit:
             crests: dict[str, float] = {}
@@ -203,7 +207,7 @@ def _run_render(
                 state.pct = 0.3 + 0.15 * (index + 1) / len(pit)
                 state.message = "crest середины → ограничение базы (ISO 226)"
                 eeg_band = packages.packages.pop(band)
-                stem = band_stem(eeg_band, w_left, w_right)
+                stem = band_stem(eeg_band, w_left, w_right, pitch_steps=octave_shift)
                 del eeg_band
                 pit_stems[band] = stem
                 rms_stem = track_rms(stem)
@@ -219,12 +223,12 @@ def _run_render(
         for index, band in enumerate(bands):
             state.stage = f"Трек {band} ({index + 1}/{n_bands})"
             state.pct = tracks_start + (0.9 - tracks_start) * index / n_bands
-            state.message = f"Ядро ×128: hilbert → ресемпл ×96 → 7 октав ({band})"
+            state.message = f"Ядро ×{2 ** octave_shift}: hilbert → ресемпл ×96 → {octave_shift} октав ({band})"
             if band in pit_stems:
                 stem = pit_stems.pop(band)
             else:
                 eeg_band = packages.packages.pop(band)
-                stem = band_stem(eeg_band, w_left, w_right)
+                stem = band_stem(eeg_band, w_left, w_right, pitch_steps=octave_shift)
                 del eeg_band
             gain_db = float(gains_db.get(band, 0.0))
             loudness_db = 0.0 if offsets is None else offsets.get(band, 0.0)
@@ -240,8 +244,8 @@ def _run_render(
                 "name": band,
                 "fmin": float(fmin),
                 "fmax": float(fmax),
-                "audio_fmin": float(fmin) * 2**PITCH_STEPS,
-                "audio_fmax": float(fmax) * 2**PITCH_STEPS,
+                "audio_fmin": float(fmin) * 2**octave_shift,
+                "audio_fmax": float(fmax) * 2**octave_shift,
                 "weights_left": [float(value) for value in w_left],
                 "weights_right": [float(value) for value in w_right],
                 "gain_db": gain_db,
@@ -282,6 +286,7 @@ def _run_render(
             notch_hz=AUDIO_NOTCH_HZ,
             notch_harmonics=AUDIO_NOTCH_HARMONICS,
             groups=groups,
+            octave_shift=octave_shift,
         ))
         state.artifacts = RenderArtifacts(
             master_wav=master_wav,

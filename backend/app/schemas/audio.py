@@ -10,6 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.services.audio_render.core import PITCH_STEPS
 from app.services.audio_render.loudness import (
     LOUDNESS_PHON_DEFAULT,
     LOUDNESS_PHON_MAX,
@@ -62,6 +63,14 @@ class AudioRenderRequest(BaseModel):
             "потолком «ямы» (θ/α/β выравниваются по перцептиву, boost срезается "
             "до запаса потолка); false — «максимум громкости» (база −18+boost, "
             "треки crest-limited)"
+        ),
+    )
+    octave_shift: int = Field(
+        default=PITCH_STEPS,
+        description=(
+            "Транспонирование партитуры, октав (5/6/7 → ×32/×64/×128, дефолт "
+            f"{PITCH_STEPS}): число квадратов фазы ядра; выбор 5/6/7 — "
+            "эксперимент 06.10.2026, невалидное значение — 400"
         ),
     )
 

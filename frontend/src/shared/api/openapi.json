@@ -3589,7 +3589,7 @@
     "/api/v1/audio/render": {
       "post": {
         "summary": "Запустить рендер партитуры ЭЭГ → стерео (эксперимент «Нейромузыка»)",
-        "description": "Старт рендера: 7 треков ×128 (7 октав) + мастер, в памяти процесса.\n\nПроценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —\nотдельными GET. Гейны валидируются здесь (400 с текстом для UI).",
+        "description": "Старт рендера: 7 треков + мастер, транспонирование 5/6/7 октав\n(``octave_shift``, дефолт 7 → ×128), в памяти процесса.\n\nПроценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —\nотдельными GET. Гейны/boost/loudness_phon/octave_shift валидируются\nздесь (400 с текстом для UI).",
         "operationId": "start_audio_render_api_v1_audio_render_post",
         "requestBody": {
           "content": {
@@ -4124,6 +4124,12 @@
             "title": "Loudness Autobase",
             "description": "Стратегия A: при включённой компенсации база рендера ограничивается потолком «ямы» (θ/α/β выравниваются по перцептиву, boost срезается до запаса потолка); false — «максимум громкости» (база −18+boost, треки crest-limited)",
             "default": true
+          },
+          "octave_shift": {
+            "type": "integer",
+            "title": "Octave Shift",
+            "description": "Транспонирование партитуры, октав (5/6/7 → ×32/×64/×128, дефолт 7): число квадратов фазы ядра; выбор 5/6/7 — эксперимент 06.10.2026, невалидное значение — 400",
+            "default": 7
           }
         },
         "type": "object",

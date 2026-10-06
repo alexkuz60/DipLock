@@ -1484,10 +1484,12 @@ export interface paths {
         put?: never;
         /**
          * Запустить рендер партитуры ЭЭГ → стерео (эксперимент «Нейромузыка»)
-         * @description Старт рендера: 7 треков ×128 (7 октав) + мастер, в памяти процесса.
+         * @description Старт рендера: 7 треков + мастер, транспонирование 5/6/7 октав
+         *     (``octave_shift``, дефолт 7 → ×128), в памяти процесса.
          *
          *     Проценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —
-         *     отдельными GET. Гейны валидируются здесь (400 с текстом для UI).
+         *     отдельными GET. Гейны/boost/loudness_phon/octave_shift валидируются
+         *     здесь (400 с текстом для UI).
          */
         post: operations["start_audio_render_api_v1_audio_render_post"];
         delete?: never;
@@ -1807,6 +1809,12 @@ export interface components {
              * @default true
              */
             loudness_autobase: boolean;
+            /**
+             * Octave Shift
+             * @description Транспонирование партитуры, октав (5/6/7 → ×32/×64/×128, дефолт 7): число квадратов фазы ядра; выбор 5/6/7 — эксперимент 06.10.2026, невалидное значение — 400
+             * @default 7
+             */
+            octave_shift: number;
         };
         /**
          * AudioRenderStart

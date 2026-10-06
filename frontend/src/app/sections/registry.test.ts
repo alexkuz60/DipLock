@@ -9,8 +9,8 @@ describe('реестр разделов', () => {
     expect(UTILITY_SECTIONS).toHaveLength(3)
     expect(UTILITY_SECTIONS.map((section) => section.id)).toEqual(['wiki', 'settings', 'server'])
     expect(MAIN_SECTIONS.map((section) => section.id)).toEqual([
-      'home', 'edf', 'eeg', 'dipoles', 'table', 'group', 'summary', 'emolab', 'neuroaudio',
-      'neuromusic',
+      'home', 'edf', 'eeg', 'dipoles', 'table', 'group', 'summary', 'emolab', 'neuromusic',
+      'neuroaudio',
     ])
   })
 
@@ -19,9 +19,11 @@ describe('реестр разделов', () => {
     expect(new Set(SECTIONS.map((section) => section.route)).size).toBe(SECTIONS.length)
   })
 
-  it('у рабочих разделов хоткеи 1…9 и 0, у служебных — нет', () => {
+  it('у рабочих разделов хоткеи 1…8, 0 (Нейромузыка) и 9 (Нейроаудио), у служебных — нет', () => {
+    // Хоткеи принадлежат разделам, а не позиции в рейле: смена порядка
+    // «Нейромузыка» → «Нейроаудио» (06.10.2026) нажатий не меняет
     expect(MAIN_SECTIONS.map((section) => section.hotkey)).toEqual([
-      '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+      '1', '2', '3', '4', '5', '6', '7', '8', '0', '9',
     ])
     expect(UTILITY_SECTIONS.every((section) => section.hotkey === '')).toBe(true)
   })

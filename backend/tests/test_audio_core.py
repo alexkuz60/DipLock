@@ -128,3 +128,35 @@ def test_pitch_steps_constant_matches_octave_grid() -> None:
     """Сетка частот: 7 октав ×128 и 500×96=48000 — константы ядра согласованы."""
     assert 2**PITCH_STEPS == 128
     assert FS_EEG * RESAMPLE_UP == FS_AUDIO
+
+
+def test_pitch_steps_scales_the_tone() -> None:
+    """Выбор октав (5/6/7): тон 10 Гц → 320/640/1280 Гц, других пиков нет.
+
+    Тот же контракт «(а)», но для параметра ``pitch_steps`` (эксперимент
+    выбора транспонирования 06.10.2026): меньше квадратов фазы — ниже пик,
+    огибающая и длина трека не меняются.
+    """
+    for steps, factor in ((5, 32), (6, 64), (7, 128)):
+        w = np.ones(1)
+        stem = band_stem(_sine_band(10.0, 4.0), w, w, pitch_steps=steps)
+        assert stem.shape == (int(FS_EEG * 4.0) * RESAMPLE_UP, 2)
+        n_out = stem.shape[0]
+        core = stem[n_out // 10 : -n_out // 10, 0]
+        spectrum = np.abs(np.fft.rfft(core))
+        freqs = np.fft.rfftfreq(core.size, 1.0 / FS_AUDIO)
+        df = float(freqs[1] - freqs[0])
+        peak = int(np.argmax(spectrum))
+        expected = 10.0 * factor
+        assert abs(float(freqs[peak]) - expected) <= 1.5 * df, (
+            f"pitch_steps={steps}: пик {freqs[peak]:.1f} Гц вместо {expected}"
+        )
+        outside = np.abs(freqs - float(freqs[peak])) > 1.5 * df
+        assert float(spectrum[outside].max()) < 0.05 * float(spectrum[peak])
+
+
+def test_invalid_pitch_steps_are_rejected() -> None:
+    """``pitch_steps < 1`` — ValueError (валидация целостности ядра)."""
+    w = np.ones(1)
+    with np.testing.assert_raises(ValueError):
+        band_stem(_sine_band(10.0, 1.0), w, w, pitch_steps=0)
