@@ -21,6 +21,15 @@ import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
+import { bandLabel } from './bandLabels'
+
+/**
+ * Стиль ссылок-кнопок («Скачать…»): тот же набор, что ``Button variant="secondary"`` —
+ * для ``<a download>`` нужен именно тег ссылки, а не кнопка.
+ */
+const LINK_BUTTON_CLASS =
+  'inline-flex items-center gap-2 rounded-lg border border-border bg-bg-2 px-4 py-2 ' +
+  'text-base font-medium text-fg-0 transition-colors hover:bg-bg-3'
 
 export function NeuromusicPanel() {
   const boostDb = useNeuromusic((state) => state.boostDb)
@@ -30,6 +39,7 @@ export function NeuromusicPanel() {
   const octaveShift = useNeuromusic((state) => state.octaveShift)
   const busy = useNeuromusic((state) => state.busy)
   const status = useNeuromusic((state) => state.status)
+  const renderId = useNeuromusic((state) => state.renderId)
   const setBoostDb = useNeuromusic((state) => state.setBoostDb)
   const setLoudness = useNeuromusic((state) => state.setLoudness)
   const setLoudnessPhon = useNeuromusic((state) => state.setLoudnessPhon)
@@ -131,6 +141,44 @@ export function NeuromusicPanel() {
           )}
         </div>
       </Panel>
+
+      {renderId && status?.status === 'succeeded' && (
+        <Panel
+          title="Файлы"
+          hint="Готовый рендер: WAV-мастер, соль-треки полос и партитура (справка — § «Партитура»)"
+        >
+          <div className="flex flex-col gap-2">
+            <a
+              className={LINK_BUTTON_CLASS}
+              href={api.audioMasterUrl(renderId)}
+              download={`neuromusic-${renderId}.wav`}
+            >
+              Скачать мастер
+            </a>
+            <a
+              className={LINK_BUTTON_CLASS}
+              href={api.audioSidecarUrl(renderId)}
+              download={`neuromusic-${renderId}-sidecar.json`}
+            >
+              Скачать партитуру (.json)
+            </a>
+            <ul className="divide-y divide-border rounded-lg border border-border">
+              {(status?.tracks ?? []).map((band) => (
+                <li key={band} className="flex items-center gap-3 px-3 py-2">
+                  <span className="text-sm text-fg-1">{bandLabel(band)}</span>
+                  <a
+                    className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
+                    href={api.audioTrackUrl(renderId, band)}
+                    download={`neuromusic-${renderId}-${band}.wav`}
+                  >
+                    Скачать .wav
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Panel>
+      )}
 
       <Panel
         title="Пространство"

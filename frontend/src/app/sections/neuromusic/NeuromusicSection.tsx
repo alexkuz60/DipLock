@@ -1,44 +1,28 @@
 /**
  * Раздел «Нейромузыка» (эксперимент, docs/rules/neuromusic.md).
  *
- * Рабочая область: подсказка без записи, статус и прогресс рендера, плеер
- * мастера, соль-прослушивание треков и скачивание WAV/партитуры (sidecar JSON).
- * Кнопка «Создать аудио» — иконка тулс-хедера (`NeuromusicToolActions`),
- * параметры — секция «Параметры рендера» правого сайдбара (`NeuromusicPanel`):
- * общее состояние — стор `shared/state/neuromusic.ts`, правка параметра рендер
- * не запускает. Поллинг статуса живёт в сторе (у рендера свой контракт
- * running/succeeded/failed, in-memory TTL 15 мин) и переживает уход из раздела.
+ * Рабочая область отдана графике: подсказка без записи, статус/прогресс
+ * рендера и трекер-плеер (`WaveTracker`: линейка времени + волна-бабочка +
+ * позиционер). Транспорт Play/Pause и Stop — кнопки хедера раздела, ссылки
+ * «Скачать…» — секция «Файлы» правого сайдбара (`NeuromusicPanel`); параметры
+ * рендера — секция «Параметры рендера» того же сайдбара (правка параметра
+ * рендер не запускает).
+ *
+ * Состояние: сторы `shared/state/neuromusic.ts` (рендер, поллинг) и
+ * `shared/state/neuromusicPlayer.ts` (транспорт/вид плеера — их делят хедер
+ * и трекер). Поллинг живёт в сторе рендера и переживает уход из раздела;
+ * результат принадлежит записи — при закрытии/смене записи сбрасывается здесь
+ * (паттерн `summaryReport`).
  */
-import { useEffect, useState } from 'react'
-import { Music2 } from 'lucide-react'
-import { api } from '@/shared/api/client'
+import { useEffect, useMemo } from 'react'
+import { Music2, Pause, Play, Square } from 'lucide-react'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useNeuromusic } from '@/shared/state/neuromusic'
-import { Button } from '@/shared/ui/Button'
+import { useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
+import { IconButton } from '@/shared/ui/IconButton'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
-import { NeuromusicSpatialPlayer } from './NeuromusicSpatialPlayer'
-
-/**
- * Стиль ссылок-кнопок («Скачать…»): тот же набор, что ``Button variant="secondary"`` —
- * для ``<a download>`` нужен именно тег ссылки, а не кнопка.
- */
-const LINK_BUTTON_CLASS =
-  'inline-flex items-center gap-2 rounded-lg border border-border bg-bg-2 px-4 py-2 ' +
-  'text-base font-medium text-fg-0 transition-colors hover:bg-bg-3'
-
-/** Человекочитаемые имена полос-«инструментов» (ключи freq_bands). */
-const BAND_LABELS: Record<string, string> = {
-  delta: 'δ — дельта',
-  delta_theta: 'δ/θ — дельта-тета',
-  theta: 'θ — тета',
-  alpha: 'α — альфа',
-  beta: 'β — бета',
-  gamma: 'γ — гамма',
-  high_gamma: 'γ-high — высокая гамма',
-}
-
-const bandLabel = (band: string): string => BAND_LABELS[band] ?? band
+import { WaveTracker } from './WaveTracker'
 
 export function NeuromusicSection() {
   const recording = useEdfRecording((state) => state.recording)
@@ -47,25 +31,30 @@ export function NeuromusicSection() {
   const busy = useNeuromusic((state) => state.busy)
   const error = useNeuromusic((state) => state.error)
   const octaveShift = useNeuromusic((state) => state.octaveShift)
-  /** 3D-режим: вместо `<audio>` — Tone-цепочка (spatial-audio, п.1). */
-  const spatialEnabled = useNeuromusic((state) => state.spatialEnabled)
-  /** Что играет в плеере: мастер или трек полосы. */
-  const [selected, setSelected] = useState<string>('master')
+
+  /** Транспорт хедера живёт в сторе плеера — с ним же делит его трекер. */
+  const playing = useNeuromusicPlayer((state) => state.playing)
+  const playerReady = useNeuromusicPlayer((state) => state.ready)
+  const togglePlay = useNeuromusicPlayer((state) => state.togglePlay)
+  const stop = useNeuromusicPlayer((state) => state.stop)
 
   const running = busy || status?.status === 'running'
+  const succeeded = status?.status === 'succeeded'
+  const tracks = useMemo(() => status?.tracks ?? [], [status])
 
   // Новый запуск кнопкой в хедере (busy=true): плеер снова с мастера —
   // как и раньше при нажатии «Создать аудио» внутри секции.
   useEffect(() => {
-    if (busy) setSelected('master')
+    if (busy) useNeuromusicPlayer.getState().reset()
   }, [busy])
 
   // Результат принадлежит записи: закрытие/смена записи убирает чужой рендер
-  // (паттерн `summaryReport`: сброс результата + глушение поллинга токеном).
+  // и сбрасывает источник/транспорт плеера.
   const recordingId = recording?.recording_id ?? null
   useEffect(() => {
     const state = useNeuromusic.getState()
     if (state.renderId && state.renderRecordingId !== recordingId) state.reset()
+    useNeuromusicPlayer.getState().reset()
   }, [recordingId])
 
   if (!recording) {
@@ -83,15 +72,6 @@ export function NeuromusicSection() {
     )
   }
 
-  const tracks = status?.tracks ?? []
-  const isMaster = selected === 'master' || !tracks.includes(selected)
-  const source = isMaster
-    ? api.audioMasterUrl(renderId ?? '')
-    : api.audioTrackUrl(renderId ?? '', selected)
-  const downloadName = isMaster
-    ? `neuromusic-${renderId ?? 'master'}.wav`
-    : `neuromusic-${renderId ?? ''}-${selected}.wav`
-
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4">
       <header className="flex flex-wrap items-center gap-3">
@@ -103,8 +83,34 @@ export function NeuromusicSection() {
             полос ×{2 ** octaveShift} ({octaveShift} октав) + мастер, WAV 48 кГц/24 бит.
           </p>
         </div>
-        {status && (
-          <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          {succeeded && renderId && (
+            <>
+              <IconButton
+                icon={
+                  playing ? (
+                    <Pause className="size-5" aria-hidden />
+                  ) : (
+                    <Play className="size-5" aria-hidden />
+                  )
+                }
+                label={playing ? 'Пауза' : 'Слушать'}
+                tooltip={playing ? 'Пауза' : 'Слушать трекер (волна и позиционер слева направо)'}
+                disabled={!playerReady}
+                onClick={() => void togglePlay()}
+                data-testid="transport-play"
+              />
+              <IconButton
+                icon={<Square className="size-4" aria-hidden />}
+                label="Стоп"
+                tooltip="Стоп: остановить и вернуть позиционер в начало"
+                disabled={!playerReady}
+                onClick={() => void stop()}
+                data-testid="transport-stop"
+              />
+            </>
+          )}
+          {status && (
             <StatusPill
               tone={
                 status.status === 'succeeded' ? 'ok' : status.status === 'failed' ? 'danger' : 'warn'
@@ -116,8 +122,8 @@ export function NeuromusicSection() {
                   ? 'Ошибка'
                   : 'Рендер…'}
             </StatusPill>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       {error && (
@@ -161,72 +167,9 @@ export function NeuromusicSection() {
         </p>
       )}
 
-      {status?.status === 'succeeded' && renderId && (
+      {succeeded && renderId && (
         <section aria-label="Прослушивание" className="flex flex-col gap-3">
-          {spatialEnabled ? (
-            <NeuromusicSpatialPlayer renderId={renderId} tracks={tracks} />
-          ) : (
-            <audio
-              key={source}
-              controls
-              preload="none"
-              src={source}
-              className="w-full"
-              data-testid="neuromusic-player"
-            />
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            <a className={LINK_BUTTON_CLASS} href={source} download={downloadName}>
-              Скачать {isMaster ? 'мастер' : `трек «${bandLabel(selected)}»`}
-            </a>
-            <a
-              className={LINK_BUTTON_CLASS}
-              href={api.audioSidecarUrl(renderId)}
-              download={`neuromusic-${renderId}-sidecar.json`}
-            >
-              Скачать партитуру (.json)
-            </a>
-          </div>
-
-          <ul className="divide-y divide-border rounded-xl border border-border">
-            {!spatialEnabled && (
-              <li className="flex items-center gap-3 px-3 py-2">
-                <Button
-                  variant="ghost"
-                  className={selected === 'master' ? 'text-accent' : undefined}
-                  onClick={() => setSelected('master')}
-                >
-                  Мастер — партитура целиком
-                </Button>
-                <span className="ml-auto text-xs text-fg-2">все 7 инструментов</span>
-              </li>
-            )}
-            {tracks.map((band) => (
-              <li key={band} className="flex items-center gap-3 px-3 py-2">
-                {/* Соло-прослушивание — только в обычном режиме: в 3D все семь
-                    треков звучат разом через Tone-цепочку. */}
-                {spatialEnabled ? (
-                  <span className="text-sm text-fg-1">{bandLabel(band)}</span>
-                ) : (
-                  <Button
-                    variant="ghost"
-                    className={selected === band ? 'text-accent' : undefined}
-                    onClick={() => setSelected(band)}
-                  >
-                    {bandLabel(band)}
-                  </Button>
-                )}
-                <a
-                  className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
-                  href={api.audioTrackUrl(renderId, band)}
-                  download={`neuromusic-${renderId}-${band}.wav`}
-                >
-                  Скачать .wav
-                </a>
-              </li>
-            ))}
-          </ul>
+          <WaveTracker renderId={renderId} tracks={tracks} />
         </section>
       )}
     </div>
