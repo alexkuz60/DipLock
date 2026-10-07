@@ -59,15 +59,22 @@ def build_sidecar(
     notch_harmonics: int,
     groups: dict[str, list[str]] | None = None,
     octave_shift: int = 7,
+    variant: str = "express",
+    rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Собирает sidecar по схеме ТЗ §6 (+ детали эксперимента для воспроизводимости).
 
     ``octave_shift`` — число октав транспонирования рендера (5/6/7, дефолт 7):
     ключи схемы не меняются, поэтому ``schema_version`` остаётся прежним —
     меняются только значения ``octave_shift``/``pitch_factor``.
+
+    ``variant`` — вариант рендера («Экспресс»/«Монтаж»); ``rows`` — веса
+    рядов монтажа для «Монтажа» (каждый ряд: id/label/веса по каналам) —
+    для «Экспресса» ``None``. Новые ключи — minor, ``schema_version`` = 1.
     """
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
+        "variant": variant,
         "fs_eeg": 500,
         "fs_audio": FS_AUDIO,
         "octave_shift": int(octave_shift),
@@ -76,6 +83,7 @@ def build_sidecar(
         "bands": bands,
         "channel_order": list(channels),
         "busses": {name: list(members) for name, members in (groups or {}).items()},
+        "rows": list(rows) if rows is not None else None,
         "input_checksum_sha256": checksum,
         "gains_db": {name: float(value) for name, value in sorted(gains_db.items())},
         "boost_db": float(boost_db),

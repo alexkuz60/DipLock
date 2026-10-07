@@ -169,6 +169,47 @@ def master_mix(tracks: list[np.ndarray]) -> np.ndarray:
     return master
 
 
+def normalize_group(
+    tracks: list[np.ndarray], gain_db: float = 0.0, boost_db: float = 0.0,
+    loudness_db: float = 0.0,
+) -> tuple[list[np.ndarray], float | None, float | None]:
+    """Один масштаб на группу треков одной полосы (вариант «Монтаж»: 4 ряда).
+
+    Групповой гейн — принципиальное отличие от :func:`normalize_track`:
+    RMS считается по **объединённой энергии** всех треков группы и общий
+    множитель приводит её к целевому уровню (−18 + boost + ISO 226), а
+    потолок ``PEAK_CEILING`` применяется по **максимальному пику группы** —
+    так относительные уровни рядов внутри полосы (фронт/тыл/лево/право)
+    сохраняются точно: тихий ряд остаётся тихим, громкий — громким. Отдельная
+    нормализация каждого ряда (как ``normalize_track``) выровняла бы ряды
+    по громкости и убила бы пространственный контраст сцены.
+
+    Тишина **всей группы** (ниже ``AUDIO_SILENCE_FLOOR_V``) → нули без
+    раздувания (как в ``normalize_track``). Возвращает
+    ``(треки, gain, rms)``: gain/rms по группе (``None`` при тишине).
+    """
+    if not tracks:
+        raise ValueError("Нет треков для нормализации")
+    sizes = sum(track.size for track in tracks)
+    energy = sum(float(np.sum(np.square(track, dtype=np.float64))) for track in tracks)
+    current = float(np.sqrt(energy / sizes)) if sizes else 0.0
+    if current < AUDIO_SILENCE_FLOOR_V:
+        return [np.zeros_like(track) for track in tracks], None, None
+    target = 10.0 ** ((TRACK_RMS_DBFS + boost_db + loudness_db) / 20.0)
+    total_db = 20.0 * float(np.log10(target / current)) + gain_db
+    scale = 10.0 ** (total_db / 20.0)
+    out = [track * scale for track in tracks]
+    peak = max((float(np.max(np.abs(track))) for track in out), default=0.0)
+    if peak > PEAK_CEILING:
+        down = PEAK_CEILING / peak
+        out = [track * down for track in out]
+        total_db += 20.0 * float(np.log10(down))
+    group_rms = float(np.sqrt(
+        sum(float(np.sum(np.square(track, dtype=np.float64))) for track in out) / sizes,
+    ))
+    return out, total_db, group_rms
+
+
 def apply_peak_ceiling(master: np.ndarray) -> float:
     """Масштабирует мастер вниз к −1 dBFS (0.891); возвращает применённый множитель."""
     peak = float(np.max(np.abs(master))) if master.size else 0.0

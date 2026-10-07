@@ -74,6 +74,14 @@ class AudioRenderParams(BaseModel):
             "эксперимент 06.10.2026, невалидное значение — 400"
         ),
     )
+    variant: str = Field(
+        default="express",
+        description=(
+            "Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, "
+            "дефолт) или «montage» (Монтаж — 4 ряда схемы × 7 полос = 28 "
+            "рядовых треков для 3D-обработки); иное значение — 400"
+        ),
+    )
 
 
 class AudioRenderRequest(AudioRenderParams):
@@ -128,6 +136,17 @@ class AudioRenderStatus(BaseModel):
     message: str = ""
     error: str | None = Field(default=None, description="Текст ошибки (status=failed)")
     tracks: list[str] = Field(default_factory=list, description="Готовые треки (после успеха)")
+    variant: str = Field(
+        default="express",
+        description=(
+            "Вариант рендера: «montage» — файлы треков отдаются как "
+            "track/{row}/{band}.wav по списку rows; «express» — track/{band}.wav"
+        ),
+    )
+    rows: list[str] = Field(
+        default_factory=list,
+        description="Для «Монтажа»: id рядов, по которым есть треки (иначе пусто)",
+    )
 
 
 class AudioIrPresetOut(BaseModel):

@@ -7,6 +7,7 @@
 import io
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from app.services import audio_ir
@@ -68,6 +69,49 @@ def test_ir_unknown_preset_404(client):
     response = client.get(f"{_PREFIX}/ir/no_such.wav")
     assert response.status_code == 404
     assert "room_small" in response.json()["detail"]
+
+
+def test_brainroom_presets_in_catalog_with_canonical_proportions(client):
+    """BrainRoom: три дискретных размера (2/3.5/5 м), пропорции сверху 1.0:1.3.
+
+    Спецификация владельца 07.10.2026: слушатель внутри муляжа черепа
+    габаритом 2…5 м (иначе слух не локализует источники), пропорции
+    канонические, размер дискретный — IR-байты стабильны.
+    """
+    response = client.get(f"{_PREFIX}/ir")
+    assert response.status_code == 200
+    presets = {preset["id"]: preset for preset in response.json()["presets"]}
+    for preset_id, length_m in (
+        ("brainroom_s", 2.0),
+        ("brainroom_m", 3.5),
+        ("brainroom_l", 5.0),
+    ):
+        assert preset_id in presets, f"пресет {preset_id} отсутствует в каталоге"
+        assert presets[preset_id]["tags"] == ["brainroom", "муляж черепа"]
+        preset = audio_ir.get_preset(preset_id)
+        assert preset is not None
+        width, length, height = preset.dims_m
+        assert length == pytest.approx(length_m)  # габарит = длина
+        assert width == pytest.approx(length_m / 1.3)  # вид сверху 1.0 : 1.3
+        assert height == pytest.approx(width)  # высота ≈ ширина
+        # Слушатель в центре комнаты.
+        assert preset.mic_m[0] == pytest.approx(width / 2)
+        assert preset.mic_m[2] == pytest.approx(height / 2)
+
+
+def test_brainroom_ir_is_generated_deterministic(tmp_path, monkeypatch):
+    """BrainRoom IR генерируется детерминированно и отдаётся WAV 48кГц/стерео."""
+    monkeypatch.setattr(audio_ir.settings, "cache_dir", str(tmp_path))
+    first = audio_ir.generate_ir(audio_ir.get_preset("brainroom_s"))
+    second = audio_ir.generate_ir(audio_ir.get_preset("brainroom_s"))
+    assert first == second
+    with sf.SoundFile(io.BytesIO(first)) as handle:
+        assert handle.samplerate == 48000
+        assert handle.channels == 2
+        data = handle.read(dtype="float64")
+    assert np.isfinite(data).all()
+    assert np.abs(data).max() <= 0.891 + 1e-6
+    assert np.abs(data).max() > 0.1  # не тишина
 
 
 def test_ir_etag_304(client):

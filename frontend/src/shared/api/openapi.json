@@ -3786,6 +3786,60 @@
         }
       }
     },
+    "/api/v1/audio/render/{render_id}/track/{row}/{band}.wav": {
+      "get": {
+        "summary": "WAV рядового трека «Монтажа» (ряд × полоса)",
+        "description": "Рядовой трек «Монтажа»: 4 ряда схемы × полосы (варианты рендера).",
+        "operationId": "audio_render_row_track_api_v1_audio_render__render_id__track__row___band__wav_get",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          },
+          {
+            "name": "row",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Row"
+            }
+          },
+          {
+            "name": "band",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Band"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "audio/wav": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/audio/render/{render_id}/sidecar.json": {
       "get": {
         "summary": "Sidecar-«партитура» рендера (веса, гейны, checksum, extensions)",
@@ -4361,6 +4415,12 @@
             "title": "Octave Shift",
             "description": "Транспонирование партитуры, октав (5/6/7 → ×32/×64/×128, дефолт 7): число квадратов фазы ядра; выбор 5/6/7 — эксперимент 06.10.2026, невалидное значение — 400",
             "default": 7
+          },
+          "variant": {
+            "type": "string",
+            "title": "Variant",
+            "description": "Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — 4 ряда схемы × 7 полос = 28 рядовых треков для 3D-обработки); иное значение — 400",
+            "default": "express"
           }
         },
         "type": "object",
@@ -4407,6 +4467,12 @@
             "title": "Octave Shift",
             "description": "Транспонирование партитуры, октав (5/6/7 → ×32/×64/×128, дефолт 7): число квадратов фазы ядра; выбор 5/6/7 — эксперимент 06.10.2026, невалидное значение — 400",
             "default": 7
+          },
+          "variant": {
+            "type": "string",
+            "title": "Variant",
+            "description": "Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — 4 ряда схемы × 7 полос = 28 рядовых треков для 3D-обработки); иное значение — 400",
+            "default": "express"
           },
           "recording_id": {
             "type": "string",
@@ -4502,6 +4568,20 @@
             "type": "array",
             "title": "Tracks",
             "description": "Готовые треки (после успеха)"
+          },
+          "variant": {
+            "type": "string",
+            "title": "Variant",
+            "description": "Вариант рендера: «montage» — файлы треков отдаются как track/{row}/{band}.wav по списку rows; «express» — track/{band}.wav",
+            "default": "express"
+          },
+          "rows": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rows",
+            "description": "Для «Монтажа»: id рядов, по которым есть треки (иначе пусто)"
           }
         },
         "type": "object",

@@ -54,6 +54,11 @@ def track_name(band: str) -> str:
     return f"track_{band}.wav"
 
 
+def row_track_name(row: str, band: str) -> str:
+    """Имя файла рядового трека («Монтаж»: ряд × полоса) внутри каталога."""
+    return f"track_{row}_{band}.wav"
+
+
 def render_sig(
     recording: Recording,
     cfg: Settings,
@@ -62,13 +67,17 @@ def render_sig(
     loudness_phon: float | None,
     loudness_autobase: bool,
     octave_shift: int,
+    variant: str = "express",
 ) -> str:
     """Ключ рендера: sha256 от дешёвых входов (без запуска конвейера).
 
     Входят: отпечаток EDF, нормализованные параметры (нулевые гейны отбрасываются —
-    ``{}`` и ``{band: 0}`` ведут себя одинаково), частотные полосы конфига,
-    версии контракта (формат кэша, схема sidecar) и научных библиотек
-    (детерминизм байтов зависит от numpy/scipy/mne).
+    ``{}`` и ``{band: 0}`` ведут себя одинаково), **вариант рендера**
+    («Экспресс»/«Монтаж» — у них разные конвейеры и файлы, ключ обязан
+    различаться; добавление поля меняет все ключи — старые рендеры честно
+    пересчитываются, байты «Экспресса» при этом не меняются), частотные
+    полосы конфига, версии контракта (формат кэша, схема sidecar) и научных
+    библиотек (детерминизм байтов зависит от numpy/scipy/mne).
     """
     payload: dict[str, Any] = {
         "v": RENDER_FORMAT_VERSION,
@@ -78,6 +87,7 @@ def render_sig(
         "loudness_phon": None if loudness_phon is None else float(loudness_phon),
         "loudness_autobase": bool(loudness_autobase),
         "octave_shift": int(octave_shift),
+        "variant": variant,
         "freq_bands": {
             band: [float(bounds[0]), float(bounds[1])]
             for band, bounds in sorted(cfg.freq_bands.items())

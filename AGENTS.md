@@ -51,7 +51,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 74 роута = 69 уникальных путей (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 75 роутов = 70 уникальных путей (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
@@ -77,7 +77,7 @@ backend/app/
 │   ├── spectral.py        # спектр δ…γ (Welch/multitaper + 1/f-фит specparam) + топокарты PNG, кэш + ETag (3.4)
 │   ├── spectrogram.py     # спектрограмма канала: STFT → сетка дБ (DPS2), кэш + ETag (5)
 │   ├── channel_mix.py     # виртуальные каналы «ЭЭГ»: миксы групп 10-20 из паспорта записи (5+)
-│   ├── audio_render/      # «Нейромузыка» (эксперимент): ядро ×128, шины L/C/R, WAV+sidecar (docs/rules/neuromusic.md)
+│   ├── audio_render/      # «Нейромузыка» (эксперимент): ядро ×128, варианты Экспресс/Монтаж (rows.py — 4 ряда 10-20), WAV+sidecar (docs/rules/neuromusic.md)
 │   ├── audio_ir.py        # IR-ассеты реверберации плеера: pyroomacoustics → cache/ir/ + ETag (spatial-audio)
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
 │   ├── eloreta.py         # eLORETA пик/ROI одной эпохи: forward+inverse MNE (остаток B9)

@@ -119,6 +119,8 @@ def test_sidecar_matches_contract_schema() -> None:
     )
     assert sidecar["schema_version"] == SIDECAR_SCHEMA_VERSION == 1
     assert sidecar["fs_eeg"] == 500 and sidecar["fs_audio"] == FS
+    assert sidecar["variant"] == "express"  # дефолт — Экспресс, rows не заданы
+    assert sidecar["rows"] is None
     assert sidecar["octave_shift"] == 7 and sidecar["pitch_factor"] == 128
     assert sidecar["duration_s"] == 103.7
     assert sidecar["boost_db"] == 6.0
@@ -133,6 +135,38 @@ def test_sidecar_matches_contract_schema() -> None:
     assert parsed["bands"][0]["audio_fmax"] == 256.0  # 2 Гц × 128
     # Детерминированный JSON (стабильный порядок ключей).
     assert blob == sidecar_bytes(sidecar)
+
+
+def test_sidecar_montage_variant_carries_rows() -> None:
+    """Вариант «Монтаж»: variant=montage, блок rows с весами рядов в партитуре."""
+    sidecar = build_sidecar(
+        duration_s=4.0,
+        channels=["O1", "O2", "Oz"],
+        bands=[{"name": "delta", "fmin": 0.5, "fmax": 2.0}],
+        checksum="abc",
+        gains_db={},
+        boost_db=6.0,
+        loudness=None,
+        warnings=[],
+        clean_label="",
+        interpolated=[],
+        notch_hz=50.0,
+        notch_harmonics=2,
+        groups={"occipital": ["O1", "O2", "Oz"]},
+        variant="montage",
+        rows=[{
+            "id": "occipital",
+            "label": "Затылочный",
+            "channels": ["O1", "O2", "Oz"],
+            "members": {"O1": [1.0 / 1.5, 0.0], "O2": [0.0, 1.0 / 1.5], "Oz": [1.0 / 3, 1.0 / 3]},
+        }],
+    )
+    assert sidecar["variant"] == "montage"
+    assert sidecar["rows"] is not None and len(sidecar["rows"]) == 1
+    assert sidecar["rows"][0]["id"] == "occipital"
+    assert sidecar["busses"]["occipital"] == ["O1", "O2", "Oz"]
+    # Ключи схемы не меняются — schema_version остаётся 1 (additive).
+    assert sidecar["schema_version"] == SIDECAR_SCHEMA_VERSION
 
 
 def test_audio_frequency_grid_matches_octave_shift() -> None:

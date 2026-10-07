@@ -12,6 +12,7 @@ from app.services.audio_render.mix import (
     apply_peak_ceiling,
     bus_weights,
     master_mix,
+    normalize_group,
     normalize_track,
     track_rms,
 )
@@ -186,3 +187,65 @@ def test_master_mix_sums_tracks() -> None:
     assert master.dtype == np.float64
     with pytest.raises(ValueError):
         master_mix([])
+
+
+def test_normalize_group_hits_group_rms_and_keeps_balance() -> None:
+    """Группа «Монтажа»: общий RMS = целевой, отношения рядов сохранены.
+
+    Это ключевое свойство варианта: ряды одной полосы масштабируются ОДНИМ
+    множителем — пространственный контраст (тихий ряд тих) не схлопывается.
+    """
+    t = np.linspace(0.0, 40.0 * np.pi, 4000)
+    base = np.stack([np.sin(t), np.cos(t)], axis=1) * 1e-3  # crest 3 дБ
+    quiet = base * 0.25  # вчетверо тише — «тихий ряд»
+    loud = base * 2.0  # вдвое громче — «громкий ряд»
+
+    out, gain, rms = normalize_group([quiet, base, loud], boost_db=0.0)
+    assert gain is not None and rms is not None
+    # Общий RMS группы (объединённая энергия) — на целевом −18 dBFS.
+    all_data = np.concatenate([track.reshape(-1) for track in out])
+    assert float(np.sqrt(np.mean(all_data**2))) == pytest.approx(
+        10 ** (-18 / 20), rel=1e-6,
+    )
+    # Баланс рядов до/после: отношения пиков 0.25 : 1 : 2 не изменились.
+    ratios_before = [0.25, 1.0, 2.0]
+    peaks = [float(np.max(np.abs(track))) for track in out]
+    for peak, ratio in zip(peaks, ratios_before, strict=True):
+        assert peak == pytest.approx(peaks[1] * ratio, rel=1e-9)
+    # Отдельная нормализация дала бы одинаковые пики — вот чего мы не хотим.
+    assert peaks[0] != pytest.approx(peaks[1])
+
+
+def test_normalize_group_applies_gain_and_loudness() -> None:
+    """Гейн и ISO 226-смещение суммируются с базой — как в normalize_track."""
+    t = np.linspace(0.0, 40.0 * np.pi, 4000)
+    track = np.stack([np.sin(t), np.cos(t)], axis=1) * 1e-3
+
+    _out, gain, rms = normalize_group([track], gain_db=6.0, loudness_db=-2.2)
+    assert gain is not None and rms is not None
+    assert rms == pytest.approx(10 ** ((-18.0 + 6.0 - 2.2) / 20), rel=1e-6)
+
+
+def test_normalize_group_peak_ceiling_shared_by_max() -> None:
+    """Потолок 0.891 — по пику всей группы: поджатие не ломает баланс."""
+    spike = np.zeros((2000, 2))
+    spike[1000, 0] = 1000.0  # импульсный «громкий ряд»
+    normal = np.full((2000, 2), 1e-6)
+
+    out, gain, rms = normalize_group([normal, spike], boost_db=BOOST_MAX_DB)
+    assert gain is not None and rms is not None
+    assert float(np.max(np.abs(out[1]))) == pytest.approx(PEAK_CEILING)
+    # Отношение рядов сохранено: тихий остался тихим относительно громкого.
+    ratio = float(np.max(np.abs(out[0]))) / float(np.max(np.abs(out[1])))
+    assert ratio == pytest.approx(1e-6 / 1000.0, rel=1e-6)
+
+
+def test_normalize_group_silent_group_is_zero() -> None:
+    """Тишина всей группы (ниже порога) → нули, gain/rms = None."""
+    tiny = [np.full((100, 2), 1e-12), np.full((100, 2), 1e-12)]
+    out, gain, rms = normalize_group(tiny, gain_db=12.0)
+    assert gain is None and rms is None
+    for track in out:
+        assert np.isfinite(track).all() and not track.any()
+    with pytest.raises(ValueError):
+        normalize_group([])

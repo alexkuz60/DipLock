@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **74 роута** (69 уникальных путей; 5 путей принимают по два
+- `backend/app/api/routes.py` — **75 роутов** (70 уникальных путей; 5 путей принимают по два
   метода), префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
@@ -100,14 +100,15 @@
 | 64 | `GET /jobs/{job_id}/manifest` | **run manifest** задачи (N40/4.6): версии среды + отпечатки ассетов + `params_sig`; честен и для идущей, и для упавшей задачи; 404 — неизвестна |
 | 65 | `POST /recordings/{id}/eloreta` | **eLORETA одной эпохи** (остаток B9, dipoles.md п.5): задача `kind=eloreta` (202), форма — та же, что у «Уточнить» (нарезка быстрого расчёта + `halfwin_ms`); результат — только пик/ROI, полные карты не отдаются |
 | 66 | `GET /recordings/{id}/eloreta/{job_id}` | результат eLORETA (`EloretaResult`): пик (координата + анатомия из `atlas_contours`) и топ-8 ROI-долей + «прочие»; 404/409 — как у других задач записи |
-| 67 | `POST /audio/render` | **рендер «Нейромузыки»** (синхронный, без job-системы): 202 `{render_id, status, cached}`, 400 — гейны/boost/loudness/octave_shift вне диапазонов, 409 — уже идёт (один за раз); повтор тех же параметров — **кэш-попадание** (`cached=true`, `status=succeeded`, конвейер не запускается) |
+| 67 | `POST /audio/render` | **рендер «Нейромузыки»** (синхронный, без job-системы): 202 `{render_id, status, cached}`, 400 — гейны/boost/loudness/octave_shift/variant вне диапазонов, 409 — уже идёт (один за раз); повтор тех же параметров — **кэш-попадание** (`cached=true`, `status=succeeded`, конвейер не запускается); `variant` = `express` (дефолт, 7 треков L/C/R) / `montage` (4 ряда схемы × 7 полос) |
 | 68 | `GET /audio/renders?recording_id=` | **журнал обработанных рендеров** записи из дискового кэша (`AudioRenderListOut`: render_id, параметры, размер, дата); 404 — неизвестная запись |
-| 69 | `GET /audio/render/{id}/status` | поллинг рендера (~400 мс): `{status, stage, pct, message, error, tracks}`; после рестарта сервера поднимается с диска |
+| 69 | `GET /audio/render/{id}/status` | поллинг рендера (~400 мс): `{status, stage, pct, message, error, tracks, variant, rows}`; после рестарта сервера поднимается с диска |
 | 70 | `GET /audio/render/{id}/master.wav` | мастер-WAV 48 кГц/PCM_24 из дискового кэша (без `Content-Disposition` — играется в `<audio>`) |
-| 71 | `GET /audio/render/{id}/track/{band}.wav` | WAV одного трека полосы (соль-прослушивание) |
-| 72 | `GET /audio/render/{id}/sidecar.json` | sidecar-«партитура»: веса, гейны, checksum входа, `extensions` |
+| 71 | `GET /audio/render/{id}/track/{band}.wav` | WAV одного трека полосы (соль-прослушивание; для `variant=montage` — 404 с подсказкой рядового пути) |
+| 72 | `GET /audio/render/{id}/sidecar.json` | sidecar-«партитура»: веса, гейны, checksum входа, `extensions`, `variant`/`rows` |
 | 73 | `GET /audio/ir` | **каталог IR-пресетов** реверберации плеера (`AudioIrCatalogOut`; spatial-audio, п.2) |
 | 74 | `GET /audio/ir/{preset}.wav` | стерео-IR пресета (WAV 48 кГц, ETag/304; ленивая генерация pyroomacoustics → `cache_dir/ir/`; 404 — неизвестный пресет) |
+| 75 | `GET /audio/render/{id}/track/{row}/{band}.wav` | **рядовой трек «Монтажа»** (ряд × полоса; `track_{row}_{band}.wav`); 404 с перечнем рядов/полос; для `variant=express` — 404 с подсказкой |
 
 **Чего в API нет осознанно:** листинга записей. «Закрыть запись» в UI остаётся **клиентским**
 действием (сброс состояния), а явное удаление — `DELETE /recordings/{id}` (4.4): TTL записей

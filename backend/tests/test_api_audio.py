@@ -314,12 +314,123 @@ def test_unknown_render_id_is_404(client):
     assert client.get(f"{_PREFIX}/render/deadbeef/sidecar.json").status_code == 404
 
 
+def test_montage_variant_full_cycle(client, tmp_path, edf_file):
+    """«Монтаж»: 202 → статус с rows → мастер → рядовые треки → sidecar.
+
+    Тестовый EDF (5 каналов: Fp1/Fp2/F3/F4/C3) даёт два непустых ряда
+    (лобной и височной) — пустые ряды пропускаются с предупреждением в
+    sidecar, варианты рендера не делят кэш (разные render_id).
+    """
+    recording = _register(tmp_path, edf_file)
+    started = client.post(
+        f"{_PREFIX}/render",
+        json={
+            "recording_id": recording.recording_id,
+            "boost_db": 0.0,
+            "loudness_phon": None,
+            "variant": "montage",
+        },
+    )
+    assert started.status_code == 202, started.text
+    render_id = started.json()["render_id"]
+    done = _wait_render(client, render_id)
+    assert done["status"] == "succeeded", done.get("error")
+
+    # Вариант — часть ключа: тот же POST без variant (Экспресс) — другой id.
+    # Рендеры идут по одному, поэтому Экспресс стартуем после завершения.
+    express = client.post(
+        f"{_PREFIX}/render",
+        json={"recording_id": recording.recording_id, "boost_db": 0.0, "loudness_phon": None},
+    )
+    assert express.status_code == 202
+    assert express.json()["render_id"] != render_id
+
+    assert done["variant"] == "montage"
+    assert done["rows"] == ["frontal", "temporal"]
+    # 2 ряда × 7 полос = 14 рядовых треков; tracks — полосы (как в Экспрессе).
+    assert set(done["tracks"]) == set(settings.freq_bands)
+    assert "14 треков + мастер" in done["message"]
+
+    # Мастер отдаётся тем же роутом, что и у Экспресса.
+    master = client.get(f"{_PREFIX}/render/{render_id}/master.wav")
+    assert master.status_code == 200
+    with sf.SoundFile(io.BytesIO(master.content)) as handle:
+        assert handle.samplerate == 48000 and handle.channels == 2
+
+    # Рядовой трек: track/{row}/{band}.wav.
+    row_track = client.get(f"{_PREFIX}/render/{render_id}/track/frontal/alpha.wav")
+    assert row_track.status_code == 200
+    with sf.SoundFile(io.BytesIO(row_track.content)) as handle:
+        assert handle.channels == 2
+        data = handle.read(dtype="float64")
+    # Группа рядов одной полосы на целевом −18 dBFS (normalize_group).
+    assert float(np.sqrt(np.mean(data**2))) > 0.0
+    # Неверные пара ряд/полоса и старый путь — 404 с подсказкой.
+    assert client.get(
+        f"{_PREFIX}/render/{render_id}/track/nope/alpha.wav",
+    ).status_code == 404
+    assert client.get(
+        f"{_PREFIX}/render/{render_id}/track/alpha.wav",
+    ).status_code == 404
+
+    # Sidecar: вариант, ряды с весами, предупреждения о пустых рядах.
+    sidecar = client.get(f"{_PREFIX}/render/{render_id}/sidecar.json").json()
+    assert sidecar["variant"] == "montage"
+    assert sidecar["rows"] is not None
+    assert [row["id"] for row in sidecar["rows"]] == ["frontal", "temporal"]
+    frontal = next(row for row in sidecar["rows"] if row["id"] == "frontal")
+    # Частичный лобной ряд EDF (Fp1/Fp2/F3/F4, без F7/Fz/F8): сумма L/R = 2.0,
+    # нормировка на среднее = 2.0 — формула владельца в нормированных весах.
+    assert frontal["members"]["Fp1"][0] == pytest.approx(1.0 / 2.0)
+    assert frontal["members"]["F3"][0] == pytest.approx(0.75 / 2.0)
+    assert frontal["members"]["F4"][1] == pytest.approx(0.75 / 2.0)
+    assert any("пропущен" in item for item in sidecar["warnings"])
+
+    # Старый путь трека на «Экспресс»-рендере работает (регрессия не сломана).
+    express_id = express.json()["render_id"]
+    _wait_render(client, express_id)
+    assert client.get(f"{_PREFIX}/render/{express_id}/track/alpha.wav").status_code == 200
+    assert client.get(
+        f"{_PREFIX}/render/{express_id}/track/frontal/alpha.wav",
+    ).status_code == 404
+
+
+def test_montage_variant_validates_value(client, tmp_path, edf_file):
+    """400 — неизвестный variant; 404 — запись не найдена до варианта."""
+    recording = _register(tmp_path, edf_file)
+    bad = client.post(
+        f"{_PREFIX}/render",
+        json={"recording_id": recording.recording_id, "variant": "turbo"},
+    )
+    assert bad.status_code == 400
+    assert "variant" in bad.json()["detail"]
+    assert "montage" in bad.json()["detail"]
+
+
+def test_montage_repeated_hits_cache(client, tmp_path, edf_file, monkeypatch):
+    """Повторный POST «Монтажа» тех же параметров → cached=true, без конвейера."""
+    recording = _register(tmp_path, edf_file)
+    body = {"recording_id": recording.recording_id, "variant": "montage"}
+    first = client.post(f"{_PREFIX}/render", json=body)
+    assert first.status_code == 202
+    assert first.json()["cached"] is False
+    _wait_render(client, first.json()["render_id"])
+
+    launched = []
+    monkeypatch.setattr(neuro_render, "_run_render", lambda *a, **k: launched.append(a))
+    second = client.post(f"{_PREFIX}/render", json=body)
+    assert second.status_code == 202
+    assert second.json()["cached"] is True
+    assert second.json()["render_id"] == first.json()["render_id"]
+    assert launched == []
+
+
 def test_second_render_is_rejected_while_running(client, tmp_path, edf_file, monkeypatch):
     """Один активный рендер: второй POST → 409 с текстом (без очереди)."""
     recording = _register(tmp_path, edf_file)
     release = threading.Event()
 
-    def _slow(state, rec, cfg, gains, boost=0.0, phon=None, autobase=True, octave=7):
+    def _slow(state, rec, cfg, gains, boost=0.0, phon=None, autobase=True, octave=7, variant="express"):
         release.wait(timeout=10)
         state.status = "succeeded"
         state.stage = "Готово"

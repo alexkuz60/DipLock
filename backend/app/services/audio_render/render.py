@@ -24,6 +24,7 @@ import numpy as np
 
 from app.core.config import Settings, settings
 from app.services import journal
+from app.services.audio_render import rows as rows_module
 from app.services.audio_render import store
 from app.services.audio_render.core import FS_AUDIO, RESAMPLE_UP, band_stem
 from app.services.audio_render.export import (
@@ -48,6 +49,7 @@ from app.services.audio_render.mix import (
     TRACK_RMS_DBFS,
     apply_peak_ceiling,
     bus_weights,
+    normalize_group,
     normalize_track,
     track_rms,
 )
@@ -83,6 +85,9 @@ class RenderArtifacts:
     bands: list[str]
     recording_id: str
     sig: str
+    variant: str = "express"
+    rows: list[str] = field(default_factory=list)
+    """Для «Монтажа»: id рядов, по которым есть рядовые треки (иначе пусто)."""
     directory: str | None = None
     memory: dict[str, bytes] = field(default_factory=dict)
 
@@ -143,6 +148,8 @@ def _state_from_manifest(
             bands=list(manifest.get("bands") or []),
             recording_id=recording_id,
             sig=sig,
+            variant=str(manifest.get("variant") or "express"),
+            rows=list(manifest.get("rows") or []),
             directory=directory,
         ),
         started_at=now,
@@ -156,6 +163,7 @@ def start_render(
     loudness_phon: float | None = LOUDNESS_PHON_DEFAULT,
     loudness_autobase: bool = True,
     octave_shift: int = 7,
+    variant: str = "express",
 ) -> tuple[str, bool]:
     """Возвращает ``(render_id, cached)``: запускает рендер либо отдаёт кэш.
 
@@ -177,7 +185,10 @@ def start_render(
     рендер за раз (``RenderBusy`` → 409 в API): FIFO-очередь задач тут
     намеренно не вводится — это эксперимент, а не job-система.
     """
-    sig = store.render_sig(recording, cfg, gains_db, boost_db, loudness_phon, loudness_autobase, octave_shift)
+    sig = store.render_sig(
+        recording, cfg, gains_db, boost_db, loudness_phon, loudness_autobase,
+        octave_shift, variant,
+    )
     lookup_started = time.perf_counter()
     # 1) Кэш в памяти: недавний рендер с теми же параметрами (в том числе
     #    фоллбэк «запись на диск не удалась» — байты ещё в RAM).
@@ -209,7 +220,7 @@ def start_render(
         target=_run_render,
         args=(
             state, recording, cfg, dict(gains_db), float(boost_db),
-            loudness_phon, bool(loudness_autobase), int(octave_shift),
+            loudness_phon, bool(loudness_autobase), int(octave_shift), variant,
         ),
         name=f"audio-render-{sig}",
         daemon=True,
@@ -264,11 +275,18 @@ def _run_render(
     loudness_phon: float | None = LOUDNESS_PHON_DEFAULT,
     loudness_autobase: bool = True,
     octave_shift: int = 7,
+    variant: str = "express",
 ) -> None:
     """Цикл рендера: подготовка → ядро по полосам → мастер → экспорт.
 
     Прогресс: подготовка 0..0.3 (``prepare_packages``), семь треков 0.3..0.9,
     сведение/экспорт 0.9..1.0 — клиент рисует единый прогресс-бар (ТЗ M5).
+
+    ``variant`` — «express» (7 треков L/C/R, шины ``bus_weights``) или
+    «montage» (ряды ``rows.row_mixes``: для каждой полосы отдельный стем на
+    каждый непустой ряд, групповой гейн ``normalize_group`` сохраняет
+    баланс рядов; файлы ``track_{row}_{band}.wav``). Мастер и психоакустика
+    общие для обоих вариантов.
     """
     started = time.perf_counter()
     try:
@@ -280,9 +298,25 @@ def _run_render(
         packages = prepare_packages(recording, cfg, on_stage=_stage)
         # Отпечаток входа — до освобождения пакетов (в sidecar и для детерминизма).
         checksum = input_checksum(packages.packages)
-        # Группы L/C/R нужны для sidecar-«партитуры»: веса несут ту же
-        # информацию, но явная раскладка электродов читается человеком.
+        # Веса шин считаются всегда: фаза автобазы меряет crest по шинному
+        # стему (веса шин не зависят от варианта). Для «Монтажа» группу
+        # стемов каждой полосы дают ряды, а groups/sidecar описывают ряды.
         w_left, w_right, groups = bus_weights(packages.channels)
+        row_mixes_list: list[rows_module.RowMix] = []
+        sidecar_rows: list[dict[str, Any]] | None = None
+        if variant == "montage":
+            row_mixes_list, row_warnings = rows_module.row_mixes(packages.channels)
+            packages.warnings.extend(row_warnings)
+            groups = {mix.id: mix.channels for mix in row_mixes_list}
+            sidecar_rows = [
+                {
+                    "id": mix.id,
+                    "label": mix.label,
+                    "channels": mix.channels,
+                    "members": mix.members(),
+                }
+                for mix in row_mixes_list
+            ]
 
         bands = list(cfg.freq_bands)
         # Психоакустические смещения ISO 226 (считаются один раз на рендер):
@@ -293,8 +327,29 @@ def _run_render(
         n_bands = max(1, len(bands))
         n_out = packages.n_times * RESAMPLE_UP
         master = np.zeros((n_out, 2), dtype=np.float64)
-        tracks_wav: dict[str, bytes] = {}
         rows: dict[str, dict[str, Any]] = {}
+
+        # Потоковая запись треков: WAV уходит на диск сразу после полосы.
+        # «Монтаж» пишет 4×7 файлов — накопление всех байтов в RAM (схема
+        # «Экспресса» фазы 1) умножило бы пик памяти ещё ×4. Манифест
+        # по-прежнему пишется последним (коммит, `store`): сбой записи →
+        # байты в fallback-памяти и манифест не записан → честный
+        # пересчёт при следующем POST; для текущего рендера отдача читает
+        # диск, а при сбое — память (`RenderArtifacts.read`).
+        file_sizes: dict[str, int] = {}
+        memory_fallback: dict[str, bytes] = {}
+        files_ok = True
+
+        def _persist(name: str, data: bytes) -> None:
+            """Один файл рендера → диск; при сбое записи — байты в память."""
+            nonlocal files_ok
+            file_sizes[name] = len(data)
+            if store.write_artifacts(
+                cfg, recording.recording_id, state.render_id, {name: data},
+            ):
+                return
+            files_ok = False
+            memory_fallback[name] = data
 
         # Фаза автобазы (стратегия A): стемы «ямы» считаются заранее — их crest
         # ограничивает базу, чтобы θ/α/β не упирались в потолок 0.891 и
@@ -312,14 +367,25 @@ def _run_render(
                 state.stage = f"Автобаза: стем «ямы» {band} ({index + 1}/{len(pit)})"
                 state.pct = 0.3 + 0.15 * (index + 1) / len(pit)
                 state.message = "crest середины → ограничение базы (ISO 226)"
-                eeg_band = packages.packages.pop(band)
+                # «Монтаж»: шинный стем здесь только ради crest — пакет полосы
+                # остаётся в очереди (главный цикл соберёт рядовые стемы), а
+                # стем сразу отпускается: кэш pit-стемов для «Монтажа» не
+                # ведём, он умножил бы память фазы ×4 без выгоды (в основном
+                # цикле шинный стем всё равно не используется).
+                if variant == "montage":
+                    eeg_band = packages.packages[band]
+                else:
+                    eeg_band = packages.packages.pop(band)
                 stem = band_stem(eeg_band, w_left, w_right, pitch_steps=octave_shift)
                 del eeg_band
-                pit_stems[band] = stem
+                if variant != "montage":
+                    pit_stems[band] = stem
                 rms_stem = track_rms(stem)
                 peak_stem = float(np.max(np.abs(stem))) if stem.size else 0.0
                 if rms_stem > 0.0 and peak_stem > 0.0:
                     crests[band] = 20.0 * float(np.log10(peak_stem / rms_stem))
+                if variant == "montage":
+                    del stem
             base_db = autobase_db(base_db, crests, offsets or {}, pit)
         # Фактический boost с учётом автобазы (в баланс-режиме срезается до
         # запаса потолка «ямы» — физика без компрессии).
@@ -330,21 +396,44 @@ def _run_render(
             state.stage = f"Трек {band} ({index + 1}/{n_bands})"
             state.pct = tracks_start + (0.9 - tracks_start) * index / n_bands
             state.message = f"Ядро ×{2 ** octave_shift}: hilbert → ресемпл ×96 → {octave_shift} октав ({band})"
-            if band in pit_stems:
-                stem = pit_stems.pop(band)
-            else:
-                eeg_band = packages.packages.pop(band)
-                stem = band_stem(eeg_band, w_left, w_right, pitch_steps=octave_shift)
-                del eeg_band
             gain_db = float(gains_db.get(band, 0.0))
             loudness_db = 0.0 if offsets is None else offsets.get(band, 0.0)
-            normalized, applied_db, rms_dbfs = normalize_track(
-                stem, gain_db=gain_db, boost_db=effective_boost, loudness_db=loudness_db,
-            )
-            del stem
-            master += normalized
-            tracks_wav[band] = wav_bytes(normalized, FS_AUDIO)
-            del normalized
+            if variant == "montage":
+                # Один пакет полосы → стем на каждый непустой ряд; общий гейн
+                # группы (normalize_group) сохраняет баланс рядов внутри полосы.
+                eeg_band = packages.packages.pop(band)
+                stems = [
+                    band_stem(eeg_band, mix.w_left, mix.w_right, pitch_steps=octave_shift)
+                    for mix in row_mixes_list
+                ]
+                del eeg_band
+                normalized_list, applied_db, rms_dbfs = normalize_group(
+                    stems, gain_db=gain_db, boost_db=effective_boost,
+                    loudness_db=loudness_db,
+                )
+                del stems
+                for mix, normalized in zip(row_mixes_list, normalized_list, strict=True):
+                    master += normalized
+                    _persist(
+                        store.row_track_name(mix.id, band),
+                        wav_bytes(normalized, FS_AUDIO),
+                    )
+                    del normalized
+                del normalized_list
+            else:
+                if band in pit_stems:
+                    stem = pit_stems.pop(band)
+                else:
+                    eeg_band = packages.packages.pop(band)
+                    stem = band_stem(eeg_band, w_left, w_right, pitch_steps=octave_shift)
+                    del eeg_band
+                normalized, applied_db, rms_dbfs = normalize_track(
+                    stem, gain_db=gain_db, boost_db=effective_boost, loudness_db=loudness_db,
+                )
+                del stem
+                master += normalized
+                _persist(store.track_name(band), wav_bytes(normalized, FS_AUDIO))
+                del normalized
             fmin, fmax = cfg.freq_bands[band]
             rows[band] = {
                 "name": band,
@@ -352,13 +441,16 @@ def _run_render(
                 "fmax": float(fmax),
                 "audio_fmin": float(fmin) * 2**octave_shift,
                 "audio_fmax": float(fmax) * 2**octave_shift,
-                "weights_left": [float(value) for value in w_left],
-                "weights_right": [float(value) for value in w_right],
                 "gain_db": gain_db,
                 "loudness_offset_db": loudness_db,
                 "applied_gain_db": applied_db,
                 "rms_out_dbfs": rms_dbfs,
             }
+            if variant != "montage":
+                # Веса шин (одинаковы для всех полос) — только «Экспресс»:
+                # у «Монтажа» веса рядов лежат в sidecar-блоке rows.
+                rows[band]["weights_left"] = [float(value) for value in w_left]
+                rows[band]["weights_right"] = [float(value) for value in w_right]
         # Строки партитуры — в порядке freq_bands (порядок расчёта не важен).
         band_rows = [rows[band] for band in bands]
 
@@ -393,21 +485,26 @@ def _run_render(
             notch_harmonics=AUDIO_NOTCH_HARMONICS,
             groups=groups,
             octave_shift=octave_shift,
+            variant=variant,
+            rows=sidecar_rows,
         ))
         state.stage = "Сохранение на диск"
         state.pct = 0.95
-        state.message = "WAV-файлы и манифест в дисковый кэш"
-        # Артефакты → диск: манифест пишется последним и служит коммитом
-        # (нет манифеста → кэш-промах → честный пересчёт). При сбое записи
-        # байты остаются в памяти — кэш оптимизация, а не источник истины.
-        files = {store.MASTER_NAME: master_wav, store.SIDECAR_NAME: sidecar}
-        files.update({store.track_name(band): data for band, data in tracks_wav.items()})
-        files_ok = store.write_artifacts(cfg, recording.recording_id, state.render_id, files)
+        state.message = "Мастер, sidecar и манифест в дисковый кэш"
+        # Треки уже на диске (потоковая запись в цикле): остаётся мастер и
+        # sidecar. Манифест пишется последним и служит коммитом (нет его →
+        # кэш-промах → честный пересчёт); при сбое записи байты в памяти —
+        # кэш оптимизация, а не источник истины.
+        _persist(store.MASTER_NAME, master_wav)
+        _persist(store.SIDECAR_NAME, sidecar)
+        del master_wav
         elapsed = time.perf_counter() - started
+        n_tracks = len(bands) if variant != "montage" else len(bands) * len(row_mixes_list)
         message = (
-            f"7 треков + мастер, {packages.duration_s:.1f} с, "
+            f"{n_tracks} треков + мастер, {packages.duration_s:.1f} с, "
             f"пик мастера ×{peak_scale:.3f}, {elapsed:.1f} с"
         )
+        row_ids = [mix.id for mix in row_mixes_list]
         manifest = {
             "format": store.RENDER_FORMAT_VERSION,
             "sig": state.render_id,
@@ -415,14 +512,17 @@ def _run_render(
             "created_at": time.time(),
             "duration_s": float(packages.duration_s),
             "bands": bands,
+            "variant": variant,
+            "rows": row_ids,
             "params": {
                 "gains_db": {name: float(value) for name, value in sorted(gains_db.items())},
                 "boost_db": float(boost_db),
                 "loudness_phon": None if loudness_phon is None else float(loudness_phon),
                 "loudness_autobase": bool(loudness_autobase),
                 "octave_shift": int(octave_shift),
+                "variant": variant,
             },
-            "files": {name: len(data) for name, data in files.items()},
+            "files": dict(file_sizes),
             "message": message,
         }
         manifest_ok = files_ok and store.write_manifest(
@@ -437,9 +537,12 @@ def _run_render(
             bands=bands,
             recording_id=recording.recording_id,
             sig=state.render_id,
-            directory=store.render_dir(cfg, recording.recording_id, state.render_id)
-            if files_ok else None,
-            memory={} if files_ok else dict(files),
+            variant=variant,
+            rows=row_ids,
+            # Диск даже при files_ok=False: успешные файлы там, сбойные — в
+            # memory (read сначала смотрит каталог, затем память).
+            directory=store.render_dir(cfg, recording.recording_id, state.render_id),
+            memory=dict(memory_fallback),
         )
         state.message = message
         # Строка журнала — до «succeeded»: поллинг клиента и чтение журнала
@@ -447,7 +550,7 @@ def _run_render(
         _journal_render(
             cfg, recording, state.render_id,
             ms=elapsed * 1000.0,
-            bytes_out=sum(len(data) for data in files.values()),
+            bytes_out=sum(file_sizes.values()),
             cache_hit=False, note=message,
         )
         state.status = "succeeded"

@@ -160,6 +160,7 @@ from app.services.audio_render.mix import (
     GAIN_MAX_DB,
     GAIN_MIN_DB,
 )
+from app.services.audio_render.rows import RENDER_VARIANTS
 from app.services.channel_mix import mixes_for
 from app.services.compare import cached_compare_topomap
 from app.services.filter_design import filter_response
@@ -2362,12 +2363,22 @@ async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
                 f"допустимо {choices} (×32/×64/×128)"
             ),
         )
+    variant = str(payload.variant)
+    if variant not in RENDER_VARIANTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"variant: {payload.variant} — неизвестный вариант рендера, "
+                f"допустимо {'/'.join(RENDER_VARIANTS)} "
+                "«Экспресс» (7 треков L/C/R) / «Монтаж» (4 ряда × 7 полос)"
+            ),
+        )
     try:
         # render_sig/load_manifest читают диск — вне event loop (409 оттуда же)
         render_id, cached = await asyncio.to_thread(
             neuro_render.start_render,
             recording, settings, payload.gains_db, boost, loudness_phon,
-            payload.loudness_autobase, octave_shift,
+            payload.loudness_autobase, octave_shift, variant,
         )
     except neuro_render.RenderBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -2420,6 +2431,7 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
         state = await asyncio.to_thread(neuro_render.state_of, render_id)
     except neuro_render.RenderNotFound as exc:
         raise HTTPException(status_code=404, detail=f"Рендер {render_id} не найден") from exc
+    artifacts = state.artifacts
     return AudioRenderStatus(
         render_id=state.render_id,
         status=state.status,
@@ -2427,7 +2439,9 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
         pct=state.pct,
         message=state.message,
         error=state.error,
-        tracks=sorted(state.artifacts.bands) if state.artifacts else [],
+        tracks=sorted(artifacts.bands) if artifacts else [],
+        variant=artifacts.variant if artifacts else "express",
+        rows=list(artifacts.rows) if artifacts else [],
     )
 
 
@@ -2458,12 +2472,52 @@ async def audio_render_track(render_id: str, band: str) -> Response:
     artifacts = state.artifacts
     if artifacts is None:  # не бывает: _audio_state уже проверил, но для типов
         raise HTTPException(status_code=409, detail="Артефакты рендера недоступны")
+    if artifacts.variant == "montage":
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Это рендер «Монтаж»: треки отдаются по ряду — "
+                f"track/{{row}}/{{band}}.wav, ряды: {', '.join(artifacts.rows)}"
+            ),
+        )
     if band not in artifacts.bands:
         raise HTTPException(
             status_code=404,
             detail=f"Трек {band} не найден; доступны: {', '.join(artifacts.bands)}",
         )
     data = await _artifact_bytes(state, neuro_store.track_name(band))
+    return Response(content=data, media_type="audio/wav")
+
+
+@router.get(
+    "/audio/render/{render_id}/track/{row}/{band}.wav",
+    response_class=Response,
+    responses={200: {"content": {"audio/wav": {}}}},
+    summary="WAV рядового трека «Монтажа» (ряд × полоса)",
+)
+async def audio_render_row_track(render_id: str, row: str, band: str) -> Response:
+    """Рядовой трек «Монтажа»: 4 ряда схемы × полосы (варианты рендера)."""
+    state = await _audio_state(render_id)
+    artifacts = state.artifacts
+    if artifacts is None:  # не бывает: _audio_state уже проверил, но для типов
+        raise HTTPException(status_code=409, detail="Артефакты рендера недоступны")
+    if artifacts.variant != "montage":
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Это рендер «Экспресс»: рядовых треков нет — "
+                f"track/{{band}}.wav, полосы: {', '.join(artifacts.bands)}"
+            ),
+        )
+    if row not in artifacts.rows or band not in artifacts.bands:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Трек ряда {row}/{band} не найден; ряды: "
+                f"{', '.join(artifacts.rows)}, полосы: {', '.join(artifacts.bands)}"
+            ),
+        )
+    data = await _artifact_bytes(state, neuro_store.row_track_name(row, band))
     return Response(content=data, media_type="audio/wav")
 
 

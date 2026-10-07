@@ -49,6 +49,16 @@ def test_render_sig_normalizes_zero_gains(tmp_path):
     assert _sig(rec, gains={}) == _sig(rec, gains={"alpha": 0.0, "theta": -0.0})
 
 
+def test_render_sig_variant_changes_key(tmp_path):
+    """Вариант рендера — часть ключа: Экспресс и Монтаж не делят кэш."""
+    rec = _recording(tmp_path)
+    express = store.render_sig(rec, settings, {}, 6.0, 75.0, True, 7)
+    montage = store.render_sig(rec, settings, {}, 6.0, 75.0, True, 7, "montage")
+    assert express != montage
+    # Дефолт равен явному «express» — ключи старых рендеров стабильны.
+    assert express == store.render_sig(rec, settings, {}, 6.0, 75.0, True, 7, "express")
+
+
 def test_write_then_load_roundtrip(tmp_path):
     """Артефакты без манифеста — промах; после коммита — полный круг чтения."""
     files = {"master.wav": b"RIFF-stub", "track_alpha.wav": b"wav", "sidecar.json": b"{}"}
