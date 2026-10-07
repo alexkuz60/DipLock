@@ -1,6 +1,7 @@
 /**
- * Силуэт BrainRoom для секции «Пространство» «Нейромузыки» (спецификация
- * владельца 07.10.2026): вид сверху, стены комнаты в пропорциях 1.0 : 1.3,
+ * Силуэт BrainRoom для секции «Визуализация» «Нейромузыки» (спецификация
+ * владельца 07.10.2026; перенесён сюда из секции «Пространство» правого
+ * сайдбара): вид сверху, стены комнаты в пропорциях 1.0 : 1.3,
  * контур мозга с продольной щелью и слушатель в центре; точки — позиции
  * источников текущей сцены (дуга «Экспресса» или 4 модуля «Монтажа»).
  *
@@ -51,13 +52,14 @@ export function BrainRoomView({ variant, rows, bands, spreadPct }: BrainRoomView
   const brainBottom = center.y + BRAIN_RY
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex h-full min-h-0 flex-col gap-1.5">
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+        preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label={`Силуэт BrainRoom: вид сверху, ${variant === 'montage' ? 'модули рядов' : 'дуга ±60°'}`}
         data-testid="brainroom-view"
-        className="w-full"
+        className="min-h-0 w-full flex-1"
       >
         {/* Стены BrainRoom: эллипс 1.0 : 1.3, слушатель в центре. */}
         <ellipse

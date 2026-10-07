@@ -3,7 +3,8 @@
  * в тулс-хедере → поллинг → прогресс → трекер-плеер (волна-бабочка,
  * линейка, позиционер), транспорт Play/Pause и Stop в хедере раздела,
  * зум/скорость/источник, файлы «Скачать…» в сайдбаре, параметры рендера
- * в панели (правка не запускает расчёт) и 3D-режим (spatial-audio).
+ * в панели (правка не запускает расчёт), 3D-режим (spatial-audio) и секция
+ * «Визуализация» под плеером (силуэт головы из «Опций» + радиальный график).
  */
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -845,5 +846,98 @@ describe('Нейромузыка — раздел', () => {
     )
     // Лишних POST нет: bake — отдельный цикл, рендер не перезапускался.
     expect(fetchMock.postBodies).toHaveLength(2)
+  })
+
+  it('до рендера: секции «Визуализация» и силуэта в «Опциях» нет', () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    renderNeuromusic()
+    // Силуэт переехал из панели в рабочую область (07.10.2026), а секция
+    // видна только вместе с плеером — до рендера нет ни её, ни графика.
+    expect(screen.queryByRole('region', { name: 'Визуализация' })).not.toBeInTheDocument()
+    expect(screen.queryByTestId('brainroom-view')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('radial-chart')).not.toBeInTheDocument()
+    // Контролы «Пространства» в панели остались на месте.
+    expect(screen.getByText('3D-режим плеера')).toBeInTheDocument()
+  })
+
+  it('после рендера: секция «Визуализация» под плеером, 2 колонки — голова и график', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const section = screen.getByRole('region', { name: 'Визуализация' })
+    // Секция идёт под плеером: трекер раньше её в DOM.
+    const tracker = screen.getByTestId('neuromusic-tracker')
+    expect(
+      tracker.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    // Обе колонки внутри секции: силуэт (перенесён из «Опций») и график.
+    const columns = within(section).getByTestId('visualization-columns')
+    expect(columns.className).toContain('md:grid-cols-2')
+    expect(within(columns).getByTestId('brainroom-view')).toBeInTheDocument()
+    expect(within(columns).getByTestId('radial-chart')).toBeInTheDocument()
+    // Без шапок и подписей — экономия высоты (остались только aria-label).
+    expect(within(section).queryByRole('heading')).not.toBeInTheDocument()
+    expect(within(section).queryByText('Голова, вид сверху')).not.toBeInTheDocument()
+    expect(within(section).queryByText('Радиальный график')).not.toBeInTheDocument()
+  })
+
+  it('радиальный график: оси X/Y, 7 лучей-сегментов, круги сетки 25/50/75 %', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const chart = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'radial-chart',
+    )
+    // Оси X и Y — две линии через центр (viewBox 200×200, центр 100/100).
+    expect(chart.querySelectorAll('[data-part="axis"]')).toHaveLength(2)
+    // Лучи-разделители 7 сегментов: каждый выходит из центра.
+    const rays = chart.querySelectorAll('[data-part="ray"]')
+    expect(rays).toHaveLength(7)
+    for (const ray of rays) {
+      expect(ray.getAttribute('x1')).toBe('100')
+      expect(ray.getAttribute('y1')).toBe('100')
+    }
+    // Круги сетки: радиус × 25 %, 50 %, 75 % (радиус графика 90).
+    const rings = chart.querySelectorAll('[data-part="ring"]')
+    expect([...rings].map((ring) => Number(ring.getAttribute('r')))).toEqual([22.5, 45, 67.5])
+    // Круг-граница: оси и лучи ограничены его диаметром (r = 90).
+    const frame = chart.querySelector('[data-part="frame"]')
+    expect(frame).not.toBeNull()
+    expect(Number(frame?.getAttribute('r'))).toBe(90)
+    // Полигон: 7 вершин в кольце 0.1…1.0 R, заливка жёлтой 0.25, грани 2 px.
+    const polygon = chart.querySelector('[data-part="polygon"]')
+    expect(polygon).not.toBeNull()
+    expect(polygon?.getAttribute('fill')).toBe('yellow')
+    expect(polygon?.getAttribute('fill-opacity')).toBe('0.25')
+    expect(polygon?.getAttribute('stroke')).toBe('yellow')
+    expect(polygon?.getAttribute('stroke-opacity')).toBe('1')
+    expect(polygon?.getAttribute('stroke-width')).toBe('2')
+    const vertices = (polygon?.getAttribute('points') ?? '')
+      .trim()
+      .split(/\s+/)
+      .map((pair) => pair.split(',').map(Number))
+    expect(vertices).toHaveLength(7)
+    for (const [x, y] of vertices) {
+      const distance = Math.hypot(x - 100, y - 100)
+      expect(distance).toBeGreaterThanOrEqual(9 - 1e-6)
+      expect(distance).toBeLessThanOrEqual(90 + 1e-6)
+    }
+    // Доминанта: белая линия из центра + круглая точка 4 px.
+    const dominant = chart.querySelector('[data-part="dominant"]')
+    expect(dominant?.getAttribute('x1')).toBe('100')
+    expect(dominant?.getAttribute('y1')).toBe('100')
+    expect(dominant?.getAttribute('stroke')).toBe('white')
+    const dot = chart.querySelector('[data-part="dominant-dot"]')
+    expect(dot).not.toBeNull()
+    expect(dot?.getAttribute('stroke')).toBe('white')
+    expect(dot?.getAttribute('stroke-width')).toBe('4')
+    expect(dot?.getAttribute('stroke-linecap')).toBe('round')
+    // Точка доминанты стоит там же, где конец линии.
+    expect(dot?.getAttribute('x1')).toBe(dominant?.getAttribute('x2'))
+    expect(dot?.getAttribute('y1')).toBe(dominant?.getAttribute('y2'))
   })
 })

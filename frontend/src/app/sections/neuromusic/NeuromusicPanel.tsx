@@ -1,7 +1,8 @@
 /**
  * Правый сайдбар («Опции раздела») «Нейромузыки»: параметры рендера, секция
  * «Пространство» (real-time цепочка плеера, spatial-audio) и справка
- * о партитуре (docs/rules/neuromusic.md).
+ * о партитуре (docs/rules/neuromusic.md). Силуэт комнаты переехал в секцию
+ * «Визуализация» рабочей области под плеером (07.10.2026).
  *
  * Контролы правят стор `shared/state/neuromusic.ts`; параметры рендера уходят
  * на сервер только с запуском — кнопкой-иконкой в тулс-хедере (правка ≠
@@ -24,8 +25,7 @@ import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { bandLabel } from './bandLabels'
-import { BrainRoomView } from './BrainRoomView'
-import { MONTAGE_ROW_IDS, ROW_LABELS } from './rowMeta'
+import { ROW_LABELS } from './rowMeta'
 
 /**
  * Стиль ссылок-кнопок («Скачать…»): тот же набор, что ``Button variant="secondary"`` —
@@ -83,17 +83,11 @@ export function NeuromusicPanel() {
   // На время рендера контролы гаснут — параметры уже ушли в POST
   const running = busy || status?.status === 'running'
 
-  // Геометрия силуэта: играющий рендер (status) важнее выбранного варианта —
-  // до рендера показываем то, что будет посчитано кнопкой.
+  // Геометрия сцены: играющий рендер (status) важнее выбранного варианта —
+  // до рендера показываем то, что будет посчитано кнопкой (силуэт при этом
+  // живёт в секции «Визуализация» рабочей области — перенос 07.10.2026).
   const sceneVariant: AudioRenderVariant =
     (status?.variant ?? variant) === 'montage' ? 'montage' : 'express'
-  const sceneRows: readonly string[] = status
-    ? status.variant === 'montage'
-      ? (status.rows ?? [])
-      : []
-    : variant === 'montage'
-      ? MONTAGE_ROW_IDS
-      : []
 
   return (
     <>
@@ -261,14 +255,8 @@ export function NeuromusicPanel() {
         hint="3D-плеер (Tone.js): параметры применяются на лету к играющему треку — без пересчёта рендера (spatial-audio); «Запечь» печатает ту же цепочку на сервере."
       >
         <div className="flex flex-col gap-3">
-          {/* Силуэт комнаты: геометрия сцены того, что играет/будет посчитано
-              (спецификация 07.10.2026 — без МРТ-срезов). */}
-          <BrainRoomView
-            variant={sceneVariant}
-            rows={sceneRows}
-            bands={status?.tracks?.length ?? 7}
-            spreadPct={spatialSpreadPct}
-          />
+          {/* Силуэт комнаты переехал в секцию «Визуализация» рабочей
+              области (под плеером) — правка 07.10.2026. */}
           <CheckboxRow
             label="3D-режим плеера"
             checked={spatialEnabled}

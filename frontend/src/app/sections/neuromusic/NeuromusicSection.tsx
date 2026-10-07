@@ -2,11 +2,15 @@
  * Раздел «Нейромузыка» (эксперимент, docs/rules/neuromusic.md).
  *
  * Рабочая область отдана графике: подсказка без записи, статус/прогресс
- * рендера и трекер-плеер (`WaveTracker`: линейка времени + волна-бабочка +
- * позиционер). Транспорт Play/Pause и Stop — кнопки хедера раздела, ссылки
- * «Скачать…» — секция «Файлы» правого сайдбара (`NeuromusicPanel`); параметры
- * рендера — секция «Параметры рендера» того же сайдбара (правка параметра
- * рендер не запускает).
+ * рендера, трекер-плеер (`WaveTracker`: линейка времени + волна-бабочка +
+ * позиционер) и под ним секция **«Визуализация»** (2 колонки: силуэт
+ * головы `BrainRoomView`, перенесённый из «Опций» правого сайдбара, и
+ * радиальный график `RadialChart`; без шапок/подписей, вписывается по
+ * высоте рабочей области без прокрутки; видна только вместе с плеером —
+ * после успешного рендера). Транспорт Play/Pause и Stop — кнопки хедера
+ * раздела, ссылки «Скачать…» — секция «Файлы» правого сайдбара
+ * (`NeuromusicPanel`); параметры рендера — секция «Параметры рендера»
+ * того же сайдбара (правка параметра рендер не запускает).
  *
  * Состояние: сторы `shared/state/neuromusic.ts` (рендер, поллинг) и
  * `shared/state/neuromusicPlayer.ts` (транспорт/вид плеера — их делят хедер
@@ -16,12 +20,16 @@
  */
 import { useEffect, useMemo, useRef } from 'react'
 import { Music2, Pause, Play, Square } from 'lucide-react'
+import type { AudioRenderVariant } from '@/shared/api/types'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useNeuromusic } from '@/shared/state/neuromusic'
 import { useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
 import { IconButton } from '@/shared/ui/IconButton'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { BrainRoomView } from './BrainRoomView'
+import { RadialChart } from './RadialChart'
+import { MONTAGE_ROW_IDS } from './rowMeta'
 import { TrackerControls } from './TrackerControls'
 import { WaveTracker } from './WaveTracker'
 
@@ -32,6 +40,9 @@ export function NeuromusicSection() {
   const busy = useNeuromusic((state) => state.busy)
   const cached = useNeuromusic((state) => state.cached)
   const error = useNeuromusic((state) => state.error)
+  /** Для силуэта «Визуализации»: вариант/разброс сцены — из того же стора. */
+  const variant = useNeuromusic((state) => state.variant)
+  const spatialSpreadPct = useNeuromusic((state) => state.spatialSpreadPct)
 
   /** Транспорт хедера живёт в сторе плеера — с ним же делит его трекер. */
   const playing = useNeuromusicPlayer((state) => state.playing)
@@ -44,6 +55,19 @@ export function NeuromusicSection() {
   const running = busy || status?.status === 'running'
   const succeeded = status?.status === 'succeeded'
   const tracks = useMemo(() => status?.tracks ?? [], [status])
+
+  // Геометрия силуэта «Визуализации» (перенесена из «Опций» 07.10.2026):
+  // играющий рендер (status) важнее выбранного варианта — до рендера
+  // секции нет, но логика осталась прежней (панель «Пространства»).
+  const sceneVariant: AudioRenderVariant =
+    (status?.variant ?? variant) === 'montage' ? 'montage' : 'express'
+  const sceneRows: readonly string[] = status
+    ? status.variant === 'montage'
+      ? (status.rows ?? [])
+      : []
+    : variant === 'montage'
+      ? MONTAGE_ROW_IDS
+      : []
 
   // Новый запуск кнопкой в хедере (busy=true): плеер снова с мастера —
   // как и раньше при нажатии «Создать аудио» внутри секции.
@@ -172,8 +196,45 @@ export function NeuromusicSection() {
       )}
 
       {succeeded && renderId && (
-        <section aria-label="Прослушивание" className="flex flex-col gap-3">
+        <section aria-label="Прослушивание" className="flex shrink-0 flex-col gap-3">
           <WaveTracker renderId={renderId} tracks={tracks} timeRef={timeRef} />
+        </section>
+      )}
+
+      {/* Первая нижняя область визуализации под трекером (задел 06.10.2026,
+          спецификация владельца 07.10.2026): 2 колонки — силуэт головы
+          (перенесён из «Опций» правого сайдбара) и радиальный график.
+          Без шапок и подписей (экономия высоты, правка 07.10.2026): секция
+          растягивается на весь остаток рабочей области (flex-1), картинки
+          вписываются по высоте ячеек — под трекером прокрутки нет. Видна
+          только вместе с плеером — после успешного рендера. */}
+      {succeeded && renderId && (
+        <section
+          aria-label="Визуализация"
+          className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-bg-2 p-2"
+          data-testid="neuromusic-visualization"
+        >
+          <div
+            className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-3 md:grid-cols-2 md:grid-rows-1"
+            data-testid="visualization-columns"
+          >
+            {/* Колонка 1: голова вид сверху — та же геометрия сцены, что
+                играет/будет посчитано (вариант/разброс — из стора). */}
+            <div className="h-full min-h-0 overflow-hidden">
+              <BrainRoomView
+                variant={sceneVariant}
+                rows={sceneRows}
+                bands={tracks.length}
+                spreadPct={spatialSpreadPct}
+              />
+            </div>
+            {/* Колонка 2: радиальный график — 7 сегментов от π/2 + π/7
+                против часовой, оси X/Y, сетка 25/50/75 %, круг-граница;
+                полигон по лучам — задел `starPolygon` (данные отдельно). */}
+            <div className="h-full min-h-0 overflow-hidden">
+              <RadialChart />
+            </div>
+          </div>
         </section>
       )}
     </div>
