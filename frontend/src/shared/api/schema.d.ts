@@ -1625,6 +1625,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audio/render/{render_id}/bake": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Запечь 3D-цепочку рендера в WAV (3D-bake «Нейромузыки»)
+         * @description Ширина/разброс/влажность/помещение → WAV сцены с 3D-обработкой.
+         *
+         *     ``bake_id`` — детерминированный ключ (render_id + параметры + sha IR):
+         *     повторный POST тех же параметров отдаёт кэш без расчёта (``cached=true``).
+         *     400 — параметры/пресет IR, 404 — рендер не найден, 409 — рендер ещё идёт
+         *     либо уже идёт другой бак.
+         */
+        post: operations["start_audio_bake_api_v1_audio_render__render_id__bake_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/render/{render_id}/bake/{bake_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Статус 3D-bake: шаг и проценты (поллинг UI)
+         * @description Прогресс запекания; готовый бак доступен и после рестарта сервера (диск).
+         */
+        get: operations["audio_bake_status_api_v1_audio_render__render_id__bake__bake_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/render/{render_id}/bake/{bake_id}.wav": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * WAV запечённой 3D-сцены (48 кГц, PCM_24, стерео)
+         * @description Скачивание результата; 409 — ещё печатается/упал/файл вычищен квотой.
+         */
+        get: operations["audio_bake_wav_api_v1_audio_render__render_id__bake__bake_id__wav_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audio/ir": {
         parameters: {
             query?: never;
@@ -1867,6 +1932,100 @@ export interface components {
             duration_sec: number;
             /** Channels */
             channels?: string[];
+        };
+        /**
+         * AudioBakeRequest
+         * @description Тело ``POST /audio/render/{id}/bake``: параметры 3D-цепочки для запекания.
+         *
+         *     Диапазоны те же, что держит UI «Пространства» (width до 150 % — дальше
+         *     звучит как фазовый сдвиг); валидация 400 с текстом для UI — в роуте (A1).
+         */
+        AudioBakeRequest: {
+            /**
+             * Width Pct
+             * @description Ширина стереобазы, % (0…150, 100 — без изменения)
+             * @default 100
+             */
+            width_pct: number;
+            /**
+             * Spread Pct
+             * @description Разброс источников по дуге/модулям, % (0…100, 100 — полный)
+             * @default 100
+             */
+            spread_pct: number;
+            /**
+             * Wet Pct
+             * @description Влажность общей Convolver, % (0…100, 0 — сухая сцена)
+             * @default 25
+             */
+            wet_pct: number;
+            /**
+             * Ir
+             * @description Пресет IR из GET /audio/ir (в т.ч. brainroom_*); неизвестный — 400
+             * @default room_small
+             */
+            ir: string;
+        };
+        /**
+         * AudioBakeStart
+         * @description Ответ ``POST …/bake`` (202): запекание запущено либо уже посчитано.
+         */
+        AudioBakeStart: {
+            /** Bake Id */
+            bake_id: string;
+            /**
+             * Status
+             * @default running
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed";
+            /**
+             * Cached
+             * @description true — байты взяты из дискового кэша (те же параметры цепочки), расчёт не запускался, status сразу succeeded
+             * @default false
+             */
+            cached: boolean;
+        };
+        /**
+         * AudioBakeStatus
+         * @description ``GET …/bake/{bake_id}/status``: проценты и шаг запекания (поллинг UI).
+         */
+        AudioBakeStatus: {
+            /** Bake Id */
+            bake_id: string;
+            /** Render Id */
+            render_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed";
+            /**
+             * Stage
+             * @description Текущий шаг, например «Панорама: стем 3/7»
+             */
+            stage: string;
+            /**
+             * Pct
+             * @description Готовность 0..1
+             */
+            pct: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Error
+             * @description Текст ошибки (status=failed)
+             */
+            error?: string | null;
+            /**
+             * Bytes Total
+             * @description Размер готового WAV, байт (после успеха)
+             * @default 0
+             */
+            bytes_total: number;
         };
         /**
          * AudioIrCatalogOut
@@ -9601,6 +9760,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_audio_bake_api_v1_audio_render__render_id__bake_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AudioBakeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioBakeStart"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_bake_status_api_v1_audio_render__render_id__bake__bake_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+                bake_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioBakeStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_bake_wav_api_v1_audio_render__render_id__bake__bake_id__wav_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+                bake_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": unknown;
                 };
             };
             /** @description Validation Error */

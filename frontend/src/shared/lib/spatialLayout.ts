@@ -79,6 +79,98 @@ export function wetParam(wetPct: number): number {
   return clamp01(wetPct / 100)
 }
 
+// --- «Монтаж»: 4 модуля рядов и силуэт BrainRoom (срез 07.10.2026) -------------
+// Геометрия зеркалит backend `audio_render/bake.py` (тот же spread, те же
+// полудуги): запечённый WAV и живой граф стоят в одной сцене.
+
+/** Лобной ряд: узкая дуга к лбу, полудуга при полном разбросе, градусы. */
+export const FRONTAL_HALF_DEG = 30
+/** Затылочный: зеркало лобной — тоже узкое. */
+export const OCCIPITAL_HALF_DEG = 30
+/** Теменной: смещён в тыл, широкая дуга к затылку. */
+export const PARIETAL_HALF_DEG = 60
+/** Височный: прямая линия на уровне ушей вдоль X (Z = 0), метры. */
+export const TEMPORAL_HALF_M = 1.5
+/** Пропорции вида сверху BrainRoom: ширина : длина = 1.0 : 1.3. */
+export const ROOM_LENGTH_RATIO = 1.3
+
+function polar(azimuthDeg: number): SourcePosition {
+  const azimuthRad = (azimuthDeg * Math.PI) / 180
+  return {
+    x: SOURCE_DISTANCE_M * Math.sin(azimuthRad),
+    y: 0,
+    z: -SOURCE_DISTANCE_M * Math.cos(azimuthRad),
+  }
+}
+
+/**
+ * Позиция источника модуля «Монтажа» (спецификация владельца 07.10.2026):
+ * frontal — дуга к лбу (±30°·spread), temporal — прямая линия ушей
+ * (X −1.5…+1.5 м, Z=0), parietal — тыл 180°±60°·spread,
+ * occipital — зеркало лобной (180°±30°·spread). ``spread`` 0…1 схлопывает
+ * модуль к его центру; неизвестный ряд — ошибка (в UI приходят только
+ * ряды из статуса рендера).
+ */
+export function moduleSourcePosition(
+  row: string,
+  index: number,
+  count: number,
+  spread: number,
+): SourcePosition {
+  const unit = count <= 1 ? 0 : (index / (count - 1)) * 2 - 1
+  const scaled = unit * clamp01(spread)
+  switch (row) {
+    case 'frontal':
+      return polar(FRONTAL_HALF_DEG * scaled)
+    case 'temporal':
+      return { x: TEMPORAL_HALF_M * scaled, y: 0, z: 0 }
+    case 'parietal':
+      return polar(180 + PARIETAL_HALF_DEG * scaled)
+    case 'occipital':
+      return polar(180 + OCCIPITAL_HALF_DEG * scaled)
+    default:
+      throw new Error(`Неизвестный ряд модуля «Монтажа»: ${row}`)
+  }
+}
+
+/**
+ * Проекция точки сцены на силуэт BrainRoom (вид сверху): ``u`` −1…1 вправо,
+ * ``v`` −1…1 **вперёд** (фронт сверху). Координаты нормированы на
+ * пропорции комнаты 1.0 : 1.3 (длина по Z шире) — «деформация сферы»
+ * из ТЗ; эллипс стен рисуется как (u, v) = единичный круг.
+ */
+export function brainroomProject(x: number, z: number): { u: number; v: number } {
+  return {
+    u: x / SOURCE_DISTANCE_M,
+    v: -z / (SOURCE_DISTANCE_M * ROOM_LENGTH_RATIO),
+  }
+}
+
+/** Точка силуэта: позиция сцены + ряд (для «Монтажа», иначе undefined). */
+export type ScenePoint = SourcePosition & { row?: string }
+
+/**
+ * Все точки текущей сцены для силуэта: «Экспресс» — дуга ±60° из полос,
+ * «Монтаж» — ряды × полосы в геометрии модулей.
+ */
+export function scenePoints(options: {
+  variant: 'express' | 'montage'
+  rows: readonly string[]
+  bands: number
+  spread: number
+}): ScenePoint[] {
+  const { variant, rows, bands, spread } = options
+  if (variant === 'montage') {
+    return rows.flatMap((row) =>
+      Array.from({ length: bands }, (_, index) => ({
+        ...moduleSourcePosition(row, index, bands, spread),
+        row,
+      })),
+    )
+  }
+  return Array.from({ length: bands }, (_, index) => sourcePosition(index, bands, spread))
+}
+
 function clamp01(value: number): number {
   if (Number.isNaN(value)) return 0
   return Math.min(1, Math.max(0, value))

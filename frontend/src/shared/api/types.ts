@@ -29,6 +29,11 @@ export type EpochSummary = Schemas['EpochSummary']
 /** «Нейромузыка»: запуск рендера (202) и его статус для прогресс-бара */
 export type AudioRenderStart = Schemas['AudioRenderStart']
 export type AudioRenderStatus = Schemas['AudioRenderStatus']
+/** Вариант рендера: «Экспресс» (7 треков L/C/R) ↔ «Монтаж» (4 ряда × полосы) */
+export type AudioRenderVariant = 'express' | 'montage'
+/** «Нейромузыка»: 3D-bake (spatial-audio, п.3) — запуск и статус запекания */
+export type AudioBakeStart = Schemas['AudioBakeStart']
+export type AudioBakeStatus = Schemas['AudioBakeStatus']
 
 /** «Нейромузыка»: каталог IR-пресетов реверберации и один пресет (spatial-audio) */
 export type AudioIrCatalog = Schemas['AudioIrCatalogOut']

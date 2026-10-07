@@ -10,18 +10,22 @@
  */
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
+import type { AudioRenderVariant } from '@/shared/api/types'
 import {
   MAX_SPATIAL_WIDTH_PCT,
   OCTAVE_SHIFTS,
   type OctaveShift,
   useNeuromusic,
 } from '@/shared/state/neuromusic'
+import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { NumberField } from '@/shared/ui/NumberField'
 import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { bandLabel } from './bandLabels'
+import { BrainRoomView } from './BrainRoomView'
+import { MONTAGE_ROW_IDS, ROW_LABELS } from './rowMeta'
 
 /**
  * Стиль ссылок-кнопок («Скачать…»): тот же набор, что ``Button variant="secondary"`` —
@@ -37,6 +41,7 @@ export function NeuromusicPanel() {
   const loudnessPhon = useNeuromusic((state) => state.loudnessPhon)
   const autobase = useNeuromusic((state) => state.autobase)
   const octaveShift = useNeuromusic((state) => state.octaveShift)
+  const variant = useNeuromusic((state) => state.variant)
   const busy = useNeuromusic((state) => state.busy)
   const status = useNeuromusic((state) => state.status)
   const renderId = useNeuromusic((state) => state.renderId)
@@ -45,6 +50,14 @@ export function NeuromusicPanel() {
   const setLoudnessPhon = useNeuromusic((state) => state.setLoudnessPhon)
   const setAutobase = useNeuromusic((state) => state.setAutobase)
   const setOctaveShift = useNeuromusic((state) => state.setOctaveShift)
+  const setVariant = useNeuromusic((state) => state.setVariant)
+
+  // 3D-bake (spatial-audio, п.3): печать текущей цепочки на бэкенде.
+  const bakeId = useNeuromusic((state) => state.bakeId)
+  const bakeStatus = useNeuromusic((state) => state.bakeStatus)
+  const bakeBusy = useNeuromusic((state) => state.bakeBusy)
+  const bakeError = useNeuromusic((state) => state.bakeError)
+  const startBake = useNeuromusic((state) => state.startBake)
 
   // Пространственная обработка (real-time, без запросов при правке).
   const spatialEnabled = useNeuromusic((state) => state.spatialEnabled)
@@ -70,6 +83,18 @@ export function NeuromusicPanel() {
   // На время рендера контролы гаснут — параметры уже ушли в POST
   const running = busy || status?.status === 'running'
 
+  // Геометрия силуэта: играющий рендер (status) важнее выбранного варианта —
+  // до рендера показываем то, что будет посчитано кнопкой.
+  const sceneVariant: AudioRenderVariant =
+    (status?.variant ?? variant) === 'montage' ? 'montage' : 'express'
+  const sceneRows: readonly string[] = status
+    ? status.variant === 'montage'
+      ? (status.rows ?? [])
+      : []
+    : variant === 'montage'
+      ? MONTAGE_ROW_IDS
+      : []
+
   return (
     <>
       <Panel
@@ -77,6 +102,25 @@ export function NeuromusicPanel() {
         hint="Правка значения не запускает расчёт: на сервер параметры уходят при нажатии кнопки «Создать аудио» в шапке раздела."
       >
         <div className="flex flex-col gap-3">
+          <SegmentedControl
+            label="Вариант"
+            value={variant}
+            options={[
+              {
+                value: 'express',
+                label: 'Экспресс',
+                title: '7 треков по шинам L/C/R — быстрая черновая проба созвучия полос',
+              },
+              {
+                value: 'montage',
+                label: 'Монтаж',
+                title: '4 ряда схемы × 7 полос = 28 стерео-источников: геометрия модулей для 3D и запекания',
+              },
+            ]}
+            onChange={(value) => setVariant(value as AudioRenderVariant)}
+            hint="Как считать партитуру: «Экспресс» — шины полушарий, «Монтаж» — 4 ряда для 3D-цепочки; считает кнопка"
+            disabled={running}
+          />
           <SegmentedControl
             label="Транспонирование"
             value={String(octaveShift)}
@@ -145,7 +189,11 @@ export function NeuromusicPanel() {
       {renderId && status?.status === 'succeeded' && (
         <Panel
           title="Файлы"
-          hint="Готовый рендер: WAV-мастер, соль-треки полос и партитура (справка — § «Партитура»)"
+          hint={
+            (status?.rows ?? []).length > 0
+              ? 'Готовый рендер «Монтаж»: WAV-мастер, рядовые треки (ряд × полоса) и партитура'
+              : 'Готовый рендер: WAV-мастер, соль-треки полос и партитура (справка — § «Партитура»)'
+          }
         >
           <div className="flex flex-col gap-2">
             <a
@@ -162,34 +210,70 @@ export function NeuromusicPanel() {
             >
               Скачать партитуру (.json)
             </a>
-            <ul className="divide-y divide-border rounded-lg border border-border">
-              {(status?.tracks ?? []).map((band) => (
-                <li key={band} className="flex items-center gap-3 px-3 py-2">
-                  <span className="text-sm text-fg-1">{bandLabel(band)}</span>
-                  <a
-                    className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
-                    href={api.audioTrackUrl(renderId, band)}
-                    download={`neuromusic-${renderId}-${band}.wav`}
-                  >
-                    Скачать .wav
-                  </a>
-                </li>
-              ))}
-            </ul>
+            {(status?.variant === 'montage' && (status?.rows ?? []).length > 0) ? (
+              // «Монтаж»: 4 ряда × полосы — группировка по модулям, в том же
+              // порядке, что и в статусе рендера (rows).
+              <div className="flex flex-col gap-3" data-testid="montage-files">
+                {(status?.rows ?? []).map((row) => (
+                  <div key={row} className="flex flex-col gap-1">
+                    <p className="text-xs font-medium uppercase tracking-wide text-fg-2">
+                      {ROW_LABELS[row] ?? row}
+                    </p>
+                    <ul className="divide-y divide-border rounded-lg border border-border">
+                      {(status?.tracks ?? []).map((band) => (
+                        <li key={band} className="flex items-center gap-3 px-3 py-2">
+                          <span className="text-sm text-fg-1">{bandLabel(band)}</span>
+                          <a
+                            className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
+                            href={api.audioRowTrackUrl(renderId, row, band)}
+                            download={`neuromusic-${renderId}-${row}-${band}.wav`}
+                          >
+                            Скачать .wav
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ul className="divide-y divide-border rounded-lg border border-border">
+                {(status?.tracks ?? []).map((band) => (
+                  <li key={band} className="flex items-center gap-3 px-3 py-2">
+                    <span className="text-sm text-fg-1">{bandLabel(band)}</span>
+                    <a
+                      className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
+                      href={api.audioTrackUrl(renderId, band)}
+                      download={`neuromusic-${renderId}-${band}.wav`}
+                    >
+                      Скачать .wav
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </Panel>
       )}
 
       <Panel
         title="Пространство"
-        hint="3D-плеер (Tone.js): параметры применяются на лету к играющему треку — без пересчёта рендера (spatial-audio)."
+        hint="3D-плеер (Tone.js): параметры применяются на лету к играющему треку — без пересчёта рендера (spatial-audio); «Запечь» печатает ту же цепочку на сервере."
       >
         <div className="flex flex-col gap-3">
+          {/* Силуэт комнаты: геометрия сцены того, что играет/будет посчитано
+              (спецификация 07.10.2026 — без МРТ-срезов). */}
+          <BrainRoomView
+            variant={sceneVariant}
+            rows={sceneRows}
+            bands={status?.tracks?.length ?? 7}
+            spreadPct={spatialSpreadPct}
+          />
           <CheckboxRow
             label="3D-режим плеера"
             checked={spatialEnabled}
             onChange={setSpatialEnabled}
-            hint="Вместо обычного плеера — 7 треков на дуге, HRTF-панорамирование и свёрточный ревербератор"
+            hint="Вместо обычного плеера — сцена на дуге («Экспресс») или в 4 модулях рядов («Монтаж»), HRTF-панорамирование и общая свёрточная реверберация"
           />
           <NumberField
             label="Ширина базы"
@@ -210,7 +294,11 @@ export function NeuromusicPanel() {
             min={0}
             max={100}
             step={10}
-            hint="100 — полная дуга ±60° (слева δ, справа γ-high), 0 — все треки перед слушателем"
+            hint={
+              sceneVariant === 'montage'
+                ? '100 — полные геометрии модулей (дуги и линия ушей), 0 — все ряды свёрнуты к центрам'
+                : '100 — полная дуга ±60° (слева δ, справа γ-high), 0 — все треки перед слушателем'
+            }
             disabled={!spatialEnabled}
           />
           <NumberField
@@ -236,10 +324,70 @@ export function NeuromusicPanel() {
             hint={
               irCatalog.isError
                 ? 'Каталог IR не загрузился — реверберация использует прежний пресет'
-                : 'Импульсная характеристика помещения (сгенерирована pyroomacoustics, spatial-audio)'
+                : spatialIr.startsWith('brainroom')
+                  ? 'Муляж черепа BrainRoom (2/3.5/5 м, пропорции 1.0 : 1.3) — рекомендуется для «Монтажа»'
+                  : 'Импульсная характеристика помещения (сгенерирована pyroomacoustics, spatial-audio)'
             }
             disabled={!spatialEnabled || irCatalog.isPending}
           />
+
+          {/* 3D-bake (spatial-audio, п.3): та же цепочка, но печать на
+              бэкенде — детерминированный WAV вместо real-time браузера. */}
+          {renderId && status?.status === 'succeeded' && (
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-bg-1 p-3">
+              <p className="text-sm text-fg-1">3D-bake: запечь цепочку в WAV</p>
+              <p className="text-xs text-fg-2">
+                Сервер печатает детерминированный файл с текущими параметрами (HRTF заменён
+                амплитудной панорамой — spatial-audio, п.3); результат кэшируется по параметрам.
+              </p>
+              <Button
+                variant="secondary"
+                onClick={() => void startBake()}
+                disabled={bakeBusy}
+                data-testid="bake-start"
+              >
+                {bakeBusy ? 'Запекаем…' : 'Запечь 3D (WAV)'}
+              </Button>
+              {bakeBusy && (
+                <div className="flex flex-col gap-1">
+                  <div
+                    role="progressbar"
+                    aria-label="Прогресс запекания"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round((bakeStatus?.pct ?? 0) * 100)}
+                    className="h-1.5 w-full overflow-hidden rounded-full bg-bg-3"
+                  >
+                    <span
+                      className="block h-full rounded-full bg-accent transition-[width]"
+                      style={{ width: `${Math.round((bakeStatus?.pct ?? 0) * 100)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-fg-2">{bakeStatus?.stage ?? 'Запуск…'}</p>
+                </div>
+              )}
+              {bakeStatus?.status === 'succeeded' && bakeId && (
+                <a
+                  className={LINK_BUTTON_CLASS}
+                  href={api.audioBakeWavUrl(renderId, bakeId)}
+                  download={`neuromusic-${renderId}-3d-bake.wav`}
+                  data-testid="bake-download"
+                >
+                  Скачать запечённый WAV
+                </a>
+              )}
+              {bakeStatus?.status === 'failed' && (
+                <p role="alert" className="text-xs text-danger">
+                  Запекание не удалось: {bakeStatus.error ?? 'причина неизвестна'}
+                </p>
+              )}
+              {bakeError && (
+                <p role="alert" className="text-xs text-danger">
+                  {bakeError}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       </Panel>
 

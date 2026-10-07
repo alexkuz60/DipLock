@@ -1041,3 +1041,31 @@ sidecar, `schema_version` = 1 — additive-ключи). Попутно мок `_
 `integration` — **846**), Vitest — **1067** (без правок фронта, типы
 перегенерированы), ruff/mypy/eslint/tsc чисты, `openapi.json` +1 путь (72) →
 `schema.d.ts` (`variant`, `rows`).
+
+**Срез «Нейромузыка: UI „Монтажа", 4 модуля, силуэт BrainRoom, 3D-bake»
+(07.10.2026, вторая половина).** Backend — `tests/test_audio_bake.py`
+**+9**: юнит геометрии модулей (дуга/линия ушей/тыл/зеркало по спецификации
+07.10.2026, spread схлопывает к центрам, точки внутри комнаты 1.0 : 1.3,
+`ValueError` на чужом ряду), дуга ±60° и равномощная панорама
+(`gL²+gR² = 1`), формула widening (100 % — идентичность, 0 % — моно L+R,
+50 % — M/S), ключ `bake_sig` (меняется от render_id/каждого параметра/IR),
+детерминизм печати на memory-артефактах (WAV 48k/stereo/PCM_24, пик ≤ 0.891,
+слева δ громче), «Монтаж» (4 стема по прогрессу, width 0 при spread 0 →
+L=R); API — полный цикл (202 → поллинг → WAV ≈4 с → повтор `cached=true` с
+теми же байтами, чужой render_id → 404), валидация 400 (width/spread/wet/ir)
+и 404 до/после, конфликт 409 второго бака и «ещё печатается» на WAV.
+Vitest **+15**: `spatialLayout.test.ts` **+7** (модули зеркально/линия/тыл,
+spread/NaN/чужой ряд, проекция BrainRoom u/v и симметрия, `scenePoints`
+для обоих вариантов), `trackList.test.ts` **+3** (новый: express-треки,
+row-major кросс-продукт с `row`, фоллбэк без рядов), `NeuromusicSection.test.tsx`
+**+4** (вариант в POST при правке без запроса, «Монтаж»: 14 рядовых ссылок +
+14 треков движка с `row` + силуэт/легенда, пилюля «Готово (из кэша)», bake:
+POST параметров цепочки → progressbar → ссылка `.wav` без лишних POST),
+`controls.test.tsx` **+1** (новый `disabled` у `SegmentedControl`).
+Ловушки: bake-URL содержит и `/audio/render`, и `/status` — в моке ветка
+bake раньше общей (иначе поллинг уходит в статус рендера); `-0 !== 0` в
+геометрии (`toBeCloseTo`); константы рядов вынесены в `rowMeta.ts`
+(react-refresh не пускает константы из файла компонента). Итог: pytest —
+**873** (без `integration` — **855**), Vitest — **1082**, ruff/mypy/eslint/tsc
+чисты, `openapi.json` +3 пути (75) →
+`schema.d.ts` (`AudioBakeStart`/`AudioBakeStatus`).

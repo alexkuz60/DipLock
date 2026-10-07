@@ -27,6 +27,8 @@ export type SegmentedControlProps<T extends string> = {
    * подзаголовков секций (правка 30.09.2026).
    */
   layout?: 'field' | 'inline'
+  /** Погасить выбор (параметры на время серверной задачи — как у NumberField) */
+  disabled?: boolean
 }
 
 export function SegmentedControl<T extends string>({
@@ -36,6 +38,7 @@ export function SegmentedControl<T extends string>({
   onChange,
   hint,
   layout = 'field',
+  disabled = false,
 }: SegmentedControlProps<T>) {
   const buttons = options.map((option) => {
     const active = option.value === value
@@ -45,9 +48,11 @@ export function SegmentedControl<T extends string>({
         type="button"
         title={option.title}
         aria-pressed={active}
+        disabled={disabled}
         onClick={() => onChange(option.value)}
         className={cx(
           'tnum rounded-lg border px-2.5 py-1 text-sm transition-colors',
+          'disabled:cursor-not-allowed disabled:opacity-40',
           active
             ? 'border-accent/60 bg-accent-soft text-fg-0'
             : 'border-border bg-bg-2 text-fg-1 hover:bg-bg-3 hover:text-fg-0',

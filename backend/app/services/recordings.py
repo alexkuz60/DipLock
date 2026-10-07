@@ -343,14 +343,17 @@ def _drop_signal_cache(recording_id: str) -> None:
     clear_bundle_cache(settings, recording_id)
 
     # Артефакты рендера «Нейромузыки» (дисковый кэш + состояния в памяти):
-    # производные записи, чистятся вместе с ней (срез 07.10.2026)
+    # производные записи, чистятся вместе с ней (срез 07.10.2026); 3D-bake —
+    # та же история (каталог audio/{id}/bake + состояния в памяти).
     try:
+        from app.services.audio_render import bake as audio_bake
         from app.services.audio_render import render as audio_render
         from app.services.audio_render import store as audio_store
     except ImportError:  # pragma: no cover — модуль всегда есть
         return
     audio_store.clear_audio_cache(settings, recording_id)
     audio_render.drop_recording(recording_id)
+    audio_bake.drop_recording(recording_id)
 
 
 class RecordingRegistry:

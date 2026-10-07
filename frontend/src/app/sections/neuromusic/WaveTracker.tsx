@@ -33,6 +33,7 @@ import {
 } from '@/shared/lib/waveformView'
 import { useNeuromusic } from '@/shared/state/neuromusic'
 import { getActivePlayer, useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
+import { buildTrackList } from './trackList'
 
 /** Высота волны-бабочки, px — потолок раздела (ТЗ: не более 200). */
 const WAVE_HEIGHT_PX = 200
@@ -104,6 +105,9 @@ export function WaveTracker({ renderId, tracks, timeRef }: WaveTrackerProps) {
   const sliderRef = useRef<HTMLInputElement>(null)
 
   const trackKey = tracks.join(',')
+  /** Вариант и ряды рендера: из них строится список треков движка. */
+  const renderVariant = useNeuromusic((state) => state.status?.variant ?? 'express')
+  const rowsKey = useNeuromusic((state) => state.status?.rows?.join(',') ?? '')
   /** Параметры слайдера: 0…(длительность − окно), шаг = 1/100 окна. */
   const windowSpan = duration / zoom
   const sliderMax = Math.max(0, duration - windowSpan)
@@ -119,7 +123,12 @@ export function WaveTracker({ renderId, tracks, timeRef }: WaveTrackerProps) {
     playerStore.beginLoad()
     NeuromusicPlayer.load({
       masterUrl: api.audioMasterUrl(renderId),
-      tracks: tracks.map((key) => ({ key, url: api.audioTrackUrl(renderId, key) })),
+      tracks: buildTrackList({
+        renderId,
+        bands: tracks,
+        variant: renderVariant,
+        rows: rowsKey ? rowsKey.split(',') : [],
+      }),
       irUrl: api.audioIrUrl(renderStore.spatialIr),
       source: playerStore.source,
       rate: playerStore.rate,
@@ -146,9 +155,9 @@ export function WaveTracker({ renderId, tracks, timeRef }: WaveTrackerProps) {
       playerRef.current = null
       useNeuromusicPlayer.getState().detach()
     }
-    // trackKey, а не tracks: массив из `status.tracks` стабилен, но ESLint
-    // требует явной зависимости — строка не меняется при перерисовках.
-  }, [renderId, tracks, trackKey])
+    // trackKey/rowsKey, а не массивы: значения из `status` стабильны как
+    // строки, но ESLint требует явных зависимостей (массивы — новые объекты).
+  }, [renderId, tracks, trackKey, renderVariant, rowsKey])
 
   // Параметры «Пространства» применяются к живому графу мгновенно (правило
   // «правка ≠ расчёт»): включение режима перестраивает граф с сохранением

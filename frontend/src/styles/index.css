@@ -47,6 +47,12 @@
      фиолетовый; цвета читает canvas через getComputedStyle (waveformView.ts) */
   --color-nm-wave-up: #4da3ff;
   --color-nm-wave-down: #b98cff;
+  /* Ряды варианта «Монтаж» (силуэт BrainRoom, срез 07.10.2026): точки и
+     легенда 4 модулей плеера — по ним же печатает backend 3D-bake */
+  --color-nm-row-frontal: #7ee0ff;
+  --color-nm-row-temporal: #ffb454;
+  --color-nm-row-parietal: #b98cff;
+  --color-nm-row-occipital: #48d17f;
 
   /* Слои проекций мозга (раздел «Диполи», срез 3.1): силуэт головы, MNI-срез,
      поля Бродмана, точки диполей с векторами. Цвета читает и canvas

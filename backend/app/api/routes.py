@@ -109,6 +109,9 @@ from app.schemas.analysis import (
     SurfaceOut,
 )
 from app.schemas.audio import (
+    AudioBakeRequest,
+    AudioBakeStart,
+    AudioBakeStatus,
     AudioIrCatalogOut,
     AudioIrPresetOut,
     AudioRenderInfo,
@@ -147,6 +150,7 @@ from app.services.atlas_contours import (
 from app.services.atlas_contours import (
     contours_ref as contour_ref,
 )
+from app.services.audio_render import bake as neuro_bake
 from app.services.audio_render import render as neuro_render
 from app.services.audio_render import store as neuro_store
 from app.services.audio_render.core import PITCH_STEPS_CHOICES
@@ -2532,6 +2536,133 @@ async def audio_render_sidecar(render_id: str) -> Response:
     state = await _audio_state(render_id)
     data = await _artifact_bytes(state, neuro_store.SIDECAR_NAME)
     return Response(content=data, media_type="application/json")
+
+
+# --- 3D-bake: запек 3D-цепочки в WAV (docs/rules/spatial-audio.md, п.3) --------
+# Параметры цепочки плеера → детерминированная печать на бэкенде (scipy/
+# soundfile, без HRTF — приближение зафиксировано в bake.py): статус в памяти
+# (поллинг UI), файл — в дисковом кэше записи `audio/{rec}/bake/{bake_id}.wav`.
+
+
+@router.post(
+    "/audio/render/{render_id}/bake",
+    status_code=202,
+    response_model=AudioBakeStart,
+    summary="Запечь 3D-цепочку рендера в WAV (3D-bake «Нейромузыки»)",
+)
+async def start_audio_bake(render_id: str, payload: AudioBakeRequest) -> AudioBakeStart:
+    """Ширина/разброс/влажность/помещение → WAV сцены с 3D-обработкой.
+
+    ``bake_id`` — детерминированный ключ (render_id + параметры + sha IR):
+    повторный POST тех же параметров отдаёт кэш без расчёта (``cached=true``).
+    400 — параметры/пресет IR, 404 — рендер не найден, 409 — рендер ещё идёт
+    либо уже идёт другой бак.
+    """
+    width = float(payload.width_pct)
+    if not 0.0 <= width <= neuro_bake.WIDTH_MAX_PCT:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"width_pct: {payload.width_pct} вне диапазона "
+                f"0…{neuro_bake.WIDTH_MAX_PCT:g} % (100 — без изменения)"
+            ),
+        )
+    spread = float(payload.spread_pct)
+    if not 0.0 <= spread <= neuro_bake.SPREAD_MAX_PCT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"spread_pct: {payload.spread_pct} вне диапазона 0…{neuro_bake.SPREAD_MAX_PCT:g} %",
+        )
+    wet = float(payload.wet_pct)
+    if not 0.0 <= wet <= neuro_bake.WET_MAX_PCT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"wet_pct: {payload.wet_pct} вне диапазона 0…{neuro_bake.WET_MAX_PCT:g} %",
+        )
+    if audio_ir.get_preset(payload.ir) is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"ir: {payload.ir!r} — неизвестный пресет; доступны: {', '.join(audio_ir.preset_ids())}",
+        )
+    params = neuro_bake.BakeParams(width_pct=width, spread_pct=spread, wet_pct=wet, ir=payload.ir)
+    try:
+        # bake_sig/ir_bytes читают диск — вне event loop (404/409 оттуда же)
+        bake_id, cached = await asyncio.to_thread(neuro_bake.start_bake, render_id, params)
+    except neuro_render.RenderNotFound as exc:
+        raise HTTPException(
+            status_code=404, detail=f"Рендер {render_id} не найден — сначала создайте аудио",
+        ) from exc
+    except neuro_render.RenderBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except neuro_bake.BakeBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return AudioBakeStart(
+        bake_id=bake_id,
+        status="succeeded" if cached else "running",
+        cached=cached,
+    )
+
+
+@router.get(
+    "/audio/render/{render_id}/bake/{bake_id}/status",
+    response_model=AudioBakeStatus,
+    summary="Статус 3D-bake: шаг и проценты (поллинг UI)",
+)
+async def audio_bake_status(render_id: str, bake_id: str) -> AudioBakeStatus:
+    """Прогресс запекания; готовый бак доступен и после рестарта сервера (диск)."""
+    try:
+        state = await asyncio.to_thread(neuro_bake.state_of, bake_id)
+    except neuro_bake.BakeNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"3D-bake {bake_id} не найден") from exc
+    if state.render_id != render_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"3D-bake {bake_id} принадлежит другому рендеру ({state.render_id})",
+        )
+    return AudioBakeStatus(
+        bake_id=state.bake_id,
+        render_id=state.render_id,
+        status=state.status,
+        stage=state.stage,
+        pct=state.pct,
+        message=state.message,
+        error=state.error,
+        bytes_total=state.bytes_out,
+    )
+
+
+@router.get(
+    "/audio/render/{render_id}/bake/{bake_id}.wav",
+    response_class=Response,
+    responses={200: {"content": {"audio/wav": {}}}},
+    summary="WAV запечённой 3D-сцены (48 кГц, PCM_24, стерео)",
+)
+async def audio_bake_wav(render_id: str, bake_id: str) -> Response:
+    """Скачивание результата; 409 — ещё печатается/упал/файл вычищен квотой."""
+    try:
+        state = await asyncio.to_thread(neuro_bake.state_of, bake_id)
+    except neuro_bake.BakeNotFound as exc:
+        raise HTTPException(status_code=404, detail=f"3D-bake {bake_id} не найден") from exc
+    if state.render_id != render_id:
+        raise HTTPException(status_code=404, detail=f"3D-bake {bake_id} принадлежит другому рендеру")
+    if state.status != "succeeded":
+        detail = (
+            f"3D-bake ещё печатается ({state.stage})" if state.status == "running"
+            else f"3D-bake не удался: {state.error or 'причина неизвестна'}"
+        )
+        raise HTTPException(status_code=409, detail=detail)
+    data = await asyncio.to_thread(
+        neuro_bake.read_bake, settings, state.recording_id, bake_id,
+    )
+    if data is None:
+        data = state.payload
+    if data is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Файл 3D-bake не найден в кэше — запеките заново",
+        )
+    # Без Content-Disposition: файл играет в <audio src>, скачивание — download.
+    return Response(content=data, media_type="audio/wav")
 
 
 # --- IR для пространственной обработки (docs/rules/spatial-audio.md) -----------

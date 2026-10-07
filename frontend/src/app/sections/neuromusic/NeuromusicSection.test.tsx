@@ -103,15 +103,57 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+/** Параметры мока рендера: вариант/ряды статуса, cached ответа POST. */
+type AudioFetchOptions = {
+  variant?: 'express' | 'montage'
+  rows?: string[]
+  cached?: boolean
+}
+
 /** Мок рендера: POST 202, статус — running → succeeded, файлы — заглушки.
  * `tracks` — порядок полос из `status.tracks` (по умолчанию — порядок
- * партитуры; для проверки сортировки комбо отдаётся перемешанный). */
-function audioFetchMock(tracks: string[] = TRACKS) {
+ * партитуры; для проверки сортировки комбо отдаётся перемешанный).
+ * `opts.cached` — попадание в дисковый кэш (поле ответа POST); bake-эндпоинты
+ * отвечают по своему контракту (spatial-audio, п.3). */
+function audioFetchMock(tracks: string[] = TRACKS, opts: AudioFetchOptions = {}) {
+  const variant = opts.variant ?? 'express'
+  const rows = opts.rows ?? []
   let statusCalls = 0
+  let bakeStatusCalls = 0
   const postBodies: string[] = []
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (init?.method === 'POST') postBodies.push(String(init.body ?? ''))
+    // 3D-bake — раньше общей ветки `/audio/render`: его URL содержит и её,
+    // и «/status» (иначе bake-status ушёл бы в поллинг рендера).
+    if (url.includes('/bake')) {
+      if (url.endsWith('/status')) {
+        bakeStatusCalls += 1
+        if (bakeStatusCalls === 1) {
+          return jsonResponse({
+            bake_id: 'b-1',
+            render_id: 'r-1',
+            status: 'running',
+            stage: 'Панорама: стем 3/28',
+            pct: 0.4,
+            message: '',
+            error: null,
+            bytes_total: 0,
+          })
+        }
+        return jsonResponse({
+          bake_id: 'b-1',
+          render_id: 'r-1',
+          status: 'succeeded',
+          stage: 'Готово',
+          pct: 1,
+          message: '3D-bake 120 КБ, montage, 7 полос, 90 мс',
+          error: null,
+          bytes_total: 122880,
+        })
+      }
+      return jsonResponse({ bake_id: 'b-1', status: 'running', cached: false }, 202)
+    }
     if (url.includes('/audio/render') && url.includes('/status')) {
       statusCalls += 1
       if (statusCalls === 1) {
@@ -123,6 +165,8 @@ function audioFetchMock(tracks: string[] = TRACKS) {
           message: 'Ядро ×128: hilbert → ресемпл ×96 → 7 октав (alpha)',
           error: null,
           tracks: [],
+          variant: 'express',
+          rows: [],
         })
       }
       return jsonResponse({
@@ -133,10 +177,15 @@ function audioFetchMock(tracks: string[] = TRACKS) {
         message: '7 треков + мастер, 4.0 с записи, 1.1 с рендера',
         error: null,
         tracks,
+        variant,
+        rows,
       })
     }
     if (url.includes('/audio/render')) {
-      return jsonResponse({ render_id: 'r-1', status: 'running' }, 202)
+      return jsonResponse(
+        { render_id: 'r-1', status: 'running', cached: opts.cached ?? false },
+        202,
+      )
     }
     if (url.endsWith('/audio/ir')) {
       // Каталог IR-пресетов (spatial-audio): реальный контракт, но без генерации.
@@ -236,6 +285,7 @@ describe('Нейромузыка — раздел', () => {
       loudnessPhon: DEFAULT_LOUDNESS_PHON,
       autobase: true,
       octaveShift: DEFAULT_OCTAVE_SHIFT,
+      variant: 'express',
       spatialEnabled: false,
       spatialWidthPct: DEFAULT_SPATIAL_WIDTH_PCT,
       spatialSpreadPct: DEFAULT_SPATIAL_SPREAD_PCT,
@@ -245,7 +295,12 @@ describe('Нейромузыка — раздел', () => {
       renderRecordingId: null,
       status: null,
       busy: false,
+      cached: false,
       error: null,
+      bakeId: null,
+      bakeStatus: null,
+      bakeBusy: false,
+      bakeError: null,
     })
     // jsdom без пакета canvas: getContext бросает — рисуем в фейковый контекст
     // (математика отрисовки покрыта в waveformView.test.ts; здесь по счётчику
@@ -682,5 +737,113 @@ describe('Нейромузыка — раздел', () => {
     expect(playerMock.dispose).not.toHaveBeenCalled()
     expect(screen.getByLabelText('Сигнал')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Мастер — партитура целиком' })).toBeNull()
+  })
+
+  it('вариант «Монтаж» уходит в запрос рендера, правка не запускает расчёт', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderNeuromusic()
+    // Переключатель в «Опциях»: дефолт — Экспресс, выбор — без запросов.
+    expect(screen.getByRole('button', { name: 'Экспресс' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Монтаж' }))
+    expect(fetchMock.postBodies).toHaveLength(0)
+    expect(useNeuromusic.getState().variant).toBe('montage')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
+    await waitFor(() => expect(fetchMock.postBodies).toHaveLength(1))
+    expect(JSON.parse(fetchMock.postBodies[0])).toMatchObject({ variant: 'montage' })
+  })
+
+  it('«Монтаж»: файлы по рядам, движок получает рядовые треки, силуэт — модули', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock(TRACKS, {
+      variant: 'montage',
+      rows: ['frontal', 'temporal'],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+    await waitFor(() => expect(screen.getByLabelText('Сигнал')).not.toBeDisabled())
+
+    // Файлы сгруппированы по рядам: 2 ряда × 7 полос = 14 рядовых ссылок.
+    const files = screen.getByTestId('montage-files')
+    expect(within(files).getByText('Лобной')).toBeInTheDocument()
+    expect(within(files).getByText('Височной')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Скачать .wav' })).toHaveLength(14)
+    expect(within(files).getAllByRole('link', { name: 'Скачать .wav' })[0]).toHaveAttribute(
+      'href',
+      expect.stringContaining('/track/frontal/'),
+    )
+
+    // Движок: 14 стемов row-major, каждый несёт ряд модуля.
+    const options = loadMock.load.mock.calls.at(-1)?.[0] as {
+      tracks: { key: string; url: string; row?: string }[]
+    }
+    expect(options.tracks).toHaveLength(14)
+    expect(options.tracks[0]).toMatchObject({
+      key: 'delta',
+      row: 'frontal',
+      url: expect.stringContaining('/track/frontal/delta.wav'),
+    })
+    expect(options.tracks[7]).toMatchObject({ key: 'delta', row: 'temporal' })
+
+    // Силуэт BrainRoom: подписи модулей и точки по геометрии рядов.
+    expect(screen.getByTestId('brainroom-view')).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('модули рядов'),
+    )
+    const legend = within(screen.getByTestId('brainroom-legend'))
+    expect(legend.getByText('Лобной')).toBeInTheDocument()
+    expect(legend.getByText('Височной')).toBeInTheDocument()
+  })
+
+  it('cached из ответа POST — пилюля «Готово (из кэша)»', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock(TRACKS, { cached: true })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    await waitFor(() => expect(screen.getByText('Готово (из кэша)')).toBeInTheDocument())
+    // Силуэт «Экспресса» без рядов — подпись дуги в aria-label.
+    expect(screen.getByTestId('brainroom-view')).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('дуга ±60°'),
+    )
+  })
+
+  it('3D-bake: кнопка → POST параметров цепочки → прогресс → ссылка на WAV', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+    const startButton = await screen.findByTestId('bake-start')
+    expect(fetchMock.postBodies).toHaveLength(1) // только рендер
+
+    fireEvent.click(startButton)
+    await waitFor(() => expect(fetchMock.postBodies).toHaveLength(2))
+    // Тело — параметры «Пространства» в контракте backend (width/spread/wet/ir).
+    expect(JSON.parse(fetchMock.postBodies[1])).toMatchObject({
+      width_pct: DEFAULT_SPATIAL_WIDTH_PCT,
+      spread_pct: DEFAULT_SPATIAL_SPREAD_PCT,
+      wet_pct: DEFAULT_SPATIAL_WET_PCT,
+      ir: DEFAULT_SPATIAL_IR,
+    })
+
+    // Прогресс запекания своим progressbar (aria-label), затем ссылка на файл.
+    await waitFor(() => expect(screen.getByLabelText('Прогресс запекания')).toBeInTheDocument())
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('bake-download')).toHaveAttribute(
+          'href',
+          expect.stringContaining('/audio/render/r-1/bake/b-1.wav'),
+        ),
+      { timeout: 3000 },
+    )
+    // Лишних POST нет: bake — отдельный цикл, рендер не перезапускался.
+    expect(fetchMock.postBodies).toHaveLength(2)
   })
 })

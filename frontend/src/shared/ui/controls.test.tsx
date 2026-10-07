@@ -32,6 +32,28 @@ describe('SegmentedControl', () => {
 
     expect(onChange).toHaveBeenCalledWith('per_channel')
   })
+
+  it('disabled гасит кнопки: выбор невозможен, onChange не зовётся', async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    renderWithProviders(
+      <SegmentedControl
+        label="Вариант"
+        value="express"
+        options={[
+          { value: 'express', label: 'Экспресс' },
+          { value: 'montage', label: 'Монтаж' },
+        ]}
+        onChange={onChange}
+        disabled
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: 'Монтаж' })
+    expect(button).toBeDisabled()
+    await user.click(button)
+    expect(onChange).not.toHaveBeenCalled()
+  })
 })
 
 describe('SelectField', () => {

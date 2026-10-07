@@ -6,9 +6,12 @@
  */
 import type {
   AnalyzeResponse,
+  AudioBakeStart,
+  AudioBakeStatus,
   AudioIrCatalog,
   AudioRenderStart,
   AudioRenderStatus,
+  AudioRenderVariant,
   BundleResult,
   CompareResult,
   ContourSlice,
@@ -187,7 +190,8 @@ export const api = {
    * `octaveShift` — транспонирование, октав (5/6/7 → ×32/×64/×128, дефолт 7);
    * `loudnessPhon` — опорный уровень компенсации ISO 226, фон (60…90) или
    * `null` — выключить; `loudnessAutobase` — стратегия A (автобаза «ямы») ↔
-   * «максимум громкости»; статус — `audioRenderStatus` (поллинг ~400 мс),
+   * «максимум громкости»; `variant` — «Экспресс»/«Монтаж» (4 ряда × 7 полос,
+   * 28 рядовых треков); статус — `audioRenderStatus` (поллинг ~400 мс),
    * файлы — по URL ниже; состояния рендера in-memory (TTL 15 мин).
    */
   audioRender: (
@@ -197,6 +201,7 @@ export const api = {
       octaveShift?: number
       loudnessPhon?: number | null
       loudnessAutobase?: boolean
+      variant?: AudioRenderVariant
     },
     signal?: AbortSignal,
   ) =>
@@ -211,6 +216,7 @@ export const api = {
         ...(opts?.loudnessAutobase !== undefined
           ? { loudness_autobase: opts.loudnessAutobase }
           : {}),
+        ...(opts?.variant !== undefined ? { variant: opts.variant } : {}),
       }),
       signal,
     }),
@@ -225,6 +231,47 @@ export const api = {
   /** URL WAV одного трека полосы (соль-прослушивание инструмента). */
   audioTrackUrl: (renderId: string, band: string) =>
     `${API_PREFIX}/audio/render/${renderId}/track/${band}.wav`,
+
+  /** URL рядового трека «Монтажа» (ряд × полоса, 4 ряда × 7 полос). */
+  audioRowTrackUrl: (renderId: string, row: string, band: string) =>
+    `${API_PREFIX}/audio/render/${renderId}/track/${row}/${band}.wav`,
+
+  /**
+   * 3D-bake (spatial-audio, п.3): параметры цепочки → детерминированный WAV
+   * на бэкенде; 202 + bake_id, статус — `audioBakeStatus`, файл — по URL ниже.
+   */
+  audioBakeStart: (
+    renderId: string,
+    params: {
+      widthPct: number
+      spreadPct: number
+      wetPct: number
+      ir: string
+    },
+    signal?: AbortSignal,
+  ) =>
+    request<AudioBakeStart>(`${API_PREFIX}/audio/render/${renderId}/bake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        width_pct: params.widthPct,
+        spread_pct: params.spreadPct,
+        wet_pct: params.wetPct,
+        ir: params.ir,
+      }),
+      signal,
+    }),
+
+  /** Шаг и проценты запекания (прогресс в «Пространстве»). */
+  audioBakeStatus: (renderId: string, bakeId: string, signal?: AbortSignal) =>
+    request<AudioBakeStatus>(
+      `${API_PREFIX}/audio/render/${renderId}/bake/${bakeId}/status`,
+      { signal },
+    ),
+
+  /** URL WAV запечённой 3D-сцены (скачивание после успеха). */
+  audioBakeWavUrl: (renderId: string, bakeId: string) =>
+    `${API_PREFIX}/audio/render/${renderId}/bake/${bakeId}.wav`,
 
   /** URL sidecar-«партитуры» (веса, гейны, checksum, extensions). */
   audioSidecarUrl: (renderId: string) => `${API_PREFIX}/audio/render/${renderId}/sidecar.json`,

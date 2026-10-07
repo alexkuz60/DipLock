@@ -30,6 +30,7 @@ export function NeuromusicSection() {
   const renderId = useNeuromusic((state) => state.renderId)
   const status = useNeuromusic((state) => state.status)
   const busy = useNeuromusic((state) => state.busy)
+  const cached = useNeuromusic((state) => state.cached)
   const error = useNeuromusic((state) => state.error)
 
   /** Транспорт хедера живёт в сторе плеера — с ним же делит его трекер. */
@@ -116,7 +117,11 @@ export function NeuromusicSection() {
               }
             >
               {status.status === 'succeeded'
-                ? 'Готово'
+                ? // cached из ответа POST: те же параметры уже считались —
+                  // честно показываем, что конвейер не запускался.
+                  cached
+                  ? 'Готово (из кэша)'
+                  : 'Готово'
                 : status.status === 'failed'
                   ? 'Ошибка'
                   : 'Рендер…'}

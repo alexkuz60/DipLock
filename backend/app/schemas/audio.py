@@ -165,3 +165,55 @@ class AudioIrCatalogOut(BaseModel):
         default_factory=list,
         description="Пресеты в порядке показа UI; WAV каждого — GET /audio/ir/{id}.wav",
     )
+
+
+class AudioBakeRequest(BaseModel):
+    """Тело ``POST /audio/render/{id}/bake``: параметры 3D-цепочки для запекания.
+
+    Диапазоны те же, что держит UI «Пространства» (width до 150 % — дальше
+    звучит как фазовый сдвиг); валидация 400 с текстом для UI — в роуте (A1).
+    """
+
+    width_pct: float = Field(
+        default=100.0,
+        description="Ширина стереобазы, % (0…150, 100 — без изменения)",
+    )
+    spread_pct: float = Field(
+        default=100.0,
+        description="Разброс источников по дуге/модулям, % (0…100, 100 — полный)",
+    )
+    wet_pct: float = Field(
+        default=25.0,
+        description="Влажность общей Convolver, % (0…100, 0 — сухая сцена)",
+    )
+    ir: str = Field(
+        default="room_small",
+        description="Пресет IR из GET /audio/ir (в т.ч. brainroom_*); неизвестный — 400",
+    )
+
+
+class AudioBakeStart(BaseModel):
+    """Ответ ``POST …/bake`` (202): запекание запущено либо уже посчитано."""
+
+    bake_id: str
+    status: AudioRenderState = "running"
+    cached: bool = Field(
+        default=False,
+        description=(
+            "true — байты взяты из дискового кэша (те же параметры цепочки), "
+            "расчёт не запускался, status сразу succeeded"
+        ),
+    )
+
+
+class AudioBakeStatus(BaseModel):
+    """``GET …/bake/{bake_id}/status``: проценты и шаг запекания (поллинг UI)."""
+
+    bake_id: str
+    render_id: str
+    status: AudioRenderState
+    stage: str = Field(description="Текущий шаг, например «Панорама: стем 3/7»")
+    pct: float = Field(ge=0.0, le=1.0, description="Готовность 0..1")
+    message: str = ""
+    error: str | None = Field(default=None, description="Текст ошибки (status=failed)")
+    bytes_total: int = Field(default=0, description="Размер готового WAV, байт (после успеха)")

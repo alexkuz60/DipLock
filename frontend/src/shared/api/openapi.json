@@ -3876,6 +3876,150 @@
         }
       }
     },
+    "/api/v1/audio/render/{render_id}/bake": {
+      "post": {
+        "summary": "Запечь 3D-цепочку рендера в WAV (3D-bake «Нейромузыки»)",
+        "description": "Ширина/разброс/влажность/помещение → WAV сцены с 3D-обработкой.\n\n``bake_id`` — детерминированный ключ (render_id + параметры + sha IR):\nповторный POST тех же параметров отдаёт кэш без расчёта (``cached=true``).\n400 — параметры/пресет IR, 404 — рендер не найден, 409 — рендер ещё идёт\nлибо уже идёт другой бак.",
+        "operationId": "start_audio_bake_api_v1_audio_render__render_id__bake_post",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioBakeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioBakeStart"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/render/{render_id}/bake/{bake_id}/status": {
+      "get": {
+        "summary": "Статус 3D-bake: шаг и проценты (поллинг UI)",
+        "description": "Прогресс запекания; готовый бак доступен и после рестарта сервера (диск).",
+        "operationId": "audio_bake_status_api_v1_audio_render__render_id__bake__bake_id__status_get",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          },
+          {
+            "name": "bake_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bake Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioBakeStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/render/{render_id}/bake/{bake_id}.wav": {
+      "get": {
+        "summary": "WAV запечённой 3D-сцены (48 кГц, PCM_24, стерео)",
+        "description": "Скачивание результата; 409 — ещё печатается/упал/файл вычищен квотой.",
+        "operationId": "audio_bake_wav_api_v1_audio_render__render_id__bake__bake_id__wav_get",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          },
+          {
+            "name": "bake_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Bake Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "audio/wav": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/audio/ir": {
       "get": {
         "summary": "Каталог IR-пресетов для реверберации плеера («Нейромузыка»)",
@@ -4249,6 +4393,133 @@
         ],
         "title": "ArtifactZoneOut",
         "description": "Зона артефакта для слоёв вьюера: интервал + затронутые каналы.\n\nПлоская проекция аннотаций MNE: ``onset``/``duration``/``description`` плюс\nканалы, по которым сработал детектор (для тултипа зоны). Каналы могут быть\nпустыми, если детектор не сопоставил аннотацию с конкретным каналом\n(например, ICA находит компоненты, а не каналы)."
+      },
+      "AudioBakeRequest": {
+        "properties": {
+          "width_pct": {
+            "type": "number",
+            "title": "Width Pct",
+            "description": "Ширина стереобазы, % (0…150, 100 — без изменения)",
+            "default": 100.0
+          },
+          "spread_pct": {
+            "type": "number",
+            "title": "Spread Pct",
+            "description": "Разброс источников по дуге/модулям, % (0…100, 100 — полный)",
+            "default": 100.0
+          },
+          "wet_pct": {
+            "type": "number",
+            "title": "Wet Pct",
+            "description": "Влажность общей Convolver, % (0…100, 0 — сухая сцена)",
+            "default": 25.0
+          },
+          "ir": {
+            "type": "string",
+            "title": "Ir",
+            "description": "Пресет IR из GET /audio/ir (в т.ч. brainroom_*); неизвестный — 400",
+            "default": "room_small"
+          }
+        },
+        "type": "object",
+        "title": "AudioBakeRequest",
+        "description": "Тело ``POST /audio/render/{id}/bake``: параметры 3D-цепочки для запекания.\n\nДиапазоны те же, что держит UI «Пространства» (width до 150 % — дальше\nзвучит как фазовый сдвиг); валидация 400 с текстом для UI — в роуте (A1)."
+      },
+      "AudioBakeStart": {
+        "properties": {
+          "bake_id": {
+            "type": "string",
+            "title": "Bake Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "default": "running"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "description": "true — байты взяты из дискового кэша (те же параметры цепочки), расчёт не запускался, status сразу succeeded",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "bake_id"
+        ],
+        "title": "AudioBakeStart",
+        "description": "Ответ ``POST …/bake`` (202): запекание запущено либо уже посчитано."
+      },
+      "AudioBakeStatus": {
+        "properties": {
+          "bake_id": {
+            "type": "string",
+            "title": "Bake Id"
+          },
+          "render_id": {
+            "type": "string",
+            "title": "Render Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage",
+            "description": "Текущий шаг, например «Панорама: стем 3/7»"
+          },
+          "pct": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pct",
+            "description": "Готовность 0..1"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст ошибки (status=failed)"
+          },
+          "bytes_total": {
+            "type": "integer",
+            "title": "Bytes Total",
+            "description": "Размер готового WAV, байт (после успеха)",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "bake_id",
+          "render_id",
+          "status",
+          "stage",
+          "pct"
+        ],
+        "title": "AudioBakeStatus",
+        "description": "``GET …/bake/{bake_id}/status``: проценты и шаг запекания (поллинг UI)."
       },
       "AudioIrCatalogOut": {
         "properties": {

@@ -4,13 +4,18 @@
  *
  * Граф:
  *  - обычный режим: `Player(выбранный сигнал) → master → destination`;
- *  - 3D-режим: 7 × `Player → StereoWidener → Panner3D → dry/wet Convolver →
- *    master`; источник «Микс» — вся сцена, полоса — соло (остальные стемы
- *    в `mute`, остаются синхронными по времени).
+ *  - 3D «Экспресс»: 7 × `Player → StereoWidener → Panner3D → dry/wet
+ *    Convolver → master`;
+ *  - 3D «Монтаж»: 28 стемов (4 ряда × 7 полос) теми же узлами, но выходы
+ *    panner'ов сходятся в **4 модуля-ряда** (`Tone.Gain` на ряд), общая
+ *    Convolver висит на сумме модулей (спецификация 07.10.2026);
+ *  - источник «Микс» — вся сцена, полоса — соло (в «Монтаже» — 4 рядовых
+ *    стема полосы), остальные стемы в `mute` и остаются синхронными.
  *
  * Буферы грузятся ДО построения графа (`load`/`setSource`/`setSpatial`) —
  * reject без осиротевших AudioNode; закэшированные `ToneAudioBuffer`
- * переиспользуются и отдаются трекеру для волны (`bufferFor`).
+ * переиспользуются и отдаются трекеру для волны (`bufferFor`; для полосы
+ * «Монтажа» — сумма её рядовых стемов).
  *
  * Скорость — только `player.playbackRate` (×0.5 для слухового контроля быстрых
  * перемещений; в результат не попадает, питч при замедлении падает — допустимо,
@@ -19,6 +24,7 @@
 import * as Tone from 'tone'
 import {
   SOURCE_DISTANCE_M,
+  moduleSourcePosition,
   sourcePositions,
   spreadParam,
   widthParam,
@@ -28,8 +34,11 @@ import {
 /** Скорость воспроизведения: только замедление (×0.5 / ×1.0). */
 export type NeuromusicRate = 0.5 | 1
 
-/** Строки трека: ключ полосы (из `freq_bands`) и URL его WAV. */
-export type NeuromusicTrack = { key: string; url: string }
+/**
+ * Строка трека: ключ полосы (из `freq_bands`), URL WAV и — для «Монтажа» —
+ * ряд модуля (`row`): без ряда это «Экспресс»-трек на общей дуге.
+ */
+export type NeuromusicTrack = { key: string; url: string; row?: string }
 
 export type NeuromusicPlayerOptions = {
   /** URL WAV-мастера — «микс до пост-обработки» */
@@ -67,15 +76,24 @@ export class NeuromusicPlayer {
 
   /** Общий выход графа: создаётся один раз, переживает перестройки режима. */
   private readonly out: Tone.Gain
-  /** Обычный режим: единственный играющий сигнал */
+  /**
+   * Обычный режим: единственный играющий сигнал. Для полосы «Монтажа» это
+   * **сумма** её рядовых стемов (`bufferFor` → `sumOf`), поэтому плеер один.
+   */
   private single: Tone.Player | null = null
   /** 3D-режим */
   private readonly players: Tone.Player[] = []
   private readonly wideners: Tone.StereoWidener[] = []
   private readonly panners: Tone.Panner3D[] = []
+  /** «Монтаж»: модуль-ряд — сумма panner'ов ряда → общий dry/wet. */
+  private readonly moduleGains = new Map<string, Tone.Gain>()
+  /** Слот трека в своём ряде (индекс внутри ряда, размер ряда) — для позиций. */
+  private rowSlots: { index: number; count: number }[] = []
   private convolver: Tone.Convolver | null = null
   private dry: Tone.Gain | null = null
   private wet: Tone.Gain | null = null
+  /** Кэш суммы рядовых стемов полосы (волна/длительность «Монтажа»). */
+  private readonly summed = new Map<string, Tone.ToneAudioBuffer>()
 
   /** Момент старта текущего проигрывания (аудио-контекст, сек) */
   private startClock: number | null = null
@@ -104,8 +122,10 @@ export class NeuromusicPlayer {
   static async load(options: NeuromusicPlayerOptions): Promise<NeuromusicPlayer> {
     const player = new NeuromusicPlayer(options)
     const urls = new Set<string>()
-    const sourceUrl = player.urlOf(options.source)
-    if (sourceUrl) urls.add(sourceUrl)
+    const sourceUrls = player.urlsOf(options.source)
+    if (sourceUrls) {
+      for (const url of sourceUrls) urls.add(url)
+    }
     if (options.spatial) {
       for (const track of options.tracks) urls.add(track.url)
       urls.add(options.irUrl)
@@ -116,10 +136,14 @@ export class NeuromusicPlayer {
     return player
   }
 
-  /** URL сигнала: 'master' → мастер, иначе полоса; неизвестный ключ → null. */
-  private urlOf(source: string): string | null {
-    if (source === 'master') return this.masterUrl
-    return this.tracks.find((track) => track.key === source)?.url ?? null
+  /**
+   * URL сигнала: 'master' → мастер, иначе полоса. «Монтаж» отдаёт массив
+   * рядовых стемов полосы (4 файла), «Экспресс» — один; `null` — неизвестный.
+   */
+  private urlsOf(source: string): string[] | null {
+    if (source === 'master') return [this.masterUrl]
+    const urls = this.tracks.filter((track) => track.key === source).map((track) => track.url)
+    return urls.length > 0 ? urls : null
   }
 
   /** Загрузка одного WAV через Tone (fetch + decode) с кэшем; reject — HTTP/декод. */
@@ -141,10 +165,47 @@ export class NeuromusicPlayer {
   /**
    * Буфер сигнала для отрисовки волны (сухой сигнал до любых эффектов):
    * `null` — буфер ещё не загружен (загрузка идёт, трекер показывает пустоту).
+   * У полосы «Монтажа» — сумма её рядовых стемов (кэшируется).
    */
   bufferFor(source: string): Tone.ToneAudioBuffer | null {
-    const url = this.urlOf(source)
-    return (url ? this.buffers.get(url) : null) ?? null
+    const urls = this.urlsOf(source)
+    if (!urls) return null
+    if (urls.length === 1) return this.buffers.get(urls[0]) ?? null
+    return this.sumOf(urls)
+  }
+
+  /**
+   * Сумма уже загруженных буферов → один (волна полосы «Монтажа» рисует
+   * фактический микс её рядов). В `jsdom` нет конструктора `AudioBuffer` —
+   * возвращается первый стем (плеер в тестах замокан, путь недостижим).
+   */
+  private sumOf(urls: string[]): Tone.ToneAudioBuffer | null {
+    const key = urls.join('|')
+    const cached = this.summed.get(key)
+    if (cached) return cached
+    const buffers = urls
+      .map((url) => this.buffers.get(url))
+      .filter((buffer): buffer is Tone.ToneAudioBuffer => buffer !== undefined)
+    if (buffers.length === 0) return null
+    if (buffers.length === 1) return buffers[0]
+    if (buffers.length !== urls.length) return null // часть стемов ещё грузится
+    const length = Math.max(...buffers.map((buffer) => buffer.length))
+    const channels = Math.max(...buffers.map((buffer) => buffer.numberOfChannels))
+    const sampleRate = buffers[0].sampleRate
+    if (typeof AudioBuffer === 'undefined') return buffers[0]
+    const mixed = Array.from({ length: channels }, () => new Float32Array(length))
+    for (const buffer of buffers) {
+      for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
+        const data = buffer.getChannelData(channel)
+        const target = mixed[Math.min(channel, channels - 1)]
+        for (let i = 0; i < data.length; i++) target[i] += data[i]
+      }
+    }
+    const audioBuffer = new AudioBuffer({ length, numberOfChannels: channels, sampleRate })
+    mixed.forEach((data, channel) => audioBuffer.copyToChannel(data, channel))
+    const toneBuffer = new Tone.ToneAudioBuffer(audioBuffer)
+    this.summed.set(key, toneBuffer)
+    return toneBuffer
   }
 
   /** Постройка графа по текущему режиму (буферы уже должны быть в кэше). */
@@ -163,7 +224,7 @@ export class NeuromusicPlayer {
     this.single = player
   }
 
-  /** 3D-режим: 7 стемов на дуге → dry/wet Convolver → master. */
+  /** 3D-режим: стемы на дуге («Экспресс») или в 4 модулях рядов («Монтаж»). */
   private buildSpatial(): void {
     const irBuffer = this.buffers.get(this.irUrl)
     if (!irBuffer) throw new Error(`IR «${this.irUrl}» не загружен`)
@@ -177,31 +238,67 @@ export class NeuromusicPlayer {
     wet.connect(this.out)
     const convolver = this.convolver
 
-    const positions = sourcePositions(this.tracks.length, spreadParam(this.spreadPct))
+    const spread = spreadParam(this.spreadPct)
+    const arc = sourcePositions(this.tracks.length, spread)
+    this.rowSlots = this.computeRowSlots()
     this.tracks.forEach((track, index) => {
       const buffer = this.buffers.get(track.url)
       if (!buffer) throw new Error(`Трек «${track.key}» не загружен`)
       const player = new Tone.Player(buffer)
       player.playbackRate = this.rate
       const widener = new Tone.StereoWidener(widthParam(this.widthPct))
+      const slot = this.rowSlots[index]
+      const position =
+        track.row && slot
+          ? moduleSourcePosition(track.row, slot.index, slot.count, spread)
+          : arc[index]
       const panner = new Tone.Panner3D({
         panningModel: 'HRTF',
         distanceModel: 'inverse',
         refDistance: SOURCE_DISTANCE_M,
         rolloffFactor: 1,
-        positionX: positions[index].x,
-        positionY: positions[index].y,
-        positionZ: positions[index].z,
+        positionX: position.x,
+        positionY: position.y,
+        positionZ: position.z,
       })
       player.connect(widener)
       widener.connect(panner)
-      panner.connect(dry)
-      panner.connect(convolver)
+      if (track.row) {
+        // Модуль ряда: сумма его panner'ов → общий dry/wet (цепочка из
+        // 4 модулей с одной Convolver, спецификация 07.10.2026).
+        let moduleGain = this.moduleGains.get(track.row)
+        if (!moduleGain) {
+          moduleGain = new Tone.Gain(1)
+          moduleGain.connect(dry)
+          moduleGain.connect(convolver)
+          this.moduleGains.set(track.row, moduleGain)
+        }
+        panner.connect(moduleGain)
+      } else {
+        panner.connect(dry)
+        panner.connect(convolver)
+      }
       this.players.push(player)
       this.wideners.push(widener)
       this.panners.push(panner)
     })
     this.applyMute()
+  }
+
+  /** Слот каждого трека внутри своего ряда: (индекс в ряду, размер ряда). */
+  private computeRowSlots(): { index: number; count: number }[] {
+    const counts = new Map<string, number>()
+    for (const track of this.tracks) {
+      if (!track.row) continue
+      counts.set(track.row, (counts.get(track.row) ?? 0) + 1)
+    }
+    const seen = new Map<string, number>()
+    return this.tracks.map((track) => {
+      if (!track.row) return { index: 0, count: this.tracks.length }
+      const index = seen.get(track.row) ?? 0
+      seen.set(track.row, index + 1)
+      return { index, count: counts.get(track.row) ?? 1 }
+    })
   }
 
   /** Полная разборка активного режима (смена режима/размонтирование). */
@@ -213,6 +310,9 @@ export class NeuromusicPlayer {
     for (const player of this.players) player.dispose()
     for (const widener of this.wideners) widener.dispose()
     for (const panner of this.panners) panner.dispose()
+    for (const moduleGain of this.moduleGains.values()) moduleGain.dispose()
+    this.moduleGains.clear()
+    this.rowSlots = []
     this.players.length = 0
     this.wideners.length = 0
     this.panners.length = 0
@@ -338,12 +438,13 @@ export class NeuromusicPlayer {
    */
   async setSource(source: string): Promise<void> {
     if (source === this.source) return
-    const url = this.urlOf(source)
-    if (!url) throw new Error(`Неизвестный сигнал «${source}»`)
+    const urls = this.urlsOf(source)
+    if (!urls) throw new Error(`Неизвестный сигнал «${source}»`)
     const wasPlaying = this._playing
     const position = this.position
     if (wasPlaying) this.pause()
-    await this.loadBuffer(url)
+    // «Монтаж»: полоса — это 4 рядовых стема, грузятся все (для волны и соло).
+    await Promise.all(urls.map((url) => this.loadBuffer(url)))
     this.source = source
     this.offset = Math.min(position, this.duration)
     if (this.spatial) {
@@ -365,10 +466,10 @@ export class NeuromusicPlayer {
     const wasPlaying = this._playing
     const position = this.position
     if (wasPlaying) this.pause()
-    const sourceUrl = this.urlOf(this.source)
+    const sourceUrls = this.urlsOf(this.source) ?? []
     const urls = spatial
-      ? [...this.tracks.map((track) => track.url), this.irUrl, ...(sourceUrl ? [sourceUrl] : [])]
-      : [...(sourceUrl ? [sourceUrl] : [])]
+      ? [...this.tracks.map((track) => track.url), this.irUrl, ...sourceUrls]
+      : [...sourceUrls]
     await Promise.all(urls.map((url) => this.loadBuffer(url)))
     this.spatial = spatial
     this.teardownGraph()
@@ -386,16 +487,22 @@ export class NeuromusicPlayer {
     for (const widener of this.wideners) widener.width.value = width
   }
 
-  /** Разброс по дуге: плавное (50 мс) переставление источников. */
+  /** Разброс по дуге/модулям: плавное (50 мс) переставление источников. */
   setSpread(spreadPct: number): void {
     this.spreadPct = spreadPct
     if (this.panners.length === 0) return
-    const positions = sourcePositions(this.panners.length, spreadParam(spreadPct))
+    const spread = spreadParam(spreadPct)
+    const arc = sourcePositions(this.tracks.length, spread)
     this.panners.forEach((panner, index) => {
-      const { x, y, z } = positions[index]
-      panner.positionX.rampTo(x, 0.05)
-      panner.positionY.rampTo(y, 0.05)
-      panner.positionZ.rampTo(z, 0.05)
+      const track = this.tracks[index]
+      const slot = this.rowSlots[index]
+      const position =
+        track?.row && slot
+          ? moduleSourcePosition(track.row, slot.index, slot.count, spread)
+          : arc[index]
+      panner.positionX.rampTo(position.x, 0.05)
+      panner.positionY.rampTo(position.y, 0.05)
+      panner.positionZ.rampTo(position.z, 0.05)
     })
   }
 
@@ -423,5 +530,6 @@ export class NeuromusicPlayer {
     this.teardownGraph()
     this.out.dispose()
     this.buffers.clear()
+    this.summed.clear()
   }
 }

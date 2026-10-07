@@ -208,8 +208,9 @@ def _quota_units(cfg: Settings) -> list[tuple[float, int, tuple[str, ...], str]]
     Части ``parts`` кладутся в ``cache_clear(cfg.cache_dir, *parts)``.
     Для ``reports`` единица — глубже на уровень (``reports/compare/{id}``): ключ
     отчёта — не recording_id верхнего уровня (см. ``RESERVED_REPORT_SUBDIRS``).
-    Для ``audio`` единица — один рендер (``audio/{recording_id}/{sig}``): WAV
-    весят сотни МБ, и LRU обязан стареть по каждому рендеру, а не по записи.
+    Для ``audio`` единица — один каталог верхнего уровня внутри записи:
+    рендер (``audio/{recording_id}/{sig}``) либо баки (``audio/{recording_id}/bake``):
+    WAV весят сотни МБ, и LRU обязан стареть по каждому, а не по записи.
     """
     units: list[tuple[float, int, tuple[str, ...], str]] = []
     for subdir in RECORDING_CACHE_SUBDIRS:
