@@ -28,7 +28,9 @@ export type ButterflyPeaks = {
   up: Float32Array
   /** Модуль минимума отрицательной полуволны правого канала (≥ 0, рисуется вниз) */
   down: Float32Array
+  /** Глобальный максимум вверх по файлу (справочно: на ×1 он же опорный) */
   maxUp: number
+  /** Глобальный максимум вниз по файлу (справочно: на ×1 он же опорный) */
   maxDown: number
 }
 
@@ -44,8 +46,9 @@ export function peakColumns(widthPx: number, zoom: number, samples: number): num
 
 /**
  * Пики по всему файлу: один проход по каждому каналу, колонка = диапазон
- * отсчётов. Глобальные `maxUp`/`maxDown` нормируют амплитуду, чтобы при
- * прокрутке окна волна не «дышала».
+ * отсчётов. Глобальные `maxUp`/`maxDown` — максимумы всего файла (справочные:
+ * масштаб рисунка берёт максимум видимого окна — авто-вертикальный зум, см.
+ * `drawButterfly`; на зуме ×1 окно = файлу и результат совпадает).
  */
 export function filePeaks(
   left: Float32Array,
@@ -221,6 +224,11 @@ export function prepareCanvas(
  * (`waveDown`, другой цвет); линия нуля — **последним штрихом поверх волны**
  * (уточнение владельца 06.10.2026). `peaks === null` (буфер ещё не загружен) —
  * рисуется только линия нуля.
+ *
+ * **Авто-вертикальный зум** (приёмка 07.10.2026): масштаб амплитуды считается
+ * по максимуму полуволн **видимого окна** — тихий участок при горизонтальном
+ * зуме растягивается на всю высоту вьюера. На ×1 окно = файлу, так что берётся
+ * тот же глобальный максимум, что и раньше; линия нуля всегда в центре высоты.
  */
 export function drawButterfly(
   ctx: CanvasRenderingContext2D,
@@ -238,7 +246,13 @@ export function drawButterfly(
     const columns = peaks.up.length
     const from = Math.max(0, Math.floor((view.start / duration) * columns) - 1)
     const to = Math.min(columns, Math.ceil((view.end / duration) * columns) + 1)
-    const amplitude = Math.max(peaks.maxUp, peaks.maxDown, 1e-9)
+    // Авто-вертикальный зум: опорная амплитуда — максимум видимого окна
+    // (полуволны обоих каналов), а не глобальный max файла.
+    let amplitude = 1e-9
+    for (let i = from; i < to; i++) {
+      if (peaks.up[i] > amplitude) amplitude = peaks.up[i]
+      if (peaks.down[i] > amplitude) amplitude = peaks.down[i]
+    }
     const scale = (height / 2 - 1) / amplitude
     // Вверх — положительная полуволна левого канала.
     ctx.strokeStyle = theme.waveUp

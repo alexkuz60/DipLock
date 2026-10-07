@@ -12,12 +12,10 @@
  * перерисовывается только оверлей позиционера; волна и линейка — при смене
  * окна (правило `docs/rules/frontend-perf.md`).
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { api } from '@/shared/api/client'
 import { NeuromusicPlayer } from '@/shared/lib/neuromusicPlayer'
 import {
-  PLAYBACK_RATES,
-  TIME_ZOOMS,
   drawButterfly,
   drawPlayhead,
   drawRuler,
@@ -30,20 +28,11 @@ import {
   viewWindow,
   xToTime,
   type ButterflyPeaks,
-  type PlaybackRate,
-  type TimeZoom,
   type TrackerTheme,
   type ViewState,
 } from '@/shared/lib/waveformView'
 import { useNeuromusic } from '@/shared/state/neuromusic'
-import {
-  MASTER_SOURCE,
-  getActivePlayer,
-  useNeuromusicPlayer,
-} from '@/shared/state/neuromusicPlayer'
-import { SegmentedControl } from '@/shared/ui/SegmentedControl'
-import { SelectField } from '@/shared/ui/SelectField'
-import { MIX_LABEL, bandLabel } from './bandLabels'
+import { getActivePlayer, useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
 
 /** Высота волны-бабочки, px — потолок раздела (ТЗ: не более 200). */
 const WAVE_HEIGHT_PX = 200
@@ -57,6 +46,11 @@ export type WaveTrackerProps = {
   renderId: string
   /** Ключи полос в порядке партитуры (`status.tracks`) */
   tracks: string[]
+  /**
+   * ref таймкода в хедере раздела (контролы слева от Play/Stop): `paint`
+   * пишет в него textContent — позиция/длительность без ре-рендеров хедера.
+   */
+  timeRef: RefObject<HTMLSpanElement | null>
 }
 
 /** Текст ошибки движка для пользователя. */
@@ -64,10 +58,9 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'Не удалось построить плеер'
 }
 
-export function WaveTracker({ renderId, tracks }: WaveTrackerProps) {
+export function WaveTracker({ renderId, tracks, timeRef }: WaveTrackerProps) {
   const source = useNeuromusicPlayer((state) => state.source)
   const zoom = useNeuromusicPlayer((state) => state.zoom)
-  const rate = useNeuromusicPlayer((state) => state.rate)
   const ready = useNeuromusicPlayer((state) => state.ready)
   const loading = useNeuromusicPlayer((state) => state.loading)
   const error = useNeuromusicPlayer((state) => state.error)
@@ -80,7 +73,6 @@ export function WaveTracker({ renderId, tracks }: WaveTrackerProps) {
   const rulerRef = useRef<HTMLCanvasElement>(null)
   const waveRef = useRef<HTMLCanvasElement>(null)
   const overlayRef = useRef<HTMLCanvasElement>(null)
-  const timeRef = useRef<HTMLSpanElement>(null)
   /** Пики текущего источника (пересчёт — при смене источника/зума/ширины). */
   const peaksRef = useRef<ButterflyPeaks | null>(null)
   /** Текущее окно зума (якорь позиционера). */
@@ -108,9 +100,8 @@ export function WaveTracker({ renderId, tracks }: WaveTrackerProps) {
   const waveDirtyRef = useRef(true)
   /** Ручной старт окна слайдером (`null` — автослежение за позиционером). */
   const scrollRef = useRef<number | null>(null)
-  /** Слайдер прокрутки и подпись окна — синхронизируются из paint без рендера. */
+  /** Слайдер прокрутки — синхронизируется из paint без рендера (там же тултип). */
   const sliderRef = useRef<HTMLInputElement>(null)
-  const rangeRef = useRef<HTMLSpanElement>(null)
 
   const trackKey = tracks.join(',')
   /** Параметры слайдера: 0…(длительность − окно), шаг = 1/100 окна. */
@@ -250,23 +241,33 @@ export function WaveTracker({ renderId, tracks }: WaveTrackerProps) {
       const waveCtx = waveRef.current ? prepareCanvas(waveRef.current, w, WAVE_HEIGHT_PX) : null
       if (waveCtx) drawButterfly(waveCtx, peaksRef.current, view, duration, w, WAVE_HEIGHT_PX, theme)
     }
+    const tenths = state.zoom >= 100
     // Большой палец слайдера едет вместе с окном; пока слайдер в фокусе —
     // значение пользователя не перетираем (его тянет pointer/клавиши).
     const slider = sliderRef.current
-    if (slider && document.activeElement !== slider) slider.value = String(view.start)
+    if (slider) {
+      if (document.activeElement !== slider) slider.value = String(view.start)
+      // Подпись видимого отрезка живёт в тултипе слайдера (сам ряд во всю
+      // ширину плеера, приёмка 07.10.2026). React пишет `title` только при
+      // смене пропа — правку paint он не затирает.
+      const scrollable = state.duration - state.duration / Math.max(1, state.zoom) > 0
+      const hint = scrollable
+        ? 'Прокрутка окна вдоль записи: пока позиционер в окне — автослежение стоит, вышло за окно — возвращается'
+        : 'Прокрутка появляется при зуме ×10/×100'
+      const title = `${hint} · отрезок ${formatTime(view.start, tenths)} – ${formatTime(view.end, tenths)}`
+      if (slider.title !== title) slider.title = title
+    }
     if (!viewChanged && pos === lastRef.current.pos) return
     lastRef.current = { pos }
     const totalHeight = RULER_HEIGHT_PX + WAVE_HEIGHT_PX
     const overlayCtx = overlayRef.current ? prepareCanvas(overlayRef.current, w, totalHeight) : null
     if (overlayCtx) drawPlayhead(overlayCtx, pos, view, w, totalHeight, theme)
-    const tenths = state.zoom >= 100
     if (timeRef.current) {
       timeRef.current.textContent = `${formatTime(pos, tenths)} / ${formatTime(duration, tenths)}`
     }
-    if (rangeRef.current) {
-      rangeRef.current.textContent = `${formatTime(view.start, tenths)} – ${formatTime(view.end, tenths)}`
-    }
-  }, [])
+    // timeRef — prop из хедера: объект стабилен (useRef родителя), зависимость
+    // нужна только для ESLint exhaustive-deps.
+  }, [timeRef])
 
   // Пики «бабочки» для текущего источника: пересчёт при смене источника, зума
   // или ширины; `null` пока буфер не загрузился (рисуется одна линия нуля).
@@ -355,60 +356,6 @@ export function WaveTracker({ renderId, tracks }: WaveTrackerProps) {
       data-testid="neuromusic-tracker"
       className="flex flex-col gap-3 rounded-xl border border-border bg-bg-2 p-4"
     >
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <div className="flex items-center gap-1.5">
-          <span className="text-sm text-fg-2">Сигнал</span>
-          <SelectField
-            layout="inline"
-            label="Сигнал"
-            value={source}
-            options={[
-              { value: MASTER_SOURCE, label: MIX_LABEL },
-              ...tracks.map((key) => ({ value: key, label: bandLabel(key) })),
-            ]}
-            onChange={(value) => void useNeuromusicPlayer.getState().setSource(value)}
-            disabled={!ready || loading}
-          />
-        </div>
-        <SegmentedControl
-          layout="inline"
-          label="Зум"
-          value={String(zoom)}
-          options={TIME_ZOOMS.map((value) => ({
-            value: String(value),
-            label: `×${value}`,
-            title:
-              value === 1
-                ? 'Весь файл целиком'
-                : `Окно 1/${value} файла — детали вокруг позиционера`,
-          }))}
-          onChange={(value) => useNeuromusicPlayer.getState().setZoom(Number(value) as TimeZoom)}
-        />
-        <SegmentedControl
-          layout="inline"
-          label="Скорость"
-          value={String(rate)}
-          options={PLAYBACK_RATES.map((value) => ({
-            value: String(value),
-            label: `×${value}`,
-            title:
-              value === 0.5
-                ? 'Замедление для слухового контроля (в итоговый файл не попадает, высота тона ниже)'
-                : 'Нормальная скорость',
-          }))}
-          onChange={(value) =>
-            void useNeuromusicPlayer.getState().setRate(Number(value) as PlaybackRate)
-          }
-        />
-        <span
-          ref={timeRef}
-          data-testid="tracker-time"
-          className="ml-auto text-sm tabular-nums text-fg-2"
-        >
-          0:00 / 0:00
-        </span>
-      </div>
-
       <div
         ref={wrapRef}
         data-testid="tracker-surface"
@@ -460,35 +407,27 @@ export function WaveTracker({ renderId, tracks }: WaveTrackerProps) {
         />
       </div>
 
-      {/* Прокрутка окна вдоль записи (при ×1 окно = файлу — выключен). */}
-      <div className="flex items-center gap-3">
-        <input
-          ref={sliderRef}
-          type="range"
-          aria-label="Прокрутка окна по времени"
-          title={
-            sliderMax <= 0
-              ? 'Прокрутка появляется при зуме ×10/×100'
-              : 'Прокрутка окна вдоль записи: пока позиционер в окне — автослежение стоит, вышло за окно — возвращается'
-          }
-          min={0}
-          max={sliderMax}
-          step={sliderStep}
-          disabled={sliderMax <= 0}
-          className="h-1.5 w-full cursor-pointer accent-accent"
-          onChange={(event) => {
-            scrollRef.current = Number(event.target.value)
-            paint()
-          }}
-        />
-        <span
-          ref={rangeRef}
-          data-testid="tracker-range"
-          className="w-44 shrink-0 text-right text-xs tabular-nums text-fg-2"
-        >
-          0:00 – 0:00
-        </span>
-      </div>
+      {/* Прокрутка окна вдоль записи (при ×1 окно = файлу — выключен); подпись
+          видимого отрезка — в тултипе (`paint` дописывает её туда же). */}
+      <input
+        ref={sliderRef}
+        type="range"
+        aria-label="Прокрутка окна по времени"
+        title={
+          sliderMax <= 0
+            ? 'Прокрутка появляется при зуме ×10/×100'
+            : 'Прокрутка окна вдоль записи: пока позиционер в окне — автослежение стоит, вышло за окно — возвращается'
+        }
+        min={0}
+        max={sliderMax}
+        step={sliderStep}
+        disabled={sliderMax <= 0}
+        className="h-1.5 w-full cursor-pointer accent-accent"
+        onChange={(event) => {
+          scrollRef.current = Number(event.target.value)
+          paint()
+        }}
+      />
 
       {loading && (
         <p className="text-sm text-fg-2" data-testid="tracker-loading">

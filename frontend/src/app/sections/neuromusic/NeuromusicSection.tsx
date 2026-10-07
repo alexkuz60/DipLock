@@ -14,7 +14,7 @@
  * результат принадлежит записи — при закрытии/смене записи сбрасывается здесь
  * (паттерн `summaryReport`).
  */
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Music2, Pause, Play, Square } from 'lucide-react'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useNeuromusic } from '@/shared/state/neuromusic'
@@ -22,6 +22,7 @@ import { useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
 import { IconButton } from '@/shared/ui/IconButton'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { TrackerControls } from './TrackerControls'
 import { WaveTracker } from './WaveTracker'
 
 export function NeuromusicSection() {
@@ -30,13 +31,14 @@ export function NeuromusicSection() {
   const status = useNeuromusic((state) => state.status)
   const busy = useNeuromusic((state) => state.busy)
   const error = useNeuromusic((state) => state.error)
-  const octaveShift = useNeuromusic((state) => state.octaveShift)
 
   /** Транспорт хедера живёт в сторе плеера — с ним же делит его трекер. */
   const playing = useNeuromusicPlayer((state) => state.playing)
   const playerReady = useNeuromusicPlayer((state) => state.ready)
   const togglePlay = useNeuromusicPlayer((state) => state.togglePlay)
   const stop = useNeuromusicPlayer((state) => state.stop)
+  /** Таймкод хедера: пишет paint трекера (rAF, без ре-рендеров хедера). */
+  const timeRef = useRef<HTMLSpanElement>(null)
 
   const running = busy || status?.status === 'running'
   const succeeded = status?.status === 'succeeded'
@@ -76,16 +78,13 @@ export function NeuromusicSection() {
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4">
       <header className="flex flex-wrap items-center gap-3">
         <Music2 className="size-6 text-accent" aria-hidden />
-        <div>
-          <h2 className="text-lg font-medium text-fg-1">Нейромузыка — ЭЭГ в звук</h2>
-          <p className="text-sm text-fg-2">
-            Эксперимент: запись <span className="text-fg-1">{recording.filename}</span> → 7 треков
-            полос ×{2 ** octaveShift} ({octaveShift} октав) + мастер, WAV 48 кГц/24 бит.
-          </p>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
+        {/* Заголовок хедера — имя ЭЭГ-файла (прежняя строка «Эксперимент: …»
+            сокращена по приёмке 07.10.2026). */}
+        <h2 className="text-lg font-medium text-fg-1">{recording.filename}</h2>
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {succeeded && renderId && (
             <>
+              <TrackerControls tracks={tracks} timeRef={timeRef} />
               <IconButton
                 icon={
                   playing ? (
@@ -169,7 +168,7 @@ export function NeuromusicSection() {
 
       {succeeded && renderId && (
         <section aria-label="Прослушивание" className="flex flex-col gap-3">
-          <WaveTracker renderId={renderId} tracks={tracks} />
+          <WaveTracker renderId={renderId} tracks={tracks} timeRef={timeRef} />
         </section>
       )}
     </div>

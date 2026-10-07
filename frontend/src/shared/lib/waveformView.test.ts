@@ -191,6 +191,25 @@ describe('waveformView — отрисовка на фейковом контек
     expect(raw.stroke).toHaveBeenCalledTimes(3)
   })
 
+  it('авто-вертикальный зум: масштаб по максимуму видимого окна, ноль в центре', () => {
+    const { ctx, lines, raw } = fakeCtx()
+    // Файл с гигантским пиком в начале и тихим хвостом; окно — на хвосте.
+    const peaks = {
+      up: new Float32Array([1, 0, 0, 0.1]),
+      down: new Float32Array([0, 0, 0, 0]),
+      maxUp: 1,
+      maxDown: 0,
+    }
+    drawButterfly(ctx, peaks, { start: 3, end: 4 }, 4, 100, 100, THEME)
+    // Окно видит колонки 2…3 (padding −1), максимум 0.1 → scale = 49/0.1 = 490:
+    // полуволна 0.1 доходит до y = 1.5 (по глобальному max было бы 45.5 —
+    // тихий участок выглядел бы плоским).
+    expect(lines).toContainEqual([50, 1.5])
+    // Линия нуля — ровно в центре высоты вьюера.
+    expect(lines).toContainEqual([100, 50.5])
+    expect(raw.stroke).toHaveBeenCalledTimes(3)
+  })
+
   it('линия нуля — последним штрихом поверх волны (уточнение владельца)', () => {
     const { ctx, journal } = fakeCtx()
     const peaks = {

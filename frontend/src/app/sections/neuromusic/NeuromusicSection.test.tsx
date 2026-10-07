@@ -103,8 +103,10 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-/** Мок рендера: POST 202, статус — running → succeeded, файлы — заглушки. */
-function audioFetchMock() {
+/** Мок рендера: POST 202, статус — running → succeeded, файлы — заглушки.
+ * `tracks` — порядок полос из `status.tracks` (по умолчанию — порядок
+ * партитуры; для проверки сортировки комбо отдаётся перемешанный). */
+function audioFetchMock(tracks: string[] = TRACKS) {
   let statusCalls = 0
   const postBodies: string[] = []
   const fn = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -130,7 +132,7 @@ function audioFetchMock() {
         pct: 1,
         message: '7 треков + мастер, 4.0 с записи, 1.1 с рендера',
         error: null,
-        tracks: TRACKS,
+        tracks,
       })
     }
     if (url.includes('/audio/render')) {
@@ -433,6 +435,27 @@ describe('Нейромузыка — раздел', () => {
     expect(JSON.parse(fetchMock.postBodies[1])).toMatchObject({ loudness_phon: null })
   })
 
+  it('хедер: заголовок — имя ЭЭГ-файла, контролы — слева от транспорта и вне трекера', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    // Заголовок сокращён до имени записи (прежняя строка «Эксперимент: …» убрана).
+    expect(
+      screen.getByRole('heading', { level: 2, name: recordingFixture.filename }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Эксперимент: запись/)).toBeNull()
+
+    // Контролы (сигнал/зум/скорость/таймкод) — в хедере, слева от Play/Stop.
+    expect(within(screen.getByTestId('neuromusic-tracker')).queryByLabelText('Сигнал')).toBeNull()
+    const select = screen.getByLabelText('Сигнал')
+    const play = screen.getByTestId('transport-play')
+    expect(select.compareDocumentPosition(play) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Скорость' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('tracker-time')).toHaveTextContent('0:00 / 0:04'))
+  })
+
   it('транспорт в хедере: play/pause и stop управляют движком', async () => {
     useEdfRecording.setState({ recording: recordingFixture })
     const fetchMock = audioFetchMock()
@@ -547,11 +570,21 @@ describe('Нейромузыка — раздел', () => {
     const slider = screen.getByLabelText('Прокрутка окна по времени')
     // Весь файл — прокрутить некуда, слайдер выключен.
     expect(slider).toBeDisabled()
+    // Подпись видимого отрезка живёт в тултипе слайдера (сам ряд — во всю
+    // ширину плеера): на ×1 это весь файл 0:00 – 0:04.
+    await waitFor(() => expect(slider.getAttribute('title')).toContain('отрезок 0:00 – 0:04'))
 
     fireEvent.click(
       within(screen.getByRole('group', { name: 'Зум' })).getByRole('button', { name: '×100' }),
     )
     await waitFor(() => expect(slider).not.toBeDisabled())
+    // С зумом в тултипе меняется и подсказка, и отрезок (окно уже файла).
+    await waitFor(() =>
+      expect(slider.getAttribute('title')).toContain(
+        'Прокрутка окна вдоль записи: пока позиционер в окне',
+      ),
+    )
+    expect(slider.getAttribute('title')).toContain('отрезок')
 
     // После зума перерисовка окна уже синхронна (эффекты в act) — замеряем.
     const before = canvasCtx.stroke.mock.calls.length
@@ -561,6 +594,28 @@ describe('Нейромузыка — раздел', () => {
     expect(slider).toHaveValue('1.7')
     expect(playerMock.seek).not.toHaveBeenCalled()
     expect(fetchMock.postBodies).toHaveLength(1)
+  })
+
+  it('комбо «Сигнал»: полосы отсортированы по возрастанию частоты', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    // `status.tracks` в произвольном порядке — комбо обязано отдать δ → … → γ-high.
+    const shuffled = ['gamma', 'delta', 'high_gamma', 'alpha', 'theta', 'beta', 'delta_theta']
+    const fetchMock = audioFetchMock(shuffled)
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+    await waitFor(() => expect(screen.getByLabelText('Сигнал')).not.toBeDisabled())
+
+    const options = within(screen.getByLabelText('Сигнал')).getAllByRole('option')
+    expect(options.map((option) => option.textContent)).toEqual([
+      'Микс (до эффектов)',
+      'δ — дельта',
+      'δ/θ — дельта-тета',
+      'θ — тета',
+      'α — альфа',
+      'β — бета',
+      'γ — гамма',
+      'γ-high — высокая гамма',
+    ])
   })
 
   it('3D-режим: включение перестраивает граф, источник действует и в сцене', async () => {
