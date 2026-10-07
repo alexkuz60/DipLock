@@ -319,7 +319,7 @@ def test_second_render_is_rejected_while_running(client, tmp_path, edf_file, mon
     recording = _register(tmp_path, edf_file)
     release = threading.Event()
 
-    def _slow(state, rec, cfg, gains, boost=0.0, phon=None, autobase=True):
+    def _slow(state, rec, cfg, gains, boost=0.0, phon=None, autobase=True, octave=7):
         release.wait(timeout=10)
         state.status = "succeeded"
         state.stage = "Готово"
@@ -338,3 +338,100 @@ def test_second_render_is_rejected_while_running(client, tmp_path, edf_file, mon
 def test_render_state_is_reset_between_tests():
     """Фикстура тестов очищает in-memory реестр (иначе статусы перетекают)."""
     assert neuro_render.state_of.__module__  # импорт на месте
+
+
+def test_repeated_render_hits_cache(client, tmp_path, edf_file, monkeypatch):
+    """Повторный POST тех же параметров → cached=true, конвейер не запускается."""
+    recording = _register(tmp_path, edf_file)
+    first = client.post(f"{_PREFIX}/render", json={"recording_id": recording.recording_id})
+    assert first.status_code == 202
+    render_id = first.json()["render_id"]
+    assert first.json()["cached"] is False
+    assert _wait_render(client, render_id)["status"] == "succeeded"
+    master_before = client.get(f"{_PREFIX}/render/{render_id}/master.wav").content
+
+    launched = []
+    monkeypatch.setattr(neuro_render, "_run_render", lambda *a, **k: launched.append(a))
+    second = client.post(f"{_PREFIX}/render", json={"recording_id": recording.recording_id})
+    assert second.status_code == 202
+    assert second.json()["render_id"] == render_id  # ключ детерминирован
+    assert second.json()["cached"] is True
+    assert second.json()["status"] == "succeeded"
+    assert launched == []  # конвейер не трогали
+    # Байты отдаются те же.
+    assert client.get(f"{_PREFIX}/render/{render_id}/master.wav").content == master_before
+
+
+def test_render_survives_memory_reset(client, tmp_path, edf_file, monkeypatch):
+    """Сброс памяти (рестарт сервера) не теряет рендер: статус и WAV с диска."""
+    recording = _register(tmp_path, edf_file)
+    first = client.post(
+        f"{_PREFIX}/render",
+        json={"recording_id": recording.recording_id, "loudness_phon": None},
+    )
+    render_id = first.json()["render_id"]
+    assert _wait_render(client, render_id)["status"] == "succeeded"
+    sidecar_before = client.get(f"{_PREFIX}/render/{render_id}/sidecar.json").content
+
+    neuro_render.clear_renders()  # память пуста, как после рестарта процесса
+    launched = []
+    monkeypatch.setattr(neuro_render, "_run_render", lambda *a, **k: launched.append(a))
+
+    status = client.get(f"{_PREFIX}/render/{render_id}/status")
+    assert status.status_code == 200
+    assert status.json()["status"] == "succeeded"
+    assert set(status.json()["tracks"]) == set(settings.freq_bands)
+    assert client.get(f"{_PREFIX}/render/{render_id}/master.wav").status_code == 200
+    assert client.get(f"{_PREFIX}/render/{render_id}/sidecar.json").content == sidecar_before
+    assert launched == []
+
+    # И повторный POST после «рестарта» тоже отдаёт кэш, а не пересчёт.
+    again = client.post(
+        f"{_PREFIX}/render",
+        json={"recording_id": recording.recording_id, "loudness_phon": None},
+    )
+    assert again.json()["cached"] is True
+    assert again.json()["render_id"] == render_id
+    assert launched == []
+
+
+def test_renders_list_endpoint(client, tmp_path, edf_file):
+    """GET /audio/renders: журнал обработанных рендеров записи, 404 без записи."""
+    recording = _register(tmp_path, edf_file)
+    empty = client.get(f"{_PREFIX}/renders", params={"recording_id": recording.recording_id})
+    assert empty.status_code == 200
+    assert empty.json()["renders"] == []
+    assert client.get(f"{_PREFIX}/renders", params={"recording_id": "nope"}).status_code == 404
+
+    started = client.post(f"{_PREFIX}/render", json={"recording_id": recording.recording_id})
+    render_id = started.json()["render_id"]
+    assert _wait_render(client, render_id)["status"] == "succeeded"
+
+    listing = client.get(f"{_PREFIX}/renders", params={"recording_id": recording.recording_id})
+    assert listing.status_code == 200
+    renders = listing.json()["renders"]
+    assert [item["render_id"] for item in renders] == [render_id]
+    item = renders[0]
+    assert item["duration_s"] > 0
+    assert item["bytes_total"] > 0
+    assert set(item["bands"]) == set(settings.freq_bands)
+    assert item["created_at"] > 0
+    assert item["params"]["boost_db"] == 6.0  # дефолт отражён в манифесте
+    assert item["params"]["octave_shift"] == 7
+
+
+def test_render_writes_journal_line(client, tmp_path, edf_file):
+    """Рендер оставляет строку в журнале шагов (pipeline=audio, ключ — render_id)."""
+    from app.services import journal
+
+    recording = _register(tmp_path, edf_file)
+    started = client.post(f"{_PREFIX}/render", json={"recording_id": recording.recording_id})
+    render_id = started.json()["render_id"]
+    assert _wait_render(client, render_id)["status"] == "succeeded"  # строка пишется до «succeeded»
+
+    entries = [entry for entry in journal.read_journal(pipeline="audio")
+               if entry.get("params_key") == render_id]
+    assert entries, "строка audio/render в журнале не найдена"
+    assert entries[-1]["step"] == "render"
+    assert entries[-1]["cache_hit"] is False
+    assert entries[-1]["ms"] >= 0

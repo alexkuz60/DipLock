@@ -52,8 +52,10 @@ logger = logging.getLogger(__name__)
 # ``compare`` — карты разности пар записей: верхний уровень по id_A, второй
 # (``{id_A}/{signature}``) чистится вместе с A, парные файлы с мёртвым B под
 # живой A уходят при удалении B (``_drop_signal_cache``).
+# ``audio`` — артефакты рендера «Нейромузыки» (``{recording_id}/{sig}``):
+# мастер/треки WAV + манифест, чистятся с записью и участвуют в квоте.
 RECORDING_CACHE_SUBDIRS = (
-    "signals", "spectra", "spectrograms", "prepared", "reports", "compare", "bundles",
+    "signals", "spectra", "spectrograms", "prepared", "reports", "compare", "bundles", "audio",
 )
 
 # Подкаталоги ``reports``, ключ которых — не recording_id: HTML отчётов
@@ -206,6 +208,8 @@ def _quota_units(cfg: Settings) -> list[tuple[float, int, tuple[str, ...], str]]
     Части ``parts`` кладутся в ``cache_clear(cfg.cache_dir, *parts)``.
     Для ``reports`` единица — глубже на уровень (``reports/compare/{id}``): ключ
     отчёта — не recording_id верхнего уровня (см. ``RESERVED_REPORT_SUBDIRS``).
+    Для ``audio`` единица — один рендер (``audio/{recording_id}/{sig}``): WAV
+    весят сотни МБ, и LRU обязан стареть по каждому рендеру, а не по записи.
     """
     units: list[tuple[float, int, tuple[str, ...], str]] = []
     for subdir in RECORDING_CACHE_SUBDIRS:
@@ -217,6 +221,14 @@ def _quota_units(cfg: Settings) -> list[tuple[float, int, tuple[str, ...], str]]
             if subdir == "reports" and name in RESERVED_REPORT_SUBDIRS:
                 if not os.path.isdir(path):
                     continue
+                for child in sorted(os.listdir(path)):
+                    child_path = os.path.join(path, child)
+                    units.append((
+                        _mtime_of(child_path), _size_of(child_path),
+                        (subdir, name, child), f"{subdir}/{name}/{child}",
+                    ))
+            elif subdir == "audio" and os.path.isdir(path):
+                # Рендеры: юнит = один каталог {sig} внутри записи.
                 for child in sorted(os.listdir(path)):
                     child_path = os.path.join(path, child)
                     units.append((

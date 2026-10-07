@@ -88,6 +88,22 @@ def file_digest(path: str) -> str:
         return hashlib.file_digest(fh, "sha256").hexdigest()
 
 
+def edf_stamp(recording: "Recording") -> Any:
+    """Отпечаток EDF-файла: дайджест из дедупа, иначе размер + mtime файла.
+
+    Общий ключ для входных отпечатков (пакеты сессии N40/4.6, кэш рендера
+    «Нейромузыки»): дайджест надёжен, легаси-каталог без него опознаётся по
+    паре «размер + время» — дёшево и без чтения содержимого.
+    """
+    if recording.digest:
+        return recording.digest
+    try:
+        stat = os.stat(recording.path)
+    except OSError:
+        return "missing"
+    return [stat.st_size, int(stat.st_mtime)]
+
+
 def read_sidecar(upload_dir: str) -> dict[str, Any] | None:
     """Читает сайдкар каталога записи (None — нет, битый или чужой версии)."""
     try:
@@ -325,6 +341,16 @@ def _drop_signal_cache(recording_id: str) -> None:
     except ImportError:  # pragma: no cover — модуль всегда есть
         return
     clear_bundle_cache(settings, recording_id)
+
+    # Артефакты рендера «Нейромузыки» (дисковый кэш + состояния в памяти):
+    # производные записи, чистятся вместе с ней (срез 07.10.2026)
+    try:
+        from app.services.audio_render import render as audio_render
+        from app.services.audio_render import store as audio_store
+    except ImportError:  # pragma: no cover — модуль всегда есть
+        return
+    audio_store.clear_audio_cache(settings, recording_id)
+    audio_render.drop_recording(recording_id)
 
 
 class RecordingRegistry:

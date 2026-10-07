@@ -996,3 +996,24 @@ Vitest **+5** — новый `bandLabels.test.ts` **2** (перемешанны�
 заголовок = имя файла и контролы вне карточки трекера слева от Play/Stop;
 порядок опций комбо при `status.tracks` вразнобой; `audioFetchMock(tracks)` принимает
 порядок полос). Итог: Vitest — **1067** (92 файла), eslint/tsc чисты, бандл собран.
+
+**Срез «Персист рендера Нейромузыки» (07.10.2026, дисковый кэш артефактов).**
+**+10 pytest** — новый `tests/test_audio_store.py` **5** (детерминизм `render_sig`:
+одинаковые входы → одинаковый ключ, каждый параметр меняет ключ, явный нулевой
+гейн равен отсутствию; манифест-коммит: без него и при исчезнувшем файле из
+него — промах кэша, битый JSON и чужая версия формата — тоже; `find_manifest`
+находит по записям, `list_manifests` сортирует, `clear_audio_cache` сносит
+запись), `tests/test_api_audio.py` **+4** (`test_repeated_render_hits_cache` —
+повторный POST того же `render_id`, `cached=true`, конвейер не вызывался,
+мастер байт-в-байт тот же; `test_render_survives_memory_reset` —
+`clear_renders()` (рестарт) → статус/WAV/sidecar читаются с диска, повторный
+POST — кэш; `test_renders_list_endpoint` — `GET /audio/renders`: пусто до
+рендера, после — один элемент с параметрами/размером/полосами, 404 без записи;
+`test_render_writes_journal_line` — строка `pipeline=audio`, `params_key=render_id`
+пишется до «succeeded»), `tests/test_orphans.py` **+1** (`audio` в
+`RECORDING_CACHE_SUBDIRS`: сирота сносится, кэш живой записи — нет; юнит
+LRU-квоты для `audio` — один рендер `audio/{id}/{sig}`, не вся запись).
+Попутно закрыт pre-existing warning: мок `_slow` в тесте 409 принимал на
+аргумент меньше реальной сигнатуры `_run_render`. Итог: pytest — **839**
+(без `integration` — 821), Vitest — **1067**, ruff/mypy/eslint/tsc чисты,
+`openapi.json` + `schema.d.ts` перегенерированы (74 роута).

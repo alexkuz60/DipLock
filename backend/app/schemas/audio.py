@@ -1,10 +1,12 @@
-"""Контракт «Нейромузыки»: POST /audio/render, статус рендера, sidecar.
+"""Контракт «Нейромузыки»: POST /audio/render, статус рендера, список готовых, sidecar.
 
-Рендер — экспериментальный синхронный процесс с **in-memory статусом** (ТЗ
-фазы 1: без журнала/кэшей/БД): ``POST`` запускает рендер и возвращает
+Рендер — синхронный процесс со статусом в памяти: ``POST`` запускает рендер
+(либо мгновенно отдаёт кэш-попадание — поле ``cached``) и возвращает
 ``render_id``, клиент поллит статус (проценты по трекам) и забирает WAV и
-sidecar по отдельным GET. Состояния живут в памяти процесса и убираются по
-TTL — история и очередь задач тут не участвуют.
+sidecar по отдельным GET. Готовые артефакты живут на диске
+(``services/audio_render/store.py``): статус переживает TTL памяти и
+рестарт сервера, повторный POST тех же параметров не пересчитывает.
+Список готовых рендеров записи — ``GET /audio/renders`` (дисковый манифест).
 """
 from typing import Literal
 
@@ -27,10 +29,9 @@ from app.services.audio_render.mix import (
 AudioRenderState = Literal["running", "succeeded", "failed"]
 
 
-class AudioRenderRequest(BaseModel):
-    """Тело ``POST /api/v1/audio/render``: запись, гейны, boost, психоакустика."""
+class AudioRenderParams(BaseModel):
+    """Параметры рендера: тело POST (с ``recording_id``) и эхо в манифесте списка."""
 
-    recording_id: str = Field(description="Идентификатор записи из реестра просмотра")
     gains_db: dict[str, float] = Field(
         default_factory=dict,
         description=(
@@ -75,11 +76,46 @@ class AudioRenderRequest(BaseModel):
     )
 
 
+class AudioRenderRequest(AudioRenderParams):
+    """Тело ``POST /api/v1/audio/render``: запись + параметры рендера."""
+
+    recording_id: str = Field(description="Идентификатор записи из реестра просмотра")
+
+
 class AudioRenderStart(BaseModel):
-    """Ответ ``POST /audio/render`` (202): рендер запущен, поллите статус."""
+    """Ответ ``POST /audio/render`` (202): рендер запущен либо уже посчитан."""
 
     render_id: str
     status: AudioRenderState = "running"
+    cached: bool = Field(
+        default=False,
+        description=(
+            "true — результат взят из дискового кэша (те же параметры уже "
+            "посчитаны), конвейер не запускался, status сразу succeeded"
+        ),
+    )
+
+
+class AudioRenderInfo(BaseModel):
+    """Один готовый рендер в списке ``GET /audio/renders`` (дисковый манифест)."""
+
+    render_id: str = Field(description="Ключ рендера (= sig параметров)")
+    created_at: float = Field(description="Момент завершения рендера (unix, с)")
+    duration_s: float = Field(description="Длительность записи, с")
+    bands: list[str] = Field(description="Полосы, по которым есть треки")
+    params: AudioRenderParams = Field(description="Параметры, которыми рендерен")
+    bytes_total: int = Field(description="Суммарный размер файлов рендера, байт")
+    message: str = Field(default="", description="Итоговое сообщение рендера")
+
+
+class AudioRenderListOut(BaseModel):
+    """``GET /audio/renders``: готовые рендеры записи (журнал обработанных)."""
+
+    recording_id: str
+    renders: list[AudioRenderInfo] = Field(
+        default_factory=list,
+        description="Свежие сверху; пусто — запись ещё не рендерили",
+    )
 
 
 class AudioRenderStatus(BaseModel):

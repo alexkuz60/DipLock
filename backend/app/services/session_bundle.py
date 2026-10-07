@@ -44,7 +44,7 @@ from app.services.cache_store import (
     cache_read,
     cache_write_stream,
 )
-from app.services.recordings import Recording, ensure_record_events
+from app.services.recordings import Recording, edf_stamp, ensure_record_events
 from app.utils.versions import library_versions
 
 logger = logging.getLogger(__name__)
@@ -88,17 +88,6 @@ def _bundle_jobs(cfg: Settings, recording_id: str) -> list[dict[str, Any]]:
     ]
 
 
-def _edf_stamp(recording: Recording) -> Any:
-    """Отпечаток EDF: дайджест из дедупа, иначе размер + mtime файла."""
-    if recording.digest:
-        return recording.digest
-    try:
-        stat = os.stat(recording.path)
-    except OSError:
-        return "missing"
-    return [stat.st_size, int(stat.st_mtime)]
-
-
 def bundle_signature(
     cfg: Settings, recording: Recording, params: BundleParams,
     jobs: Sequence[dict[str, Any]],
@@ -113,7 +102,7 @@ def bundle_signature(
         {
             "v": BUNDLE_FORMAT_VERSION,
             "format": params.format,
-            "edf": _edf_stamp(recording),
+            "edf": edf_stamp(recording),
             "passport": recording.meta,
             "jobs": [
                 [job.get("job_id"), job.get("kind"), job.get("saved_at"),
@@ -233,7 +222,7 @@ def _session_manifest(
         "bundle_format_version": BUNDLE_FORMAT_VERSION,
         "recording_id": recording.recording_id,
         "filename": recording.filename,
-        "edf": _edf_stamp(recording),
+        "edf": edf_stamp(recording),
         "jobs": [
             {
                 "job_id": job.get("job_id"),

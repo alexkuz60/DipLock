@@ -1,24 +1,30 @@
-"""Оркестрация рендера «Нейромузыки»: in-memory статус, треки, мастер, sidecar.
+"""Оркестрация рендера «Нейромузыки»: статус в памяти, артефакты на диске.
 
-Экспериментальная модель (ТЗ фазы 1 — без журнала/кэшей/БД): один активный
-рендер в памяти процесса, ``render_id`` → статус (проценты по трекам) и
-артефакты (WAV мастера/треков + sidecar). Состояния убираются по TTL; при
-перезапуске сервера активный рендер честно теряется (клиент видит 404).
+Модель (срез 07.10.2026, хранение аудио): ``render_id`` = ``sig`` — детерминированный
+ключ параметров (см. ``store.render_sig``). Активный рендер живёт в памяти
+(проценты по трекам для поллинга); готовые артефакты (WAV мастера/треков +
+sidecar) пишутся в дисковый кэш ``audio/{recording_id}/{sig}/`` с манифестом-
+коммитом — они переживают перезапуск сервера и TTL памяти, а повторный POST
+тех же параметров отдаёт кэш-попадание без запуска конвейера. Если диск
+недоступен, байты остаются в памяти (фоллбэк — сбой записи кэша не ломает
+расчёт, `docs/rules/data-and-caches.md` п.4).
 
-Память (лимит фазы 1): в процессе живут мастер (float64) + текущий стем
+Память (лимит фазы 1): в процессе рендера живут мастер (float64) + текущий стем
 (+ нормированная копия) + накопленные WAV-байты треков — для записи ~2 минуты
-это сотни МБ; на часовых записях нужен блочный рендер (будущее, вне ТЗ).
+это сотни МБ; после записи на диск они освобождаются. На часовых записях нужен
+блочный рендер (будущее, вне ТЗ).
 """
 import logging
 import threading
 import time
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 import numpy as np
 
-from app.core.config import Settings
+from app.core.config import Settings, settings
+from app.services import journal
+from app.services.audio_render import store
 from app.services.audio_render.core import FS_AUDIO, RESAMPLE_UP, band_stem
 from app.services.audio_render.export import (
     build_sidecar,
@@ -49,7 +55,9 @@ from app.services.recordings import Recording
 
 logger = logging.getLogger(__name__)
 
-# TTL состояния рендера: эксперимент не хранит историю — старое удаляется.
+# TTL состояния рендера в памяти: артефакты живут на диске (store), сюда
+# попадают только статус/прогресс — старое удаляется, восстановить можно из
+# манифеста (см. state_of).
 RENDER_TTL_SEC = 15 * 60
 
 
@@ -63,12 +71,28 @@ class RenderNotFound(KeyError):
 
 @dataclass
 class RenderArtifacts:
-    """Готовые артефакты одного рендера (в памяти процесса)."""
+    """Готовые артефакты рендера: каталог на диске (норма) либо байты в памяти.
 
-    master_wav: bytes
-    tracks_wav: dict[str, bytes]
-    sidecar: bytes
+    ``directory`` — каталог кэша ``audio/{recording_id}/{sig}``: WAV читаются
+    по требованию (:meth:`read`), поэтому после завершения рендера RAM не
+    удерживает сотни мегабайт. ``memory`` — фоллбэк, если запись на диск не
+    удалась: файлы отдаются из памяти, манифест не записан (следующий POST —
+    честный пересчёт).
+    """
+
     bands: list[str]
+    recording_id: str
+    sig: str
+    directory: str | None = None
+    memory: dict[str, bytes] = field(default_factory=dict)
+
+    def read(self, name: str) -> bytes | None:
+        """Байты файла артефакта (диск → память; ``None`` — нет/не читается)."""
+        if self.directory:
+            data = store.read_artifact(self.directory, name)
+            if data is not None:
+                return data
+        return self.memory.get(name)
 
 
 @dataclass
@@ -76,6 +100,7 @@ class RenderState:
     """Статус рендера для поллинга клиента (пct 0..1 + шаг пайплайна)."""
 
     render_id: str
+    recording_id: str = ""
     status: Literal["running", "succeeded", "failed"] = "running"
     stage: str = "Запуск"
     pct: float = 0.0
@@ -101,20 +126,50 @@ def _sweep_locked(now: float) -> None:
         _RENDERS.pop(render_id, None)
 
 
+def _state_from_manifest(
+    cfg: Settings, sig: str, recording_id: str, manifest: dict[str, Any],
+) -> RenderState:
+    """Состояние succeeded из манифеста на диске (кэш-хит/восстановление)."""
+    directory = store.render_dir(cfg, recording_id, sig)
+    now = time.time()
+    return RenderState(
+        render_id=sig,
+        recording_id=recording_id,
+        status="succeeded",
+        stage="Готово",
+        pct=1.0,
+        message=str(manifest.get("message") or "Из дискового кэша"),
+        artifacts=RenderArtifacts(
+            bands=list(manifest.get("bands") or []),
+            recording_id=recording_id,
+            sig=sig,
+            directory=directory,
+        ),
+        started_at=now,
+        finished_at=now,
+    )
+
+
 def start_render(
     recording: Recording, cfg: Settings, gains_db: dict[str, float],
     boost_db: float = BOOST_DEFAULT_DB,
     loudness_phon: float | None = LOUDNESS_PHON_DEFAULT,
     loudness_autobase: bool = True,
     octave_shift: int = 7,
-) -> str:
-    """Запускает рендер в фоновом потоке; возвращает ``render_id``.
+) -> tuple[str, bool]:
+    """Возвращает ``(render_id, cached)``: запускает рендер либо отдаёт кэш.
 
-    ``boost_db`` — базовое усиление полос (0…12 дБ, дефолт +6): целевой RMS
-    трека −18 + boost (приёмка 05.10.2026). ``octave_shift`` — число октав
-    транспонирования ядра (5/6/7 → ×32/×64/×128, дефолт 7 — выбор
-    эксперимента 06.10.2026); валидируется в API. ``loudness_phon`` — опорный уровень
-    психоакустической компенсации ISO 226 (60…90, дефолт 75; ``None`` —
+    ``render_id`` = ``sig`` — детерминированный ключ параметров (см.
+    ``store.render_sig``), поэтому повторный POST с теми же параметрами
+    возвращает тот же идентификатор. Порядок: кэш в памяти → кэш на диске →
+    запуск. Кэш-попадание не трогает конвейер и не требует «свободного»
+    слота, поэтому возвращается даже параллельно с другим идущим рендером.
+
+    Параметры: ``boost_db`` — базовое усиление полос (0…12 дБ, дефолт +6):
+    целевой RMS трека −18 + boost (приёмка 05.10.2026). ``octave_shift`` — число
+    октав транспонирования ядра (5/6/7 → ×32/×64/×128, дефолт 7 — выбор
+    эксперимента 06.10.2026); валидируется в API. ``loudness_phon`` — опорный
+    уровень психоакустической компенсации ISO 226 (60…90, дефолт 75; ``None`` —
     выключить, чистый RMS без поправок). ``loudness_autobase`` — стратегия A:
     при включённой компенсации база ограничивается потолком «ямы» (θ/α/β
     выравниваются по перцептиву, boost срезается до запаса потолка); ``False``
@@ -122,33 +177,84 @@ def start_render(
     рендер за раз (``RenderBusy`` → 409 в API): FIFO-очередь задач тут
     намеренно не вводится — это эксперимент, а не job-система.
     """
+    sig = store.render_sig(recording, cfg, gains_db, boost_db, loudness_phon, loudness_autobase, octave_shift)
+    lookup_started = time.perf_counter()
+    # 1) Кэш в памяти: недавний рендер с теми же параметрами (в том числе
+    #    фоллбэк «запись на диск не удалась» — байты ещё в RAM).
+    with _LOCK:
+        _sweep_locked(time.time())
+        state = _RENDERS.get(sig)
+        if state is not None and state.status == "succeeded":
+            return sig, True
+    # 2) Кэш на диске: манифест-коммит переживает TTL памяти и рестарт.
+    manifest = store.load_manifest(cfg, recording.recording_id, sig)
+    if manifest is not None:
+        with _LOCK:
+            _RENDERS[sig] = _state_from_manifest(cfg, sig, recording.recording_id, manifest)
+        _journal_render(
+            cfg, recording, sig,
+            ms=(time.perf_counter() - lookup_started) * 1000.0,
+            bytes_out=sum(int(v) for v in (manifest.get("files") or {}).values()),
+            cache_hit=True, note="попадание в дисковый кэш",
+        )
+        return sig, True
+    # 3) Запуск нового рендера.
     with _LOCK:
         _sweep_locked(time.time())
         if any(state.status == "running" for state in _RENDERS.values()):
             raise RenderBusy("Рендер уже идёт — дождитесь его завершения")
-        render_id = uuid.uuid4().hex[:16]
-        state = RenderState(render_id=render_id)
-        _RENDERS[render_id] = state
+        state = RenderState(render_id=sig, recording_id=recording.recording_id)
+        _RENDERS[sig] = state
     thread = threading.Thread(
         target=_run_render,
         args=(
             state, recording, cfg, dict(gains_db), float(boost_db),
             loudness_phon, bool(loudness_autobase), int(octave_shift),
         ),
-        name=f"audio-render-{render_id}",
+        name=f"audio-render-{sig}",
         daemon=True,
     )
     thread.start()
-    return render_id
+    return sig, False
+
+
+def _journal_render(
+    cfg: Settings, recording: Recording, sig: str, *,
+    ms: float, bytes_out: int, cache_hit: bool, note: str,
+) -> None:
+    """Строка журнала шагов о рендере (запись — в analytics под recording_id).
+
+    Сбой журнала не должен ломать рендер — ``record`` сам гасит ошибки записи,
+    здесь дополнительно оборачиваем: вызов идёт из фонового потока.
+    """
+    try:
+        with journal.job_scope(f"render-{sig}", recording.recording_id):
+            journal.record(
+                "audio", "render", ms=ms, params_key=sig,
+                bytes_out=bytes_out or None, cache_hit=cache_hit, note=note, cfg=cfg,
+            )
+    except Exception:
+        logger.warning("Строка журнала о рендере %s не записана", sig, exc_info=True)
 
 
 def state_of(render_id: str) -> RenderState:
-    """Состояние рендера; ``RenderNotFound`` — неизвестен/истёк/после рестарта."""
+    """Состояние рендера; ``RenderNotFound`` — нет ни в памяти, ни в кэше диска.
+
+    После рестарта сервера (или истечения TTL памяти) готовый рендер
+    восстанавливается из манифеста на диске — артефакты переживают процесс.
+    """
     with _LOCK:
         _sweep_locked(time.time())
         state = _RENDERS.get(render_id)
-    if state is None:
+    if state is not None:
+        return state
+    found = store.find_manifest(settings, render_id)
+    if found is None:
         raise RenderNotFound(render_id)
+    recording_id, manifest = found
+    state = _state_from_manifest(settings, render_id, recording_id, manifest)
+    with _LOCK:
+        _RENDERS[render_id] = state
     return state
 
 
@@ -288,23 +394,69 @@ def _run_render(
             groups=groups,
             octave_shift=octave_shift,
         ))
-        state.artifacts = RenderArtifacts(
-            master_wav=master_wav,
-            tracks_wav=tracks_wav,
-            sidecar=sidecar,
-            bands=bands,
-        )
+        state.stage = "Сохранение на диск"
+        state.pct = 0.95
+        state.message = "WAV-файлы и манифест в дисковый кэш"
+        # Артефакты → диск: манифест пишется последним и служит коммитом
+        # (нет манифеста → кэш-промах → честный пересчёт). При сбое записи
+        # байты остаются в памяти — кэш оптимизация, а не источник истины.
+        files = {store.MASTER_NAME: master_wav, store.SIDECAR_NAME: sidecar}
+        files.update({store.track_name(band): data for band, data in tracks_wav.items()})
+        files_ok = store.write_artifacts(cfg, recording.recording_id, state.render_id, files)
         elapsed = time.perf_counter() - started
-        state.status = "succeeded"
-        state.stage = "Готово"
-        state.pct = 1.0
-        state.message = (
+        message = (
             f"7 треков + мастер, {packages.duration_s:.1f} с, "
             f"пик мастера ×{peak_scale:.3f}, {elapsed:.1f} с"
         )
+        manifest = {
+            "format": store.RENDER_FORMAT_VERSION,
+            "sig": state.render_id,
+            "recording_id": recording.recording_id,
+            "created_at": time.time(),
+            "duration_s": float(packages.duration_s),
+            "bands": bands,
+            "params": {
+                "gains_db": {name: float(value) for name, value in sorted(gains_db.items())},
+                "boost_db": float(boost_db),
+                "loudness_phon": None if loudness_phon is None else float(loudness_phon),
+                "loudness_autobase": bool(loudness_autobase),
+                "octave_shift": int(octave_shift),
+            },
+            "files": {name: len(data) for name, data in files.items()},
+            "message": message,
+        }
+        manifest_ok = files_ok and store.write_manifest(
+            cfg, recording.recording_id, state.render_id, manifest,
+        )
+        if files_ok and not manifest_ok:
+            logger.warning(
+                "Манифест рендера %s не записан — кэш-промах при следующем POST",
+                state.render_id,
+            )
+        state.artifacts = RenderArtifacts(
+            bands=bands,
+            recording_id=recording.recording_id,
+            sig=state.render_id,
+            directory=store.render_dir(cfg, recording.recording_id, state.render_id)
+            if files_ok else None,
+            memory={} if files_ok else dict(files),
+        )
+        state.message = message
+        # Строка журнала — до «succeeded»: поллинг клиента и чтение журнала
+        # увидят завершение одновременно (без гонки «статус есть, строки нет»).
+        _journal_render(
+            cfg, recording, state.render_id,
+            ms=elapsed * 1000.0,
+            bytes_out=sum(len(data) for data in files.values()),
+            cache_hit=False, note=message,
+        )
+        state.status = "succeeded"
+        state.stage = "Готово"
+        state.pct = 1.0
         logger.info(
-            "Рендер «Нейромузыки» готов: запись %s, %.1f с записи, %.1f с рендера",
+            "Рендер «Нейромузыки» готов: запись %s, %.1f с записи, %.1f с рендера, кэш %s",
             recording.recording_id, packages.duration_s, elapsed,
+            "записан" if manifest_ok else "НЕ записан",
         )
     except Exception as exc:
         logger.exception("Рендер «Нейромузыки» упал: %s", exc)
@@ -317,6 +469,19 @@ def _run_render(
 
 
 def clear_renders() -> None:
-    """Полный сброс (тесты)."""
+    """Полный сброс состояний (тесты); артефакты на диске не трогает."""
     with _LOCK:
         _RENDERS.clear()
+
+
+def drop_recording(recording_id: str) -> None:
+    """Убирает состояния рендера записи (вызывается при её удалении/вытеснении).
+
+    Дисковые артефакты чистит ``store.clear_audio_cache`` рядом — в памяти
+    остаётся только статус, и после чистки диска он не должен отдаваться.
+    """
+    with _LOCK:
+        for render_id in [
+            rid for rid, state in _RENDERS.items() if state.recording_id == recording_id
+        ]:
+            _RENDERS.pop(render_id, None)

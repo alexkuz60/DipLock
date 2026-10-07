@@ -111,6 +111,9 @@ from app.schemas.analysis import (
 from app.schemas.audio import (
     AudioIrCatalogOut,
     AudioIrPresetOut,
+    AudioRenderInfo,
+    AudioRenderListOut,
+    AudioRenderParams,
     AudioRenderRequest,
     AudioRenderStart,
     AudioRenderStatus,
@@ -145,6 +148,7 @@ from app.services.atlas_contours import (
     contours_ref as contour_ref,
 )
 from app.services.audio_render import render as neuro_render
+from app.services.audio_render import store as neuro_store
 from app.services.audio_render.core import PITCH_STEPS_CHOICES
 from app.services.audio_render.loudness import (
     LOUDNESS_PHON_MAX,
@@ -2265,14 +2269,17 @@ async def get_group_analysis_report_html_route(
 # Роуты только форма/контракт; цикл — services/audio_render/render.py.
 
 
-def _audio_artifacts(render_id: str) -> neuro_render.RenderArtifacts:
-    """Готовые артефакты рендера; 404 — нет/TTL, 409 — идёт или упал."""
+async def _audio_state(render_id: str) -> neuro_render.RenderState:
+    """Состояние готового рендера; 404 — нет в памяти и кэше, 409 — идёт/упал.
+
+    ``state_of`` при промахе памяти читает манифесты диска — поэтому в потоке.
+    """
     try:
-        state = neuro_render.state_of(render_id)
+        state = await asyncio.to_thread(neuro_render.state_of, render_id)
     except neuro_render.RenderNotFound as exc:
         raise HTTPException(
             status_code=404,
-            detail=f"Рендер {render_id} не найден (хранился {neuro_render.RENDER_TTL_SEC // 60} мин)",
+            detail=f"Рендер {render_id} не найден (нет в памяти и дисковом кэше)",
         ) from exc
     if state.status == "running":
         raise HTTPException(
@@ -2280,7 +2287,21 @@ def _audio_artifacts(render_id: str) -> neuro_render.RenderArtifacts:
         )
     if state.status == "failed" or state.artifacts is None:
         raise HTTPException(status_code=409, detail=f"Рендер не удался: {state.error}")
-    return state.artifacts
+    return state
+
+
+async def _artifact_bytes(state: neuro_render.RenderState, name: str) -> bytes:
+    """Байты файла артефакта (дисковое чтение — вне event loop); 409 при сбое."""
+    artifacts = state.artifacts
+    if artifacts is None:  # не бывает: _audio_state уже проверил, но для типов
+        raise HTTPException(status_code=409, detail="Артефакты рендера недоступны")
+    data = await asyncio.to_thread(artifacts.read, name)
+    if data is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Файл {name} не найден в кэше рендера — пересчитайте запись",
+        )
+    return data
 
 
 @router.post(
@@ -2291,11 +2312,13 @@ def _audio_artifacts(render_id: str) -> neuro_render.RenderArtifacts:
 )
 async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
     """Старт рендера: 7 треков + мастер, транспонирование 5/6/7 октав
-    (``octave_shift``, дефолт 7 → ×128), в памяти процесса.
+    (``octave_shift``, дефолт 7 → ×128).
 
-    Проценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —
-    отдельными GET. Гейны/boost/loudness_phon/octave_shift валидируются
-    здесь (400 с текстом для UI).
+    Повторный POST с теми же параметрами не пересчитывает: результат живёт в
+    дисковом кэше ``audio/{recording_id}/{render_id}/`` — ответ сразу
+    ``status=succeeded, cached=true``. Проценты при запуске —
+    ``GET /audio/render/{id}/status``; WAV и sidecar — отдельными GET.
+    Гейны/boost/loudness_phon/octave_shift валидируются здесь (400 с текстом UI).
     """
     recording = require_recording(payload.recording_id)
     unknown = sorted(set(payload.gains_db) - set(settings.freq_bands))
@@ -2340,13 +2363,47 @@ async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
             ),
         )
     try:
-        render_id = neuro_render.start_render(
+        # render_sig/load_manifest читают диск — вне event loop (409 оттуда же)
+        render_id, cached = await asyncio.to_thread(
+            neuro_render.start_render,
             recording, settings, payload.gains_db, boost, loudness_phon,
             payload.loudness_autobase, octave_shift,
         )
     except neuro_render.RenderBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return AudioRenderStart(render_id=render_id)
+    return AudioRenderStart(
+        render_id=render_id,
+        status="succeeded" if cached else "running",
+        cached=cached,
+    )
+
+
+@router.get(
+    "/audio/renders",
+    response_model=AudioRenderListOut,
+    summary="Готовые рендеры записи (журнал обработанных, дисковый кэш)",
+)
+async def list_audio_renders(recording_id: str) -> AudioRenderListOut:
+    """Список посчитанных рендеров записи: render_id, параметры, размер, дата.
+
+    Источник — манифесты дискового кэша ``audio/{recording_id}/``: переживают
+    рестарт сервера и TTL памяти. Пустой список — запись ещё не рендерили.
+    """
+    recording = require_recording(recording_id)
+    found = await asyncio.to_thread(neuro_store.list_manifests, settings, recording.recording_id)
+    renders = [
+        AudioRenderInfo(
+            render_id=sig,
+            created_at=float(manifest.get("created_at") or 0.0),
+            duration_s=float(manifest.get("duration_s") or 0.0),
+            bands=list(manifest.get("bands") or []),
+            params=AudioRenderParams(**(manifest.get("params") or {})),
+            bytes_total=sum(int(size) for size in (manifest.get("files") or {}).values()),
+            message=str(manifest.get("message") or ""),
+        )
+        for sig, manifest in found
+    ]
+    return AudioRenderListOut(recording_id=recording.recording_id, renders=renders)
 
 
 @router.get(
@@ -2355,9 +2412,12 @@ async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
     summary="Статус рендера: шаг пайплайна и проценты (поллинг UI)",
 )
 async def audio_render_status(render_id: str) -> AudioRenderStatus:
-    """Прогресс-бар «Нейромузыки»: stage + pct 0..1, список готовых треков."""
+    """Прогресс-бар «Нейромузыки»: stage + pct 0..1, список готовых треков.
+
+    Готовый рендер доступен и после рестарта сервера (дисковый кэш).
+    """
     try:
-        state = neuro_render.state_of(render_id)
+        state = await asyncio.to_thread(neuro_render.state_of, render_id)
     except neuro_render.RenderNotFound as exc:
         raise HTTPException(status_code=404, detail=f"Рендер {render_id} не найден") from exc
     return AudioRenderStatus(
@@ -2367,7 +2427,7 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
         pct=state.pct,
         message=state.message,
         error=state.error,
-        tracks=sorted(state.artifacts.tracks_wav) if state.artifacts else [],
+        tracks=sorted(state.artifacts.bands) if state.artifacts else [],
     )
 
 
@@ -2378,11 +2438,12 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
     summary="WAV мастера партитуры (48 кГц, PCM_24, стерео)",
 )
 async def audio_render_master(render_id: str) -> Response:
-    """Мастер-трек из памяти рендера (плеер и «Скачать WAV»)."""
-    artifacts = _audio_artifacts(render_id)
+    """Мастер-трек из дискового кэша рендера (плеер и «Скачать WAV»)."""
+    state = await _audio_state(render_id)
+    data = await _artifact_bytes(state, neuro_store.MASTER_NAME)
     # Без Content-Disposition: файл должен проигрываться в <audio src=...>,
     # а скачивание UI инициирует атрибутом download (same-origin).
-    return Response(content=artifacts.master_wav, media_type="audio/wav")
+    return Response(content=data, media_type="audio/wav")
 
 
 @router.get(
@@ -2393,13 +2454,16 @@ async def audio_render_master(render_id: str) -> Response:
 )
 async def audio_render_track(render_id: str, band: str) -> Response:
     """Соль-прослушивание: каждый трек полосы отдельным файлом (концепция M6)."""
-    artifacts = _audio_artifacts(render_id)
-    data = artifacts.tracks_wav.get(band)
-    if data is None:
+    state = await _audio_state(render_id)
+    artifacts = state.artifacts
+    if artifacts is None:  # не бывает: _audio_state уже проверил, но для типов
+        raise HTTPException(status_code=409, detail="Артефакты рендера недоступны")
+    if band not in artifacts.bands:
         raise HTTPException(
             status_code=404,
             detail=f"Трек {band} не найден; доступны: {', '.join(artifacts.bands)}",
         )
+    data = await _artifact_bytes(state, neuro_store.track_name(band))
     return Response(content=data, media_type="audio/wav")
 
 
@@ -2411,8 +2475,9 @@ async def audio_render_track(render_id: str, band: str) -> Response:
 )
 async def audio_render_sidecar(render_id: str) -> Response:
     """JSON-партитура эксперимента (ТЗ §6): что и из чего было сварено."""
-    artifacts = _audio_artifacts(render_id)
-    return Response(content=artifacts.sidecar, media_type="application/json")
+    state = await _audio_state(render_id)
+    data = await _artifact_bytes(state, neuro_store.SIDECAR_NAME)
+    return Response(content=data, media_type="application/json")
 
 
 # --- IR для пространственной обработки (docs/rules/spatial-audio.md) -----------

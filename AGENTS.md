@@ -51,7 +51,7 @@ backend/app/
 ├── main.py            # FastAPI entry: CORS (5173), gzip, раздача /ui (сборка frontend) и /legacy
 ├── core/config.py     # Pydantic-settings — ЕДИНЫЙ источник конфига
 ├── api/               # роуты + адаптеры HTTP (этап 3)
-│   ├── routes.py      # 73 роута = 68 уникальных путей (инвентарь — `docs/rules/api-jobs.md`)
+│   ├── routes.py      # 74 роута = 69 уникальных путей (инвентарь — `docs/rules/api-jobs.md`)
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)

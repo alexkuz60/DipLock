@@ -1485,13 +1485,38 @@ export interface paths {
         /**
          * Запустить рендер партитуры ЭЭГ → стерео (эксперимент «Нейромузыка»)
          * @description Старт рендера: 7 треков + мастер, транспонирование 5/6/7 октав
-         *     (``octave_shift``, дефолт 7 → ×128), в памяти процесса.
+         *     (``octave_shift``, дефолт 7 → ×128).
          *
-         *     Проценты и шаг — ``GET /audio/render/{id}/status``; WAV и sidecar —
-         *     отдельными GET. Гейны/boost/loudness_phon/octave_shift валидируются
-         *     здесь (400 с текстом для UI).
+         *     Повторный POST с теми же параметрами не пересчитывает: результат живёт в
+         *     дисковом кэше ``audio/{recording_id}/{render_id}/`` — ответ сразу
+         *     ``status=succeeded, cached=true``. Проценты при запуске —
+         *     ``GET /audio/render/{id}/status``; WAV и sidecar — отдельными GET.
+         *     Гейны/boost/loudness_phon/octave_shift валидируются здесь (400 с текстом UI).
          */
         post: operations["start_audio_render_api_v1_audio_render_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/renders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Готовые рендеры записи (журнал обработанных, дисковый кэш)
+         * @description Список посчитанных рендеров записи: render_id, параметры, размер, дата.
+         *
+         *     Источник — манифесты дискового кэша ``audio/{recording_id}/``: переживают
+         *     рестарт сервера и TTL памяти. Пустой список — запись ещё не рендерили.
+         */
+        get: operations["list_audio_renders_api_v1_audio_renders_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1508,6 +1533,8 @@ export interface paths {
         /**
          * Статус рендера: шаг пайплайна и проценты (поллинг UI)
          * @description Прогресс-бар «Нейромузыки»: stage + pct 0..1, список готовых треков.
+         *
+         *     Готовый рендер доступен и после рестарта сервера (дисковый кэш).
          */
         get: operations["audio_render_status_api_v1_audio_render__render_id__status_get"];
         put?: never;
@@ -1527,7 +1554,7 @@ export interface paths {
         };
         /**
          * WAV мастера партитуры (48 кГц, PCM_24, стерео)
-         * @description Мастер-трек из памяти рендера (плеер и «Скачать WAV»).
+         * @description Мастер-трек из дискового кэша рендера (плеер и «Скачать WAV»).
          */
         get: operations["audio_render_master_api_v1_audio_render__render_id__master_wav_get"];
         put?: never;
@@ -1859,15 +1886,62 @@ export interface components {
             tags?: string[];
         };
         /**
-         * AudioRenderRequest
-         * @description Тело ``POST /api/v1/audio/render``: запись, гейны, boost, психоакустика.
+         * AudioRenderInfo
+         * @description Один готовый рендер в списке ``GET /audio/renders`` (дисковый манифест).
          */
-        AudioRenderRequest: {
+        AudioRenderInfo: {
             /**
-             * Recording Id
-             * @description Идентификатор записи из реестра просмотра
+             * Render Id
+             * @description Ключ рендера (= sig параметров)
              */
+            render_id: string;
+            /**
+             * Created At
+             * @description Момент завершения рендера (unix, с)
+             */
+            created_at: number;
+            /**
+             * Duration S
+             * @description Длительность записи, с
+             */
+            duration_s: number;
+            /**
+             * Bands
+             * @description Полосы, по которым есть треки
+             */
+            bands: string[];
+            /** @description Параметры, которыми рендерен */
+            params: components["schemas"]["AudioRenderParams"];
+            /**
+             * Bytes Total
+             * @description Суммарный размер файлов рендера, байт
+             */
+            bytes_total: number;
+            /**
+             * Message
+             * @description Итоговое сообщение рендера
+             * @default
+             */
+            message: string;
+        };
+        /**
+         * AudioRenderListOut
+         * @description ``GET /audio/renders``: готовые рендеры записи (журнал обработанных).
+         */
+        AudioRenderListOut: {
+            /** Recording Id */
             recording_id: string;
+            /**
+             * Renders
+             * @description Свежие сверху; пусто — запись ещё не рендерили
+             */
+            renders?: components["schemas"]["AudioRenderInfo"][];
+        };
+        /**
+         * AudioRenderParams
+         * @description Параметры рендера: тело POST (с ``recording_id``) и эхо в манифесте списка.
+         */
+        AudioRenderParams: {
             /**
              * Gains Db
              * @description Пользовательские гейны полос, dB (ключи — freq_bands); диапазон -24…12, по умолчанию 0
@@ -1901,8 +1975,50 @@ export interface components {
             octave_shift: number;
         };
         /**
+         * AudioRenderRequest
+         * @description Тело ``POST /api/v1/audio/render``: запись + параметры рендера.
+         */
+        AudioRenderRequest: {
+            /**
+             * Gains Db
+             * @description Пользовательские гейны полос, dB (ключи — freq_bands); диапазон -24…12, по умолчанию 0
+             */
+            gains_db?: {
+                [key: string]: number;
+            };
+            /**
+             * Boost Db
+             * @description Базовое усиление полосовых стерео-треков, dB (целевой RMS −18 + boost); диапазон 0…12, по умолчанию 6 (приёмка 05.10.2026)
+             * @default 6
+             */
+            boost_db: number;
+            /**
+             * Loudness Phon
+             * @description Опорный уровень психоакустической компенсации ISO 226:2003, фон — статические смещения целевого RMS полос для равной субъективной громкости; диапазон 60…90, по умолчанию 75; null — выключить (чистый RMS без поправок)
+             * @default 75
+             */
+            loudness_phon: number | null;
+            /**
+             * Loudness Autobase
+             * @description Стратегия A: при включённой компенсации база рендера ограничивается потолком «ямы» (θ/α/β выравниваются по перцептиву, boost срезается до запаса потолка); false — «максимум громкости» (база −18+boost, треки crest-limited)
+             * @default true
+             */
+            loudness_autobase: boolean;
+            /**
+             * Octave Shift
+             * @description Транспонирование партитуры, октав (5/6/7 → ×32/×64/×128, дефолт 7): число квадратов фазы ядра; выбор 5/6/7 — эксперимент 06.10.2026, невалидное значение — 400
+             * @default 7
+             */
+            octave_shift: number;
+            /**
+             * Recording Id
+             * @description Идентификатор записи из реестра просмотра
+             */
+            recording_id: string;
+        };
+        /**
          * AudioRenderStart
-         * @description Ответ ``POST /audio/render`` (202): рендер запущен, поллите статус.
+         * @description Ответ ``POST /audio/render`` (202): рендер запущен либо уже посчитан.
          */
         AudioRenderStart: {
             /** Render Id */
@@ -1913,6 +2029,12 @@ export interface components {
              * @enum {string}
              */
             status: "running" | "succeeded" | "failed";
+            /**
+             * Cached
+             * @description true — результат взят из дискового кэша (те же параметры уже посчитаны), конвейер не запускался, status сразу succeeded
+             * @default false
+             */
+            cached: boolean;
         };
         /**
          * AudioRenderStatus
@@ -9247,6 +9369,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AudioRenderStart"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_audio_renders_api_v1_audio_renders_get: {
+        parameters: {
+            query: {
+                recording_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioRenderListOut"];
                 };
             };
             /** @description Validation Error */

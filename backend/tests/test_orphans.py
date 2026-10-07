@@ -70,6 +70,10 @@ def test_sweep_removes_orphan_caches_and_keeps_live_ones(isolated, edf_file):
     # Карты разности пар (B9): верхний уровень — id первой записи пары.
     _touch(os.path.join(cache, "compare", live, "sig1", "alpha.png"))
     _touch(os.path.join(cache, "compare", "ghost", "sig1", "alpha.png"))
+    # Рендеры «Нейромузыки»: мастер + треки + манифест, ключ — recording_id.
+    _touch(os.path.join(cache, "audio", live, "sig1", "master.wav"))
+    _touch(os.path.join(cache, "audio", live, "sig1", "manifest.json"))
+    _touch(os.path.join(cache, "audio", "ghost", "sig1", "master.wav"))
     # Ассеты и журнал живут по версии/диагностике — обход их не касается.
     _touch(os.path.join(cache, "surface", "surface-abc.json"))
     _touch(os.path.join(cache, "journal.jsonl"))
@@ -77,23 +81,25 @@ def test_sweep_removes_orphan_caches_and_keeps_live_ones(isolated, edf_file):
     report = sweep_orphans(settings, registry=registry)
 
     assert sorted(report.cache_dirs) == [
-        "compare/ghost", "signals/ghost", "spectra/ghost", "spectrograms/edf",
+        "audio/ghost", "compare/ghost", "signals/ghost", "spectra/ghost", "spectrograms/edf",
     ]
     assert report.freed_bytes > 0
     assert os.path.isfile(os.path.join(cache, "signals", live, "level1.bin"))
     assert os.path.isfile(os.path.join(cache, "spectra", live, "sig1", "delta.png"))
     assert os.path.isfile(os.path.join(cache, "spectrograms", live, "sig1.bin"))
     assert os.path.isfile(os.path.join(cache, "compare", live, "sig1", "alpha.png"))
+    assert os.path.isfile(os.path.join(cache, "audio", live, "sig1", "master.wav"))
     for orphan in ("ghost", "edf"):
         assert not os.path.exists(os.path.join(cache, "spectrograms", orphan))
     assert not os.path.exists(os.path.join(cache, "signals", "ghost"))
     assert not os.path.exists(os.path.join(cache, "spectra", "ghost"))
     assert not os.path.exists(os.path.join(cache, "compare", "ghost"))
+    assert not os.path.exists(os.path.join(cache, "audio", "ghost"))
     assert os.path.isfile(os.path.join(cache, "surface", "surface-abc.json"))
     assert os.path.isfile(os.path.join(cache, "journal.jsonl"))
     assert RECORDING_CACHE_SUBDIRS == (
         "signals", "spectra", "spectrograms", "prepared", "reports", "compare",
-        "bundles",
+        "bundles", "audio",
     )
 
 
@@ -250,6 +256,23 @@ def test_cache_quota_removes_oldest_live_caches_lru(isolated, edf_file, monkeypa
     assert not os.path.exists(os.path.join(cache, "signals", old_id))
     assert os.path.isfile(os.path.join(cache, "signals", new_id, "level1.bin"))
     assert report.freed_bytes >= 600 * 1024
+
+
+def test_cache_quota_treats_each_render_as_unit(isolated, edf_file, monkeypatch):
+    """Квота для audio: юнит LRU — один рендер, а не все рендеры записи."""
+    upload, cache, _, registry = isolated
+    monkeypatch.setattr(settings, "cache_quota_mb", 1)  # лимит 1 МБ
+    live = _register(registry, upload, edf_file, "rec-renders")
+    payload = b"w" * (600 * 1024)
+    _touch(os.path.join(cache, "audio", live, "old-sig", "master.wav"), payload)
+    _touch(os.path.join(cache, "audio", live, "new-sig", "master.wav"), payload)
+    os.utime(os.path.join(cache, "audio", live, "old-sig"), (1_700_000_000.0,) * 2)
+
+    report = sweep_orphans(settings, registry=registry)
+
+    assert report.quota_dirs == [f"audio/{live}/old-sig"]
+    assert not os.path.exists(os.path.join(cache, "audio", live, "old-sig"))
+    assert os.path.isfile(os.path.join(cache, "audio", live, "new-sig", "master.wav"))
 
 
 def test_cache_quota_off_by_default_keeps_everything(isolated, edf_file, monkeypatch):

@@ -12,21 +12,22 @@
    в сигнатуры кэшей не нужно. Отпечаток и паспорт лежат в сайдкаре `recording.json`
    (дедуп переживает рестарт), легаси-каталоги без сайдкара чистятся
    `backend/scripts/dedupe_recordings.py`.
-2. **Десять дисковых кэшей, один отпечаток ассетов** (`docs/data_map.md`, раздел «Носители»):
-   `signals` / `spectra` / `spectrograms` / `prepared` / `reports` / `compare` / `bundles` — по записи, живут
+2. **Одиннадцать дисковых кэшей, один отпечаток ассетов** (`docs/data_map.md`, раздел «Носители»):
+   `signals` / `spectra` / `spectrograms` / `prepared` / `reports` / `compare` / `bundles` / `audio` — по записи, живут
    и умирают вместе с ней (`compare/{id_A}/{signature}/{band}.png` — карты разности пар B9:
    второй уровень внутри каталога `id_A` чистит `clear_compare_cache`; `bundles/{id}/{sig}.zip` —
-   пакеты сессии N40/4.6, чистит `clear_bundle_cache`);
+   пакеты сессии N40/4.6, чистит `clear_bundle_cache`; `audio/{recording_id}/{sig}/` — артефакты
+   рендера «Нейромузыки» с манифестом-коммитом, чистит `audio_render.store.clear_audio_cache`);
    `surface` / `mri` / `contours` — по версии ассета, не чистятся по TTL. Входы трёх ассетов
    (номер сборки, параметры, файлы данных) объявлены **в одном месте** — `services/asset_versions.py`
    (п.12), и версия считается одной функцией `fingerprint(kind, subjects_dir)`. Меняете сборку
    тома/атласа/меша — **поднимайте версию там**, иначе на диске подхватится старый кэш.
    Восьмой кэш — RAM-кэш подготовленного сигнала (п.10): диска он не касается, но живёт и умирает
-   вместе с записью. Рядом с семью дисковыми кэшами лежит `journal.jsonl` — это **не** кэш, а журнал
+   вместе с записью. Рядом с дисковыми кэшами лежит `journal.jsonl` — это **не** кэш, а журнал
    шагов (п.11). Не путайте версию ассета с **отпечатком расчёта** (`topomap_version`, `grid_version`):
    второй собирается из параметров задачи и меняется автоматически.
 3. **Чистка кэшей привязана к вытеснению записи, а сироты убирает обход.** `_drop_signal_cache`
-   (signals, spectra, spectrograms, prepared, compare, reports, bundles + RAM-кэш сигнала) срабатывает при
+   (signals, spectra, spectrograms, prepared, compare, reports, bundles, audio + RAM-кэш сигнала) срабатывает при
    вытеснении записи — TTL 24 ч
    (`RECORDINGS_TTL_HOURS`) и лимит 10 (`RECORDINGS_HISTORY_LIMIT`) применяются при обращении к реестру
    (`_drop_expired`). Кэш записи, которую реестр уже не знает, никто бы не убрал — этим занимается
@@ -101,7 +102,7 @@
    `grid_version`) — не ассет: он собирается из параметров задачи и подъёма не требует.
 13. **Сироты убирает обход, а не кнопка.** `services/orphans.py` (`sweep_orphans`) сносит три вида
    мусора: каталоги загрузок без живого владельца (через `RecordingRegistry.prune_orphans`), кэши
-   `signals`/`spectra`/`spectrograms`/`prepared`/`reports`/`compare`/`bundles` (верхний уровень по `id_A`)
+   `signals`/`spectra`/`spectrograms`/`prepared`/`reports`/`compare`/`bundles`/`audio` (верхний уровень по `id_A`)
    и файлы задач записи, которой нет **ни** в реестре, **ни** в
    каталоге загрузок, а также файлы задач сверх `JOBS_HISTORY_LIMIT`. Вызовы: lifespan приложения
    (`main.py`) и `backend/scripts/dedupe_recordings.py --prune`. Правила: ассеты
@@ -162,8 +163,9 @@
     В конце того же `sweep_orphans` вызывается `orphans._enforce_cache_quota(cfg)`: если сумма
     занята превышает `CACHE_QUOTA_MB`, единицы кэшей (подкаталоги из
     `RECORDING_CACHE_SUBDIRS`, «запись × подкаталог» — для `reports` глубже на уровень
-    `reports/{kind}/{id}`) сортируются по mtime и **самые старые** удаляются, пока не влезет
-    в лимит. Свойства:
+    `reports/{kind}/{id}`, для `audio` — на один рендер `audio/{recording_id}/{sig}`:
+    WAV весят сотни МБ, LRU обязан стареть по каждому) сортируются по mtime и **самые старые**
+    удаляются, пока не влезет в лимит. Свойства:
     - **0 — квота выключена** (дефолт): ничего не чистится, поведение прежних срезов сохраняется;
     - не трогает ассеты (`surface`/`mri`/`contours`), `journal.jsonl`, `analytics.db` и корень
       загрузок — только `RECORDING_CACHE_SUBDIRS` (п.13);
