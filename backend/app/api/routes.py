@@ -112,6 +112,7 @@ from app.schemas.audio import (
     AudioBakeRequest,
     AudioBakeStart,
     AudioBakeStatus,
+    AudioEmoOut,
     AudioIrCatalogOut,
     AudioIrPresetOut,
     AudioRenderInfo,
@@ -2536,6 +2537,31 @@ async def audio_render_sidecar(render_id: str) -> Response:
     state = await _audio_state(render_id)
     data = await _artifact_bytes(state, neuro_store.SIDECAR_NAME)
     return Response(content=data, media_type="application/json")
+
+
+@router.get(
+    "/audio/render/{render_id}/emo",
+    response_model=AudioEmoOut,
+    summary="Кадры радара «Эмо»: 7 лучей по кадрам спектра чистого микса",
+)
+async def audio_render_emo(render_id: str) -> AudioEmoOut:
+    """Кадры анимации радара «Эмо» (docs/rules/neuromusic.md §«Эмо»).
+
+    Окно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔
+    время k · 2/3 с — сетка синхронизации с плеером и (дальше) дипольными
+    эпохами; нормировка лучей глобальная (максимум счётчиков всего микса =
+    100 % R). Кадры читаются из ``emo.json`` кэша рендера; старые рендеры
+    добиваются расчётом из ``master.wav`` (чтение вне event loop). 404 —
+    рендер не найден, 409 — идёт/упал либо мастер недоступен.
+    """
+    state = await _audio_state(render_id)
+    payload = await asyncio.to_thread(neuro_render.emo_payload_of, state)
+    if payload is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Кадры «Эмо» недоступны: в кэше рендера нет emo.json и master.wav",
+        )
+    return AudioEmoOut.model_validate(payload)
 
 
 # --- 3D-bake: запек 3D-цепочки в WAV (docs/rules/spatial-audio.md, п.3) --------

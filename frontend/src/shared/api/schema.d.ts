@@ -1625,6 +1625,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/audio/render/{render_id}/emo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Кадры радара «Эмо»: 7 лучей по кадрам спектра чистого микса
+         * @description Кадры анимации радара «Эмо» (docs/rules/neuromusic.md §«Эмо»).
+         *
+         *     Окно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔
+         *     время k · 2/3 с — сетка синхронизации с плеером и (дальше) дипольными
+         *     эпохами; нормировка лучей глобальная (максимум счётчиков всего микса =
+         *     100 % R). Кадры читаются из ``emo.json`` кэша рендера; старые рендеры
+         *     добиваются расчётом из ``master.wav`` (чтение вне event loop). 404 —
+         *     рендер не найден, 409 — идёт/упал либо мастер недоступен.
+         */
+        get: operations["audio_render_emo_api_v1_audio_render__render_id__emo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audio/render/{render_id}/bake": {
         parameters: {
             query?: never;
@@ -2026,6 +2053,93 @@ export interface components {
              * @default 0
              */
             bytes_total: number;
+        };
+        /**
+         * AudioEmoFrame
+         * @description Один кадр анимации радара «Эмо» (слайд полигона со своим вектором Доминанты).
+         */
+        AudioEmoFrame: {
+            /**
+             * T Sec
+             * @description Время начала окна FFT кадра, с (k × hop_samples / fs_audio)
+             */
+            t_sec: number;
+            /**
+             * Rays
+             * @description Длины 7 лучей полигона, % радиуса (0…100), порядок полос BAND_ORDER (δ…γ-high); значения — децибельная шкала громкости: 20·log10 к глобальному максимуму, карта [db_floor…0] дБ → [0…100] %
+             */
+            rays: number[];
+        };
+        /**
+         * AudioEmoOut
+         * @description ``GET /audio/render/{id}/emo``: кадры анимации радара «Эмо».
+         *
+         *     Окно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔
+         *     время k · 2/3 с — сетка синхронизации анимации с плеером и (в дальнейшем)
+         *     дипольными эпохами. Лучи — на **децибельной шкале громкости**
+         *     (``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта
+         *     ``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из
+         *     dB-лучей. Данные — из ``emo.json`` кэша рендера; рендеры до среза «Эмо»
+         *     добиваются расчётом из ``master.wav``.
+         */
+        AudioEmoOut: {
+            /**
+             * Schema Version
+             * @description Версия контракта emo.json (2 — децибельная шкала лучей)
+             * @default 2
+             */
+            schema_version: number;
+            /**
+             * Fs Audio
+             * @description Частота дискретизации микса, Гц (48000)
+             */
+            fs_audio: number;
+            /**
+             * Fft Size
+             * @description Размер окна FFT, сэмплов (32768 = 2^15)
+             */
+            fft_size: number;
+            /**
+             * Hop Samples
+             * @description Сдвиг окна между кадрами, сэмплов (32000)
+             */
+            hop_samples: number;
+            /**
+             * Overlap Samples
+             * @description Перекрытие окон, сэмплов (768)
+             */
+            overlap_samples: number;
+            /**
+             * Normalization
+             * @description Шкала лучей: децибелы относительно глобального максимума всех счётчиков всех кадров (0 дБ = 100 % R) с порогом db_floor
+             * @constant
+             */
+            normalization: "db_relative";
+            /**
+             * Db Floor
+             * @description Порог децибельной шкалы, дБ (−60): счётчик на пороге и ниже → 0 % R; шкала [db_floor…0] дБ линейно отображается в [0…100] %
+             */
+            db_floor: number;
+            /**
+             * Global Max
+             * @description Референс 0 дБ — глобальный максимум сырых счётчиков
+             */
+            global_max: number;
+            /**
+             * Duration S
+             * @description Длительность микса, с
+             */
+            duration_s: number;
+            /**
+             * Frame Count
+             * @description Число кадров (длина frames)
+             */
+            frame_count: number;
+            /**
+             * Frames
+             * @description Кадры по возрастанию t_sec
+             */
+            frames: components["schemas"]["AudioEmoFrame"][];
         };
         /**
          * AudioIrCatalogOut
@@ -9760,6 +9874,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_render_emo_api_v1_audio_render__render_id__emo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioEmoOut"];
                 };
             };
             /** @description Validation Error */

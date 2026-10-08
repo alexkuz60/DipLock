@@ -10,23 +10,39 @@
  * вершина/«звезда» (точка на луче) · полигон (7 вершин по порядку лучей) ·
  * доминанта (белая линия из центра к точке суммы компонент вершин).
  *
- * Пока длина лучей — **случайный рандомизатор 0.1…1.0 R**
- * (`randomRayPercents`, один раз на монтирование — без «прыжков» при
- * ре-рендерах); расчёт по спектральной мощности и динамика при
- * воспроизведении — отдельные темы. Полигон: заливка жёлтым с прозрачностью
- * 0.25, грани — сплошные линии 2 px; доминанта — белая линия и точка 4 px
- * (точки/линии в экранных пикселях — `vector-effect="non-scaling-stroke"`).
- * Геометрия — чистый модуль `radialChart.ts`; отрисовка SVG, как у соседнего
+ * **Анимация «Эмо» (08.10.2026):** с пропом `emo` (кадры
+ * `GET /audio/render/{id}/emo`) лучи анимируются по позиции плеера —
+ * `rAF` читает `getActivePlayer().position`, берёт интерполяцию между
+ * слайдами (`emoRadar.interpolatedRays`) и пишет атрибуты polygon/доминанты
+ * **императивно через refs** — без ре-рендеров React на каждый кадр
+ * (`docs/rules/frontend-perf.md`). Сетка слайдов — шаг окна FFT 32000
+ * сэмплов (2/3 с). Без данных/с ошибкой — прежний фоллбэк: случайные лучи
+ * 0.1…1.0 R один раз на монтирование (без «прыжков» при ре-рендерах).
+ * Полигон: заливка жёлтым с прозрачностью 0.25, грани — сплошные линии 2 px;
+ * доминанта — белая линия и точка **8 px**. Статика поверх (08.10.2026):
+ * **облако доминант** всех кадров (мелкие круги ⌀5 px без заливки,
+ * обводка 1 px, позади полигона) и **суммарная доминанта** облака —
+ * ярко-красный кружок ⌀8 px с заливкой 50 %, без линии вектора
+ * (`totalDominant`: центроид облака — сумма компонент / число точек,
+ * всегда **внутри** облака, в отличие от сырой суммы на ободе). Пиксельные
+ * толщины —
+ * `vector-effect="non-scaling-stroke"`. Геометрия — чистые модули
+ * `radialChart.ts` и `emoRadar.ts`; отрисовка SVG, как у соседнего
  * силуэта `BrainRoomView`.
  */
-import { useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import type { AudioEmo } from '@/shared/api/types'
+import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
+import { hopSeconds, interpolatedRays } from './emoRadar'
 import {
   GRID_FRACTIONS,
+  dominantCloud,
   dominantPoint,
   pointAt,
   randomRayPercents,
   segmentBoundaries,
   starPolygon,
+  totalDominant,
 } from './radialChart'
 
 /** Размер viewBox: квадрат 200×200, центр — посередине. */
@@ -37,13 +53,82 @@ const RADIUS = 90
 /** Центр графика — константа модуля (стабильна для `useMemo`). */
 const CENTER_PT = { x: CENTER, y: CENTER }
 
-export function RadialChart() {
+export type RadialChartProps = {
+  /** Кадры «Эмо» (null/undefined — фоллбэк-рандомизатор до загрузки). */
+  emo?: AudioEmo | null
+}
+
+export function RadialChart({ emo = null }: RadialChartProps) {
   const boundaries = segmentBoundaries()
-  // Случайные лучи 0.1…1.0 R — один раз на монтирование: до подключения
-  // расчёта полигон не должен меняться от ре-рендеров (transport/store).
-  const vertices = useMemo(() => starPolygon(randomRayPercents(), RADIUS, CENTER_PT), [])
+  // Фоллбэк-лучи: случайные 0.1…1.0 R — один раз на монтирование.
+  const randomRays = useMemo(() => randomRayPercents(), [])
+  // Кадры обязаны быть массивом: защита от ответа не по контракту (заглушка
+  // мока, дрейф API) — иначе фоллбэк вместо падения.
+  const frames = emo && Array.isArray(emo.frames) ? emo.frames : null
+  // Текущие лучи — в ref: rAF пишет их в DOM напрямую (без state), а JSX
+  // при ре-рендере читает то же значение — рассинхрона «атрибут ↔ props» нет.
+  const raysRef = useRef<number[]>(randomRays)
+  const lastFramesRef = useRef<typeof frames>(null)
+  if (frames !== lastFramesRef.current) {
+    lastFramesRef.current = frames
+    const first = frames?.[0]
+    raysRef.current = first ? [...first.rays] : randomRays
+  }
+
+  const polygonRef = useRef<SVGPolygonElement>(null)
+  const dominantRef = useRef<SVGLineElement>(null)
+  const dotRef = useRef<SVGLineElement>(null)
+
+  /** Один кадр → атрибуты полигона и доминанты (императивно, без React). */
+  const paint = useCallback((rays: readonly number[]) => {
+    raysRef.current = [...rays]
+    const vertices = starPolygon(raysRef.current, RADIUS, CENTER_PT)
+    const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
+    polygonRef.current?.setAttribute(
+      'points',
+      vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(' '),
+    )
+    // Доминанта — из центра к точке суммы; точка — нулевой штрих в ней же.
+    dominantRef.current?.setAttribute('x2', String(dominant.x))
+    dominantRef.current?.setAttribute('y2', String(dominant.y))
+    for (const attribute of ['x1', 'y1', 'x2', 'y2'] as const) {
+      const value = attribute === 'x1' || attribute === 'x2' ? dominant.x : dominant.y
+      dotRef.current?.setAttribute(attribute, String(value))
+    }
+  }, [])
+
+  // Анимация: пока есть кадры, каждый кадр экрана читает позицию плеера
+  // (с учётом rate ×0.5; вне игры — сохранённая позиция/0) и рисует
+  // интерполированные лучи. Пауза/seek → сразу слайд текущей позиции.
+  useEffect(() => {
+    if (!emo || !frames) return
+    const hopSec = hopSeconds(emo.hop_samples, emo.fs_audio)
+    let raf = 0
+    const tick = () => {
+      const position = getActivePlayer()?.position ?? 0
+      const rays = interpolatedRays(frames, hopSec, position)
+      if (rays) paint(rays)
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [emo, frames, paint])
+
+  const vertices = starPolygon(raysRef.current, RADIUS, CENTER_PT)
   const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
   const polygonPoints = vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')
+  // Облако доминант всех кадров и их суммарная точка — статика (меняется
+  // только при загрузке кадров): каждая точка = доминанта своего кадра,
+  // суммарная = центроид облака (сумма компонент / число точек) — всегда
+  // внутри облака, в отличие от сырой суммы, упиравшейся в обод.
+  const cloud = useMemo(
+    () => (frames ? dominantCloud(frames, RADIUS, CENTER_PT) : []),
+    [frames],
+  )
+  const totalPoint = useMemo(
+    () => (cloud.length > 0 ? totalDominant(cloud, CENTER_PT, RADIUS) : null),
+    [cloud],
+  )
 
   return (
     <svg
@@ -112,9 +197,27 @@ export function RadialChart() {
           strokeWidth={1}
         />
       ))}
-      {/* Полигон («звезда»): случайные лучи 0.1…1.0 R; заливка жёлтой с
-          прозрачностью 0.25, грани — сплошные (не прозрачные) 2 px. */}
+      {/* Облако доминант: точка доминанты каждого кадра анимации — мелкие
+          круги ⌀5 px без заливки, обводка 1 px (позади полигона: история,
+          полигон — «сейчас»). Считается один раз на загрузке кадров. */}
+      {cloud.map((point, index) => (
+        <circle
+          key={index}
+          data-part="dominant-cloud"
+          cx={point.x}
+          cy={point.y}
+          r={2.5}
+          fill="none"
+          stroke="var(--color-fg-2)"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+      ))}
+      {/* Полигон («звезда»): вершины из лучей (кадр «Эмо» или фоллбэк —
+          случайные 0.1…1.0 R); заливка жёлтой с прозрачностью 0.25, грани —
+          сплошные (не прозрачные) 2 px. Анимация пишет points через ref. */}
       <polygon
+        ref={polygonRef}
         data-part="polygon"
         points={polygonPoints}
         fill="yellow"
@@ -126,6 +229,7 @@ export function RadialChart() {
       />
       {/* Доминанта: белая линия из центра к точке суммы компонент вершин. */}
       <line
+        ref={dominantRef}
         data-part="dominant"
         x1={CENTER}
         y1={CENTER}
@@ -135,18 +239,36 @@ export function RadialChart() {
         strokeWidth={2}
         vectorEffect="non-scaling-stroke"
       />
-      {/* Точка доминанты 4 px: нулевой штрих со скруглением = круг 4 px. */}
+      {/* Точка доминанты 8 px (правка 08.10.2026): нулевой штрих со
+          скруглением = круг диаметра strokeWidth. */}
       <line
+        ref={dotRef}
         data-part="dominant-dot"
         x1={dominant.x}
         y1={dominant.y}
         x2={dominant.x}
         y2={dominant.y}
         stroke="white"
-        strokeWidth={4}
+        strokeWidth={8}
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />
+      {/* Суммарная доминанта облака: центроид всех точек доминант кадров
+          (сумма компонент / число точек — всегда внутри облака): ярко-красный
+          кружок ⌀8 px с заливкой 50 %, без линии вектора. */}
+      {totalPoint && (
+        <circle
+          data-part="total-dominant"
+          cx={totalPoint.x}
+          cy={totalPoint.y}
+          r={4}
+          fill="red"
+          fillOpacity={0.5}
+          stroke="red"
+          strokeWidth={1}
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
     </svg>
   )
 }

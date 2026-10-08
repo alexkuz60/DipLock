@@ -19,7 +19,9 @@
  * (паттерн `summaryReport`).
  */
 import { useEffect, useMemo, useRef } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Music2, Pause, Play, Square } from 'lucide-react'
+import { api } from '@/shared/api/client'
 import type { AudioRenderVariant } from '@/shared/api/types'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useNeuromusic } from '@/shared/state/neuromusic'
@@ -55,6 +57,18 @@ export function NeuromusicSection() {
   const running = busy || status?.status === 'running'
   const succeeded = status?.status === 'succeeded'
   const tracks = useMemo(() => status?.tracks ?? [], [status])
+
+  // Кадры радара «Эмо» (08.10.2026): один GET на готовый рендер — ключ по
+  // render_id, данные неизменяемы (staleTime ∞), ошибки не повторяем:
+  // при недоступности график остаётся на фоллбэк-рандомизаторе. `renderId`
+  // в queryFn не null только при включённом запросе (`enabled` ниже).
+  const emoQuery = useQuery({
+    queryKey: ['audio-emo', renderId],
+    queryFn: ({ signal }) => api.audioEmo(renderId ?? '', signal),
+    enabled: Boolean(succeeded && renderId),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
 
   // Геометрия силуэта «Визуализации» (перенесена из «Опций» 07.10.2026):
   // играющий рендер (status) важнее выбранного варианта — до рендера
@@ -230,9 +244,9 @@ export function NeuromusicSection() {
             </div>
             {/* Колонка 2: радиальный график — 7 сегментов от π/2 + π/7
                 против часовой, оси X/Y, сетка 25/50/75 %, круг-граница;
-                полигон по лучам — задел `starPolygon` (данные отдельно). */}
+                полигон анимируется по кадрам «Эмо» (или фоллбэк-рандом). */}
             <div className="h-full min-h-0 overflow-hidden">
-              <RadialChart />
+              <RadialChart emo={emoQuery.data ?? null} />
             </div>
           </div>
         </section>

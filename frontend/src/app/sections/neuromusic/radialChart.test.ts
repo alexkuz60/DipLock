@@ -6,11 +6,13 @@ import {
   RANDOM_RAY_MIN_PCT,
   SEGMENT_START,
   SEGMENT_STEP,
+  dominantCloud,
   dominantPoint,
   pointAt,
   randomRayPercents,
   segmentBoundaries,
   starPolygon,
+  totalDominant,
 } from './radialChart'
 
 describe('radialChart — геометрия радиального графика', () => {
@@ -142,5 +144,78 @@ describe('radialChart — геометрия радиального график
     expect(outside.x).toBeCloseTo(190, 10)
     expect(outside.y).toBeCloseTo(100, 10)
     expect(Math.hypot(outside.x - 100, outside.y - 100)).toBeCloseTo(90, 10)
+  })
+
+  it('dominantCloud: одна точка на кадр = dominantPoint(starPolygon(rays))', () => {
+    const center = { x: 100, y: 100 }
+    const frames = [
+      { rays: [100, 0, 0, 0, 0, 0, 0] },
+      { rays: [10, 20, 30, 40, 50, 60, 70] },
+      { rays: [0, 0, 0, 0, 0, 0, 100] },
+    ]
+    const cloud = dominantCloud(frames, 90, center)
+    expect(cloud).toHaveLength(frames.length)
+    frames.forEach((frame, index) => {
+      const expected = dominantPoint(starPolygon(frame.rays, 90, center), center, 90)
+      expect(cloud[index]?.x).toBeCloseTo(expected.x, 10)
+      expect(cloud[index]?.y).toBeCloseTo(expected.y, 10)
+      // Точка доминанты кадра всегда внутри круга-границы.
+      expect(Math.hypot((cloud[index]?.x ?? 0) - 100, (cloud[index]?.y ?? 0) - 100)).toBeLessThanOrEqual(
+        90 + 1e-6,
+      )
+    })
+    // Равные лучи семи направлений → доминанта в центре.
+    const [even] = dominantCloud([{ rays: [100, 100, 100, 100, 100, 100, 100] }], 90, center)
+    expect(even?.x).toBeCloseTo(100, 6)
+    expect(even?.y).toBeCloseTo(100, 6)
+    // Нет кадров — пустое облако (ничего не рисуется).
+    expect(dominantCloud([], 90, center)).toEqual([])
+  })
+
+  it('totalDominant: центроид облака — среднее компонент, не сырая сумма', () => {
+    const center = { x: 100, y: 100 }
+    // Контрольные точки: среднее (5 + 10)/2, (0 + 5)/2 → (107.5, 102.5).
+    const total = totalDominant(
+      [
+        { x: 105, y: 100 },
+        { x: 110, y: 105 },
+      ],
+      center,
+      90,
+    )
+    expect(total.x).toBeCloseTo(107.5, 10)
+    expect(total.y).toBeCloseTo(102.5, 10)
+    // Регрессия (жалоба 08.10.2026): сырая сумма множества точек упиралась
+    // в зажим к ободу графика. Среднее 50 одинаковых сдвигов = сам сдвиг
+    // (5 px), без всякого зажима.
+    const many = Array.from({ length: 50 }, () => ({ x: 105, y: 100 }))
+    const mean = totalDominant(many, center, 90)
+    expect(mean.x).toBeCloseTo(105, 10)
+    expect(mean.y).toBeCloseTo(100, 10)
+    expect(Math.hypot(mean.x - 100, mean.y - 100)).toBeCloseTo(5, 10)
+    // Пустое облако — центр (круг не рисуется).
+    expect(totalDominant([], center, 90)).toEqual(center)
+  })
+
+  it('totalDominant: точка всегда внутри облака (bbox точек), а не на ободе', () => {
+    const center = { x: 100, y: 100 }
+    const frames = [
+      { rays: [100, 0, 0, 0, 0, 0, 0] },
+      { rays: [0, 100, 0, 0, 0, 0, 0] },
+      { rays: [0, 0, 0, 50, 0, 0, 0] },
+      { rays: [10, 20, 30, 40, 50, 60, 70] },
+      { rays: [90, 90, 90, 90, 90, 90, 90] },
+    ]
+    const cloud = dominantCloud(frames, 90, center)
+    const total = totalDominant(cloud, center, 90)
+    const xs = cloud.map((point) => point.x)
+    const ys = cloud.map((point) => point.y)
+    // Центроид по построению не выходит за границы облака…
+    expect(total.x).toBeGreaterThanOrEqual(Math.min(...xs) - 1e-9)
+    expect(total.x).toBeLessThanOrEqual(Math.max(...xs) + 1e-9)
+    expect(total.y).toBeGreaterThanOrEqual(Math.min(...ys) - 1e-9)
+    expect(total.y).toBeLessThanOrEqual(Math.max(...ys) + 1e-9)
+    // …и для этого облака не лежит на ободе круга-границы.
+    expect(Math.hypot(total.x - 100, total.y - 100)).toBeLessThan(90)
   })
 })

@@ -43,6 +43,9 @@ AUDIO_SUBDIR = "audio"
 MANIFEST_NAME = "manifest.json"
 MASTER_NAME = "master.wav"
 SIDECAR_NAME = "sidecar.json"
+# Кадры радара «Эмо» (7 лучей по кадрам спектра чистого микса): пишутся
+# новыми рендерами и добиваются для старых манифестов (emo_payload_of).
+EMO_NAME = "emo.json"
 
 # Длина ключа в URL (sha256-хвост): 128 бит — коллизия практически
 # невозможна, путь остаётся читаемым (предыдент: bundle_signature — [:16]).

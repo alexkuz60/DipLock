@@ -217,3 +217,60 @@ class AudioBakeStatus(BaseModel):
     message: str = ""
     error: str | None = Field(default=None, description="Текст ошибки (status=failed)")
     bytes_total: int = Field(default=0, description="Размер готового WAV, байт (после успеха)")
+
+
+class AudioEmoFrame(BaseModel):
+    """Один кадр анимации радара «Эмо» (слайд полигона со своим вектором Доминанты)."""
+
+    t_sec: float = Field(
+        description="Время начала окна FFT кадра, с (k × hop_samples / fs_audio)",
+    )
+    rays: list[float] = Field(
+        min_length=7,
+        max_length=7,
+        description=(
+            "Длины 7 лучей полигона, % радиуса (0…100), порядок полос "
+            "BAND_ORDER (δ…γ-high); значения — децибельная шкала громкости: "
+            "20·log10 к глобальному максимуму, карта [db_floor…0] дБ → [0…100] %"
+        ),
+    )
+
+
+class AudioEmoOut(BaseModel):
+    """``GET /audio/render/{id}/emo``: кадры анимации радара «Эмо».
+
+    Окно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔
+    время k · 2/3 с — сетка синхронизации анимации с плеером и (в дальнейшем)
+    дипольными эпохами. Лучи — на **децибельной шкале громкости**
+    (``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта
+    ``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из
+    dB-лучей. Данные — из ``emo.json`` кэша рендера; рендеры до среза «Эмо»
+    добиваются расчётом из ``master.wav``.
+    """
+
+    schema_version: int = Field(
+        default=2,
+        description="Версия контракта emo.json (2 — децибельная шкала лучей)",
+    )
+    fs_audio: int = Field(description="Частота дискретизации микса, Гц (48000)")
+    fft_size: int = Field(description="Размер окна FFT, сэмплов (32768 = 2^15)")
+    hop_samples: int = Field(description="Сдвиг окна между кадрами, сэмплов (32000)")
+    overlap_samples: int = Field(description="Перекрытие окон, сэмплов (768)")
+    normalization: Literal["db_relative"] = Field(
+        description=(
+            "Шкала лучей: децибелы относительно глобального максимума всех "
+            "счётчиков всех кадров (0 дБ = 100 % R) с порогом db_floor"
+        ),
+    )
+    db_floor: float = Field(
+        description=(
+            "Порог децибельной шкалы, дБ (−60): счётчик на пороге и ниже → "
+            "0 % R; шкала [db_floor…0] дБ линейно отображается в [0…100] %"
+        ),
+    )
+    global_max: float = Field(
+        description="Референс 0 дБ — глобальный максимум сырых счётчиков",
+    )
+    duration_s: float = Field(description="Длительность микса, с")
+    frame_count: int = Field(ge=0, description="Число кадров (длина frames)")
+    frames: list[AudioEmoFrame] = Field(description="Кадры по возрастанию t_sec")

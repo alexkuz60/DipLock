@@ -24,8 +24,8 @@ import numpy as np
 
 from app.core.config import Settings, settings
 from app.services import journal
+from app.services.audio_render import emo_radar, store
 from app.services.audio_render import rows as rows_module
-from app.services.audio_render import store
 from app.services.audio_render.core import FS_AUDIO, RESAMPLE_UP, band_stem
 from app.services.audio_render.export import (
     build_sidecar,
@@ -269,6 +269,49 @@ def state_of(render_id: str) -> RenderState:
     return state
 
 
+def emo_payload_of(state: RenderState) -> dict[str, Any] | None:
+    """Кадры «Эмо» готового рендера: артефакт либо добивка из ``master.wav``.
+
+    Рендеры, посчитанные до среза «Эмо» (08.10.2026), манифеста с ``emo.json``
+    не имеют: кадры считаются из ``master.wav`` (без временных файлов) и
+    дописываются в кэш — новый артефакт не поднимает ``RENDER_FORMAT_VERSION``
+    (байты аудио не меняются), файл добавляется в ``files`` манифеста, чтобы
+    комплект оставался самопроверяемым. ``None`` — нет ни кадров, ни мастера
+    (409 в API). Вычисление дискового чтения идёт вне event loop (to_thread).
+    """
+    artifacts = state.artifacts
+    if artifacts is None:
+        return None
+    blob = artifacts.read(store.EMO_NAME)
+    if blob is not None:
+        payload = emo_radar.parse_emo(blob)
+        if payload is not None:
+            return payload
+    master_blob = artifacts.read(store.MASTER_NAME)
+    if master_blob is None:
+        return None
+    payload = emo_radar.frames_from_wav(master_blob)
+    fresh = emo_radar.emo_bytes(payload)
+    if artifacts.directory is None:
+        # Фоллбэк «запись на диск не удалась» — держим кадры в памяти рядом
+        # с байтами мастер-файла (случай сбоя записи кэша, data-and-caches §4).
+        artifacts.memory[store.EMO_NAME] = fresh
+        return payload
+    store.write_artifacts(
+        settings, state.recording_id, state.render_id, {store.EMO_NAME: fresh},
+    )
+    manifest = store.load_manifest(settings, state.recording_id, state.render_id)
+    if manifest is not None:
+        files = manifest.setdefault("files", {})
+        files[store.EMO_NAME] = len(fresh)
+        store.write_manifest(settings, state.recording_id, state.render_id, manifest)
+    logger.debug(
+        "Кадры «Эмо» %s добиты из master.wav: %d кадров",
+        state.render_id, payload.get("frame_count", 0),
+    )
+    return payload
+
+
 def _run_render(
     state: RenderState, recording: Recording, cfg: Settings, gains_db: dict[str, float],
     boost_db: float = BOOST_DEFAULT_DB,
@@ -458,6 +501,11 @@ def _run_render(
         state.pct = 0.9
         state.message = "Сумма треков + контроль пика −1 dBFS"
         peak_scale = apply_peak_ceiling(master)
+        # Кадры радара «Эмо» — по моно-слиянию чистого микса (мастер после
+        # пика = байты master.wav и источник `master` плеера): считается здесь
+        # же, из памяти, без временного моно-файла и без повторного чтения
+        # диска (спецификация 08.10.2026 — «параллельно операциям рендера»).
+        emo_payload = emo_radar.frames_from_master(master)
         master_wav = wav_bytes(master, FS_AUDIO)
         del master
 
@@ -497,6 +545,10 @@ def _run_render(
         # кэш оптимизация, а не источник истины.
         _persist(store.MASTER_NAME, master_wav)
         _persist(store.SIDECAR_NAME, sidecar)
+        # Кадры «Эмо» рядом с мастером: входят в files манифеста (коммит
+        # кэша); для старых рендеров без emo.json есть emo_payload_of.
+        _persist(store.EMO_NAME, emo_radar.emo_bytes(emo_payload))
+        del emo_payload
         del master_wav
         elapsed = time.perf_counter() - started
         n_tracks = len(bands) if variant != "montage" else len(bands) * len(row_mixes_list)

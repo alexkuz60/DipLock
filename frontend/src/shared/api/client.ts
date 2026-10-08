@@ -8,6 +8,7 @@ import type {
   AnalyzeResponse,
   AudioBakeStart,
   AudioBakeStatus,
+  AudioEmo,
   AudioIrCatalog,
   AudioRenderStart,
   AudioRenderStatus,
@@ -275,6 +276,16 @@ export const api = {
 
   /** URL sidecar-«партитуры» (веса, гейны, checksum, extensions). */
   audioSidecarUrl: (renderId: string) => `${API_PREFIX}/audio/render/${renderId}/sidecar.json`,
+
+  /**
+   * Кадры радара «Эмо» (08.10.2026): 7 лучей по кадрам динамического спектра
+   * чистого микса — окно FFT 32768, шаг 32000 сэмплов (перекрытие 768),
+   * нормировка глобальная; база анимации графика в секции «Визуализация».
+   * Статус рендера — `audioRenderStatus`; рендеры до «Эмо» сервер добивает
+   * сам расчётом из master.wav.
+   */
+  audioEmo: (renderId: string, signal?: AbortSignal) =>
+    request<AudioEmo>(`${API_PREFIX}/audio/render/${renderId}/emo`, { signal }),
 
   /** Каталог IR-пресетов для реверберации плеера (селект «Помещение»). */
   audioIrCatalog: (signal?: AbortSignal) =>

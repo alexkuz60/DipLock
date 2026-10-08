@@ -121,3 +121,53 @@ export function dominantPoint(
   }
   return { x: center.x + sumX, y: center.y + sumY }
 }
+
+/**
+ * **Облако доминант** (08.10.2026): точка доминанты каждого кадра анимации
+ * «Эмо» — для кадра его лучи собираются в вершины (`starPolygon`) и сводятся
+ * к точке суммы компонент (`dominantPoint`). Порядок — порядок кадров;
+ * пустой список кадров → пустое облако. Рисует `RadialChart.tsx` мелкими
+ * кругами; **суммарная доминанта** облака — см. :func:`totalDominant`.
+ */
+export function dominantCloud(
+  frames: readonly { readonly rays: readonly number[] }[],
+  radius: number,
+  center: RadialPoint,
+): RadialPoint[] {
+  return frames.map((frame) =>
+    dominantPoint(starPolygon(frame.rays, radius, center), center, radius),
+  )
+}
+
+/**
+ * **Суммарная доминанта облака** (правка 08.10.2026): сумма компонент всех
+ * точек доминант, **нормированная на число точек** (центроид/среднее) —
+ * направление совпадает с суммой, но длина не растёт с числом кадров.
+ *
+ * Жалоба владельца 08.10.2026: «сырая» сумма на любом реальном миксе
+ * (десятки и тысячи кадров) всегда упиралась в зажим к кругу-границе —
+ * вектор лежал на ободе почти в одном месте для разных записей. Центроид
+ * по построению лежит **внутри выпуклой оболочки облака** (зажим к
+ * `radius` остаётся лишь страховкой). Пустое облако → точка центра.
+ */
+export function totalDominant(
+  points: readonly RadialPoint[],
+  center: RadialPoint,
+  radius: number,
+): RadialPoint {
+  if (points.length === 0) return { x: center.x, y: center.y }
+  let sumX = 0
+  let sumY = 0
+  for (const point of points) {
+    sumX += point.x - center.x
+    sumY += point.y - center.y
+  }
+  let x = sumX / points.length
+  let y = sumY / points.length
+  const length = Math.hypot(x, y)
+  if (length > radius && length > 0) {
+    x *= radius / length
+    y *= radius / length
+  }
+  return { x: center.x + x, y: center.y + y }
+}

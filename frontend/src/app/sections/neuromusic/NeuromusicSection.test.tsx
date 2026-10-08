@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { recordingFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import * as neuromusicPlayerLib from '@/shared/lib/neuromusicPlayer'
+import type { AudioEmo } from '@/shared/api/types'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import {
   DEFAULT_BOOST_DB,
@@ -97,6 +98,28 @@ const playerMock = loadMock.__player as {
 
 const TRACKS = ['delta', 'delta_theta', 'theta', 'alpha', 'beta', 'gamma', 'high_gamma']
 
+/** Кадры «Эмо» для мока (реальный контракт GET …/emo): 6 слайдов записи 4 с,
+ * сетка 32000/48000; лучи слайда k = (i+1)·10 + k·10, максимум 100 % R
+ * (шкала — dB_relative, порог −60 дБ, schema_version 2). */
+const EMO_PAYLOAD: AudioEmo = {
+  schema_version: 2,
+  fs_audio: 48000,
+  fft_size: 32768,
+  hop_samples: 32000,
+  overlap_samples: 768,
+  normalization: 'db_relative',
+  db_floor: -60,
+  global_max: 4812.5,
+  duration_s: 4,
+  frame_count: 6,
+  frames: Array.from({ length: 6 }, (_, index) => ({
+    t_sec: (index * 32000) / 48000,
+    rays: Array.from({ length: 7 }, (_, ray) =>
+      Math.min(100, (ray + 1) * 10 + index * 10),
+    ),
+  })),
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -109,6 +132,8 @@ type AudioFetchOptions = {
   variant?: 'express' | 'montage'
   rows?: string[]
   cached?: boolean
+  /** Кадры «Эмо»: null — 404 (фоллбэк графика), иначе payload (дефолт — свой). */
+  emo?: AudioEmo | null
 }
 
 /** Мок рендера: POST 202, статус — running → succeeded, файлы — заглушки.
@@ -182,6 +207,11 @@ function audioFetchMock(tracks: string[] = TRACKS, opts: AudioFetchOptions = {})
         rows,
       })
     }
+    if (url.includes('/emo')) {
+      // Кадры радара «Эмо»: контракт GET …/emo; opts.emo === null → 404.
+      if (opts.emo === null) return jsonResponse({ detail: 'нет кадров' }, 404)
+      return jsonResponse(opts.emo ?? EMO_PAYLOAD)
+    }
     if (url.includes('/audio/render')) {
       return jsonResponse(
         { render_id: 'r-1', status: 'running', cached: opts.cached ?? false },
@@ -247,6 +277,17 @@ function fakeAudioBuffer() {
     length: left.length,
     getChannelData: (index: number) => (index === 0 ? left : right),
   }
+}
+
+/** Расстояния вершин полигона от центра (100/100) — длины лучей в px viewBox. */
+function polygonDistances(chart: HTMLElement): number[] {
+  const points =
+    chart.querySelector('[data-part="polygon"]')?.getAttribute('points') ?? ''
+  if (!points.trim()) return []
+  return points.trim().split(/\s+/).map((pair) => {
+    const [x, y] = pair.split(',').map(Number)
+    return Math.hypot(x - 100, y - 100)
+  })
 }
 
 /**
@@ -926,7 +967,7 @@ describe('Нейромузыка — раздел', () => {
       expect(distance).toBeGreaterThanOrEqual(9 - 1e-6)
       expect(distance).toBeLessThanOrEqual(90 + 1e-6)
     }
-    // Доминанта: белая линия из центра + круглая точка 4 px.
+    // Доминанта: белая линия из центра + круглая точка 8 px (правка 08.10.2026).
     const dominant = chart.querySelector('[data-part="dominant"]')
     expect(dominant?.getAttribute('x1')).toBe('100')
     expect(dominant?.getAttribute('y1')).toBe('100')
@@ -934,10 +975,128 @@ describe('Нейромузыка — раздел', () => {
     const dot = chart.querySelector('[data-part="dominant-dot"]')
     expect(dot).not.toBeNull()
     expect(dot?.getAttribute('stroke')).toBe('white')
-    expect(dot?.getAttribute('stroke-width')).toBe('4')
+    expect(dot?.getAttribute('stroke-width')).toBe('8')
     expect(dot?.getAttribute('stroke-linecap')).toBe('round')
     // Точка доминанты стоит там же, где конец линии.
     expect(dot?.getAttribute('x1')).toBe(dominant?.getAttribute('x2'))
     expect(dot?.getAttribute('y1')).toBe(dominant?.getAttribute('y2'))
+  })
+
+  it('«Эмо»: кадры грузятся, полигон рисуется лучами первого слайда', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const chart = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'radial-chart',
+    )
+    // GET …/emo ушёл после успеха рендера (TanStack Query, ключ render_id).
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).includes('/emo')),
+      ).toBe(true),
+    )
+    // Слайд 0: лучи [10…70] % × 90 px → расстояния вершин 9, 18, …, 63 px.
+    await waitFor(() => {
+      const distances = polygonDistances(chart)
+      expect(distances).toHaveLength(7)
+      distances.forEach((value, index) => expect(value).toBeCloseTo((index + 1) * 9, 1))
+    })
+    // Доминанта пересчитана под эти лучи: ненулевой вектор внутри круга.
+    const dominant = chart.querySelector('[data-part="dominant"]')
+    const length = Math.hypot(
+      Number(dominant?.getAttribute('x2')) - 100,
+      Number(dominant?.getAttribute('y2')) - 100,
+    )
+    expect(length).toBeGreaterThan(0)
+    expect(length).toBeLessThanOrEqual(90 + 1e-6)
+    // Облако доминант: круг на каждый кадр (6 в моке) — ⌀5 px, без
+    // заливки, обводка 1 px.
+    const cloud = chart.querySelectorAll('[data-part="dominant-cloud"]')
+    expect(cloud).toHaveLength(6)
+    for (const point of cloud) {
+      expect(point.getAttribute('r')).toBe('2.5')
+      expect(point.getAttribute('fill')).toBe('none')
+      expect(point.getAttribute('stroke-width')).toBe('1')
+      // Все точки внутри круга-границы.
+      const distance = Math.hypot(
+        Number(point.getAttribute('cx')) - 100,
+        Number(point.getAttribute('cy')) - 100,
+      )
+      expect(distance).toBeLessThanOrEqual(90 + 1e-6)
+    }
+    // Суммарная доминанта: красный кружок ⌀8 px с заливкой 50 %,
+    // отдельной линии вектора у неё нет — и она лежит ВНУТРИ облака
+    // (центроид его bbox), а не на ободе графика.
+    const total = chart.querySelector('[data-part="total-dominant"]')
+    expect(total).not.toBeNull()
+    expect(total?.getAttribute('r')).toBe('4')
+    expect(total?.getAttribute('fill')).toBe('red')
+    expect(total?.getAttribute('fill-opacity')).toBe('0.5')
+    const totalX = Number(total?.getAttribute('cx'))
+    const totalY = Number(total?.getAttribute('cy'))
+    const cloudXs = [...cloud].map((point) => Number(point.getAttribute('cx')))
+    const cloudYs = [...cloud].map((point) => Number(point.getAttribute('cy')))
+    expect(totalX).toBeGreaterThanOrEqual(Math.min(...cloudXs) - 1e-6)
+    expect(totalX).toBeLessThanOrEqual(Math.max(...cloudXs) + 1e-6)
+    expect(totalY).toBeGreaterThanOrEqual(Math.min(...cloudYs) - 1e-6)
+    expect(totalY).toBeLessThanOrEqual(Math.max(...cloudYs) + 1e-6)
+    expect(Math.hypot(totalX - 100, totalY - 100)).toBeLessThan(90)
+    expect(chart.querySelectorAll('[data-part="dominant"]')).toHaveLength(1)
+  })
+
+  it('«Эмо»: позиция плеера двигает полигон (интерполяция слайдов)', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const chart = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'radial-chart',
+    )
+    await waitFor(() => expect(polygonDistances(chart)[0]).toBeCloseTo(9, 1))
+
+    // Слайды идут по 2/3 с: позиция 1.0 с — середина слайда 1 → 2.
+    // Лучи слайда 1 = [20…80], слайда 2 = [30…90] → середина [25…85] % R.
+    playerMock.position = 1
+    await waitFor(
+      () => {
+        const distances = polygonDistances(chart)
+        expect(distances[0]).toBeCloseTo(22.5, 1)
+        expect(distances[6]).toBeCloseTo(76.5, 1)
+      },
+      { timeout: 3000 },
+    )
+  })
+
+  it('«Эмо»: сервер не отдал кадры (404) — фоллбэк-рандомизатор без падения', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock(TRACKS, { emo: null })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const chart = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'radial-chart',
+    )
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).includes('/emo')),
+      ).toBe(true),
+    )
+    // Лучи случайные 0.1…1.0 R: детерминированный паттерн кадра
+    // [9, 18, …, 63] не собирается, но все вершины внутри круга-границы.
+    await waitFor(() => {
+      const distances = polygonDistances(chart)
+      expect(distances).toHaveLength(7)
+      const matched = distances.filter(
+        (value, index) => Math.abs(value - (index + 1) * 9) <= 0.5,
+      ).length
+      expect(matched).toBeLessThan(7)
+      for (const value of distances) {
+        expect(value).toBeGreaterThanOrEqual(9 - 1e-6)
+        expect(value).toBeLessThanOrEqual(90 + 1e-6)
+      }
+    })
   })
 })
