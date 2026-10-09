@@ -128,10 +128,18 @@ export function RadialChart({ emo = null }: RadialChartProps) {
         dotRef.current?.setAttribute(attribute, String(value))
       }
       // Метка темпа на оси Y: y = tempoY(bpm) · R от центра (60 внизу,
-      // 120 в центре, 240 вверху); темп не определён — метка в центре.
-      const markY = CENTER - (bpm == null ? 0 : tempoY(bpm)) * RADIUS
-      tempoMarkRef.current?.setAttribute('y1', String(markY))
-      tempoMarkRef.current?.setAttribute('y2', String(markY))
+      // 120 в центре, 240 вверху); темп не определён — засечка скрыта.
+      const mark = tempoMarkRef.current
+      if (mark) {
+        if (bpm == null) {
+          mark.setAttribute('opacity', '0')
+        } else {
+          const markY = CENTER - tempoY(bpm) * RADIUS
+          mark.setAttribute('opacity', '1')
+          mark.setAttribute('y1', String(markY))
+          mark.setAttribute('y2', String(markY))
+        }
+      }
     },
     [],
   )
@@ -228,20 +236,6 @@ export function RadialChart({ emo = null }: RadialChartProps) {
         y2={CENTER + RADIUS}
         stroke="var(--color-fg-2)"
         strokeWidth={1}
-      />
-      {/* Метка темпа на оси Y («Темп-коррекция», 09.10.2026): горизонтальная
-          засечка на высоте tempoY(bpm)·R (60 внизу, 120 в центре, 240 вверху);
-          анимация пишет y1/y2 через ref. */}
-      <line
-        ref={tempoMarkRef}
-        data-part="tempo-mark"
-        x1={CENTER - 12}
-        y1={CENTER}
-        x2={CENTER + 12}
-        y2={CENTER}
-        stroke="var(--color-fg-0)"
-        strokeWidth={2}
-        vectorEffect="non-scaling-stroke"
       />
       {/* Лучи-разделители 7 сегментов (отсчёт — против часовой). */}
       {boundaries.map((angle, index) => {
@@ -344,6 +338,24 @@ export function RadialChart({ emo = null }: RadialChartProps) {
           vectorEffect="non-scaling-stroke"
         />
       )}
+      {/* Метка темпа на оси Y («Темп-коррекция», 09.10.2026), верхний слой:
+          горизонтальная засечка на высоте tempoY(bpm)·R (60 внизу, 120 в
+          центре, 240 вверху); темп не определён — засечка скрыта (иначе она
+          ложится на ось X и сливается с ней). Анимация пишет y1/y2 и opacity
+          через ref. */}
+      <line
+        ref={tempoMarkRef}
+        data-part="tempo-mark"
+        x1={CENTER - 12}
+        y1={CENTER}
+        x2={CENTER + 12}
+        y2={CENTER}
+        stroke="var(--color-accent)"
+        strokeWidth={2}
+        strokeLinecap="round"
+        opacity={0}
+        vectorEffect="non-scaling-stroke"
+      />
     </svg>
   )
 }

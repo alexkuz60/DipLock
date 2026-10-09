@@ -1070,6 +1070,52 @@ describe('Нейромузыка — раздел', () => {
     )
   })
 
+  it('«Эмо»: метка темпа на оси Y скрыта без tempo_track (ложится на ось X)', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const chart = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'radial-chart',
+    )
+    await waitFor(() => expect(polygonDistances(chart)[0]).toBeCloseTo(9, 1))
+    // Засечка есть в DOM, но прозрачна: без темпа она лежала бы ровно на оси X.
+    const mark = chart.querySelector('[data-part="tempo-mark"]')
+    expect(mark).not.toBeNull()
+    expect(mark?.getAttribute('opacity')).toBe('0')
+  })
+
+  it('«Эмо»: метка темпа едет по оси Y (60 → низ, 240 → верх)', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const withTempo: AudioEmo = {
+      ...EMO_PAYLOAD,
+      tempo_track: [
+        { t_sec: 0, bpm: 60 }, // слайд 0: y = −1 → низ графика (100 + 90)
+        { t_sec: 2, bpm: 240 }, // слайд 3+: y = +1 → верх (100 − 90)
+      ],
+      tempo_source: 'vamp:qm-vamp-plugins:qm-tempotracker:tempo',
+    }
+    const fetchMock = audioFetchMock(TRACKS, { emo: withTempo })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const chart = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'radial-chart',
+    )
+    const mark = chart.querySelector('[data-part="tempo-mark"]')
+    await waitFor(() => expect(mark?.getAttribute('opacity')).toBe('1'))
+    // Слайд 0: темп 60 → метка внизу оси Y (y = 190 при центре 100 и R = 90).
+    await waitFor(() => expect(Number(mark?.getAttribute('y1'))).toBeCloseTo(190, 1))
+    expect(Number(mark?.getAttribute('y2'))).toBeCloseTo(190, 1)
+    // Позиция 2.0 с — слайд 3 (темп 240 после hold/интерполяции) → верх (y = 10).
+    playerMock.position = 2
+    await waitFor(
+      () => expect(Number(mark?.getAttribute('y1'))).toBeCloseTo(10, 1),
+      { timeout: 3000 },
+    )
+  })
+
   it('«Эмо»: сервер не отдал кадры (404) — фоллбэк-рандомизатор без падения', async () => {
     useEdfRecording.setState({ recording: recordingFixture })
     const fetchMock = audioFetchMock(TRACKS, { emo: null })
