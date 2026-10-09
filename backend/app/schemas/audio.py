@@ -219,6 +219,22 @@ class AudioBakeStatus(BaseModel):
     bytes_total: int = Field(default=0, description="Размер готового WAV, байт (после успеха)")
 
 
+class AudioKeySegment(BaseModel):
+    """Сегмент тональности микса (VAMP Key Detector, ``key_track`` кадров «Эмо»).
+
+    ``key_code`` — числовой код QM Key Detector: 1…12 — мажор (C=1 … B=12),
+    13…24 — минор (Cm=13 … Bm=24); метка ``label`` справочная (может быть
+    составной, «Eb / D# minor»), для вращения звезды используется код.
+    """
+
+    t_sec: float = Field(description="Начало сегмента устойчивой тональности, с")
+    key_code: int = Field(
+        ge=1, le=24,
+        description="Код тональности QM: 1…12 мажор (C…B), 13…24 минор (Cm…Bm)",
+    )
+    label: str = Field(description="Название тональности, например «B minor»")
+
+
 class AudioEmoFrame(BaseModel):
     """Один кадр анимации радара «Эмо» (слайд полигона со своим вектором Доминанты)."""
 
@@ -244,13 +260,15 @@ class AudioEmoOut(BaseModel):
     дипольными эпохами. Лучи — на **децибельной шкале громкости**
     (``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта
     ``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из
-    dB-лучей. Данные — из ``emo.json`` кэша рендера; рендеры до среза «Эмо»
-    добиваются расчётом из ``master.wav``.
+    dB-лучей **после вращения полигона**. ``schema_version`` 3 (09.10.2026):
+    ``key_track`` — сегменты тональности микса (VAMP Key Detector) для
+    вращения звезды. Данные — из ``emo.json`` кэша рендера; рендеры до среза
+    «Эмо» добиваются расчётом из ``master.wav``.
     """
 
     schema_version: int = Field(
-        default=2,
-        description="Версия контракта emo.json (2 — децибельная шкала лучей)",
+        default=3,
+        description="Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track)",
     )
     fs_audio: int = Field(description="Частота дискретизации микса, Гц (48000)")
     fft_size: int = Field(description="Размер окна FFT, сэмплов (32768 = 2^15)")
@@ -274,3 +292,16 @@ class AudioEmoOut(BaseModel):
     duration_s: float = Field(description="Длительность микса, с")
     frame_count: int = Field(ge=0, description="Число кадров (длина frames)")
     frames: list[AudioEmoFrame] = Field(description="Кадры по возрастанию t_sec")
+    key_track: list[AudioKeySegment] | None = Field(
+        default=None,
+        description=(
+            "Сегменты тональности микса (VAMP Key Detector) для вращения "
+            "звезды: угол кадра — из активного сегмента, знак — мажор + "
+            "(против часовой), минор − (по часовой); null — инструмент "
+            "недоступен, вращение нулевое"
+        ),
+    )
+    key_source: str | None = Field(
+        default=None,
+        description="Идентификатор источника key_track (vamp:qm-vamp-plugins:qm-keydetector:key)",
+    )

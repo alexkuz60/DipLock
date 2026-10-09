@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from app.core.config import settings
-from app.services.audio_render import emo_radar
+from app.services.audio_render import emo_radar, vamp_analysis
 from app.services.audio_render import render as neuro_render
 from app.services.audio_render import store as neuro_store
 from app.services.audio_render.core import FS_AUDIO
@@ -26,8 +26,13 @@ _PREFIX = "/api/v1/audio"
 
 @pytest.fixture(autouse=True)
 def clean_state(tmp_path, monkeypatch):
-    """Пустые состояния рендера + изолированный дисковый кэш между тестами."""
+    """Пустые состояния рендера + изолированный дисковый кэш между тестами.
+
+    VAMP-анализ (внешний sonic-annotator) выключен: тесты герметичны, живой
+    прогон плагина — ``test_audio_vamp.py`` (маркер ``integration``).
+    """
     monkeypatch.setattr(settings, "cache_dir", str(tmp_path / "cache"))
+    monkeypatch.setattr(vamp_analysis, "key_track_from_wav", lambda blob, cfg=None: None)
     recording_registry.clear()
     clear_prepared_cache()
     neuro_render.clear_renders()
@@ -160,7 +165,7 @@ def test_emo_frames_contract_and_global_normalization():
     mono = rng.standard_normal(n)
     mono[96_000:] *= 5.0  # вторая половина микса громче — «дыхание» между кадрами
     payload = emo_radar.emo_frames(mono)
-    assert payload["schema_version"] == emo_radar.EMO_SCHEMA_VERSION == 2
+    assert payload["schema_version"] == emo_radar.EMO_SCHEMA_VERSION == 3
     assert payload["fs_audio"] == FS_AUDIO
     assert payload["fft_size"] == 32768 and payload["fft_size"] == 2**15
     assert payload["hop_samples"] == 32000 and payload["overlap_samples"] == 768
@@ -264,6 +269,7 @@ def test_render_writes_emo_and_endpoint_serves(client, tmp_path, edf_file):
     assert payload["db_floor"] == emo_radar.EMO_DB_FLOOR
     assert payload["global_max"] > 0
     assert payload["frame_count"] == len(payload["frames"])
+    assert payload["key_track"] is None and payload["key_source"] is None
     expected = emo_radar.frame_starts(
         round(payload["duration_s"] * FS_AUDIO),
     ).size

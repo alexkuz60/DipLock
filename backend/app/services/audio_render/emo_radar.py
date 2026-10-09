@@ -17,7 +17,10 @@
   читаются в единицах громкости и «дышат» с интенсивностью микса;
 * вектор Доминанты и геометрия полигона считаются в UI существующей
   формулой ``dominantPoint`` (единая формула для рандом- и спектрального
-  путей) — здесь только данные кадров.
+  путей) — здесь только данные кадров;
+* v3 контракта (09.10.2026): ``key_track`` — сегменты тональности микса
+  (VAMP Key Detector, ``vamp_analysis``) для вращения звезды; ``None`` —
+  инструмент недоступен, вращение в UI нулевое.
 
 Временный моно-файл не нужен: при рендере кадры считаются из массива
 мастера в памяти, для старых кэшей — ``frames_from_wav`` по ``master.wav``.
@@ -33,6 +36,7 @@ import numpy as np
 import soundfile as sf
 
 from app.services.audio_render.core import FS_AUDIO
+from app.services.audio_render.vamp_analysis import KEY_SOURCE
 
 # Окно FFT (2^15), сдвиг окна и перекрытие кадров (спецификация владельца).
 EMO_FFT_SIZE = 32768
@@ -45,7 +49,9 @@ EMO_RAY_COUNT = 7
 # Версия контракта emo.json (новые ключи — minor, ломающие — major).
 # v2 (08.10.2026): лучи приведены к децибельной шкале громкости — старые
 # линейные кадры parse_emo отвергает, идёт добивка из master.wav.
-EMO_SCHEMA_VERSION = 2
+# v3 (09.10.2026): добавлен ``key_track`` (тональность сегментов микса из
+# VAMP Key Detector) для вращения звезды; кадры v2 отвергаются → добивка.
+EMO_SCHEMA_VERSION = 3
 
 # Нормировка лучей: шкала одна на весь микс (решение владельца 08.10.2026).
 EMO_NORMALIZATION = "db_relative"
@@ -132,7 +138,11 @@ def db_rays(raw: np.ndarray, peak: float) -> np.ndarray:
     return np.clip(pct, 0.0, 100.0)
 
 
-def emo_frames(mono: np.ndarray, fs: int = FS_AUDIO) -> dict[str, Any]:
+def emo_frames(
+    mono: np.ndarray,
+    fs: int = FS_AUDIO,
+    key_track: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Кадры анимации радара «Эмо» для моно-сигнала микса.
 
     Окна FFT (32768, сдвиг 32000, хвост — с zero-pad) → ``|X_k|`` → 7
@@ -140,6 +150,10 @@ def emo_frames(mono: np.ndarray, fs: int = FS_AUDIO) -> dict[str, Any]:
     ``db = 20·log10(raw / global_max)`` (0 дБ = глобальный максимум счётчиков
     всех кадров), карта ``[−60 … 0]`` дБ → ``[0 … 100]`` % радиуса; тишина →
     нули.
+
+    ``key_track`` — сегменты тональности микса (VAMP Key Detector,
+    ``vamp_analysis.key_track_from_wav``): ``None`` — инструмент недоступен,
+    вращение звезды в UI остаётся нулевым.
 
     Возвращает dict контракта ``emo.json`` (он же ответ ``GET …/emo``):
     метаданные окна/сетки/шкалы + список кадров ``{t_sec, rays[7]}`` в
@@ -176,10 +190,16 @@ def emo_frames(mono: np.ndarray, fs: int = FS_AUDIO) -> dict[str, Any]:
         "duration_s": round(data.size / fs, 6),
         "frame_count": len(frames),
         "frames": frames,
+        "key_track": key_track,
+        "key_source": KEY_SOURCE if key_track else None,
     }
 
 
-def frames_from_master(master: np.ndarray, fs: int = FS_AUDIO) -> dict[str, Any]:
+def frames_from_master(
+    master: np.ndarray,
+    fs: int = FS_AUDIO,
+    key_track: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Кадры из стерео-мастера рендера: моно-слияние ``(L+R)/2`` → расчёт.
 
     Мастер (после контроля пика) — это и есть «чистый аудио-микс до
@@ -188,10 +208,13 @@ def frames_from_master(master: np.ndarray, fs: int = FS_AUDIO) -> dict[str, Any]
     """
     arr = np.asarray(master, dtype=np.float64)
     mono = arr.mean(axis=1) if arr.ndim == 2 else arr.ravel()
-    return emo_frames(mono, fs=fs)
+    return emo_frames(mono, fs=fs, key_track=key_track)
 
 
-def frames_from_wav(blob: bytes) -> dict[str, Any]:
+def frames_from_wav(
+    blob: bytes,
+    key_track: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Кадры из байтов ``master.wav`` (добивка рендеров до среза «Эмо»).
 
     Моно-слияние ``(L+R)/2`` и частота — из файла (контракт рендера —
@@ -201,7 +224,7 @@ def frames_from_wav(blob: bytes) -> dict[str, Any]:
     data, samplerate = sf.read(io.BytesIO(blob), dtype="float64")
     arr = np.asarray(data)
     mono = arr.mean(axis=1) if arr.ndim == 2 else arr.ravel()
-    return emo_frames(mono, fs=int(samplerate))
+    return emo_frames(mono, fs=int(samplerate), key_track=key_track)
 
 
 def emo_bytes(payload: dict[str, Any]) -> bytes:

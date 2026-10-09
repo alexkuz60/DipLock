@@ -1640,7 +1640,9 @@ export interface paths {
          *     время k · 2/3 с — сетка синхронизации с плеером и (дальше) дипольными
          *     эпохами; нормировка лучей глобальная (максимум счётчиков всего микса =
          *     100 % R). Кадры читаются из ``emo.json`` кэша рендера; старые рендеры
-         *     добиваются расчётом из ``master.wav`` (чтение вне event loop). 404 —
+         *     добиваются расчётом из ``master.wav`` (чтение вне event loop). Поле
+         *     ``key_track`` — тональность сегментов микса (VAMP Key Detector) для
+         *     вращения звезды (``null`` — инструмент недоступен). 404 —
          *     рендер не найден, 409 — идёт/упал либо мастер недоступен.
          */
         get: operations["audio_render_emo_api_v1_audio_render__render_id__emo_get"];
@@ -2079,14 +2081,16 @@ export interface components {
          *     дипольными эпохами. Лучи — на **децибельной шкале громкости**
          *     (``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта
          *     ``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из
-         *     dB-лучей. Данные — из ``emo.json`` кэша рендера; рендеры до среза «Эмо»
-         *     добиваются расчётом из ``master.wav``.
+         *     dB-лучей **после вращения полигона**. ``schema_version`` 3 (09.10.2026):
+         *     ``key_track`` — сегменты тональности микса (VAMP Key Detector) для
+         *     вращения звезды. Данные — из ``emo.json`` кэша рендера; рендеры до среза
+         *     «Эмо» добиваются расчётом из ``master.wav``.
          */
         AudioEmoOut: {
             /**
              * Schema Version
-             * @description Версия контракта emo.json (2 — децибельная шкала лучей)
-             * @default 2
+             * @description Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track)
+             * @default 3
              */
             schema_version: number;
             /**
@@ -2140,6 +2144,16 @@ export interface components {
              * @description Кадры по возрастанию t_sec
              */
             frames: components["schemas"]["AudioEmoFrame"][];
+            /**
+             * Key Track
+             * @description Сегменты тональности микса (VAMP Key Detector) для вращения звезды: угол кадра — из активного сегмента, знак — мажор + (против часовой), минор − (по часовой); null — инструмент недоступен, вращение нулевое
+             */
+            key_track?: components["schemas"]["AudioKeySegment"][] | null;
+            /**
+             * Key Source
+             * @description Идентификатор источника key_track (vamp:qm-vamp-plugins:qm-keydetector:key)
+             */
+            key_source?: string | null;
         };
         /**
          * AudioIrCatalogOut
@@ -2177,6 +2191,31 @@ export interface components {
              * @description Метки («комната», «эксперимент»)
              */
             tags?: string[];
+        };
+        /**
+         * AudioKeySegment
+         * @description Сегмент тональности микса (VAMP Key Detector, ``key_track`` кадров «Эмо»).
+         *
+         *     ``key_code`` — числовой код QM Key Detector: 1…12 — мажор (C=1 … B=12),
+         *     13…24 — минор (Cm=13 … Bm=24); метка ``label`` справочная (может быть
+         *     составной, «Eb / D# minor»), для вращения звезды используется код.
+         */
+        AudioKeySegment: {
+            /**
+             * T Sec
+             * @description Начало сегмента устойчивой тональности, с
+             */
+            t_sec: number;
+            /**
+             * Key Code
+             * @description Код тональности QM: 1…12 мажор (C…B), 13…24 минор (Cm…Bm)
+             */
+            key_code: number;
+            /**
+             * Label
+             * @description Название тональности, например «B minor»
+             */
+            label: string;
         };
         /**
          * AudioRenderInfo

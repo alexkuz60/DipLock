@@ -148,6 +148,54 @@ docker-compose up --build
 
 ---
 
+## 🎵 VAMP-анализ (Sonic Annotator) — установка
+
+Для **вращения звезды «Эмо» по тональности** микса используется
+**Sonic Annotator** (C4DM QMUL) с плагином **QM Key Detector** из
+Vamp Plugin Pack. Инструмент **опциональный**: без него рендер и кадры
+«Эмо» работают как прежде (`key_track: null`, вращение нулевое).
+
+```bash
+# 1. Бинарь Sonic Annotator 1.7 (linux64-static) → tools/sonic-annotator/
+#    https://github.com/sonic-visualiser/sonic-annotator/releases
+mkdir -p tools/sonic-annotator && cd tools/sonic-annotator
+curl -L -o sa.tar.gz \
+  https://github.com/sonic-visualiser/sonic-annotator/releases/download/sonic-annotator-1.7/sonic-annotator-1.7.0-linux64-static.tar.gz
+tar xzf sa.tar.gz --strip-components=1 && rm sa.tar.gz
+cd ../..
+
+# 2. Vamp Plugin Pack (Linux x86_64) → ~/vamp
+#    https://www.vamp-plugins.org/download.html
+#    Инсталлятор спрашивает выбор каталога и подтверждения — принимайте
+#    установку плагинов в $HOME/vamp (стандартный пользовательский путь
+#    VAMP под Linux). Либо вручную: распаковать архив пакета и скопировать
+#    *.so, *.n3, *.cat в ~/vamp.
+
+# 3. Проверка цепочки
+VAMP_PATH=$HOME/vamp tools/sonic-annotator/sonic-annotator -l | grep keydetector
+# → vamp:qm-vamp-plugins:qm-keydetector:key
+```
+
+**Нюансы установки:**
+
+- **FUSE**: бинарь — AppImage-сборка; на системах без FUSE установите
+  `sudo apt install libfuse2` (Ubuntu 22.04/24.04), иначе запуск падает с
+  «Cannot mount AppImage».
+- **Ловушка `VAMP_PATH`** (случай 09.10.2026): дефолтный поиск плагинов
+  статической сборки 1.7 падает с «buffer overflow detected» — бэкенд
+  **всегда** передаёт `VAMP_PATH` явно; при ручном запуске делайте так же.
+- **Пути** настраиваются в `.env`: `SONIC_ANNOTATOR_BIN` (дефолт
+  `tools/sonic-annotator/sonic-annotator`) и `VAMP_PATH` (дефолт `~/vamp`).
+- **Docker**: в образ инструмент не входит — ставьте внутрь контейнера
+  по шагам выше либо монтируйте `tools/` и `~/vamp` томами.
+- Transform плагина зафиксирован в репо:
+  `backend/vamp/transforms/qm-keydetector-key.n3` (step/block 32768,
+  length 10, tuning 440). Лицензия инструмента — GPL-2.0 (запускается
+  отдельным процессом, код проекта не смешивается). Подробности —
+  `docs/rules/neuromusic.md`, §«Вращение звезды».
+
+---
+
 ## 📤 Пример API-запроса
 
 Синхронный вариант (скрипты, curl):

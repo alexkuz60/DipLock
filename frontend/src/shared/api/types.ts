@@ -37,6 +37,7 @@ export type AudioBakeStatus = Schemas['AudioBakeStatus']
 /** «Нейромузыка»: кадры радара «Эмо» — 7 лучей по кадрам спектра микса */
 export type AudioEmo = Schemas['AudioEmoOut']
 export type AudioEmoFrame = Schemas['AudioEmoFrame']
+export type AudioKeySegment = Schemas['AudioKeySegment']
 
 /** «Нейромузыка»: каталог IR-пресетов реверберации и один пресет (spatial-audio) */
 export type AudioIrCatalog = Schemas['AudioIrCatalogOut']

@@ -34,6 +34,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { AudioEmo } from '@/shared/api/types'
 import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
 import { hopSeconds, interpolatedRays } from './emoRadar'
+import { frameRotations, interpolatedRotation } from './keyRotation'
 import {
   GRID_FRACTIONS,
   dominantCloud,
@@ -65,9 +66,16 @@ export function RadialChart({ emo = null }: RadialChartProps) {
   // Кадры обязаны быть массивом: защита от ответа не по контракту (заглушка
   // мока, дрейф API) — иначе фоллбэк вместо падения.
   const frames = emo && Array.isArray(emo.frames) ? emo.frames : null
+  // Углы вращения кадров — из тональности микса (key_track; без трека —
+  // нули, звезда без поворота). Статика: меняется только с кадрами.
+  const rotations = useMemo(
+    () => frameRotations(emo?.key_track ?? null, frames ?? []),
+    [emo, frames],
+  )
   // Текущие лучи — в ref: rAF пишет их в DOM напрямую (без state), а JSX
   // при ре-рендере читает то же значение — рассинхрона «атрибут ↔ props» нет.
   const raysRef = useRef<number[]>(randomRays)
+  const rotationRef = useRef(0)
   const lastFramesRef = useRef<typeof frames>(null)
   if (frames !== lastFramesRef.current) {
     lastFramesRef.current = frames
@@ -80,9 +88,10 @@ export function RadialChart({ emo = null }: RadialChartProps) {
   const dotRef = useRef<SVGLineElement>(null)
 
   /** Один кадр → атрибуты полигона и доминанты (императивно, без React). */
-  const paint = useCallback((rays: readonly number[]) => {
+  const paint = useCallback((rays: readonly number[], rotationRad = 0) => {
     raysRef.current = [...rays]
-    const vertices = starPolygon(raysRef.current, RADIUS, CENTER_PT)
+    rotationRef.current = rotationRad
+    const vertices = starPolygon(raysRef.current, RADIUS, CENTER_PT, rotationRad)
     const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
     polygonRef.current?.setAttribute(
       'points',
@@ -107,23 +116,33 @@ export function RadialChart({ emo = null }: RadialChartProps) {
     const tick = () => {
       const position = getActivePlayer()?.position ?? 0
       const rays = interpolatedRays(frames, hopSec, position)
-      if (rays) paint(rays)
+      // Плавный доворот звезды: тот же линейный интерполятор, что у лучей.
+      const rotation = interpolatedRotation(rotations, frames, hopSec, position) ?? 0
+      if (rays) paint(rays, rotation)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [emo, frames, paint])
+  }, [emo, frames, rotations, paint])
 
-  const vertices = starPolygon(raysRef.current, RADIUS, CENTER_PT)
+  const vertices = starPolygon(raysRef.current, RADIUS, CENTER_PT, rotationRef.current)
   const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
   const polygonPoints = vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')
   // Облако доминант всех кадров и их суммарная точка — статика (меняется
-  // только при загрузке кадров): каждая точка = доминанта своего кадра,
-  // суммарная = центроид облака (сумма компонент / число точек) — всегда
-  // внутри облака, в отличие от сырой суммы, упиравшейся в обод.
+  // только при загрузке кадров): каждая точка = доминанта своего кадра
+  // **после его вращения** (спецификация 09.10.2026), суммарная = центроид
+  // облака (сумма компонент / число точек) — всегда внутри облака, в отличие
+  // от сырой суммы, упиравшейся в обод.
   const cloud = useMemo(
-    () => (frames ? dominantCloud(frames, RADIUS, CENTER_PT) : []),
-    [frames],
+    () =>
+      frames
+        ? dominantCloud(
+            frames.map((frame, index) => ({ rays: frame.rays, rotation: rotations[index] ?? 0 })),
+            RADIUS,
+            CENTER_PT,
+          )
+        : [],
+    [frames, rotations],
   )
   const totalPoint = useMemo(
     () => (cloud.length > 0 ? totalDominant(cloud, CENTER_PT, RADIUS) : null),

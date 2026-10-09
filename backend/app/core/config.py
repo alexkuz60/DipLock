@@ -365,6 +365,26 @@ class Settings(BaseSettings):
     # «одиночную частоту» (7.83 ± 0.25 Гц) не выделяет честно.
     filter_iir_max_width_hz: float = 1.0
 
+    # VAMP-анализ (Sonic Annotator, C4DM QMUL): тональность микса → вращение
+    # звезды «Эмо» (docs/rules/neuromusic.md §«Эмо», «Вращение звезды»).
+    # Бинарь — отдельный GPL-процесс (AppImage-сборка), плагины VAMP — из
+    # `vamp_path` (каталог `~/vamp` по умолчанию). ВАЖНО: `VAMP_PATH` всегда
+    # передаётся явно — дефолтный поиск плагинов статической сборки 1.7 падает
+    # с «buffer overflow detected» (ловушка 09.10.2026). Инструкция установки —
+    # README (FUSE для AppImage и диалоги инсталлятора Vamp Plugin Pack).
+    sonic_annotator_bin: str = Field(
+        default=str(_REPO_DIR / "tools" / "sonic-annotator" / "sonic-annotator"),
+        description="Путь к бинарю sonic-annotator (пусто/нет файла → VAMP-анализ выключен)",
+    )
+    vamp_path: str = Field(
+        default="",
+        description="Каталог VAMP-плагинов (пусто → ~/vamp); передаётся в VAMP_PATH",
+    )
+    vamp_transforms_dir: str = Field(
+        default=str(_BACKEND_DIR / "vamp" / "transforms"),
+        description="Каталог зафиксированных transform-файлов Sonic Annotator (.n3)",
+    )
+
     # 10-20 каналы
     standard_channels: list[str] = [
         "Fp1", "Fp2", "F3", "F4", "C3", "C4",

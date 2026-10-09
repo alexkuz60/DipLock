@@ -55,6 +55,11 @@ export function pointAt(angle: number, radius: number, center: RadialPoint): Rad
  * случайными долями (`randomRayPercents`), расчёт по спектральной
  * мощности — отдельная тема (07.10.2026).
  *
+ * `rotationRad` (09.10.2026, «Вращение звезды») — жёсткий поворот полигона
+ * вокруг центра: **+ — против часовой** (мажор), **− — по часовой**
+ * (минор); сетка и границы сегментов не вращаются. Угол кадра — из
+ * тональности микса (`keyRotation.ts`), доминанты считаются после поворота.
+ *
  * Значения зажимаются к 0…100; нечисловое/отсутствующее = 0 (вершина в
  * центре). Точки идут в порядке лучей против часовой — ровно
  * `RADIAL_SEGMENTS` вершин.
@@ -63,6 +68,7 @@ export function starPolygon(
   values: readonly number[],
   radius: number,
   center: RadialPoint,
+  rotationRad = 0,
 ): RadialPoint[] {
   return segmentBoundaries().map((angle, index) => {
     const value = values[index]
@@ -70,7 +76,7 @@ export function starPolygon(
       typeof value === 'number' && Number.isFinite(value)
         ? Math.min(100, Math.max(0, value))
         : 0
-    return pointAt(angle, (radius * pct) / 100, center)
+    return pointAt(angle + rotationRad, (radius * pct) / 100, center)
   })
 }
 
@@ -128,14 +134,22 @@ export function dominantPoint(
  * к точке суммы компонент (`dominantPoint`). Порядок — порядок кадров;
  * пустой список кадров → пустое облако. Рисует `RadialChart.tsx` мелкими
  * кругами; **суммарная доминанта** облака — см. :func:`totalDominant`.
+ *
+ * `rotation` кадра (09.10.2026, «Вращение звезды») — угол поворота полигона
+ * из тональности микса: доминанта кадра считается **после вращения**
+ * (спецификация владельца), отсутствие угла = без поворота.
  */
 export function dominantCloud(
-  frames: readonly { readonly rays: readonly number[] }[],
+  frames: readonly { readonly rays: readonly number[]; readonly rotation?: number }[],
   radius: number,
   center: RadialPoint,
 ): RadialPoint[] {
   return frames.map((frame) =>
-    dominantPoint(starPolygon(frame.rays, radius, center), center, radius),
+    dominantPoint(
+      starPolygon(frame.rays, radius, center, frame.rotation ?? 0),
+      center,
+      radius,
+    ),
   )
 }
 

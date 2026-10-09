@@ -114,3 +114,6 @@ task.md
 
 # --- Скриншоты для просмотра ИИ-кодером
 screenshots/
+
+# --- Sonic Annotator (VAMP, бинарь GPL — не коммитим; ставится по README) ---
+tools/sonic-annotator/

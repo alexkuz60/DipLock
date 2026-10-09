@@ -24,7 +24,7 @@ import numpy as np
 
 from app.core.config import Settings, settings
 from app.services import journal
-from app.services.audio_render import emo_radar, store
+from app.services.audio_render import emo_radar, store, vamp_analysis
 from app.services.audio_render import rows as rows_module
 from app.services.audio_render.core import FS_AUDIO, RESAMPLE_UP, band_stem
 from app.services.audio_render.export import (
@@ -290,7 +290,10 @@ def emo_payload_of(state: RenderState) -> dict[str, Any] | None:
     master_blob = artifacts.read(store.MASTER_NAME)
     if master_blob is None:
         return None
-    payload = emo_radar.frames_from_wav(master_blob)
+    # Трек тональности (VAMP Key Detector) по байтам мастера; инструмент
+    # недоступен → key_track None, кадры всё равно добиваются.
+    key_track = vamp_analysis.key_track_from_wav(master_blob)
+    payload = emo_radar.frames_from_wav(master_blob, key_track=key_track)
     fresh = emo_radar.emo_bytes(payload)
     if artifacts.directory is None:
         # Фоллбэк «запись на диск не удалась» — держим кадры в памяти рядом
@@ -505,8 +508,12 @@ def _run_render(
         # пика = байты master.wav и источник `master` плеера): считается здесь
         # же, из памяти, без временного моно-файла и без повторного чтения
         # диска (спецификация 08.10.2026 — «параллельно операциям рендера»).
-        emo_payload = emo_radar.frames_from_master(master)
         master_wav = wav_bytes(master, FS_AUDIO)
+        # Трек тональности для вращения звезды (VAMP Key Detector) — по тем же
+        # байтам мастера; инструмент недоступен → key_track None (вращение в
+        # UI нулевое), рендер не падает (vamp_analysis, best-effort).
+        key_track = vamp_analysis.key_track_from_wav(master_wav)
+        emo_payload = emo_radar.frames_from_master(master, key_track=key_track)
         del master
 
         loudness_meta: dict[str, Any] | None = None

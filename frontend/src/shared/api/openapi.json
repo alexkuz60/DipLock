@@ -3879,7 +3879,7 @@
     "/api/v1/audio/render/{render_id}/emo": {
       "get": {
         "summary": "Кадры радара «Эмо»: 7 лучей по кадрам спектра чистого микса",
-        "description": "Кадры анимации радара «Эмо» (docs/rules/neuromusic.md §«Эмо»).\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с — сетка синхронизации с плеером и (дальше) дипольными\nэпохами; нормировка лучей глобальная (максимум счётчиков всего микса =\n100 % R). Кадры читаются из ``emo.json`` кэша рендера; старые рендеры\nдобиваются расчётом из ``master.wav`` (чтение вне event loop). 404 —\nрендер не найден, 409 — идёт/упал либо мастер недоступен.",
+        "description": "Кадры анимации радара «Эмо» (docs/rules/neuromusic.md §«Эмо»).\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с — сетка синхронизации с плеером и (дальше) дипольными\nэпохами; нормировка лучей глобальная (максимум счётчиков всего микса =\n100 % R). Кадры читаются из ``emo.json`` кэша рендера; старые рендеры\nдобиваются расчётом из ``master.wav`` (чтение вне event loop). Поле\n``key_track`` — тональность сегментов микса (VAMP Key Detector) для\nвращения звезды (``null`` — инструмент недоступен). 404 —\nрендер не найден, 409 — идёт/упал либо мастер недоступен.",
         "operationId": "audio_render_emo_api_v1_audio_render__render_id__emo_get",
         "parameters": [
           {
@@ -4592,8 +4592,8 @@
           "schema_version": {
             "type": "integer",
             "title": "Schema Version",
-            "description": "Версия контракта emo.json (2 — децибельная шкала лучей)",
-            "default": 2
+            "description": "Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track)",
+            "default": 3
           },
           "fs_audio": {
             "type": "integer",
@@ -4649,6 +4649,33 @@
             "type": "array",
             "title": "Frames",
             "description": "Кадры по возрастанию t_sec"
+          },
+          "key_track": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AudioKeySegment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Track",
+            "description": "Сегменты тональности микса (VAMP Key Detector) для вращения звезды: угол кадра — из активного сегмента, знак — мажор + (против часовой), минор − (по часовой); null — инструмент недоступен, вращение нулевое"
+          },
+          "key_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Source",
+            "description": "Идентификатор источника key_track (vamp:qm-vamp-plugins:qm-keydetector:key)"
           }
         },
         "type": "object",
@@ -4665,7 +4692,7 @@
           "frames"
         ],
         "title": "AudioEmoOut",
-        "description": "``GET /audio/render/{id}/emo``: кадры анимации радара «Эмо».\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с — сетка синхронизации анимации с плеером и (в дальнейшем)\nдипольными эпохами. Лучи — на **децибельной шкале громкости**\n(``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта\n``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из\ndB-лучей. Данные — из ``emo.json`` кэша рендера; рендеры до среза «Эмо»\nдобиваются расчётом из ``master.wav``."
+        "description": "``GET /audio/render/{id}/emo``: кадры анимации радара «Эмо».\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с — сетка синхронизации анимации с плеером и (в дальнейшем)\nдипольными эпохами. Лучи — на **децибельной шкале громкости**\n(``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта\n``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из\ndB-лучей **после вращения полигона**. ``schema_version`` 3 (09.10.2026):\n``key_track`` — сегменты тональности микса (VAMP Key Detector) для\nвращения звезды. Данные — из ``emo.json`` кэша рендера; рендеры до среза\n«Эмо» добиваются расчётом из ``master.wav``."
       },
       "AudioIrCatalogOut": {
         "properties": {
@@ -4716,6 +4743,35 @@
         ],
         "title": "AudioIrPresetOut",
         "description": "Один пресет IR в каталоге ``GET /audio/ir`` (селект «Помещение» UI)."
+      },
+      "AudioKeySegment": {
+        "properties": {
+          "t_sec": {
+            "type": "number",
+            "title": "T Sec",
+            "description": "Начало сегмента устойчивой тональности, с"
+          },
+          "key_code": {
+            "type": "integer",
+            "maximum": 24.0,
+            "minimum": 1.0,
+            "title": "Key Code",
+            "description": "Код тональности QM: 1…12 мажор (C…B), 13…24 минор (Cm…Bm)"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Название тональности, например «B minor»"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t_sec",
+          "key_code",
+          "label"
+        ],
+        "title": "AudioKeySegment",
+        "description": "Сегмент тональности микса (VAMP Key Detector, ``key_track`` кадров «Эмо»).\n\n``key_code`` — числовой код QM Key Detector: 1…12 — мажор (C=1 … B=12),\n13…24 — минор (Cm=13 … Bm=24); метка ``label`` справочная (может быть\nсоставной, «Eb / D# minor»), для вращения звезды используется код."
       },
       "AudioRenderInfo": {
         "properties": {

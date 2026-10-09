@@ -219,3 +219,42 @@ describe('radialChart — геометрия радиального график
     expect(Math.hypot(total.x - 100, total.y - 100)).toBeLessThan(90)
   })
 })
+
+describe('radialChart — вращение звезды (09.10.2026)', () => {
+  it('starPolygon: rotationRad поворачивает вершины против часовой (+)', () => {
+    const center = { x: 100, y: 100 }
+    const values = [100, 0, 0, 0, 0, 0, 0]
+    const rot = 0.3
+    const rotated = starPolygon(values, 90, center, rot)
+    const plain = starPolygon(values, 90, center)
+    // Вершина 0 — на своём луче + угол поворота (жёсткий поворот вокруг центра).
+    expect(rotated[0]?.x).toBeCloseTo(100 + 90 * Math.cos(SEGMENT_START + rot), 6)
+    expect(rotated[0]?.y).toBeCloseTo(100 - 90 * Math.sin(SEGMENT_START + rot), 6)
+    // Длины не меняются: расстояние до центра то же.
+    const plainLen = Math.hypot((plain[0]?.x ?? 0) - 100, (plain[0]?.y ?? 0) - 100)
+    const rotLen = Math.hypot((rotated[0]?.x ?? 0) - 100, (rotated[0]?.y ?? 0) - 100)
+    expect(rotLen).toBeCloseTo(plainLen, 9)
+  })
+
+  it('dominantCloud: доминанта кадра считается после его вращения', () => {
+    const center = { x: 100, y: 100 }
+    const rays = [100, 0, 0, 0, 0, 0, 0]
+    const rot = Math.PI / 7
+    const [point] = dominantCloud([{ rays, rotation: rot }], 90, center)
+    const expected = dominantPoint(starPolygon(rays, 90, center, rot), center, 90)
+    expect(point?.x).toBeCloseTo(expected.x, 10)
+    expect(point?.y).toBeCloseTo(expected.y, 10)
+    // Без rotation — прежняя формула (аддитивность параметра).
+    const [plain] = dominantCloud([{ rays }], 90, center)
+    const plainExpected = dominantPoint(starPolygon(rays, 90, center), center, 90)
+    expect(plain?.x).toBeCloseTo(plainExpected.x, 10)
+    // Равные лучи → центр при любом повороте (семь равномерных направлений).
+    const [even] = dominantCloud(
+      [{ rays: [50, 50, 50, 50, 50, 50, 50], rotation: 1.2 }],
+      90,
+      center,
+    )
+    expect(even?.x).toBeCloseTo(100, 6)
+    expect(even?.y).toBeCloseTo(100, 6)
+  })
+})
