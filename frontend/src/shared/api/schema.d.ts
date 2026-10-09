@@ -2083,14 +2083,16 @@ export interface components {
          *     ``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из
          *     dB-лучей **после вращения полигона**. ``schema_version`` 3 (09.10.2026):
          *     ``key_track`` — сегменты тональности микса (VAMP Key Detector) для
-         *     вращения звезды. Данные — из ``emo.json`` кэша рендера; рендеры до среза
+         *     вращения звезды. ``schema_version`` 4 (09.10.2026): ``tempo_track`` —
+         *     оценки темпа микса (VAMP Tempo and Beat Tracker) для темп-коррекции
+         *     радара. Данные — из ``emo.json`` кэша рендера; рендеры до среза
          *     «Эмо» добиваются расчётом из ``master.wav``.
          */
         AudioEmoOut: {
             /**
              * Schema Version
-             * @description Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track)
-             * @default 3
+             * @description Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, 4 — + tempo_track)
+             * @default 4
              */
             schema_version: number;
             /**
@@ -2154,6 +2156,16 @@ export interface components {
              * @description Идентификатор источника key_track (vamp:qm-vamp-plugins:qm-keydetector:key)
              */
             key_source?: string | null;
+            /**
+             * Tempo Track
+             * @description Оценки темпа микса (VAMP Tempo and Beat Tracker, вывод tempo) для темп-коррекции радара: темп кадра — значение его временного диапазона (несколько оценок → среднее); null — инструмент недоступен, коррекция нулевая
+             */
+            tempo_track?: components["schemas"]["AudioTempoSegment"][] | null;
+            /**
+             * Tempo Source
+             * @description Идентификатор источника tempo_track (vamp:qm-vamp-plugins:qm-tempotracker:tempo)
+             */
+            tempo_source?: string | null;
         };
         /**
          * AudioIrCatalogOut
@@ -2428,6 +2440,27 @@ export interface components {
              * @description Для «Монтажа»: id рядов, по которым есть треки (иначе пусто)
              */
             rows?: string[];
+        };
+        /**
+         * AudioTempoSegment
+         * @description Оценка темпа микса (VAMP Tempo and Beat Tracker, ``tempo_track`` кадров «Эмо»).
+         *
+         *     Вывод ``tempo`` плагина — «locked tempo estimates»: по одной оценке на
+         *     строку CSV, значение — темп в bpm. Для кадра анимации берётся значение
+         *     темпа его временного диапазона (несколько оценок в диапазоне → среднее,
+         *     спецификация владельца 09.10.2026).
+         */
+        AudioTempoSegment: {
+            /**
+             * T Sec
+             * @description Момент оценки темпа, с
+             */
+            t_sec: number;
+            /**
+             * Bpm
+             * @description Темп, bpm (> 0)
+             */
+            bpm: number;
         };
         /**
          * BestFitDipole

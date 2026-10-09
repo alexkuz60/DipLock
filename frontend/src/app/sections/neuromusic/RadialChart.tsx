@@ -27,7 +27,10 @@
  * всегда **внутри** облака, в отличие от сырой суммы на ободе). Пиксельные
  * толщины —
  * `vector-effect="non-scaling-stroke"`. Геометрия — чистые модули
- * `radialChart.ts` и `emoRadar.ts`; отрисовка SVG, как у соседнего
+ * `radialChart.ts`, `emoRadar.ts`, `keyRotation.ts` и `tempoCorrection.ts`
+ * (темп-коррекция 09.10.2026: радиусы вершин удлиняются на `Kr` своей
+ * половине круга **после** вращения и **до** доминант, метка темпа —
+ * засечка на оси Y); отрисовка SVG, как у соседнего
  * силуэта `BrainRoomView`.
  */
 import { useCallback, useEffect, useMemo, useRef } from 'react'
@@ -36,13 +39,18 @@ import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
 import { hopSeconds, interpolatedRays } from './emoRadar'
 import { frameRotations, interpolatedRotation } from './keyRotation'
 import {
+  frameTempos,
+  interpolatedTempo,
+  tempoY,
+} from './tempoCorrection'
+import {
   GRID_FRACTIONS,
   dominantCloud,
   dominantPoint,
   pointAt,
   randomRayPercents,
   segmentBoundaries,
-  starPolygon,
+  tempoStarPolygon,
   totalDominant,
 } from './radialChart'
 
@@ -72,10 +80,22 @@ export function RadialChart({ emo = null }: RadialChartProps) {
     () => frameRotations(emo?.key_track ?? null, frames ?? []),
     [emo, frames],
   )
+  // Темп кадров — из VAMP Tempo and Beat Tracker (tempo_track; без трека —
+  // null, темп-коррекция нулевая). Статика: меняется только с кадрами.
+  const tempos = useMemo(
+    () =>
+      frameTempos(
+        emo?.tempo_track ?? null,
+        frames ?? [],
+        emo ? hopSeconds(emo.hop_samples, emo.fs_audio) : 0,
+      ),
+    [emo, frames],
+  )
   // Текущие лучи — в ref: rAF пишет их в DOM напрямую (без state), а JSX
   // при ре-рендере читает то же значение — рассинхрона «атрибут ↔ props» нет.
   const raysRef = useRef<number[]>(randomRays)
   const rotationRef = useRef(0)
+  const tempoRef = useRef<number | null>(null)
   const lastFramesRef = useRef<typeof frames>(null)
   if (frames !== lastFramesRef.current) {
     lastFramesRef.current = frames
@@ -86,25 +106,35 @@ export function RadialChart({ emo = null }: RadialChartProps) {
   const polygonRef = useRef<SVGPolygonElement>(null)
   const dominantRef = useRef<SVGLineElement>(null)
   const dotRef = useRef<SVGLineElement>(null)
+  const tempoMarkRef = useRef<SVGLineElement>(null)
 
-  /** Один кадр → атрибуты полигона и доминанты (императивно, без React). */
-  const paint = useCallback((rays: readonly number[], rotationRad = 0) => {
-    raysRef.current = [...rays]
-    rotationRef.current = rotationRad
-    const vertices = starPolygon(raysRef.current, RADIUS, CENTER_PT, rotationRad)
-    const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
-    polygonRef.current?.setAttribute(
-      'points',
-      vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(' '),
-    )
-    // Доминанта — из центра к точке суммы; точка — нулевой штрих в ней же.
-    dominantRef.current?.setAttribute('x2', String(dominant.x))
-    dominantRef.current?.setAttribute('y2', String(dominant.y))
-    for (const attribute of ['x1', 'y1', 'x2', 'y2'] as const) {
-      const value = attribute === 'x1' || attribute === 'x2' ? dominant.x : dominant.y
-      dotRef.current?.setAttribute(attribute, String(value))
-    }
-  }, [])
+  /** Один кадр → атрибуты полигона, доминанты и метки темпа (без React). */
+  const paint = useCallback(
+    (rays: readonly number[], rotationRad = 0, bpm: number | null = null) => {
+      raysRef.current = [...rays]
+      rotationRef.current = rotationRad
+      tempoRef.current = bpm
+      const vertices = tempoStarPolygon(raysRef.current, RADIUS, CENTER_PT, rotationRad, bpm)
+      const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
+      polygonRef.current?.setAttribute(
+        'points',
+        vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(' '),
+      )
+      // Доминанта — из центра к точке суммы; точка — нулевой штрих в ней же.
+      dominantRef.current?.setAttribute('x2', String(dominant.x))
+      dominantRef.current?.setAttribute('y2', String(dominant.y))
+      for (const attribute of ['x1', 'y1', 'x2', 'y2'] as const) {
+        const value = attribute === 'x1' || attribute === 'x2' ? dominant.x : dominant.y
+        dotRef.current?.setAttribute(attribute, String(value))
+      }
+      // Метка темпа на оси Y: y = tempoY(bpm) · R от центра (60 внизу,
+      // 120 в центре, 240 вверху); темп не определён — метка в центре.
+      const markY = CENTER - (bpm == null ? 0 : tempoY(bpm)) * RADIUS
+      tempoMarkRef.current?.setAttribute('y1', String(markY))
+      tempoMarkRef.current?.setAttribute('y2', String(markY))
+    },
+    [],
+  )
 
   // Анимация: пока есть кадры, каждый кадр экрана читает позицию плеера
   // (с учётом rate ×0.5; вне игры — сохранённая позиция/0) и рисует
@@ -118,31 +148,43 @@ export function RadialChart({ emo = null }: RadialChartProps) {
       const rays = interpolatedRays(frames, hopSec, position)
       // Плавный доворот звезды: тот же линейный интерполятор, что у лучей.
       const rotation = interpolatedRotation(rotations, frames, hopSec, position) ?? 0
-      if (rays) paint(rays, rotation)
+      // Темп кадра — тоже плавно, как лучи и вращение.
+      const tempo = interpolatedTempo(tempos, frames, hopSec, position)
+      if (rays) paint(rays, rotation, tempo)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [emo, frames, rotations, paint])
+  }, [emo, frames, rotations, tempos, paint])
 
-  const vertices = starPolygon(raysRef.current, RADIUS, CENTER_PT, rotationRef.current)
+  const vertices = tempoStarPolygon(
+    raysRef.current,
+    RADIUS,
+    CENTER_PT,
+    rotationRef.current,
+    tempoRef.current,
+  )
   const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
   const polygonPoints = vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')
   // Облако доминант всех кадров и их суммарная точка — статика (меняется
   // только при загрузке кадров): каждая точка = доминанта своего кадра
-  // **после его вращения** (спецификация 09.10.2026), суммарная = центроид
-  // облака (сумма компонент / число точек) — всегда внутри облака, в отличие
-  // от сырой суммы, упиравшейся в обод.
+  // **после его вращения и темп-коррекции** (спецификация 09.10.2026),
+  // суммарная = центроид облака (сумма компонент / число точек) — всегда
+  // внутри облака, в отличие от сырой суммы, упиравшейся в обод.
   const cloud = useMemo(
     () =>
       frames
         ? dominantCloud(
-            frames.map((frame, index) => ({ rays: frame.rays, rotation: rotations[index] ?? 0 })),
+            frames.map((frame, index) => ({
+              rays: frame.rays,
+              rotation: rotations[index] ?? 0,
+              tempo: tempos[index] ?? null,
+            })),
             RADIUS,
             CENTER_PT,
           )
         : [],
-    [frames, rotations],
+    [frames, rotations, tempos],
   )
   const totalPoint = useMemo(
     () => (cloud.length > 0 ? totalDominant(cloud, CENTER_PT, RADIUS) : null),
@@ -186,6 +228,20 @@ export function RadialChart({ emo = null }: RadialChartProps) {
         y2={CENTER + RADIUS}
         stroke="var(--color-fg-2)"
         strokeWidth={1}
+      />
+      {/* Метка темпа на оси Y («Темп-коррекция», 09.10.2026): горизонтальная
+          засечка на высоте tempoY(bpm)·R (60 внизу, 120 в центре, 240 вверху);
+          анимация пишет y1/y2 через ref. */}
+      <line
+        ref={tempoMarkRef}
+        data-part="tempo-mark"
+        x1={CENTER - 12}
+        y1={CENTER}
+        x2={CENTER + 12}
+        y2={CENTER}
+        stroke="var(--color-fg-0)"
+        strokeWidth={2}
+        vectorEffect="non-scaling-stroke"
       />
       {/* Лучи-разделители 7 сегментов (отсчёт — против часовой). */}
       {boundaries.map((angle, index) => {

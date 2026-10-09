@@ -290,10 +290,13 @@ def emo_payload_of(state: RenderState) -> dict[str, Any] | None:
     master_blob = artifacts.read(store.MASTER_NAME)
     if master_blob is None:
         return None
-    # Трек тональности (VAMP Key Detector) по байтам мастера; инструмент
-    # недоступен → key_track None, кадры всё равно добиваются.
+    # Трек тональности и темп (VAMP) по байтам мастера; инструмент
+    # недоступен → треки None, кадры всё равно добиваются.
     key_track = vamp_analysis.key_track_from_wav(master_blob)
-    payload = emo_radar.frames_from_wav(master_blob, key_track=key_track)
+    tempo_track = vamp_analysis.tempo_track_from_wav(master_blob)
+    payload = emo_radar.frames_from_wav(
+        master_blob, key_track=key_track, tempo_track=tempo_track,
+    )
     fresh = emo_radar.emo_bytes(payload)
     if artifacts.directory is None:
         # Фоллбэк «запись на диск не удалась» — держим кадры в памяти рядом
@@ -509,11 +512,14 @@ def _run_render(
         # же, из памяти, без временного моно-файла и без повторного чтения
         # диска (спецификация 08.10.2026 — «параллельно операциям рендера»).
         master_wav = wav_bytes(master, FS_AUDIO)
-        # Трек тональности для вращения звезды (VAMP Key Detector) — по тем же
-        # байтам мастера; инструмент недоступен → key_track None (вращение в
-        # UI нулевое), рендер не падает (vamp_analysis, best-effort).
+        # Трек тональности для вращения звезды и темп для её коррекции (VAMP) —
+        # по тем же байтам мастера; инструмент недоступен → треки None
+        # (вращение/коррекция в UI нулевые), рендер не падает (best-effort).
         key_track = vamp_analysis.key_track_from_wav(master_wav)
-        emo_payload = emo_radar.frames_from_master(master, key_track=key_track)
+        tempo_track = vamp_analysis.tempo_track_from_wav(master_wav)
+        emo_payload = emo_radar.frames_from_master(
+            master, key_track=key_track, tempo_track=tempo_track,
+        )
         del master
 
         loudness_meta: dict[str, Any] | None = None

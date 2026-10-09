@@ -8,6 +8,8 @@
  * `radialChart.test.ts`, рисует `RadialChart.tsx`.
  */
 
+import { tempoCorrectedRays } from './tempoCorrection'
+
 /** Число сегментов = число полос партитуры (`BAND_ORDER` из `bandLabels.ts`). */
 export const RADIAL_SEGMENTS = 7
 
@@ -80,6 +82,26 @@ export function starPolygon(
   })
 }
 
+/**
+ * **Вершины с темп-коррекцией** (09.10.2026, «Темп-коррекция»): порядок шагов
+ * спецификации владельца — лучи → гармоническое вращение → **темп-коррекция
+ * радиусов** → вершины → доминанта. Квадрант вершины определяется её углом
+ * **после** поворота (`angles` = границы сегментов + `rotationRad`), поэтому
+ * коррекция применяется к значениям до `starPolygon`, но с уже повёрнутыми
+ * углами (`tempoCorrection.tempoCorrectedRays`). `bpm` null — без коррекции.
+ */
+export function tempoStarPolygon(
+  values: readonly number[],
+  radius: number,
+  center: RadialPoint,
+  rotationRad = 0,
+  bpm: number | null = null,
+): RadialPoint[] {
+  const angles = segmentBoundaries().map((angle) => angle + rotationRad)
+  const corrected = tempoCorrectedRays(values, angles, bpm)
+  return starPolygon(corrected, radius, center, rotationRad)
+}
+
 /** Нижняя граница случайной длины луча, % радиуса (0.1 × R). */
 export const RANDOM_RAY_MIN_PCT = 10
 
@@ -137,16 +159,29 @@ export function dominantPoint(
  *
  * `rotation` кадра (09.10.2026, «Вращение звезды») — угол поворота полигона
  * из тональности микса: доминанта кадра считается **после вращения**
- * (спецификация владельца), отсутствие угла = без поворота.
+ * (спецификация владельца), отсутствие угла = без поворота. `tempo` кадра
+ * (09.10.2026, «Темп-коррекция») — темп в bpm: доминанта считается **после
+ * темп-коррекции радиусов** (`tempoStarPolygon`), отсутствие темпа = без
+ * коррекции.
  */
 export function dominantCloud(
-  frames: readonly { readonly rays: readonly number[]; readonly rotation?: number }[],
+  frames: readonly {
+    readonly rays: readonly number[]
+    readonly rotation?: number
+    readonly tempo?: number | null
+  }[],
   radius: number,
   center: RadialPoint,
 ): RadialPoint[] {
   return frames.map((frame) =>
     dominantPoint(
-      starPolygon(frame.rays, radius, center, frame.rotation ?? 0),
+      tempoStarPolygon(
+        frame.rays,
+        radius,
+        center,
+        frame.rotation ?? 0,
+        frame.tempo ?? null,
+      ),
       center,
       radius,
     ),

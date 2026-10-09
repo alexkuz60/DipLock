@@ -1,9 +1,10 @@
-"""Тесты VAMP-анализа (Sonic Annotator): парсер CSV Key Detector и key_track.
+"""Тесты VAMP-анализа (Sonic Annotator): парсеры CSV Key Detector/Tempo и треки.
 
-Юнит — разбор CSV-таблицы плагина (составные метки, мусорные строки), запуск
+Юнит — разбор CSV-таблиц плагинов (составные метки, мусорные строки), запуск
 ``sonic-annotator`` с моком ``subprocess`` (успех/нет бинаря/нет transform/
-падение/таймаут), привязка ``key_track`` к контракту кадров «Эмо» и валидация
-``AudioEmoOut``; ``integration`` — живой прогон плагина (бинарь в ``tools/``).
+падение/таймаут), привязка ``key_track``/``tempo_track`` к контракту кадров
+«Эмо» и валидация ``AudioEmoOut``; ``integration`` — живой прогон плагинов
+(бинарь в ``tools/``).
 """
 import subprocess
 
@@ -12,9 +13,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import settings
-from app.schemas.audio import AudioEmoOut, AudioKeySegment
+from app.schemas.audio import AudioEmoOut, AudioKeySegment, AudioTempoSegment
 from app.services.audio_render import emo_radar, vamp_analysis
-from app.services.audio_render.vamp_analysis import KEY_SOURCE
+from app.services.audio_render.vamp_analysis import KEY_SOURCE, TEMPO_SOURCE
 
 # Выдержка реального вывода Key Detector (--csv-stdout): имя файла только в
 # первой строке, метка бывает составной («Eb / D# minor»).
@@ -162,6 +163,105 @@ def test_audio_emo_out_validates_key_track():
         AudioKeySegment(t_sec=0.0, key_code=25, label="X")
 
 
+# --- юнит: парсер CSV Tempo -----------------------------------------------------
+
+
+def test_parse_tempo_csv_estimates():
+    """CSV → оценки темпа: времена/bpm, метка и имя файла игнорируются."""
+    text = (
+        '"master.wav",0.000000000,120.185,"120,19 bpm"\n'
+        ',7.430385488,90.6661,"90,67 bpm"\n'
+        ',15.0,96.0,"96,00 bpm"\n'
+    )
+    estimates = vamp_analysis.parse_tempo_csv(text)
+    assert estimates == [
+        {"t_sec": 0.0, "bpm": 120.185},
+        {"t_sec": 7.430385, "bpm": 90.666},
+        {"t_sec": 15.0, "bpm": 96.0},
+    ]
+
+
+def test_parse_tempo_csv_skips_garbage():
+    """Мусорные строки (bpm ≤ 0, не число, короткие) — пропускаются."""
+    text = (
+        '"f.wav",0.0,0,"0 bpm"\n'   # bpm 0 — не оценка
+        ',1.0,-90,"-90 bpm"\n'     # отрицательный bpm
+        ',2.0,xx,"xx"\n'           # bpm не число
+        "just,a,b,c\n"             # время не число
+        "\n"                       # пустая строка
+        ',3.0,75.0,"75 bpm"\n'     # валидная
+    )
+    estimates = vamp_analysis.parse_tempo_csv(text)
+    assert estimates == [{"t_sec": 3.0, "bpm": 75.0}]
+    assert vamp_analysis.parse_tempo_csv("") == []
+
+
+# --- юнит: запуск sonic-annotator для темпа (мок subprocess) --------------------
+
+
+def test_tempo_track_from_wav_success(monkeypatch):
+    """Успех: команда собрана с transform Tempo, CSV разобран в оценки."""
+    captured: dict = {}
+    tempo_csv = '"master.wav",0.0,120.185,"120,19 bpm"\n,1.0,122.5,"122,50 bpm"\n'
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout=tempo_csv, stderr="")
+
+    monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
+    track = vamp_analysis.tempo_track_from_wav(b"RIFF-fake")
+    assert track == [{"t_sec": 0.0, "bpm": 120.185}, {"t_sec": 1.0, "bpm": 122.5}]
+    assert vamp_analysis.TEMPO_TRANSFORM_NAME in captured["cmd"][2]
+
+
+def test_tempo_track_from_wav_missing_transform(monkeypatch, tmp_path):
+    """Бинарь есть, transform-файла темпа нет — None (конфигурация не собрана)."""
+    monkeypatch.setattr(settings, "sonic_annotator_bin", vamp_analysis.__file__)
+    monkeypatch.setattr(settings, "vamp_transforms_dir", str(tmp_path))
+    assert vamp_analysis.tempo_track_from_wav(b"x") is None
+
+
+def test_tempo_track_from_wav_nonzero_rc(monkeypatch):
+    """Ненулевой код возврата — None (best-effort, как у key_track)."""
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
+    assert vamp_analysis.tempo_track_from_wav(b"x") is None
+
+
+# --- юнит: контракт кадров «Эмо» с tempo_track ----------------------------------
+
+
+def _tempo_estimates() -> list[dict]:
+    """Контрольный tempo_track для тестов привязки к кадрам."""
+    return [
+        {"t_sec": 0.0, "bpm": 120.0},
+        {"t_sec": 3.413333, "bpm": 90.0},
+    ]
+
+
+def test_emo_frames_attach_tempo_track():
+    """tempo_track попадает в payload (+tempo_source); без него оба поля None."""
+    track = _tempo_estimates()
+    payload = emo_radar.emo_frames(np.ones(40_000), tempo_track=track)
+    assert payload["tempo_track"] == track
+    assert payload["tempo_source"] == TEMPO_SOURCE
+    plain = emo_radar.emo_frames(np.ones(40_000))
+    assert plain["tempo_track"] is None and plain["tempo_source"] is None
+
+
+def test_audio_emo_out_validates_tempo_track():
+    """AudioEmoOut принимает tempo_track; bpm ≤ 0 — ошибка."""
+    payload = emo_radar.emo_frames(np.ones(40_000), tempo_track=_tempo_estimates())
+    validated = AudioEmoOut.model_validate(payload)
+    assert validated.tempo_track is not None
+    assert validated.tempo_track[0].bpm == 120.0
+    assert validated.tempo_source == TEMPO_SOURCE
+    with pytest.raises(ValidationError):
+        AudioTempoSegment(t_sec=0.0, bpm=0.0)
+
+
 # --- integration: живой прогон Key Detector ------------------------------------
 
 
@@ -186,3 +286,29 @@ def test_key_track_live_sonic_annotator():
     track = vamp_analysis.key_track_from_wav(blob)
     assert track is not None
     assert all(1 <= seg["key_code"] <= 24 for seg in track)
+
+
+@pytest.mark.integration
+def test_tempo_track_live_sonic_annotator():
+    """Реальный sonic-annotator + qm-tempotracker (вывод tempo) по щелчкам.
+
+    Маркер ``integration``: пропускается без бинаря в ``tools/`` (в CI его
+    нет); синтетические щелчки каждые 0.5 с (120 bpm) — плагин обязан найти
+    темп рядом с 120 (без жёсткого допуска — важна работоспособность цепочки).
+    """
+    import os
+
+    from app.services.audio_render.export import wav_bytes
+
+    if not os.path.isfile(settings.sonic_annotator_bin):
+        pytest.skip("sonic-annotator не установлен")
+    fs = 48_000
+    t = np.arange(fs * 8) / fs
+    sig = np.zeros_like(t)
+    for k in range(16):
+        sig[(t >= k * 0.5) & (t < k * 0.5 + 0.02)] = 0.8
+    blob = wav_bytes(np.stack([sig] * 2, axis=1), fs)
+    track = vamp_analysis.tempo_track_from_wav(blob)
+    assert track is not None and len(track) >= 1
+    assert all(seg["bpm"] > 0 for seg in track)
+    assert any(abs(seg["bpm"] - 120.0) < 5.0 for seg in track)

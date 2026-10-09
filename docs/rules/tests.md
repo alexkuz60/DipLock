@@ -1144,3 +1144,30 @@ center)` (вершины по 7 лучам = проценты распредел
 (95 файлов), ruff/mypy/eslint/tsc чисты, `openapi.json` 76 путей (+`/emo`)
 → `schema.d.ts` (`AudioEmoOut`/`AudioEmoFrame`), бандл собран в
 `backend/app/static/ui`.
+
+**Срез «Темп-коррекция радара „Эмо“» (09.10.2026).** Backend —
+`tests/test_audio_vamp.py` **+8**: парсер CSV темпа (времена/bpm, метка и имя
+файла игнорируются; мусор — bpm ≤ 0/не число/короткие строки — пропускается),
+моки subprocess для `tempo_track_from_wav` (успех с transform Tempo, нет
+transform, rc≠0), привязка `tempo_track`/`tempo_source` к payload и валидация
+`AudioEmoOut` (`AudioTempoSegment`, bpm ≤ 0 — ошибка); **`integration`** —
+живой прогон qm-tempotracker по щелчкам 120 bpm (оценка рядом с 120,
+цепочка sonic-annotator → CSV → трек); контракт кадров обновлён на
+**schema v4** (`tempo_track: null` без VAMP). Frontend — новый
+`tempoCorrection.test.ts` **20**: шкала Y (60/120/240 → −1/0/+1, зажим вне
+границ, мусор → 0), Kr = sin(π/2·|y|) (60 → 1, 90 → ≈0.607, 120 → 0,
+180 → ≈0.795, 240 → 1, симметрия по |y|), `frameTempos` (усреднение нескольких
+оценок в диапазоне кадра, hold до следующей оценки, null до первой, граница
+кадра `[t, t+hop)`), `interpolatedTempo` (линейная, хвосты, null-семантика),
+`tempoCorrectedRays` (нижние квадранты при темпе < 120, верхние при > 120,
+квадрант по углу **после** поворота — сдвиг π меняет половину, 120/мусор →
+без изменений, **условная нормализация**: превышение 100 % → деление на max,
+без превышения — как есть); `radialChart.test.ts` **+2** (вершины нижних
+квадрантов удлиняются при темпе 60, доминанта кадра считается после
+темп-коррекции, аддитивность `tempo`). Итог: pytest — **906** (без
+`integration` — **886**), Vitest — **1135** (97 файлов), ruff/mypy/eslint/tsc
+чисты, `openapi.json` 76 путей (контракт расширен: `AudioTempoSegment`,
+`tempo_track`/`tempo_source`) → `schema.d.ts`, бандл собран в
+`backend/app/static/ui`. Ловушки: transform qm-tempotracker требует
+**rate 44100** (шаг 512 при 48 кГц плагин отвергает — «Unsupported step size»);
+CSV темпа — 4 колонки `[файл,] время, значение, метка` (как у Key Detector).

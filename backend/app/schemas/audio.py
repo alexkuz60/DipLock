@@ -235,6 +235,19 @@ class AudioKeySegment(BaseModel):
     label: str = Field(description="Название тональности, например «B minor»")
 
 
+class AudioTempoSegment(BaseModel):
+    """Оценка темпа микса (VAMP Tempo and Beat Tracker, ``tempo_track`` кадров «Эмо»).
+
+    Вывод ``tempo`` плагина — «locked tempo estimates»: по одной оценке на
+    строку CSV, значение — темп в bpm. Для кадра анимации берётся значение
+    темпа его временного диапазона (несколько оценок в диапазоне → среднее,
+    спецификация владельца 09.10.2026).
+    """
+
+    t_sec: float = Field(description="Момент оценки темпа, с")
+    bpm: float = Field(gt=0.0, description="Темп, bpm (> 0)")
+
+
 class AudioEmoFrame(BaseModel):
     """Один кадр анимации радара «Эмо» (слайд полигона со своим вектором Доминанты)."""
 
@@ -262,13 +275,18 @@ class AudioEmoOut(BaseModel):
     ``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из
     dB-лучей **после вращения полигона**. ``schema_version`` 3 (09.10.2026):
     ``key_track`` — сегменты тональности микса (VAMP Key Detector) для
-    вращения звезды. Данные — из ``emo.json`` кэша рендера; рендеры до среза
+    вращения звезды. ``schema_version`` 4 (09.10.2026): ``tempo_track`` —
+    оценки темпа микса (VAMP Tempo and Beat Tracker) для темп-коррекции
+    радара. Данные — из ``emo.json`` кэша рендера; рендеры до среза
     «Эмо» добиваются расчётом из ``master.wav``.
     """
 
     schema_version: int = Field(
-        default=3,
-        description="Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track)",
+        default=4,
+        description=(
+            "Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, "
+            "4 — + tempo_track)"
+        ),
     )
     fs_audio: int = Field(description="Частота дискретизации микса, Гц (48000)")
     fft_size: int = Field(description="Размер окна FFT, сэмплов (32768 = 2^15)")
@@ -304,4 +322,20 @@ class AudioEmoOut(BaseModel):
     key_source: str | None = Field(
         default=None,
         description="Идентификатор источника key_track (vamp:qm-vamp-plugins:qm-keydetector:key)",
+    )
+    tempo_track: list[AudioTempoSegment] | None = Field(
+        default=None,
+        description=(
+            "Оценки темпа микса (VAMP Tempo and Beat Tracker, вывод tempo) "
+            "для темп-коррекции радара: темп кадра — значение его временного "
+            "диапазона (несколько оценок → среднее); null — инструмент "
+            "недоступен, коррекция нулевая"
+        ),
+    )
+    tempo_source: str | None = Field(
+        default=None,
+        description=(
+            "Идентификатор источника tempo_track "
+            "(vamp:qm-vamp-plugins:qm-tempotracker:tempo)"
+        ),
     )

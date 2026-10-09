@@ -12,6 +12,7 @@ import {
   randomRayPercents,
   segmentBoundaries,
   starPolygon,
+  tempoStarPolygon,
   totalDominant,
 } from './radialChart'
 
@@ -256,5 +257,38 @@ describe('radialChart — вращение звезды (09.10.2026)', () => {
     )
     expect(even?.x).toBeCloseTo(100, 6)
     expect(even?.y).toBeCloseTo(100, 6)
+  })
+})
+
+describe('radialChart — темп-коррекция (09.10.2026)', () => {
+  it('tempoStarPolygon: вершины нижних квадрантов удлиняются при темпе < 120', () => {
+    const center = { x: 100, y: 100 }
+    const values = [40, 40, 40, 40, 40, 40, 40]
+    const slow = tempoStarPolygon(values, 90, center, 0, 60) // Kr = 1
+    const plain = tempoStarPolygon(values, 90, center)
+    slow.forEach((point, index) => {
+      const angle = ((SEGMENT_START + index * SEGMENT_STEP) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI)
+      const isLower = angle >= Math.PI
+      const expected = 90 * (isLower ? 0.8 : 0.4) // 40·(1+1) = 80 либо 40
+      expect(Math.hypot(point.x - 100, point.y - 100)).toBeCloseTo(expected, 6)
+      if (!isLower) {
+        expect(point.x).toBeCloseTo(plain[index]?.x ?? 0, 9)
+      }
+    })
+  })
+
+  it('dominantCloud: доминанта кадра считается после темп-коррекции', () => {
+    const center = { x: 100, y: 100 }
+    const rays = [100, 0, 0, 0, 0, 0, 0]
+    const [point] = dominantCloud([{ rays, tempo: 240 }], 90, center)
+    // Вершина 0 (SEGMENT_START < π → верх) удваивается при темпе 240, но
+    // 200 % → нормализация к max = 100 %: одна вершина = 90 px, как без
+    // коррекции; доминанта совпадает с некорректированной.
+    const expected = dominantPoint(starPolygon(rays, 90, center), center, 90)
+    expect(point?.x).toBeCloseTo(expected.x, 9)
+    expect(point?.y).toBeCloseTo(expected.y, 9)
+    // Без tempo — прежняя формула (аддитивность параметра).
+    const [plain] = dominantCloud([{ rays }], 90, center)
+    expect(plain?.x).toBeCloseTo(expected.x, 9)
   })
 })

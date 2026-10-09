@@ -39,6 +39,9 @@ export type AudioEmo = Schemas['AudioEmoOut']
 export type AudioEmoFrame = Schemas['AudioEmoFrame']
 export type AudioKeySegment = Schemas['AudioKeySegment']
 
+/** Оценка темпа микса (VAMP Tempo and Beat Tracker, `tempo_track` кадров «Эмо») */
+export type AudioTempoSegment = Schemas['AudioTempoSegment']
+
 /** «Нейромузыка»: каталог IR-пресетов реверберации и один пресет (spatial-audio) */
 export type AudioIrCatalog = Schemas['AudioIrCatalogOut']
 export type AudioIrPreset = Schemas['AudioIrPresetOut']
