@@ -11,6 +11,7 @@ import {
   TEMPO_CENTER_BPM,
   TEMPO_MAX_BPM,
   TEMPO_MIN_BPM,
+  formatTempoBpm,
   frameTempos,
   interpolatedTempo,
   tempoCorrectedRays,
@@ -178,4 +179,17 @@ describe('tempoCorrectedRays — коррекция радиусов по ква
       expect(mild[index]).toBeCloseTo(isLower ? 40 : 20, 6)
     })
   })
+
+describe('formatTempoBpm — темп текстом для счётчика «Темп»', () => {
+  it('один десятичный знак, запятая как разделитель; неопределённый темп — «—»', () => {
+    expect(formatTempoBpm(120.44)).toBe('120,4 bpm')
+    expect(formatTempoBpm(100)).toBe('100,0 bpm')
+    expect(formatTempoBpm(12.34)).toBe('12,3 bpm')
+    expect(formatTempoBpm(null)).toBe('—')
+    expect(formatTempoBpm(undefined)).toBe('—')
+    expect(formatTempoBpm(Number.NaN)).toBe('—')
+    expect(formatTempoBpm(0)).toBe('—')
+    expect(formatTempoBpm(-5)).toBe('—')
+  })
+})
 })

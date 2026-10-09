@@ -15,11 +15,14 @@
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { api } from '@/shared/api/client'
+import type { AudioEmo } from '@/shared/api/types'
 import { NeuromusicPlayer } from '@/shared/lib/neuromusicPlayer'
 import {
   drawButterfly,
+  drawKeyLines,
   drawPlayhead,
   drawRuler,
+  drawTempoSteps,
   filePeaks,
   formatTime,
   peakColumns,
@@ -49,6 +52,12 @@ export type WaveTrackerProps = {
   /** Ключи полос в порядке партитуры (`status.tracks`) */
   tracks: string[]
   /**
+   * Кадры «Эмо» с треками Соник Аннотатора (`key_track`/`tempo_track`) —
+   * аннотации на волне: вертикали смены аккордов и ступенчатый темп
+   * (null — аннотаций нет, волна без них).
+   */
+  emo?: AudioEmo | null
+  /**
    * ref таймкода в хедере раздела (контролы слева от Play/Stop): `paint`
    * пишет в него textContent — позиция/длительность без ре-рендеров хедера.
    */
@@ -60,7 +69,7 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'Не удалось построить плеер'
 }
 
-export function WaveTracker({ renderId, tracks, timeRef }: WaveTrackerProps) {
+export function WaveTracker({ renderId, tracks, timeRef, emo = null }: WaveTrackerProps) {
   const source = useNeuromusicPlayer((state) => state.source)
   const zoom = useNeuromusicPlayer((state) => state.zoom)
   const ready = useNeuromusicPlayer((state) => state.ready)
@@ -83,6 +92,9 @@ export function WaveTracker({ renderId, tracks, timeRef }: WaveTrackerProps) {
   const lastRef = useRef({ pos: Number.NaN })
   const widthRef = useRef(0)
   widthRef.current = width
+  /** Аннотации Соник Аннотатора: `paint` читает их из ref (он стабилен). */
+  const emoRef = useRef<AudioEmo | null>(emo)
+  emoRef.current = emo
   const themeRef = useRef<TrackerTheme | null>(null)
   if (!themeRef.current) themeRef.current = trackerTheme()
   /**
@@ -249,7 +261,27 @@ export function WaveTracker({ renderId, tracks, timeRef }: WaveTrackerProps) {
     if (viewChanged || waveDirtyRef.current) {
       waveDirtyRef.current = false
       const waveCtx = waveRef.current ? prepareCanvas(waveRef.current, w, WAVE_HEIGHT_PX) : null
-      if (waveCtx) drawButterfly(waveCtx, peaksRef.current, view, duration, w, WAVE_HEIGHT_PX, theme)
+      if (waveCtx) {
+        drawButterfly(waveCtx, peaksRef.current, view, duration, w, WAVE_HEIGHT_PX, theme)
+        // Аннотации Соник Аннотатора поверх волны (та же статика окна):
+        // вертикали смены аккордов и ступенчатый график темпа.
+        drawKeyLines(
+          waveCtx,
+          emoRef.current?.key_track ?? null,
+          view,
+          w,
+          WAVE_HEIGHT_PX,
+          theme,
+        )
+        drawTempoSteps(
+          waveCtx,
+          emoRef.current?.tempo_track ?? null,
+          view,
+          w,
+          WAVE_HEIGHT_PX,
+          theme,
+        )
+      }
     }
     const tenths = state.zoom >= 100
     // Большой палец слайдера едет вместе с окном; пока слайдер в фокусе —
@@ -302,6 +334,14 @@ export function WaveTracker({ renderId, tracks, timeRef }: WaveTrackerProps) {
   useEffect(() => {
     scrollRef.current = null
   }, [zoom])
+
+  // Аннотации Соник Аннотатора приходят с кадрами «Эмо» уже после первого
+  // рендера трекера — волна обязана перерисоваться с ними (dirty-флаг, как при
+  // смене источника без смены окна).
+  useEffect(() => {
+    waveDirtyRef.current = true
+    paint()
+  }, [emo, paint])
 
   // rAF-цикл: конец трека, окно зума с якорем позиционера, позиционер, таймкод.
   // Без единого setState — всё через ref'ы и canvas (frontend-perf).

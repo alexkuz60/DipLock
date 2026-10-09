@@ -20,7 +20,8 @@
  * 0.1…1.0 R один раз на монтирование (без «прыжков» при ре-рендерах).
  * Полигон: заливка жёлтым с прозрачностью 0.25, грани — сплошные линии 2 px;
  * доминанта — белая линия и точка **8 px**. Статика поверх (08.10.2026):
- * **облако доминант** всех кадров (мелкие круги ⌀5 px без заливки,
+ * **облако доминант** всех кадров (кружки **⌀8 px** — тот же диаметр, что у
+ * текущей доминанты (правка 09.10.2026), без заливки,
  * обводка 1 px, позади полигона) и **суммарная доминанта** облака —
  * ярко-красный кружок ⌀8 px с заливкой 50 %, без линии вектора
  * (`totalDominant`: центроид облака — сумма компонент / число точек,
@@ -33,7 +34,7 @@
  * засечка на оси Y); отрисовка SVG, как у соседнего
  * силуэта `BrainRoomView`.
  */
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AudioEmo } from '@/shared/api/types'
 import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
 import { hopSeconds, interpolatedRays } from './emoRadar'
@@ -61,6 +62,15 @@ const CENTER = VIEW / 2
 const RADIUS = 90
 /** Центр графика — константа модуля (стабильна для `useMemo`). */
 const CENTER_PT = { x: CENTER, y: CENTER }
+/**
+ * Полный экранный диаметр текущей доминанты (точка на радиус-векторе), px —
+ * нулевой штрих со скруглением `strokeWidth = DOMINANT_DOT_PX` +
+ * `vector-effect="non-scaling-stroke"` (8 px на любом масштабе ячейки).
+ * Кружки облака доминант держат **тот же** диаметр (правка 09.10.2026).
+ */
+const DOMINANT_DOT_PX = 8
+/** Обводка кружков облака доминант, px (внутри — без заливки). */
+const CLOUD_RING_STROKE_PX = 1
 
 export type RadialChartProps = {
   /** Кадры «Эмо» (null/undefined — фоллбэк-рандомизатор до загрузки). */
@@ -107,6 +117,31 @@ export function RadialChart({ emo = null }: RadialChartProps) {
   const dominantRef = useRef<SVGLineElement>(null)
   const dotRef = useRef<SVGLineElement>(null)
   const tempoMarkRef = useRef<SVGLineElement>(null)
+
+  /**
+   * Масштаб ячейки: CSS-пикселей экрана на единицу viewBox (приём
+   * `MriProjection`): кружки облака доминант держат экранный диаметр
+   * `DOMINANT_DOT_PX` — в точности как точка текущей доминанты на
+   * радиус-векторе (правка 09.10.2026), поэтому их радиус делится на
+   * масштаб. SVG — квадрат с `preserveAspectRatio="meet"` → масштаб =
+   * min(ширина, высота) / VIEW. В jsdom раскладки нет (rect = 0): масштаб
+   * остаётся 1, и тесты видят «честные» пиксели.
+   */
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const [pxPerUnit, setPxPerUnit] = useState(1)
+  useEffect(() => {
+    const element = svgRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const update = () => {
+      const rect = element.getBoundingClientRect()
+      const side = Math.min(rect.width, rect.height)
+      if (side > 0) setPxPerUnit(side / VIEW)
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   /** Один кадр → атрибуты полигона, доминанты и метки темпа (без React). */
   const paint = useCallback(
@@ -201,6 +236,7 @@ export function RadialChart({ emo = null }: RadialChartProps) {
 
   return (
     <svg
+      ref={svgRef}
       viewBox={`0 0 ${VIEW} ${VIEW}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
@@ -266,19 +302,20 @@ export function RadialChart({ emo = null }: RadialChartProps) {
           strokeWidth={1}
         />
       ))}
-      {/* Облако доминант: точка доминанты каждого кадра анимации — мелкие
-          круги ⌀5 px без заливки, обводка 1 px (позади полигона: история,
-          полигон — «сейчас»). Считается один раз на загрузке кадров. */}
+      {/* Облако доминант: точка доминанты каждого кадра анимации — кружки
+          ⌀8 px без заливки, обводка 1 px (диаметр в точности как у текущей
+          доминанты на радиус-векторе, правка 09.10.2026; позади полигона:
+          история, полигон — «сейчас»). Считается один раз на загрузке кадров. */}
       {cloud.map((point, index) => (
         <circle
           key={index}
           data-part="dominant-cloud"
           cx={point.x}
           cy={point.y}
-          r={2.5}
+          r={(DOMINANT_DOT_PX - CLOUD_RING_STROKE_PX) / 2 / pxPerUnit}
           fill="none"
           stroke="var(--color-fg-2)"
-          strokeWidth={1}
+          strokeWidth={CLOUD_RING_STROKE_PX}
           vectorEffect="non-scaling-stroke"
         />
       ))}
@@ -308,8 +345,9 @@ export function RadialChart({ emo = null }: RadialChartProps) {
         strokeWidth={2}
         vectorEffect="non-scaling-stroke"
       />
-      {/* Точка доминанты 8 px (правка 08.10.2026): нулевой штрих со
-          скруглением = круг диаметра strokeWidth. */}
+      {/* Точка доминанты DOMINANT_DOT_PX = 8 px (правка 08.10.2026): нулевой
+          штрих со скруглением = круг диаметра strokeWidth; кружки облака
+          держат тот же экранный диаметр (правка 09.10.2026). */}
       <line
         ref={dotRef}
         data-part="dominant-dot"
@@ -318,7 +356,7 @@ export function RadialChart({ emo = null }: RadialChartProps) {
         x2={dominant.x}
         y2={dominant.y}
         stroke="white"
-        strokeWidth={8}
+        strokeWidth={DOMINANT_DOT_PX}
         strokeLinecap="round"
         vectorEffect="non-scaling-stroke"
       />

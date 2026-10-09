@@ -8,6 +8,8 @@
  * чистая (без Tone и Web Audio) — юнит-тестируется отдельно; отрисовка терпит
  * `getContext` без 2D (jsdom) — просто ничего не рисует.
  */
+import type { AudioKeySegment, AudioTempoSegment } from '@/shared/api/types'
+
 
 /** Варианты горизонтального зума: во сколько раз окно уже всего файла. */
 export const TIME_ZOOMS = [1, 10, 100] as const
@@ -174,6 +176,10 @@ export type TrackerTheme = {
   grid: string
   text: string
   playhead: string
+  /** Вертикальные линии смены аккордов (аннотации Соник Аннотатора) */
+  chordLine: string
+  /** Ступенчатая линия темпа (аннотации Соник Аннотатора) */
+  tempoLine: string
 }
 
 export function trackerTheme(): TrackerTheme {
@@ -192,6 +198,8 @@ export function trackerTheme(): TrackerTheme {
     grid: color('--color-border', '#2c3a4d'),
     text: color('--color-fg-2', '#8695a8'),
     playhead: color('--color-fg-0', '#e8eef6'),
+    chordLine: color('--color-nm-chord', '#7ee0ff'),
+    tempoLine: color('--color-nm-tempo', '#ffb454'),
   }
 }
 
@@ -347,5 +355,122 @@ export function drawPlayhead(
   ctx.lineTo(playX, 7)
   ctx.closePath()
   ctx.fill()
+}
+
+/**
+ * Аннотации Соник Аннотатора поверх волны (docs/rules/neuromusic.md,
+ * §«Плеер-трекер», «Аннотации»): вертикальные линии смены аккордов
+ * (`key_track`) и ступенчатый график темпа (`tempo_track`). Вызываются после
+ * `drawButterfly` на том же холсте — это статика видимого окна (перерисовка —
+ * вместе с волной).
+ */
+
+/**
+ * Вертикальные линии-аннотации смены аккордов: одна линия на начало каждого
+ * сегмента тональности (`t_sec`), на всю высоту волны. Сегмент в 0.0 — это
+ * левый край файла, а не смена, поэтому не рисуется; линии вне видимого окна
+ * пропускаются. `key_track` пуст/`null` — ничего не рисуется.
+ */
+export function drawKeyLines(
+  ctx: CanvasRenderingContext2D,
+  keyTrack: readonly AudioKeySegment[] | null | undefined,
+  view: ViewState,
+  width: number,
+  height: number,
+  theme: TrackerTheme,
+): void {
+  if (!keyTrack || keyTrack.length === 0 || view.end <= view.start || !(width > 0)) return
+  ctx.lineWidth = 1
+  ctx.strokeStyle = theme.chordLine
+  ctx.beginPath()
+  for (const segment of keyTrack) {
+    if (!(segment.t_sec > 0)) continue
+    const x = Math.round(timeToX(segment.t_sec, view, width)) + 0.5
+    if (x < 0 || x > width) continue
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, height)
+  }
+  ctx.stroke()
+}
+
+/**
+ * Диапазон bpm трека темпа (min…max по всем оценкам) — авто-шкала ступеней.
+ * Нет валидных оценок — `null`.
+ */
+export function tempoBpmRange(
+  tempoTrack: readonly AudioTempoSegment[] | null | undefined,
+): { min: number; max: number } | null {
+  if (!tempoTrack || tempoTrack.length === 0) return null
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  for (const estimate of tempoTrack) {
+    if (!Number.isFinite(estimate.bpm) || estimate.bpm <= 0) continue
+    if (estimate.bpm < min) min = estimate.bpm
+    if (estimate.bpm > max) max = estimate.bpm
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
+}
+
+/**
+ * Y ступени темпа, px: авто-шкала `range` → полоса **15…85 %** высоты волны
+ * (min — нижняя граница полосы, max — верхняя: больший темп — выше линия).
+ * Все оценки равны (`max <= min`) — середина высоты.
+ */
+export function tempoStepY(
+  bpm: number,
+  range: { min: number; max: number },
+  height: number,
+): number {
+  const top = height * 0.15
+  const bottom = height * 0.85
+  if (!(range.max > range.min)) return height / 2
+  const frac = (bpm - range.min) / (range.max - range.min)
+  return bottom - Math.min(1, Math.max(0, frac)) * (bottom - top)
+}
+
+/**
+ * Ступенчатый график изменения темпа: горизонтальные ступени на высоте
+ * `tempoStepY(bpm)` от оценки до следующей (hold-семантика сырых данных
+ * Соник Аннотатора; после последней оценки — до конца окна), вертикальные
+ * фронты смены темпа между ступенями. До первой оценки линии нет; `tempo_track`
+ * пуст/`null` — ничего не рисуется. Шкала — авто min…max по всему треку
+ * (решение владельца 09.10.2026: мелкие девиации темпа видны).
+ */
+export function drawTempoSteps(
+  ctx: CanvasRenderingContext2D,
+  tempoTrack: readonly AudioTempoSegment[] | null | undefined,
+  view: ViewState,
+  width: number,
+  height: number,
+  theme: TrackerTheme,
+): void {
+  const range = tempoBpmRange(tempoTrack)
+  if (!tempoTrack || !range || view.end <= view.start || !(width > 0)) return
+  const sorted = [...tempoTrack].sort((a, b) => a.t_sec - b.t_sec)
+  ctx.lineWidth = 2
+  ctx.strokeStyle = theme.tempoLine
+  ctx.beginPath()
+  let lastY: number | null = null
+  for (let index = 0; index < sorted.length; index++) {
+    const current = sorted[index]
+    if (!current || !Number.isFinite(current.bpm) || current.bpm <= 0) continue
+    // Ступень [t_i, t_{i+1}) пересекается с окном; последняя держится до конца.
+    const start = Math.max(current.t_sec, view.start)
+    const end =
+      index + 1 < sorted.length ? Math.min(sorted[index + 1]?.t_sec ?? view.end, view.end) : view.end
+    const x1 = timeToX(start, view, width)
+    const x2 = timeToX(end, view, width)
+    if (x2 <= x1) continue
+    const y = tempoStepY(current.bpm, range, height)
+    // Фронт смены темпа: вертикаль от прошлой ступени к текущей (не у края).
+    if (lastY !== null && x1 > 0 && lastY !== y) {
+      ctx.moveTo(x1, lastY)
+      ctx.lineTo(x1, y)
+    }
+    ctx.moveTo(x1, y)
+    ctx.lineTo(x2, y)
+    lastY = y
+  }
+  ctx.stroke()
 }
 

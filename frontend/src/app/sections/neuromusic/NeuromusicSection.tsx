@@ -30,6 +30,7 @@ import { IconButton } from '@/shared/ui/IconButton'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { BrainRoomView } from './BrainRoomView'
+import { EmoCounters } from './EmoCounters'
 import { RadialChart } from './RadialChart'
 import { MONTAGE_ROW_IDS } from './rowMeta'
 import { TrackerControls } from './TrackerControls'
@@ -211,7 +212,12 @@ export function NeuromusicSection() {
 
       {succeeded && renderId && (
         <section aria-label="Прослушивание" className="flex shrink-0 flex-col gap-3">
-          <WaveTracker renderId={renderId} tracks={tracks} timeRef={timeRef} />
+          <WaveTracker
+            renderId={renderId}
+            tracks={tracks}
+            timeRef={timeRef}
+            emo={emoQuery.data ?? null}
+          />
         </section>
       )}
 
@@ -244,9 +250,16 @@ export function NeuromusicSection() {
             </div>
             {/* Колонка 2: радиальный график — 7 сегментов от π/2 + π/7
                 против часовой, оси X/Y, сетка 25/50/75 %, круг-граница;
-                полигон анимируется по кадрам «Эмо» (или фоллбэк-рандом). */}
-            <div className="h-full min-h-0 overflow-hidden">
-              <RadialChart emo={emoQuery.data ?? null} />
+                полигон анимируется по кадрам «Эмо» (или фоллбэк-рандом).
+                Справа-сверху от графика — счётчики «Аккорд»/«Темп»
+                (09.10.2026): пиули прибиты к правому краю секции ЭМО-графика,
+                текст — размера названия раздела в шапке (НЕ в подзаголовке
+                секции — правка владельца). */}
+            <div className="flex h-full min-h-0">
+              <div className="min-w-0 flex-1">
+                <RadialChart emo={emoQuery.data ?? null} />
+              </div>
+              <EmoCounters emo={emoQuery.data ?? null} />
             </div>
           </div>
         </section>

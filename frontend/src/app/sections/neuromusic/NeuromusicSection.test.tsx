@@ -1011,14 +1011,25 @@ describe('Нейромузыка — раздел', () => {
     )
     expect(length).toBeGreaterThan(0)
     expect(length).toBeLessThanOrEqual(90 + 1e-6)
-    // Облако доминант: круг на каждый кадр (6 в моке) — ⌀5 px, без
-    // заливки, обводка 1 px.
+    // Облако доминант: круг на каждый кадр (6 в моке) — ⌀8 px без заливки,
+    // обводка 1 px; в jsdom масштаб ячейки = 1 — «честные» пиксели.
     const cloud = chart.querySelectorAll('[data-part="dominant-cloud"]')
     expect(cloud).toHaveLength(6)
+    // Текущая доминанта на радиус-векторе — точка нулевым штрихом:
+    // её диаметр = stroke-width (8 px, non-scaling).
+    const dotDiameter = Number(
+      chart.querySelector('[data-part="dominant-dot"]')?.getAttribute('stroke-width'),
+    )
+    expect(dotDiameter).toBe(8)
     for (const point of cloud) {
-      expect(point.getAttribute('r')).toBe('2.5')
+      expect(point.getAttribute('r')).toBe('3.5')
       expect(point.getAttribute('fill')).toBe('none')
       expect(point.getAttribute('stroke-width')).toBe('1')
+      // Внешний диаметр кружка облака (2r + обводка) = диаметру текущей
+      // доминанты (правка 09.10.2026).
+      const diameter =
+        Number(point.getAttribute('r')) * 2 + Number(point.getAttribute('stroke-width'))
+      expect(diameter).toBe(dotDiameter)
       // Все точки внутри круга-границы.
       const distance = Math.hypot(
         Number(point.getAttribute('cx')) - 100,
@@ -1114,6 +1125,54 @@ describe('Нейромузыка — раздел', () => {
       () => expect(Number(mark?.getAttribute('y1'))).toBeCloseTo(10, 1),
       { timeout: 3000 },
     )
+  })
+
+  it('счётчики «Аккорд»/«Темп»: пиули в секции «Эмо», значения — как в анимации радара', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const withTracks: AudioEmo = {
+      ...EMO_PAYLOAD,
+      key_track: [
+        { t_sec: 0, key_code: 1, label: 'C major' },
+        { t_sec: 2, key_code: 13, label: 'C minor' },
+      ],
+      key_source: 'vamp:qm-vamp-plugins:qm-keydetector:key',
+      tempo_track: [
+        { t_sec: 0, bpm: 100 },
+        { t_sec: 2, bpm: 140 },
+      ],
+      tempo_source: 'vamp:qm-vamp-plugins:qm-tempotracker:tempo',
+    }
+    const fetchMock = audioFetchMock(TRACKS, { emo: withTracks })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    // Счётчики — в секции размещения графика «Эмо» (не в подзаголовке секции).
+    const counters = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'emo-counters',
+    )
+    const keyCounter = within(counters).getByTestId('emo-counter-key')
+    const tempoCounter = within(counters).getByTestId('emo-counter-tempo')
+    // Кадр 0: сегмент «C major», темп слайда 0 (100,0 — среднее оценок диапазона).
+    await waitFor(() => expect(keyCounter).toHaveTextContent('C major'))
+    expect(tempoCounter).toHaveTextContent('100,0 bpm')
+
+    // Позиция 2.0 с — кадр 3: сегмент «C minor», темп 140 (как у засечки радара).
+    playerMock.position = 2
+    await waitFor(() => expect(keyCounter).toHaveTextContent('C minor'), { timeout: 3000 })
+    expect(tempoCounter).toHaveTextContent('140,0 bpm')
+  })
+
+  it('счётчики «Аккорд»/«Темп»: без треков Соник Аннотатора — «—»', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const counters = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'emo-counters',
+    )
+    expect(within(counters).getByTestId('emo-counter-key')).toHaveTextContent('—')
+    expect(within(counters).getByTestId('emo-counter-tempo')).toHaveTextContent('—')
   })
 
   it('«Эмо»: сервер не отдал кадры (404) — фоллбэк-рандомизатор без падения', async () => {

@@ -47,6 +47,10 @@
      фиолетовый; цвета читает canvas через getComputedStyle (waveformView.ts) */
   --color-nm-wave-up: #4da3ff;
   --color-nm-wave-down: #b98cff;
+  /* Аннотации Соник Аннотатора на волне трекера (срез 09.10.2026): вертикальные
+     линии смены аккордов (key_track) и ступенчатая линия темпа (tempo_track) */
+  --color-nm-chord: #7ee0ff;
+  --color-nm-tempo: #ffb454;
   /* Ряды варианта «Монтаж» (силуэт BrainRoom, срез 07.10.2026): точки и
      легенда 4 модулей плеера — по ним же печатает backend 3D-bake */
   --color-nm-row-frontal: #7ee0ff;

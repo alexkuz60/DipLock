@@ -50,6 +50,26 @@ export function keyRotationRad(keyCode: number): number {
 }
 
 /**
+ * Активный сегмент тональности в момент `tSec` — последний с `t_sec ≤ tSec`
+ * (сегмент длится до следующего, как в `frameRotations`); до первого сегмента,
+ * пустой/`null` трек либо нечисловое время — `null` (тональность не определена).
+ * Источник для счётчика «Аккорд» у графика «Эмо» (`neuromusic/EmoCounters.tsx`).
+ */
+export function activeKeySegment(
+  keyTrack: readonly AudioKeySegment[] | null | undefined,
+  tSec: number,
+): AudioKeySegment | null {
+  if (!keyTrack || keyTrack.length === 0) return null
+  const time = Number.isFinite(tSec) ? tSec : Number.NEGATIVE_INFINITY
+  let active: AudioKeySegment | null = null
+  for (const segment of keyTrack) {
+    if (segment.t_sec <= time) active = segment
+    else break
+  }
+  return active
+}
+
+/**
  * Угол вращения каждого кадра, рад: для кадра берётся тональность
  * активного сегмента `key_track` (последний с `t_sec ≤ t` кадра; сегмент
  * длится до следующего). До первого сегмента — 0 (тональность не

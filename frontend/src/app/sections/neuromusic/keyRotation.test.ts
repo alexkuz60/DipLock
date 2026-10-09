@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 import type { AudioKeySegment } from '@/shared/api/types'
 import {
   KEY_DELTA_RAD,
+  activeKeySegment,
   frameRotations,
   interpolatedRotation,
   keyRotationRad,
@@ -107,4 +108,25 @@ describe('interpolatedRotation — плавный доворот между ка
     expect(interpolatedRotation(rotations, [], hop, 0)).toBeNull()
     expect(interpolatedRotation(rotations, frames, 0, 0)).toBeNull()
   })
+
+describe('activeKeySegment — активный сегмент тональности (счётчик «Аккорд»)', () => {
+  const track = [seg(0, 1), seg(2, 13), seg(3.5, 5)]
+
+  it('hold до следующего сегмента; граница t_sec включительно', () => {
+    expect(activeKeySegment(track, 0)?.key_code).toBe(1)
+    expect(activeKeySegment(track, 1.9)?.key_code).toBe(1)
+    expect(activeKeySegment(track, 2)?.key_code).toBe(13)
+    expect(activeKeySegment(track, 3.4)?.key_code).toBe(13)
+    expect(activeKeySegment(track, 100)?.key_code).toBe(5)
+  })
+
+  it('до первого сегмента, пустой/отсутствующий трек, мусорное время — null', () => {
+    const late = [seg(1, 1)]
+    expect(activeKeySegment(late, 0.5)).toBeNull()
+    expect(activeKeySegment([], 1)).toBeNull()
+    expect(activeKeySegment(null, 1)).toBeNull()
+    expect(activeKeySegment(undefined, 1)).toBeNull()
+    expect(activeKeySegment(track, Number.NaN)).toBeNull()
+  })
+})
 })

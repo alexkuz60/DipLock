@@ -125,6 +125,16 @@ export function interpolatedTempo(
 }
 
 /**
+ * Темп текстом для счётчика «Темп» у графика «Эмо»: один десятичный знак,
+ * запятая как разделитель (как в подписи CSV Sonic Annotator) — «120,4 bpm».
+ * `null`/нечисловой/неположительный темп — «—» (не определён).
+ */
+export function formatTempoBpm(bpm: number | null | undefined): string {
+  if (bpm == null || !Number.isFinite(bpm) || bpm <= 0) return '—'
+  return `${bpm.toFixed(1).replace('.', ',')} bpm`
+}
+
+/**
  * Темп-коррекция радиусов вершин: `r·(1+Kr)` — вершинам той половины круга,
  * куда попал их угол (`angles` — углы вершин **после** гармонического
  * вращения): при темпе < 120 — нижние квадранты (θ ∈ [π, 2π)), при > 120 —

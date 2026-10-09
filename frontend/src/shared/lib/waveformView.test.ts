@@ -5,11 +5,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   drawButterfly,
+  drawKeyLines,
   drawPlayhead,
+  drawTempoSteps,
   filePeaks,
   formatTime,
   peakColumns,
   rulerTicks,
+  tempoBpmRange,
+  tempoStepY,
   timeToX,
   viewWindow,
   xToTime,
@@ -23,6 +27,8 @@ const THEME: TrackerTheme = {
   grid: '#2c3a4d',
   text: '#8695a8',
   playhead: '#e8eef6',
+  chordLine: '#7ee0ff',
+  tempoLine: '#ffb454',
 }
 
 /** Фейковый 2D-контекст: jsdom без пакета canvas не даёт настоящий. */
@@ -245,6 +251,115 @@ describe('waveformView — отрисовка на фейковом контек
     // Второй вызов вне окна — только очистка.
     drawPlayhead(ctx, -5, { start: 0, end: 4 }, 100, 120, THEME)
     expect(raw.stroke).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('waveformView — аннотации Соник Аннотатора', () => {
+  it('drawKeyLines: вертикали на начало сегментов; 0.0 и вне окна — без линий', () => {
+    const { ctx, moves, lines, styles, raw } = fakeCtx()
+    const track = [
+      { t_sec: 0, key_code: 1, label: 'C major' },
+      { t_sec: 1, key_code: 13, label: 'C minor' },
+      { t_sec: 3, key_code: 5, label: 'F major' },
+      { t_sec: 5, key_code: 8, label: 'Ab major' },
+    ]
+    // Окно 0.5…3.5 с при ширине 300 px → 100 px/с: t=1 → x=50.5, t=3 → 250.5.
+    drawKeyLines(ctx, track, { start: 0.5, end: 3.5 }, 300, 200, THEME)
+    expect(moves).toEqual([
+      [50.5, 0],
+      [250.5, 0],
+    ])
+    expect(lines).toEqual([
+      [50.5, 200],
+      [250.5, 200],
+    ])
+    expect(raw.stroke).toHaveBeenCalledTimes(1)
+    expect(styles).toEqual([THEME.chordLine])
+  })
+
+  it('drawKeyLines: пустой/отсутствующий key_track — ничего не рисуется', () => {
+    const { ctx, raw } = fakeCtx()
+    drawKeyLines(ctx, null, { start: 0, end: 4 }, 100, 200, THEME)
+    drawKeyLines(ctx, [], { start: 0, end: 4 }, 100, 200, THEME)
+    expect(raw.stroke).not.toHaveBeenCalled()
+  })
+
+  it('tempoBpmRange: min…max по валидным оценкам; без валидных — null', () => {
+    expect(
+      tempoBpmRange([
+        { t_sec: 0, bpm: 110 },
+        { t_sec: 1, bpm: 130 },
+        { t_sec: 2, bpm: 120 },
+      ]),
+    ).toEqual({ min: 110, max: 130 })
+    expect(tempoBpmRange([{ t_sec: 0, bpm: 0 }])).toBeNull()
+    expect(tempoBpmRange([])).toBeNull()
+    expect(tempoBpmRange(null)).toBeNull()
+  })
+
+  it('tempoStepY: авто-шкала в полосе 15…85 % высоты (min — низ, max — верх)', () => {
+    // Высота 200 → полоса 30…170: min → 170, max → 30, середина диапазона → 100.
+    expect(tempoStepY(100, { min: 100, max: 200 }, 200)).toBeCloseTo(170)
+    expect(tempoStepY(200, { min: 100, max: 200 }, 200)).toBeCloseTo(30)
+    expect(tempoStepY(150, { min: 100, max: 200 }, 200)).toBeCloseTo(100)
+    // Все оценки равны — линия посередине высоты.
+    expect(tempoStepY(120, { min: 120, max: 120 }, 200)).toBeCloseTo(100)
+  })
+
+  it('drawTempoSteps: ступени и фронт смены темпа, после последней оценки — hold', () => {
+    const { ctx, moves, lines, styles, raw } = fakeCtx()
+    const track = [
+      { t_sec: 0, bpm: 100 },
+      { t_sec: 2, bpm: 140 },
+    ]
+    // Окно 0…4, ширина 400 → 100 px/с; шкала 100…140 → y=170 и y=30.
+    drawTempoSteps(ctx, track, { start: 0, end: 4 }, 400, 200, THEME)
+    expect(moves).toEqual([
+      [0, 170],
+      [200, 170],
+      [200, 30],
+    ])
+    // Ступень 0…2, фронт в x=200, ступень 2…4 (hold последней до конца окна).
+    expect(lines).toEqual([
+      [200, 170],
+      [200, 30],
+      [400, 30],
+    ])
+    expect(raw.stroke).toHaveBeenCalledTimes(1)
+    expect(styles).toEqual([THEME.tempoLine])
+  })
+
+  it('drawTempoSteps: окно обрезает ступени — слева hold входит, справа выходит', () => {
+    const track = [
+      { t_sec: 0, bpm: 100 },
+      { t_sec: 2, bpm: 140 },
+    ]
+    // Левый край: окно 1…3 видит хвост ступени 100 bpm (y=170) с x=0 (hold).
+    const left = fakeCtx()
+    drawTempoSteps(left.ctx, track, { start: 1, end: 3 }, 400, 200, THEME)
+    expect(left.moves).toEqual([
+      [0, 170],
+      [200, 170],
+      [200, 30],
+    ])
+    // Правый край: окно 2.5…4 видит только ступень 140 bpm (обрезана слева,
+    // hold), фронта смены нет.
+    const right = fakeCtx()
+    drawTempoSteps(right.ctx, track, { start: 2.5, end: 4 }, 300, 200, THEME)
+    expect(right.moves).toEqual([[0, 30]])
+    expect(right.lines).toEqual([[300, 30]])
+  })
+
+  it('drawTempoSteps: до первой оценки линии нет; пустой tempo_track — ничего', () => {
+    const single = fakeCtx()
+    drawTempoSteps(single.ctx, [{ t_sec: 1, bpm: 100 }], { start: 0, end: 2 }, 200, 200, THEME)
+    // Ступень начинается только с t=1 (x=100): отрезка слева нет.
+    expect(single.moves).toEqual([[100, 100]])
+    expect(single.raw.stroke).toHaveBeenCalledTimes(1)
+    const empty = fakeCtx()
+    drawTempoSteps(empty.ctx, null, { start: 0, end: 4 }, 100, 200, THEME)
+    drawTempoSteps(empty.ctx, [], { start: 0, end: 4 }, 100, 200, THEME)
+    expect(empty.raw.stroke).not.toHaveBeenCalled()
   })
 })
 
