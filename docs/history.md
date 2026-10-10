@@ -35,7 +35,9 @@ Tracker** (вывод `tempo`); (2) брать значение темпа дл�
   payload и в рендере/добивке. `schemas/audio.py`: `AudioTempoSegment`,
   `AudioEmoOut.tempo_track/tempo_source`; openapi → `gen:api`.
 * **`neuromusic/tempoCorrection.ts`**: `tempoY` (clamp log2(bpm/120), −1…+1),
-  `tempoKr` (sin(π/2·|y|)), `frameTempos` (усреднение оценок в диапазоне кадра
+  `tempoKr` (sin(π/2·|y|); правка 10.10.2026 — **`Kr = sin²(π/2·y)`**: квадрат
+  синуса всегда ≥ 0, знак синуса выбирает квадранты лучей — 3–4 при «−», 1–2
+  при «+»), `frameTempos` (усреднение оценок в диапазоне кадра
   + hold), `interpolatedTempo`, `tempoCorrectedRays` (квадрант вершины по углу
   **после** вращения, `r·(1+Kr)`, условная нормализация к max = 100 %).
   `radialChart.ts`: `tempoStarPolygon` (лучи → вращение → темп-коррекция →

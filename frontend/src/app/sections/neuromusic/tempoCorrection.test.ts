@@ -1,8 +1,9 @@
 /**
  * Тесты темп-коррекции радара «Эмо» (спецификация владельца 09.10.2026,
  * `docs/rules/neuromusic.md` §«Эмо», «Темп-коррекция»): шкала оси Y
- * (логарифм от 2, 60/120/240), коэффициент Kr = sin(π/2·|y|), пофреймовый
- * ряд темпа из оценок VAMP (усреднение/hold) и его интерполяция,
+ * (логарифм от 2, 60/120/240), коэффициент Kr = sin²(π/2·y) — квадрат синуса,
+ * всегда ≥ 0, знак синуса выбирает квадранты лучей (правка 10.10.2026),
+ * пофреймовый ряд темпа из оценок VAMP (усреднение/hold) и его интерполяция,
  * коррекция радиусов по квадрантам с условной нормализацией.
  */
 import { describe, expect, it } from 'vitest'
@@ -48,20 +49,30 @@ describe('tempoY — проекция темпа на ось Y (логарифм
   })
 })
 
-describe('tempoKr — «синус метки»: sin(π/2 · |y|)', () => {
+describe('tempoKr — квадрат «синуса метки»: sin²(π/2 · y)', () => {
   it('якоря: 60 → 1, 120 → 0, 240 → 1', () => {
     expect(tempoKr(60)).toBeCloseTo(1, 12)
     expect(tempoKr(120)).toBe(0)
     expect(tempoKr(240)).toBeCloseTo(1, 12)
   })
 
-  it('промежуточные: 90 → ≈0.607, 180 → ≈0.796 (симметрия по |y|)', () => {
-    expect(tempoKr(90)).toBeCloseTo(Math.sin((Math.PI / 2) * Math.abs(Math.log2(0.75))), 12)
-    expect(tempoKr(180)).toBeCloseTo(Math.sin((Math.PI / 2) * Math.abs(Math.log2(1.5))), 12)
-    expect(tempoKr(90)).toBeCloseTo(0.6067, 3)
-    expect(tempoKr(180)).toBeCloseTo(0.7948, 3)
-    // Симметрия: Kr зависит только от |y| (60 и 240 — по 1, 90 и 180 — по |y| ≠).
+  it('промежуточные: 90 → ≈0.368, 180 → ≈0.632 (квадрат синуса, симметрия по |y|)', () => {
+    expect(tempoKr(90)).toBeCloseTo(Math.sin((Math.PI / 2) * Math.log2(0.75)) ** 2, 12)
+    expect(tempoKr(180)).toBeCloseTo(Math.sin((Math.PI / 2) * Math.log2(1.5)) ** 2, 12)
+    expect(tempoKr(90)).toBeCloseTo(0.3681, 3)
+    expect(tempoKr(180)).toBeCloseTo(0.6319, 3)
+    // Симметрия: sin² чётная — Kr зависит только от |y|.
     expect(tempoKr(80)).toBeCloseTo(tempoKr(180), 12)
+  })
+
+  it('Kr всегда ≥ 0 — квадрат синуса (правка 10.10.2026)', () => {
+    for (const bpm of [30, 60, 75, 90, 105, 120, 150, 180, 210, 240, 480]) {
+      const kr = tempoKr(bpm)
+      expect(kr).toBeGreaterThanOrEqual(0)
+      expect(kr).toBeLessThanOrEqual(1)
+      // Kr — в точности квадрат синуса метки sin(π/2·y), а не синус |y|.
+      expect(kr).toBeCloseTo(Math.sin((Math.PI / 2) * tempoY(bpm)) ** 2, 12)
+    }
   })
 })
 
@@ -160,6 +171,26 @@ describe('tempoCorrectedRays — коррекция радиусов по ква
     expect(tempoCorrectedRays(flat, angles7, 120)).toEqual(flat)
     expect(tempoCorrectedRays(flat, angles7, null)).toEqual(flat)
     expect(tempoCorrectedRays(flat, angles7, Number.NaN)).toEqual(flat)
+  })
+
+  it('дробный Kr = sin²: r·(1+Kr) той половине, что выбирает знак синуса (10.10.2026)', () => {
+    // 90 bpm: sin(π/2·y) < 0 → квадранты 3–4; Kr = sin² ≈ 0.368.
+    const slow = tempoCorrectedRays(flat, angles7, 90)
+    const slowKr = tempoKr(90)
+    angles7.forEach((angle, index) => {
+      const isLower = ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) >= Math.PI
+      expect(slow[index]).toBeCloseTo(isLower ? 40 * (1 + slowKr) : 40, 6)
+    })
+    // 180 bpm: sin(π/2·y) > 0 → квадранты 1–2; Kr = sin² ≈ 0.632.
+    const fast = tempoCorrectedRays(flat, angles7, 180)
+    const fastKr = tempoKr(180)
+    angles7.forEach((angle, index) => {
+      const isLower = ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) >= Math.PI
+      expect(fast[index]).toBeCloseTo(isLower ? 40 : 40 * (1 + fastKr), 6)
+    })
+    // Обе коррекции без нормализации (40·1.64 < 100) — значения «чистые».
+    expect(Math.max(...slow)).toBeLessThan(100)
+    expect(Math.max(...fast)).toBeLessThan(100)
   })
 
   it('условная нормализация: превышение 100 → деление на max; без превышения — как есть', () => {
