@@ -7,6 +7,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { RotateCcw } from 'lucide-react'
 import { useState } from 'react'
+import { ModelRouterPanel } from './ModelRouterPanel'
 import { api, apiErrorText } from '@/shared/api/client'
 import {
   applyUiPreferences,
@@ -199,6 +200,8 @@ export function SettingsSection() {
           </>
         ) : null}
       </Panel>
+
+      <ModelRouterPanel />
 
       <Panel title="Данные и окружение">
         {meta.data ? (

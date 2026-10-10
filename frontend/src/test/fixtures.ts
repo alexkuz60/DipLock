@@ -15,6 +15,8 @@ import type {
   GroupAnalysisSummary,
   InitStatus,
   JobStatus,
+  LlmProbeResult,
+  LlmRouter,
   LocalResource,
   MainsResponse,
   MetaResponse,
@@ -1156,6 +1158,38 @@ export function bundleResultFixture(overrides: Partial<BundleResult> = {}): Bund
     size_bytes: 4_194_304,
     warnings: [],
     zip_url: null,
+    ...overrides,
+  }
+}
+
+/** Состояние модельного роутера ИИ (GET/PUT /llm-router): один провайдер с маской ключа. */
+export function llmRouterFixture(overrides: Partial<LlmRouter> = {}): LlmRouter {
+  return {
+    providers: [
+      {
+        id: 'prov-full',
+        label: 'Полная модель',
+        protocol: 'openai',
+        base_url: 'https://api.example.com/v1',
+        model: 'big-model-1',
+        enabled: true,
+        key_hint: '…1234',
+      },
+    ],
+    routes: { chat: 'prov-full', transcribe: null },
+    ...overrides,
+  }
+}
+
+/** Результат probe /llm-router/probe (по умолчанию — успешная проверка связи). */
+export function llmProbeFixture(overrides: Partial<LlmProbeResult> = {}): LlmProbeResult {
+  return {
+    ok: true,
+    provider_id: 'prov-full',
+    route: 'chat',
+    model: 'big-model-1',
+    latency_ms: 420,
+    error: null,
     ...overrides,
   }
 }

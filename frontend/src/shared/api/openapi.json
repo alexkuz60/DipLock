@@ -5252,6 +5252,110 @@
         }
       }
     },
+    "/api/v1/llm-router": {
+      "get": {
+        "tags": [
+          "Настройки ИИ"
+        ],
+        "summary": "Модельный роутер ИИ: провайдеры и маршруты",
+        "description": "Состояние роутера: без ключей, только маски; файл настроек — на сервере.",
+        "operationId": "get_llm_router_api_v1_llm_router_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmRouterOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Настройки ИИ"
+        ],
+        "summary": "Сохранить провайдеров и маршруты",
+        "description": "Полная замена списка провайдеров и маршрутов; ``api_key=None`` — не менять.",
+        "operationId": "put_llm_router_api_v1_llm_router_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmRouterUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmRouterOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/llm-router/probe": {
+      "post": {
+        "tags": [
+          "Настройки ИИ"
+        ],
+        "summary": "Проверка связи с провайдером (нейтральный запрос)",
+        "description": "Нейтральная проба без материалов дела: ошибка провайдера — в поле error.",
+        "operationId": "probe_llm_provider_api_v1_llm_router_probe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmProbeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -13409,6 +13513,300 @@
         "description": "Хвост журнала шагов: последние ``limit`` строк (в порядке записи)."
       },
       "JsonValue": {},
+      "LlmProbeOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "route": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "transcribe"
+            ],
+            "title": "Route"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "Модель провайдера"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms",
+            "description": "Задержка вызова, мс"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст для UI; None при успехе"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "provider_id",
+          "route"
+        ],
+        "title": "LlmProbeOut",
+        "description": "Итог проверки: честная ошибка вместо ложного успеха."
+      },
+      "LlmProbeRequest": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider Id"
+          },
+          "route": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "transcribe"
+            ],
+            "title": "Route",
+            "description": "Какой маршрут проверять",
+            "default": "chat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id"
+        ],
+        "title": "LlmProbeRequest",
+        "description": "``POST /api/v1/llm-router/probe``: нейтральная проверка связи с провайдером."
+      },
+      "LlmProviderIn": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id",
+            "description": "Id существующего провайдера; None — новый (id назначит сервер)"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "description": "Человеческое имя провайдера"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic"
+            ],
+            "title": "Protocol",
+            "description": "openai — совместимый /chat/completions; anthropic — Messages API"
+          },
+          "base_url": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 8,
+            "title": "Base Url",
+            "description": "Адрес API вместе с /v1, например https://api.openai.com/v1"
+          },
+          "model": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model",
+            "description": "Идентификатор модели провайдера"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Выключенный провайдер не вызывается",
+            "default": true
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "None — не менять; '' — удалить ключ; иначе заменить (хранится только на сервере)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "protocol",
+          "base_url",
+          "model"
+        ],
+        "title": "LlmProviderIn",
+        "description": "Провайдер из формы PUT (``api_key=None`` — ключ не менять)."
+      },
+      "LlmProviderOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": [
+              "openai",
+              "anthropic"
+            ],
+            "title": "Protocol"
+          },
+          "base_url": {
+            "type": "string",
+            "title": "Base Url"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "key_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Hint",
+            "description": "Маска ключа (…abcd); None — ключ не задан"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "protocol",
+          "base_url",
+          "model",
+          "enabled"
+        ],
+        "title": "LlmProviderOut",
+        "description": "Провайдер для UI: без ключа, только его маска."
+      },
+      "LlmRouterOut": {
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/LlmProviderOut"
+            },
+            "type": "array",
+            "title": "Providers"
+          },
+          "routes": {
+            "$ref": "#/components/schemas/LlmRoutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "providers",
+          "routes"
+        ],
+        "title": "LlmRouterOut",
+        "description": "``GET /api/v1/llm-router`` — состояние роутера (ключи заменены масками)."
+      },
+      "LlmRouterUpdate": {
+        "properties": {
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/LlmProviderIn"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Providers",
+            "description": "Все провайдеры роутера"
+          },
+          "routes": {
+            "$ref": "#/components/schemas/LlmRoutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "providers"
+        ],
+        "title": "LlmRouterUpdate",
+        "description": "``PUT /api/v1/llm-router``: полная замена списка провайдеров и маршрутов."
+      },
+      "LlmRoutes": {
+        "properties": {
+          "chat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat",
+            "description": "Провайдер советников (Т3); None — не назначен"
+          },
+          "transcribe": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcribe",
+            "description": "Провайдер распознавания (Т2); только protocol=openai; None — не назначен"
+          }
+        },
+        "type": "object",
+        "title": "LlmRoutes",
+        "description": "Назначение маршрутов на провайдеров (пер-ролевые маршруты — в Т4)."
+      },
       "LocalResourceOut": {
         "properties": {
           "gpu": {

@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     consilium_snapshot_max_bytes: int = Field(default=16_000_000, ge=1024)
     consilium_source_max_rows: int = Field(default=20_000, ge=1)
 
+    # Модельный роутер ИИ (docs/rules/consilium.md §5): провайдеры внешних API
+    # полноценных моделей. Локальные урезанные модели (llama.cpp) отклонены
+    # 10.10.2026 как советники. Файл с ключами живёт на сервере, в ответах UI
+    # ключи только маскируются; тайм-аут одного вызова модели.
+    llm_router_config_path: str = Field(
+        default=str(_REPO_DIR / "data" / "llm_router.json"),
+        description="JSON-файл настроек модельного роутера (провайдеры, ключи, маршруты)",
+    )
+    llm_request_timeout_s: float = Field(default=60.0, gt=0)
+
     # Локальный ресурс (GPU/CUDA): дефолт тумблера «Использовать GPU» в
     # «Настройках». Выбор пользователя хранится в MNE-конфиге сервера
     # (MNE_USE_CUDA, файл ~/.mne/mne-python.json — переживает рестарт) через

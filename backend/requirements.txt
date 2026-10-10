@@ -50,3 +50,8 @@ pyroomacoustics>=0.10.0
 # поднимается.
 mne-icalabel>=0.9.0
 onnxruntime>=1.30.0
+# Модельный роутер ИИ (services/llm_router.py, docs/rules/consilium.md §5):
+# вызовы внешних API полноценных моделей (openai-совместимый / Anthropic Messages).
+# Раньше httpx жил только в dev-окружении (TestClient); при runtime-использовании
+# зависимость объявляем явно — правило проекта (F3), как joblib/sklearn.
+httpx>=0.27.0

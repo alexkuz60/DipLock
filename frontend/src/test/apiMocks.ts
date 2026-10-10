@@ -13,6 +13,8 @@ import {
   groupAggregateFixture,
   groupRunSummaryFixture,
   initStatusFixture,
+  llmProbeFixture,
+  llmRouterFixture,
   localResourceFixture,
   mainsFixture,
   metaFixture,
@@ -41,6 +43,8 @@ import type {
   GroupAnalysisSummary,
   InitStatus,
   JobStatus,
+  LlmProbeResult,
+  LlmRouter,
   LocalResource,
   MainsResponse,
   MetaResponse,
@@ -124,6 +128,10 @@ export type MockApiOptions = {
   localResource?: LocalResource
   /** Ответ PUT /resource (например «CuPy не установлен», HTTP 409) */
   localResourceFail?: string
+  /** Состояние модельного роутера ИИ для GET/PUT /llm-router */
+  llmRouter?: LlmRouter
+  /** Результат probe /llm-router/probe (например, ошибка провайдера) */
+  llmProbe?: LlmProbeResult
   /** Смоделировать отказ сигналов записи (например 404 после TTL) */
   signalsFail?: boolean
   /** Стадия предподготовки, если запрос её не указал (срез 2.7) */
@@ -483,6 +491,14 @@ export function mockApiFetch(options: MockApiOptions = {}) {
     if (url.includes('/mains')) {
       // Раньше общей ветки `/recordings/`: URL mains её содержит
       return jsonResponse(options.mains ?? mainsFixture())
+    }
+    if (url.includes('/llm-router/probe')) {
+      // Проверка связи: по умолчанию успех, ошибка — через options.llmProbe
+      return jsonResponse(options.llmProbe ?? llmProbeFixture())
+    }
+    if (url.includes('/llm-router')) {
+      // PUT возвращает присланное состояние (сервер его и сохраняет)
+      return jsonResponse(options.llmRouter ?? llmRouterFixture())
     }
     if (url.includes('/meta')) {
       return jsonResponse(options.meta ?? metaFixture)

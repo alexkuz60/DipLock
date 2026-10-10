@@ -55,6 +55,8 @@ backend/app/
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
+│   ├── consilium.py   # Консилиум: форма и контракт, работа — services/consilium (Т1)
+│   ├── llm_router.py  # модельный роутер ИИ: провайдеры API + probe (10.10.2026)
 │   └── uploads.py     # приём EDF: имя, размер, sha256 (F10)
 ├── schemas/           # Pydantic-контракт ответов (OpenAPI → TS-типы UI)
 ├── models/db.py       # SQLAlchemy модели (Session, Epoch, Dipole): пишется только legacy-анализ
@@ -101,6 +103,7 @@ backend/app/
 │   ├── job_manager.py     # фоновые задачи: этапы, прогресс эпох, семафор (F7)
 │   ├── server_control.py  # перезапуск бэкенд из UI: guard'ы + os.execv (POST /server/restart)
 │   ├── gpu.py           # локальный ресурс: автоопределение GPU/CuPy + тумблер «Использовать GPU» → n_jobs='cuda' (GET/PUT /resource)
+│   ├── llm_router.py      # модельный роутер ИИ: провайдеры внешних API (openai/anthropic), маршруты chat/transcribe, ключи маскируются
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
 │   ├── fsaverage_assets.py # BEM/transform fsaverage: файл → кэш → расчёт MNE (FreeSurfer)
 │   ├── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)
@@ -187,7 +190,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/api-jobs.md` | инвентарь роутов, правило «задача = job», ETag/304, ошибки |
 | `docs/rules/compare.md` | дифференциальный анализ двух записей (B9): дельты B − A, кластерный тест MNE, карты разности |
 | `docs/rules/group-analysis.md` | групповой анализ группы N>2 (остаток 4.7): агрегаты «BA × сессии», два знаменателя share, персист прогонов, тепловая карта, кластеры диполей (B8) |
-| `docs/rules/consilium.md` | Консилиум: ручной UI Т1, дело/контекст, копии источников и снимки досье (0006/0007); ИИ — план |
+| `docs/rules/consilium.md` | Консилиум: ручной UI Т1, дело/контекст, копии источников и снимки досье (0006/0007); ИИ — модельный роутер API (llama.cpp отклонён) |
 | `docs/rules/interviews.md` | беседа (план): аудио, стенограмма, версии исправлений, проверенные реплики, запись с микрофона |
 | `docs/rules/neuromusic.md` | раздел «Нейромузыка» (эксперимент): партитура ЭЭГ, ядро ×128, шины L/C/R, in-memory рендер, радар «Эмо» (кадры спектра микса), чек-лист приёмки |
 | `docs/rules/spatial-audio.md` | пространственная обработка треков нейромузыки: выбор аудио-библиотек (Tone.js в браузере, pyroomacoustics для IR; Resonance Audio архивирован) |
@@ -196,7 +199,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL строк, PHI-псевдоним |
 | `docs/rules/safety.md` | правила безопасности и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, отрисовка, границы воркеров/GPU |
-| `docs/rules/tests.md` | покрытие (1020 Vitest / 767 pytest, без `integration` — 749), ruff/mypy и CI |
+| `docs/rules/tests.md` | покрытие (1167 Vitest / 937 pytest, без `integration`), ruff/mypy и CI |
 | `docs/rules/docs.md` | правило ведения документации (куда писать новое правило) |
 | `docs/rules/wiki.md` | раздел «Wiki»: статьи руководства (препроцессинг EDF, «Диполи», «Итоги», сравнение, экспорт), глоссарий, хеш-навигация |
 | `docs/data_map.md` | что где лежит: кэши, файлы, БД, localStorage, ключи инвалидации, формат журнала шагов |

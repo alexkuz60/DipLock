@@ -1,15 +1,12 @@
 """HTTP-контракт основания Консилиума: работа выполняется сервисом хранения."""
 
-from collections.abc import AsyncIterator, Callable, Coroutine
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from fastapi.routing import APIRoute
+from fastapi import APIRouter, HTTPException, Query, Response
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.api.private import PrivateRoute
 from app.schemas.consilium import (
     ConsiliumCaseCreate,
     ConsiliumCaseOut,
@@ -36,30 +33,6 @@ from app.schemas.consilium import (
 )
 from app.services import recording_store
 from app.services.consilium import dossier, sources, store
-
-
-class PrivateRoute(APIRoute):
-    """Ошибка формы не эхо-передаёт чувствительный текст и не кэшируется."""
-
-    def get_route_handler(self) -> Callable[[Request], Coroutine[Any, Any, Response]]:
-        """Сохраняет обычный контракт ошибок loc/msg/type без input и ctx."""
-        original = super().get_route_handler()
-
-        async def handle(request: Request) -> Response:
-            try:
-                return await original(request)
-            except RequestValidationError as exc:
-                return JSONResponse(
-                    status_code=422,
-                    content={"detail": [
-                        {key: error[key] for key in ("loc", "msg", "type")}
-                        for error in exc.errors()
-                    ]},
-                    headers={"Cache-Control": "private, no-store"},
-                )
-
-        return handle
-
 
 router = APIRouter(prefix="/consilium", tags=["Консилиум"], route_class=PrivateRoute)
 

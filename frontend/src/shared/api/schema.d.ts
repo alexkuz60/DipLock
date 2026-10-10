@@ -2074,6 +2074,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm-router": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Модельный роутер ИИ: провайдеры и маршруты
+         * @description Состояние роутера: без ключей, только маски; файл настроек — на сервере.
+         */
+        get: operations["get_llm_router_api_v1_llm_router_get"];
+        /**
+         * Сохранить провайдеров и маршруты
+         * @description Полная замена списка провайдеров и маршрутов; ``api_key=None`` — не менять.
+         */
+        put: operations["put_llm_router_api_v1_llm_router_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm-router/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Проверка связи с провайдером (нейтральный запрос)
+         * @description Нейтральная проба без материалов дела: ошибка провайдера — в поле error.
+         */
+        post: operations["probe_llm_provider_api_v1_llm_router_probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -6549,6 +6593,157 @@ export interface components {
             entries?: components["schemas"]["JournalEntry"][];
         };
         JsonValue: unknown;
+        /**
+         * LlmProbeOut
+         * @description Итог проверки: честная ошибка вместо ложного успеха.
+         */
+        LlmProbeOut: {
+            /** Ok */
+            ok: boolean;
+            /** Provider Id */
+            provider_id: string;
+            /**
+             * Route
+             * @enum {string}
+             */
+            route: "chat" | "transcribe";
+            /**
+             * Model
+             * @description Модель провайдера
+             */
+            model?: string | null;
+            /**
+             * Latency Ms
+             * @description Задержка вызова, мс
+             */
+            latency_ms?: number | null;
+            /**
+             * Error
+             * @description Текст для UI; None при успехе
+             */
+            error?: string | null;
+        };
+        /**
+         * LlmProbeRequest
+         * @description ``POST /api/v1/llm-router/probe``: нейтральная проверка связи с провайдером.
+         */
+        LlmProbeRequest: {
+            /** Provider Id */
+            provider_id: string;
+            /**
+             * Route
+             * @description Какой маршрут проверять
+             * @default chat
+             * @enum {string}
+             */
+            route: "chat" | "transcribe";
+        };
+        /**
+         * LlmProviderIn
+         * @description Провайдер из формы PUT (``api_key=None`` — ключ не менять).
+         */
+        LlmProviderIn: {
+            /**
+             * Id
+             * @description Id существующего провайдера; None — новый (id назначит сервер)
+             */
+            id?: string | null;
+            /**
+             * Label
+             * @description Человеческое имя провайдера
+             */
+            label: string;
+            /**
+             * Protocol
+             * @description openai — совместимый /chat/completions; anthropic — Messages API
+             * @enum {string}
+             */
+            protocol: "openai" | "anthropic";
+            /**
+             * Base Url
+             * @description Адрес API вместе с /v1, например https://api.openai.com/v1
+             */
+            base_url: string;
+            /**
+             * Model
+             * @description Идентификатор модели провайдера
+             */
+            model: string;
+            /**
+             * Enabled
+             * @description Выключенный провайдер не вызывается
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Api Key
+             * @description None — не менять; '' — удалить ключ; иначе заменить (хранится только на сервере)
+             */
+            api_key?: string | null;
+        };
+        /**
+         * LlmProviderOut
+         * @description Провайдер для UI: без ключа, только его маска.
+         */
+        LlmProviderOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Protocol
+             * @enum {string}
+             */
+            protocol: "openai" | "anthropic";
+            /** Base Url */
+            base_url: string;
+            /** Model */
+            model: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Key Hint
+             * @description Маска ключа (…abcd); None — ключ не задан
+             */
+            key_hint?: string | null;
+        };
+        /**
+         * LlmRouterOut
+         * @description ``GET /api/v1/llm-router`` — состояние роутера (ключи заменены масками).
+         */
+        LlmRouterOut: {
+            /** Providers */
+            providers: components["schemas"]["LlmProviderOut"][];
+            routes: components["schemas"]["LlmRoutes"];
+        };
+        /**
+         * LlmRouterUpdate
+         * @description ``PUT /api/v1/llm-router``: полная замена списка провайдеров и маршрутов.
+         */
+        LlmRouterUpdate: {
+            /**
+             * Providers
+             * @description Все провайдеры роутера
+             */
+            providers: components["schemas"]["LlmProviderIn"][];
+            routes?: components["schemas"]["LlmRoutes"];
+        };
+        /**
+         * LlmRoutes
+         * @description Назначение маршрутов на провайдеров (пер-ролевые маршруты — в Т4).
+         */
+        LlmRoutes: {
+            /**
+             * Chat
+             * @description Провайдер советников (Т3); None — не назначен
+             */
+            chat?: string | null;
+            /**
+             * Transcribe
+             * @description Провайдер распознавания (Т2); только protocol=openai; None — не назначен
+             */
+            transcribe?: string | null;
+        };
         /**
          * LocalResourceOut
          * @description ``GET /api/v1/resource`` — локальный ресурс: детекция GPU + тумблер.
@@ -11702,6 +11897,92 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_llm_router_api_v1_llm_router_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmRouterOut"];
+                };
+            };
+        };
+    };
+    put_llm_router_api_v1_llm_router_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmRouterUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmRouterOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probe_llm_provider_api_v1_llm_router_probe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProbeOut"];
+                };
             };
             /** @description Validation Error */
             422: {

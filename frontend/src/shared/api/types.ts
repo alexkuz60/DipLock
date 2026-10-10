@@ -216,6 +216,20 @@ export type MetaResponse = Schemas['MetaResponse']
  */
 export type LocalResource = Schemas['LocalResourceOut']
 
+/**
+ * Модельный роутер ИИ (`GET/PUT /api/v1/llm-router`, `POST .../probe`):
+ * провайдеры внешних API полноценных моделей и маршруты `chat`/`transcribe`.
+ * Ключи API в контракте не участвуют — только маска `key_hint`
+ * (`backend/app/services/llm_router.py`, `docs/rules/consilium.md` §5).
+ */
+export type LlmProvider = Schemas['LlmProviderOut']
+export type LlmProviderIn = Schemas['LlmProviderIn']
+export type LlmRoutes = Schemas['LlmRoutes']
+export type LlmRouter = Schemas['LlmRouterOut']
+export type LlmRouterUpdate = Schemas['LlmRouterUpdate']
+export type LlmProbeRequest = Schemas['LlmProbeRequest']
+export type LlmProbeResult = Schemas['LlmProbeOut']
+
 export type MriSliceRef = Schemas['MriSliceRef']
 
 /** Ссылка на тома fsaverage для 3D-вида Niivue — схема `MriVolumeRef` */
