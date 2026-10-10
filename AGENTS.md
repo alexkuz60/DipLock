@@ -170,7 +170,7 @@ docs/ui.md             # спецификация UI и дорожная кар�
 
 ## НЕ коммитить
 
-- `venv/`, `__pycache__/`, `.env`, `data/results/`, `*.db` — см. `.gitignore`.
+- `venv/`, `__pycache__/`, `.env`, `data/results/`, `*.db`, `data/llm_router.json` (API-ключи ИИ) — см. `.gitignore`.
 - `.env` содержит локальные пути/настройки — вместо него есть `.env.example`.
 
 ## Карта документации
