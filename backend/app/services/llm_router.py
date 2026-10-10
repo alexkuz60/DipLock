@@ -18,7 +18,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 
@@ -30,8 +30,15 @@ LlmRouteKey = Literal["chat", "transcribe"]
 _ROUTE_KEYS: tuple[str, ...] = ("chat", "transcribe")
 _ANTHROPIC_VERSION = "2023-06-01"
 _PROBE_PROMPT = "Ответь одним словом: готов"
+# Бюджет пробы: thinking-режим (DeepSeek `thinking`/`reasoning_effort`) требует
+# головы сверх одного слова, иначе модель молчит и проба даёт ложный отказ.
+_PROBE_MAX_TOKENS = 1024
 _MAX_ERROR_CHARS = 200
 _MAX_PROVIDERS = 20
+# Поля тела запроса, которые принадлежат роутеру, а не extra провайдера.
+_RESERVED_BODY_KEYS: frozenset[str] = frozenset({"model", "messages", "stream"})
+_MAX_EXTRA_KEYS = 30
+_MAX_EXTRA_CHARS = 4000
 
 # Сериализация записи файла: параллельные PUT не должны терять чужие правки.
 _lock = asyncio.Lock()
@@ -56,6 +63,7 @@ class Provider:
     model: str
     enabled: bool
     api_key: str | None
+    extra: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -79,6 +87,7 @@ class ProviderDraft:
     model: str
     enabled: bool
     api_key: str | None
+    extra: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -145,6 +154,7 @@ def _read_state() -> RouterState:
             model=str(item.get("model", "")),
             enabled=bool(item.get("enabled", True)),
             api_key=(str(item["api_key"]) if item.get("api_key") else None),
+            extra=(item["extra"] if isinstance(item.get("extra"), dict) else None),
         )
         for item in raw.get("providers", [])
     )
@@ -168,6 +178,7 @@ def _write_state(state: RouterState) -> None:
                 "model": provider.model,
                 "enabled": provider.enabled,
                 "api_key": provider.api_key,
+                "extra": provider.extra,
             }
             for provider in state.providers
         ],
@@ -188,12 +199,32 @@ async def get_state() -> RouterState:
     return await asyncio.to_thread(_read_state)
 
 
+def _validate_extra(extra: dict[str, Any]) -> None:
+    """Дополнительные параметры: без зарезервированных ключей и гигантских тел."""
+    reserved = _RESERVED_BODY_KEYS & set(extra)
+    if reserved:
+        raise LlmRouterError(
+            "Параметры model/messages/stream задаются роутером — уберите их "
+            "из дополнительных параметров",
+        )
+    if len(extra) > _MAX_EXTRA_KEYS:
+        raise LlmRouterError(
+            f"Слишком много дополнительных параметров: не больше {_MAX_EXTRA_KEYS}",
+        )
+    if len(json.dumps(extra, ensure_ascii=False)) > _MAX_EXTRA_CHARS:
+        raise LlmRouterError("Дополнительные параметры слишком велики — сократите JSON")
+
+
 def _merge_provider(draft: ProviderDraft, known: dict[str, Provider]) -> Provider:
-    """Собрать провайдера из черновика: семантика ключа None — не менять."""
+    """Собрать провайдера из черновика: семантика None — не менять (ключ и extra)."""
     if draft.api_key is None:
         api_key = known[draft.id].api_key if draft.id in known else None
     else:
         api_key = draft.api_key or None
+    if draft.extra is None:
+        extra = known[draft.id].extra if draft.id in known else None
+    else:
+        extra = draft.extra or None
     if draft.id is None:
         return Provider(
             id=uuid.uuid4().hex[:12],
@@ -203,6 +234,7 @@ def _merge_provider(draft: ProviderDraft, known: dict[str, Provider]) -> Provide
             model=draft.model,
             enabled=draft.enabled,
             api_key=api_key,
+            extra=extra,
         )
     if draft.id not in known:
         raise LlmRouterError(
@@ -217,6 +249,7 @@ def _merge_provider(draft: ProviderDraft, known: dict[str, Provider]) -> Provide
         model=draft.model,
         enabled=draft.enabled,
         api_key=api_key,
+        extra=extra,
     )
 
 
@@ -240,6 +273,8 @@ def _apply_update_sync(
             raise LlmRouterError("Имя провайдера и модель обязательны")
         if not (base_url.startswith("http://") or base_url.startswith("https://")):
             raise LlmRouterError("Адрес API должен начинаться с http:// или https://")
+        if draft.extra is not None:
+            _validate_extra(draft.extra)
         provider = _merge_provider(
             ProviderDraft(
                 id=draft.id,
@@ -249,6 +284,7 @@ def _apply_update_sync(
                 model=model,
                 enabled=draft.enabled,
                 api_key=draft.api_key,
+                extra=draft.extra,
             ),
             known,
         )
@@ -337,7 +373,18 @@ async def _chat_completion(
         if provider.api_key:
             headers["Authorization"] = f"Bearer {provider.api_key}"
         url = f"{provider.base_url}/chat/completions"
-    body = {"model": provider.model, "max_tokens": max_tokens, "messages": messages}
+    body: dict[str, Any] = {
+        "model": provider.model,
+        "max_tokens": max_tokens,
+        "messages": messages,
+    }
+    if provider.extra:
+        # Зарезервированные ключи отсекаются и здесь: файл мог быть отредактирован вручную.
+        body.update({
+            key: value
+            for key, value in provider.extra.items()
+            if key not in _RESERVED_BODY_KEYS
+        })
 
     started = time.perf_counter()
     try:
@@ -423,7 +470,7 @@ async def probe(
         result = await _chat_completion(
             provider,
             [{"role": "user", "content": _PROBE_PROMPT}],
-            max_tokens=8,
+            max_tokens=_PROBE_MAX_TOKENS,
             client=client,
         )
     except LlmRouterError as exc:

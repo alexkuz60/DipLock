@@ -2,7 +2,7 @@
  * Тесты панели «Модельный роутер ИИ»: маскирование ключа, сохранение только
  * кнопкой, семантика «пустой ключ — не менять», проверка связи.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { ModelRouterPanel } from './ModelRouterPanel'
@@ -134,5 +134,73 @@ describe('панель «Модельный роутер ИИ»', () => {
     await user.click(screen.getByRole('button', { name: 'Добавить провайдера' }))
     expect(screen.getByText('Новый провайдер')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Сохраните, чтобы проверить' })).toBeDisabled()
+  })
+
+  it('дополнительные параметры (JSON) уходят только с сохранением', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderWithProviders(<ModelRouterPanel />)
+
+    const extra = await screen.findByLabelText('Дополнительные параметры')
+    fireEvent.change(extra, {
+      target: { value: '{"thinking": {"type": "enabled"}, "reasoning_effort": "high"}' },
+    })
+    expect(putBodies(fetchMock)).toHaveLength(0)
+
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+    await waitFor(() => expect(putBodies(fetchMock)).toHaveLength(1))
+    const body = putBodies(fetchMock)[0] as {
+      providers: { extra?: { [key: string]: unknown } }[]
+    }
+    expect(body.providers[0].extra).toEqual({
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'high',
+    })
+  })
+
+  it('некорректный JSON параметров показывает ошибку и не отправляет', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderWithProviders(<ModelRouterPanel />)
+
+    const extra = await screen.findByLabelText('Дополнительные параметры')
+    await user.type(extra, 'не json')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    expect(
+      await screen.findByText(/Дополнительные параметры — некорректный JSON/),
+    ).toBeInTheDocument()
+    expect(putBodies(fetchMock)).toHaveLength(0)
+  })
+
+  it('пустое поле параметров убирает прежние (отправляется {})', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch({
+      llmRouter: llmRouterFixture({
+        providers: [
+          {
+            id: 'prov-full',
+            label: 'Полная модель',
+            protocol: 'openai',
+            base_url: 'https://api.deepseek.com',
+            model: 'deepseek-flash',
+            enabled: true,
+            key_hint: '…1234',
+            extra: { reasoning_effort: 'high' },
+          },
+        ],
+        routes: { chat: 'prov-full', transcribe: null },
+      }),
+    })
+    renderWithProviders(<ModelRouterPanel />)
+
+    const extra = await screen.findByLabelText('Дополнительные параметры')
+    expect(extra).toHaveValue(JSON.stringify({ reasoning_effort: 'high' }, null, 2))
+    await user.clear(extra)
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => expect(putBodies(fetchMock)).toHaveLength(1))
+    const body = putBodies(fetchMock)[0] as { providers: { extra?: unknown }[] }
+    expect(body.providers[0].extra).toEqual({})
   })
 })

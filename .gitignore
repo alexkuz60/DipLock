@@ -117,3 +117,5 @@ screenshots/
 
 # --- Sonic Annotator (VAMP, бинарь GPL — не коммитим; ставится по README) ---
 tools/sonic-annotator/
+# Модельный роутер ИИ: API-ключи провайдеров — только локально, никогда в git
+data/llm_router.json

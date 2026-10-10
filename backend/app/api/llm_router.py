@@ -35,6 +35,7 @@ def _provider_out(provider: Provider) -> LlmProviderOut:
         model=provider.model,
         enabled=provider.enabled,
         key_hint=llm_router.key_hint(provider.api_key),
+        extra=provider.extra,
     )
 
 
@@ -80,6 +81,7 @@ async def put_llm_router(payload: LlmRouterUpdate, response: Response) -> LlmRou
             model=item.model,
             enabled=item.enabled,
             api_key=item.api_key,
+            extra=item.extra,
         )
         for item in payload.providers
     ]

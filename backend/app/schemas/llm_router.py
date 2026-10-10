@@ -6,7 +6,7 @@
 наружу отдаётся только маска ``key_hint`` (правила — ``docs/rules/consilium.md`` §5).
 """
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -29,7 +29,11 @@ class LlmProviderIn(BaseModel):
     base_url: str = Field(
         min_length=8,
         max_length=300,
-        description="Адрес API вместе с /v1, например https://api.openai.com/v1",
+        description=(
+            "Адрес API как у провайдера (с /v1 или без — роутер дописывает только "
+            "/chat/completions или /messages): https://api.deepseek.com, "
+            "https://api.openai.com/v1, https://api.anthropic.com/v1"
+        ),
     )
     model: str = Field(min_length=1, max_length=120, description="Идентификатор модели провайдера")
     enabled: bool = Field(default=True, description="Выключенный провайдер не вызывается")
@@ -37,6 +41,15 @@ class LlmProviderIn(BaseModel):
         default=None,
         max_length=500,
         description="None — не менять; '' — удалить ключ; иначе заменить (хранится только на сервере)",
+    )
+    extra: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Дополнительные параметры тела запроса (например, "
+            '{"thinking": {"type": "enabled"}, "reasoning_effort": "high"} для '
+            "DeepSeek); None — не менять; {} — убрать. model/messages/stream "
+            "задаются роутером"
+        ),
     )
 
 
@@ -52,6 +65,10 @@ class LlmProviderOut(BaseModel):
     key_hint: str | None = Field(
         default=None,
         description="Маска ключа (…abcd); None — ключ не задан",
+    )
+    extra: dict[str, Any] | None = Field(
+        default=None,
+        description="Дополнительные параметры тела запроса (как сохранены); None — нет",
     )
 
 

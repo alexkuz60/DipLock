@@ -5,6 +5,8 @@
 реальные провайдеры не используются.
 """
 
+import json
+
 import httpx
 import pytest
 
@@ -343,3 +345,78 @@ async def test_state_survives_reload(router_config):
     assert [p.id for p in reread.providers] == [p.id for p in saved.providers]
     assert reread.providers[0].api_key == _TEST_KEY
     assert reread.routes == saved.routes
+
+
+# ---------- дополнительные параметры (DeepSeek thinking/reasoning_effort) ----------
+
+
+@pytest.mark.asyncio
+async def test_extra_merged_into_request_body(router_config, monkeypatch):
+    """extra дополняет тело запроса; stream остаётся за роутером (не отправляется)."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="DeepSeek", protocol="openai",
+            base_url="https://api.deepseek.com", model="deepseek-flash", enabled=True,
+            api_key=_TEST_KEY,
+            extra={"thinking": {"type": "enabled"}, "reasoning_effort": "high"},
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+    assert state.providers[0].extra == {
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "high",
+    }
+
+    captured: dict[str, bytes] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = request.content
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": "готов"}}],
+        })
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    result = await llm_router.probe(provider_id, "chat")
+    assert result.ok is True
+
+    body = json.loads(captured["body"])
+    assert body["model"] == "deepseek-flash"
+    assert body["thinking"] == {"type": "enabled"}
+    assert body["reasoning_effort"] == "high"
+    # Бюджет пробы достаточно велик для thinking-режима (не 8 токенов)
+    assert body["max_tokens"] >= 256
+    assert "stream" not in body
+
+
+def test_extra_reserved_keys_rejected(client, router_config):
+    """model/messages/stream задаются роутером — в extra их быть не должно."""
+    result = client.put(PREFIX, json={
+        "providers": [_provider_payload(extra={"stream": True})],
+        "routes": {},
+    })
+    assert result.status_code == 400
+    assert "stream" in result.json()["detail"]
+    assert not router_config.exists()
+
+
+def test_extra_none_keeps_and_empty_clears(client, router_config):
+    """extra=None — не менять; {} — убрать дополнительные параметры."""
+    created = client.put(PREFIX, json={
+        "providers": [_provider_payload(extra={"reasoning_effort": "high"})],
+        "routes": {},
+    })
+    provider_id = created.json()["providers"][0]["id"]
+    assert created.json()["providers"][0]["extra"] == {"reasoning_effort": "high"}
+
+    kept = client.put(PREFIX, json={
+        "providers": [_provider_payload(id=provider_id, extra=None, label="P2")],
+        "routes": {},
+    })
+    assert kept.json()["providers"][0]["extra"] == {"reasoning_effort": "high"}
+
+    cleared = client.put(PREFIX, json={
+        "providers": [_provider_payload(id=provider_id, extra={})],
+        "routes": {},
+    })
+    assert cleared.json()["providers"][0]["extra"] is None

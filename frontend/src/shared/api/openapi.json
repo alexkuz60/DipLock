@@ -13639,7 +13639,7 @@
             "maxLength": 300,
             "minLength": 8,
             "title": "Base Url",
-            "description": "Адрес API вместе с /v1, например https://api.openai.com/v1"
+            "description": "Адрес API как у провайдера (с /v1 или без — роутер дописывает только /chat/completions или /messages): https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1"
           },
           "model": {
             "type": "string",
@@ -13666,6 +13666,19 @@
             ],
             "title": "Api Key",
             "description": "None — не менять; '' — удалить ключ; иначе заменить (хранится только на сервере)"
+          },
+          "extra": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra",
+            "description": "Дополнительные параметры тела запроса (например, {\"thinking\": {\"type\": \"enabled\"}, \"reasoning_effort\": \"high\"} для DeepSeek); None — не менять; {} — убрать. model/messages/stream задаются роутером"
           }
         },
         "type": "object",
@@ -13719,6 +13732,19 @@
             ],
             "title": "Key Hint",
             "description": "Маска ключа (…abcd); None — ключ не задан"
+          },
+          "extra": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extra",
+            "description": "Дополнительные параметры тела запроса (как сохранены); None — нет"
           }
         },
         "type": "object",

@@ -6661,7 +6661,7 @@ export interface components {
             protocol: "openai" | "anthropic";
             /**
              * Base Url
-             * @description Адрес API вместе с /v1, например https://api.openai.com/v1
+             * @description Адрес API как у провайдера (с /v1 или без — роутер дописывает только /chat/completions или /messages): https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1
              */
             base_url: string;
             /**
@@ -6680,6 +6680,13 @@ export interface components {
              * @description None — не менять; '' — удалить ключ; иначе заменить (хранится только на сервере)
              */
             api_key?: string | null;
+            /**
+             * Extra
+             * @description Дополнительные параметры тела запроса (например, {"thinking": {"type": "enabled"}, "reasoning_effort": "high"} для DeepSeek); None — не менять; {} — убрать. model/messages/stream задаются роутером
+             */
+            extra?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * LlmProviderOut
@@ -6706,6 +6713,13 @@ export interface components {
              * @description Маска ключа (…abcd); None — ключ не задан
              */
             key_hint?: string | null;
+            /**
+             * Extra
+             * @description Дополнительные параметры тела запроса (как сохранены); None — нет
+             */
+            extra?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * LlmRouterOut

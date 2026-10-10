@@ -33,6 +33,8 @@ type ProviderRow = {
   /** Серверная маска (…abcd) для подсказки поля */
   keyHint: string | null
   clearKey: boolean
+  /** Дополнительные параметры тела запроса как JSON-текст (пусто — без них) */
+  extraText: string
 }
 
 type ProbeState = { pending: boolean; result: LlmProbeResult | null }
@@ -57,10 +59,25 @@ function emptyRow(): ProviderRow {
     apiKey: '',
     keyHint: null,
     clearKey: false,
+    extraText: '',
   }
 }
 
-/** Тело PUT: api_key отправляется только при явном действии (ввод/очистка). */
+/**
+ * Разбор JSON дополнительных параметров: объект верхнего уровня.
+ * Пустой текст — «без параметров» (сервер получит `{}` и уберёт прежние).
+ */
+function parseExtra(text: string): { [key: string]: unknown } {
+  const trimmed = text.trim()
+  if (!trimmed) return {}
+  const parsed: unknown = JSON.parse(trimmed)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('json')
+  }
+  return parsed as { [key: string]: unknown }
+}
+
+/** Тело PUT: api_key/extra отправляются по явному видимому состоянию формы. */
 function toProviderIn(row: ProviderRow): LlmProviderIn {
   const base: LlmProviderIn = {
     id: row.id,
@@ -69,6 +86,7 @@ function toProviderIn(row: ProviderRow): LlmProviderIn {
     base_url: row.baseUrl.trim(),
     model: row.model.trim(),
     enabled: row.enabled,
+    extra: parseExtra(row.extraText),
   }
   if (row.clearKey) return { ...base, api_key: '' }
   if (row.apiKey) return { ...base, api_key: row.apiKey }
@@ -105,6 +123,7 @@ export function ModelRouterPanel() {
         apiKey: '',
         keyHint: provider.key_hint ?? null,
         clearKey: false,
+        extraText: provider.extra ? JSON.stringify(provider.extra, null, 2) : '',
       })),
     )
     setRoutes({ chat: data.routes.chat, transcribe: data.routes.transcribe })
@@ -150,6 +169,7 @@ export function ModelRouterPanel() {
           apiKey: '',
           keyHint: provider.key_hint ?? null,
           clearKey: false,
+          extraText: provider.extra ? JSON.stringify(provider.extra, null, 2) : '',
         })),
       )
       setRoutes({ chat: data.routes.chat, transcribe: data.routes.transcribe })
@@ -261,15 +281,31 @@ export function ModelRouterPanel() {
               label="Адрес API"
               mono
               value={row.baseUrl}
-              hint="Вместе с /v1: https://api.openai.com/v1, https://api.anthropic.com/v1"
+              hint="Как у провайдера, с /v1 или без: https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1"
               onChange={(value) => editRow(index, { baseUrl: value })}
             />
             <TextField
               label="Модель"
               mono
               value={row.model}
+              hint="Например: deepseek-flash, deepseek-v4-pro, gpt-4o, claude-sonnet"
               onChange={(value) => editRow(index, { model: value })}
             />
+            <div className="ui-list-row flex items-start gap-3 py-2">
+              <span className="w-32 shrink-0 pt-1.5 text-sm text-fg-2">Параметры</span>
+              <textarea
+                aria-label="Дополнительные параметры"
+                value={row.extraText}
+                rows={2}
+                placeholder='{"thinking": {"type": "enabled"}, "reasoning_effort": "high"}'
+                onChange={(event) => editRow(index, { extraText: event.target.value })}
+                className="w-full rounded-lg border border-border bg-bg-2 px-2.5 py-1.5 font-mono text-sm text-fg-0"
+              />
+            </div>
+            <p className="pb-1 text-sm text-fg-2">
+              JSON дополняет тело запроса (DeepSeek: thinking/reasoning_effort);
+              model/messages/stream задаются роутером. Пусто — без параметров.
+            </p>
             <CheckboxRow
               label="Включён"
               checked={row.enabled}
@@ -358,12 +394,18 @@ export function ModelRouterPanel() {
         <Button
           variant="primary"
           disabled={!dirty || save.isPending}
-          onClick={() =>
-            save.mutate({
-              providers: providerRows.map(toProviderIn),
-              routes: { chat: routes.chat, transcribe: routes.transcribe },
-            })
-          }
+          onClick={() => {
+            try {
+              save.mutate({
+                providers: providerRows.map(toProviderIn),
+                routes: { chat: routes.chat, transcribe: routes.transcribe },
+              })
+            } catch {
+              setSaveError(
+                'Дополнительные параметры — некорректный JSON (нужен объект вида {"ключ": значение})',
+              )
+            }
+          }}
         >
           Сохранить
         </Button>
