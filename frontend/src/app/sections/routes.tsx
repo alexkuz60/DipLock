@@ -33,7 +33,11 @@ import { GroupSection } from './group/GroupSection'
 import { GroupToolActions } from './group/GroupToolActions'
 import { NeuromusicPanel } from './neuromusic/NeuromusicPanel'
 import { NeuromusicSection } from './neuromusic/NeuromusicSection'
-import { NeuromusicToolActions } from './neuromusic/NeuromusicToolActions'
+import {
+  NeuromusicTitleFile,
+  NeuromusicTitleIcon,
+  NeuromusicToolActions,
+} from './neuromusic/NeuromusicToolActions'
 import {
   EmoLabPanel,
   EmoLabSection,
@@ -46,6 +50,10 @@ type SectionModule = {
   Component: ComponentType
   /** Содержимое правого сайдбара раздела (если у него есть панель) */
   Panel?: ComponentType
+  /** Дополнение тулс-хедера перед названием раздела (иконка и т.п.) */
+  TitleBefore?: ComponentType
+  /** Дополнение тулс-хедера после названия раздела (имя файла и т.п.) */
+  TitleAfter?: ComponentType
   /** Кнопки-действия тулс-хедера (после заголовка раздела) */
   ToolActions?: ComponentType
   /** Вторичные контролы тулс-хедера (правый край, перед кнопкой панели) */
@@ -90,6 +98,8 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
   neuromusic: {
     Component: NeuromusicSection,
     Panel: NeuromusicPanel,
+    TitleBefore: NeuromusicTitleIcon,
+    TitleAfter: NeuromusicTitleFile,
     ToolActions: NeuromusicToolActions,
   },
   wiki: { Component: WikiSection },
@@ -100,11 +110,14 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
 /** Раздел внутри каркаса: тулс-хедер + рабочая область + панель опций. */
 export function SectionRoute({ id }: { id: SectionId }) {
   const section = getSection(id)
-  const { Component, Panel, ToolActions, HeaderExtra, Drawer } = SECTION_MODULES[id]
+  const { Component, Panel, TitleBefore, TitleAfter, ToolActions, HeaderExtra, Drawer } =
+    SECTION_MODULES[id]
 
   return (
     <AppShell
       section={section}
+      titleBefore={TitleBefore ? <TitleBefore /> : undefined}
+      titleAfter={TitleAfter ? <TitleAfter /> : undefined}
       actions={ToolActions ? <ToolActions /> : undefined}
       headerExtra={HeaderExtra ? <HeaderExtra /> : undefined}
       drawer={Drawer ? <Drawer /> : undefined}

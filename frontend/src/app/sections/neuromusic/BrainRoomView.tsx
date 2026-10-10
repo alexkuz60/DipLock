@@ -8,9 +8,14 @@
  * Без МРТ-срезов — чистая векторная схема: координаты идут из
  * `spatialLayout.brainroomProject` («деформация сферы» — нормировка на
  * пропорции комнаты), поэтому силуэт и звук стоят в одной геометрии.
+ *
+ * Экономия места (правка 10.10.2026): текст-легенда под силуэтом убрана,
+ * SVG — `h-full w-full` с `preserveAspectRatio="xMidYMid meet"` — голова
+ * вписывается по высоте ячейки и держит **ту же высоту, что соседний график
+ * «Эмо»** (`RadialChart` — тот же `h-full w-full` в ячейке той же строки).
  */
 import { brainroomProject, scenePoints } from '@/shared/lib/spatialLayout'
-import { ROW_COLORS, ROW_LABELS } from './rowMeta'
+import { ROW_COLORS } from './rowMeta'
 
 /** Размер viewBox: ширина 1.0, длина 1.3 — ровно пропорции стен. */
 const VIEW_W = 200
@@ -52,106 +57,83 @@ export function BrainRoomView({ variant, rows, bands, spreadPct }: BrainRoomView
   const brainBottom = center.y + BRAIN_RY
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-1.5">
-      <svg
-        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-        preserveAspectRatio="xMidYMid meet"
-        role="img"
-        aria-label={`Силуэт BrainRoom: вид сверху, ${variant === 'montage' ? 'модули рядов' : 'дуга ±60°'}`}
-        data-testid="brainroom-view"
-        className="min-h-0 w-full flex-1"
-      >
-        {/* Стены BrainRoom: эллипс 1.0 : 1.3, слушатель в центре. */}
-        <ellipse
-          cx={center.x}
-          cy={center.y}
-          rx={WALL_RX}
-          ry={WALL_RY}
-          fill="var(--color-bg-1)"
-          stroke="var(--color-border)"
-          strokeWidth={2}
-        />
-        {/* Мозг сверху: овал коры + продольная щель + выступ носа спереди. */}
-        <ellipse
-          cx={center.x}
-          cy={center.y}
-          rx={BRAIN_RX}
-          ry={BRAIN_RY}
-          fill="none"
-          stroke="var(--color-fg-2)"
-          strokeWidth={1.5}
-        />
-        <line
-          x1={center.x}
-          y1={brainTop + 6}
-          x2={center.x}
-          y2={brainBottom - 6}
-          stroke="var(--color-fg-2)"
-          strokeWidth={1}
-          strokeDasharray="4 5"
-        />
-        <path
-          d={`M ${center.x - 6} ${brainTop} L ${center.x} ${brainTop - 7} L ${center.x + 6} ${brainTop} Z`}
-          fill="var(--color-fg-2)"
-        />
-        {/* Слушатель (y=0, сцена XY): белая точка + прицел. */}
-        <line
-          x1={center.x - 8}
-          y1={center.y}
-          x2={center.x + 8}
-          y2={center.y}
-          stroke="var(--color-fg-0)"
-          strokeWidth={1}
-        />
-        <line
-          x1={center.x}
-          y1={center.y - 8}
-          x2={center.x}
-          y2={center.y + 8}
-          stroke="var(--color-fg-0)"
-          strokeWidth={1}
-        />
-        <circle cx={center.x} cy={center.y} r={3.5} fill="var(--color-fg-0)" />
-        {/* Источники сцены. */}
-        {points.map((point, index) => {
-          const { cx, cy } = toXY(point.x, point.z)
-          const color = point.row
-            ? (ROW_COLORS[point.row] ?? 'var(--color-accent)')
-            : 'var(--color-accent)'
-          return (
-            <circle
-              key={`${point.row ?? 'arc'}-${index}`}
-              cx={cx}
-              cy={cy}
-              r={3.2}
-              fill={color}
-              stroke="var(--color-bg-0)"
-              strokeWidth={1}
-            />
-          )
-        })}
-      </svg>
-      {/* Легенда: ряды («Монтаж») либо подпись дуги («Экспресс»). */}
-      <div
-        className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs text-fg-2"
-        data-testid="brainroom-legend"
-      >
-        {variant === 'montage' && rows.length > 0 ? (
-          rows.map((row) => (
-            <span key={row} className="inline-flex items-center gap-1">
-              <span
-                aria-hidden
-                className="inline-block size-2 rounded-full"
-                style={{ backgroundColor: ROW_COLORS[row] ?? 'var(--color-accent)' }}
-              />
-              {ROW_LABELS[row] ?? row}
-            </span>
-          ))
-        ) : (
-          <span>Дуга ±60° перед слушателем (слева δ, справа γ-high)</span>
-        )}
-        <span>вид сверху, стены 1.0 : 1.3</span>
-      </div>
-    </div>
+    <svg
+      viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={`Силуэт BrainRoom: вид сверху, ${variant === 'montage' ? 'модули рядов' : 'дуга ±60°'}`}
+      data-testid="brainroom-view"
+      className="h-full w-full"
+    >
+      {/* Стены BrainRoom: эллипс 1.0 : 1.3, слушатель в центре. */}
+      <ellipse
+        cx={center.x}
+        cy={center.y}
+        rx={WALL_RX}
+        ry={WALL_RY}
+        fill="var(--color-bg-1)"
+        stroke="var(--color-border)"
+        strokeWidth={2}
+      />
+      {/* Мозг сверху: овал коры + продольная щель + выступ носа спереди. */}
+      <ellipse
+        cx={center.x}
+        cy={center.y}
+        rx={BRAIN_RX}
+        ry={BRAIN_RY}
+        fill="none"
+        stroke="var(--color-fg-2)"
+        strokeWidth={1.5}
+      />
+      <line
+        x1={center.x}
+        y1={brainTop + 6}
+        x2={center.x}
+        y2={brainBottom - 6}
+        stroke="var(--color-fg-2)"
+        strokeWidth={1}
+        strokeDasharray="4 5"
+      />
+      <path
+        d={`M ${center.x - 6} ${brainTop} L ${center.x} ${brainTop - 7} L ${center.x + 6} ${brainTop} Z`}
+        fill="var(--color-fg-2)"
+      />
+      {/* Слушатель (y=0, сцена XY): белая точка + прицел. */}
+      <line
+        x1={center.x - 8}
+        y1={center.y}
+        x2={center.x + 8}
+        y2={center.y}
+        stroke="var(--color-fg-0)"
+        strokeWidth={1}
+      />
+      <line
+        x1={center.x}
+        y1={center.y - 8}
+        x2={center.x}
+        y2={center.y + 8}
+        stroke="var(--color-fg-0)"
+        strokeWidth={1}
+      />
+      <circle cx={center.x} cy={center.y} r={3.5} fill="var(--color-fg-0)" />
+      {/* Источники сцены. */}
+      {points.map((point, index) => {
+        const { cx, cy } = toXY(point.x, point.z)
+        const color = point.row
+          ? (ROW_COLORS[point.row] ?? 'var(--color-accent)')
+          : 'var(--color-accent)'
+        return (
+          <circle
+            key={`${point.row ?? 'arc'}-${index}`}
+            cx={cx}
+            cy={cy}
+            r={3.2}
+            fill={color}
+            stroke="var(--color-bg-0)"
+            strokeWidth={1}
+          />
+        )
+      })}
+    </svg>
   )
 }

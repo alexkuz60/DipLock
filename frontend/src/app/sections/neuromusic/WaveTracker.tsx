@@ -13,7 +13,7 @@
  * перерисовывается только оверлей позиционера; волна и линейка — при смене
  * окна (правило `docs/rules/frontend-perf.md`).
  */
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/shared/api/client'
 import type { AudioEmo } from '@/shared/api/types'
 import { NeuromusicPlayer } from '@/shared/lib/neuromusicPlayer'
@@ -38,6 +38,7 @@ import {
 import { useNeuromusic } from '@/shared/state/neuromusic'
 import { getActivePlayer, useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
 import { buildTrackList } from './trackList'
+import { trackerTimeRef } from './trackerTimeRef'
 
 /** Высота волны-бабочки, px — потолок раздела (ТЗ: не более 200). */
 const WAVE_HEIGHT_PX = 200
@@ -57,11 +58,6 @@ export type WaveTrackerProps = {
    * (null — аннотаций нет, волна без них).
    */
   emo?: AudioEmo | null
-  /**
-   * ref таймкода в хедере раздела (контролы слева от Play/Stop): `paint`
-   * пишет в него textContent — позиция/длительность без ре-рендеров хедера.
-   */
-  timeRef: RefObject<HTMLSpanElement | null>
 }
 
 /** Текст ошибки движка для пользователя. */
@@ -69,7 +65,7 @@ function errorText(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'Не удалось построить плеер'
 }
 
-export function WaveTracker({ renderId, tracks, timeRef, emo = null }: WaveTrackerProps) {
+export function WaveTracker({ renderId, tracks, emo = null }: WaveTrackerProps) {
   const source = useNeuromusicPlayer((state) => state.source)
   const zoom = useNeuromusicPlayer((state) => state.zoom)
   const ready = useNeuromusicPlayer((state) => state.ready)
@@ -304,12 +300,12 @@ export function WaveTracker({ renderId, tracks, timeRef, emo = null }: WaveTrack
     const totalHeight = RULER_HEIGHT_PX + WAVE_HEIGHT_PX
     const overlayCtx = overlayRef.current ? prepareCanvas(overlayRef.current, w, totalHeight) : null
     if (overlayCtx) drawPlayhead(overlayCtx, pos, view, w, totalHeight, theme)
-    if (timeRef.current) {
-      timeRef.current.textContent = `${formatTime(pos, tenths)} / ${formatTime(duration, tenths)}`
+    if (trackerTimeRef.current) {
+      trackerTimeRef.current.textContent = `${formatTime(pos, tenths)} / ${formatTime(duration, tenths)}`
     }
-    // timeRef — prop из хедера: объект стабилен (useRef родителя), зависимость
-    // нужна только для ESLint exhaustive-deps.
-  }, [timeRef])
+    // trackerTimeRef — общий модульный ref таймкода хедера (`TrackerControls`):
+    // пишет в него textContent — позиция/длительность без ре-рендеров хедера.
+  }, [])
 
   // Пики «бабочки» для текущего источника: пересчёт при смене источника, зума
   // или ширины; `null` пока буфер не загрузился (рисуется одна линия нуля).

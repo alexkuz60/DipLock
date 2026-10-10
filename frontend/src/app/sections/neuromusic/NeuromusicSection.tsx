@@ -1,5 +1,11 @@
 /**
- * Раздел «Нейромузыка» (эксперимент, docs/rules/neuromusic.md).
+ * Раздел «Нейромузыка» (docs/rules/neuromusic.md).
+ *
+ * Строка с иконкой ноты, именем ЭЭГ-файла и контролами управления переехала
+ * в **тулс-хедер раздела** (правка 10.10.2026 «экономим место на экране»):
+ * иконка — перед названием раздела, имя файла — после него, кнопка
+ * «Создать аудио» и контролы (`NeuromusicToolActions`) — одной строкой;
+ * отдельного хедера в рабочей области больше нет.
  *
  * Рабочая область отдана графике: подсказка без записи, статус/прогресс
  * рендера, трекер-плеер (`WaveTracker`: линейка времени + волна-бабочка +
@@ -7,10 +13,9 @@
  * головы `BrainRoomView`, перенесённый из «Опций» правого сайдбара, и
  * радиальный график `RadialChart`; без шапок/подписей, вписывается по
  * высоте рабочей области без прокрутки; видна только вместе с плеером —
- * после успешного рендера). Транспорт Play/Pause и Stop — кнопки хедера
- * раздела, ссылки «Скачать…» — секция «Файлы» правого сайдбара
- * (`NeuromusicPanel`); параметры рендера — секция «Параметры рендера»
- * того же сайдбара (правка параметра рендер не запускает).
+ * после успешного рендера). Ссылки «Скачать…» — секция «Файлы» правого
+ * сайдбара (`NeuromusicPanel`); параметры рендера — секция «Параметры
+ * рендера» того же сайдбара (правка параметра рендер не запускает).
  *
  * Состояние: сторы `shared/state/neuromusic.ts` (рендер, поллинг) и
  * `shared/state/neuromusicPlayer.ts` (транспорт/вид плеера — их делят хедер
@@ -18,22 +23,19 @@
  * результат принадлежит записи — при закрытии/смене записи сбрасывается здесь
  * (паттерн `summaryReport`).
  */
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Music2, Pause, Play, Square } from 'lucide-react'
+import { Music2 } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import type { AudioRenderVariant } from '@/shared/api/types'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useNeuromusic } from '@/shared/state/neuromusic'
 import { useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
-import { IconButton } from '@/shared/ui/IconButton'
 import { Placeholder } from '@/shared/ui/Placeholder'
-import { StatusPill } from '@/shared/ui/StatusPill'
 import { BrainRoomView } from './BrainRoomView'
 import { EmoCounters } from './EmoCounters'
 import { RadialChart } from './RadialChart'
 import { MONTAGE_ROW_IDS } from './rowMeta'
-import { TrackerControls } from './TrackerControls'
 import { WaveTracker } from './WaveTracker'
 
 export function NeuromusicSection() {
@@ -41,19 +43,10 @@ export function NeuromusicSection() {
   const renderId = useNeuromusic((state) => state.renderId)
   const status = useNeuromusic((state) => state.status)
   const busy = useNeuromusic((state) => state.busy)
-  const cached = useNeuromusic((state) => state.cached)
   const error = useNeuromusic((state) => state.error)
   /** Для силуэта «Визуализации»: вариант/разброс сцены — из того же стора. */
   const variant = useNeuromusic((state) => state.variant)
   const spatialSpreadPct = useNeuromusic((state) => state.spatialSpreadPct)
-
-  /** Транспорт хедера живёт в сторе плеера — с ним же делит его трекер. */
-  const playing = useNeuromusicPlayer((state) => state.playing)
-  const playerReady = useNeuromusicPlayer((state) => state.ready)
-  const togglePlay = useNeuromusicPlayer((state) => state.togglePlay)
-  const stop = useNeuromusicPlayer((state) => state.stop)
-  /** Таймкод хедера: пишет paint трекера (rAF, без ре-рендеров хедера). */
-  const timeRef = useRef<HTMLSpanElement>(null)
 
   const running = busy || status?.status === 'running'
   const succeeded = status?.status === 'succeeded'
@@ -116,58 +109,8 @@ export function NeuromusicSection() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4">
-      <header className="flex flex-wrap items-center gap-3">
-        <Music2 className="size-6 text-accent" aria-hidden />
-        {/* Заголовок хедера — имя ЭЭГ-файла (прежняя строка «Эксперимент: …»
-            сокращена по приёмке 07.10.2026). */}
-        <h2 className="text-lg font-medium text-fg-1">{recording.filename}</h2>
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {succeeded && renderId && (
-            <>
-              <TrackerControls tracks={tracks} timeRef={timeRef} />
-              <IconButton
-                icon={
-                  playing ? (
-                    <Pause className="size-5" aria-hidden />
-                  ) : (
-                    <Play className="size-5" aria-hidden />
-                  )
-                }
-                label={playing ? 'Пауза' : 'Слушать'}
-                tooltip={playing ? 'Пауза' : 'Слушать трекер (волна и позиционер слева направо)'}
-                disabled={!playerReady}
-                onClick={() => void togglePlay()}
-                data-testid="transport-play"
-              />
-              <IconButton
-                icon={<Square className="size-4" aria-hidden />}
-                label="Стоп"
-                tooltip="Стоп: остановить и вернуть позиционер в начало"
-                disabled={!playerReady}
-                onClick={() => void stop()}
-                data-testid="transport-stop"
-              />
-            </>
-          )}
-          {status && (
-            <StatusPill
-              tone={
-                status.status === 'succeeded' ? 'ok' : status.status === 'failed' ? 'danger' : 'warn'
-              }
-            >
-              {status.status === 'succeeded'
-                ? // cached из ответа POST: те же параметры уже считались —
-                  // честно показываем, что конвейер не запускался.
-                  cached
-                  ? 'Готово (из кэша)'
-                  : 'Готово'
-                : status.status === 'failed'
-                  ? 'Ошибка'
-                  : 'Рендер…'}
-            </StatusPill>
-          )}
-        </div>
-      </header>
+      {/* Строка иконки/файла/контролов — в тулс-хедере (NeuromusicToolActions):
+          здесь только графика — экономия высоты рабочей области. */}
 
       {error && (
         <p
@@ -212,12 +155,7 @@ export function NeuromusicSection() {
 
       {succeeded && renderId && (
         <section aria-label="Прослушивание" className="flex shrink-0 flex-col gap-3">
-          <WaveTracker
-            renderId={renderId}
-            tracks={tracks}
-            timeRef={timeRef}
-            emo={emoQuery.data ?? null}
-          />
+          <WaveTracker renderId={renderId} tracks={tracks} emo={emoQuery.data ?? null} />
         </section>
       )}
 

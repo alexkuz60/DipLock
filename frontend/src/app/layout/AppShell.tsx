@@ -28,6 +28,10 @@ const TYPING_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
 export type AppShellProps = {
   section: SectionConfig
   children: ReactNode
+  /** Дополнение тулс-хедера перед названием раздела (иконка и т.п.) */
+  titleBefore?: ReactNode
+  /** Дополнение тулс-хедера после названия раздела (имя файла и т.п.) */
+  titleAfter?: ReactNode
   /** Действия в тулс-хедере (сразу после заголовка раздела) */
   actions?: ReactNode
   /** Вторичные действия тулс-хедера (у правого края) */
@@ -41,6 +45,8 @@ export type AppShellProps = {
 export function AppShell({
   section,
   children,
+  titleBefore,
+  titleAfter,
   actions,
   headerExtra,
   drawer,
@@ -95,7 +101,13 @@ export function AppShell({
 
       <div className="flex min-h-0 min-w-0 flex-col">
         {section.hasToolHeader ? (
-          <ToolHeader section={section} actions={actions} secondary={headerExtra} />
+          <ToolHeader
+            section={section}
+            titleBefore={titleBefore}
+            titleAfter={titleAfter}
+            actions={actions}
+            secondary={headerExtra}
+          />
         ) : null}
         {/*
           Выдвижная панель раздела — отдельная полоса между шапкой и рабочей

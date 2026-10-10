@@ -30,7 +30,11 @@ import {
 } from '@/shared/state/neuromusicPlayer'
 import { NeuromusicPanel } from './NeuromusicPanel'
 import { NeuromusicSection } from './NeuromusicSection'
-import { NeuromusicToolActions } from './NeuromusicToolActions'
+import {
+  NeuromusicTitleFile,
+  NeuromusicTitleIcon,
+  NeuromusicToolActions,
+} from './NeuromusicToolActions'
 
 /**
  * Мок Tone-движка: jsdom без Web Audio — проверяем интеграцию (кто вызван,
@@ -291,12 +295,15 @@ function polygonDistances(chart: HTMLElement): number[] {
 }
 
 /**
- * Раздел целиком, как в каркасе: кнопка тулс-хедера + рабочая область +
- * панель опций (без AppShell — панель вне RightPanel неаккордеонная).
+ * Раздел целиком, как в каркасе: тулс-хедер (иконка ноты + имя файла +
+ * кнопка/контролы) + рабочая область + панель опций (без AppShell — панель
+ * вне RightPanel неаккордеонная).
  */
 function renderNeuromusic() {
   return renderWithProviders(
     <>
+      <NeuromusicTitleIcon />
+      <NeuromusicTitleFile />
       <NeuromusicToolActions />
       <NeuromusicSection />
       <NeuromusicPanel />
@@ -532,21 +539,28 @@ describe('Нейромузыка — раздел', () => {
     expect(JSON.parse(fetchMock.postBodies[1])).toMatchObject({ loudness_phon: null })
   })
 
-  it('хедер: заголовок — имя ЭЭГ-файла, контролы — слева от транспорта и вне трекера', async () => {
+  it('хедер: имя ЭЭГ-файла после названия, контролы — после кнопки и вне трекера', async () => {
     useEdfRecording.setState({ recording: recordingFixture })
     const fetchMock = audioFetchMock()
     vi.stubGlobal('fetch', fetchMock)
     await renderSucceeded(fetchMock)
 
-    // Заголовок сокращён до имени записи (прежняя строка «Эксперимент: …» убрана).
-    expect(
-      screen.getByRole('heading', { level: 2, name: recordingFixture.filename }),
-    ).toBeInTheDocument()
+    // Имя файла — в строке шапки (иконка/имя/контролы переехали в тулс-хедер,
+    // правка 10.10.2026), отдельного хедера в рабочей области больше нет.
+    expect(screen.getByTestId('neuromusic-title-file')).toHaveTextContent(
+      recordingFixture.filename,
+    )
     expect(screen.queryByText(/Эксперимент: запись/)).toBeNull()
 
-    // Контролы (сигнал/зум/скорость/таймкод) — в хедере, слева от Play/Stop.
-    expect(within(screen.getByTestId('neuromusic-tracker')).queryByLabelText('Сигнал')).toBeNull()
+    // Слово «Сигнал» из строки убрано (экономия места) — у комбо остался aria-label.
+    expect(screen.queryByText('Сигнал')).toBeNull()
     const select = screen.getByLabelText('Сигнал')
+    const create = screen.getByRole('button', { name: 'Создать аудио' })
+    // Контролы (источник/зум/скорость/таймкод) — после кнопки «Создать аудио».
+    expect(create.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    // Контролы — вне трекера, слева от Play/Stop.
+    expect(within(screen.getByTestId('neuromusic-tracker')).queryByLabelText('Сигнал')).toBeNull()
     const play = screen.getByTestId('transport-play')
     expect(select.compareDocumentPosition(play) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.getByRole('group', { name: 'Скорость' })).toBeInTheDocument()
@@ -833,14 +847,15 @@ describe('Нейромузыка — раздел', () => {
     })
     expect(options.tracks[7]).toMatchObject({ key: 'delta', row: 'temporal' })
 
-    // Силуэт BrainRoom: подписи модулей и точки по геометрии рядов.
+    // Силуэт BrainRoom: точки по геометрии рядов, а текста под силуэтом
+    // больше нет (легенда убрана — экономия места, правка 10.10.2026).
     expect(screen.getByTestId('brainroom-view')).toHaveAttribute(
       'aria-label',
       expect.stringContaining('модули рядов'),
     )
-    const legend = within(screen.getByTestId('brainroom-legend'))
-    expect(legend.getByText('Лобной')).toBeInTheDocument()
-    expect(legend.getByText('Височной')).toBeInTheDocument()
+    expect(screen.queryByTestId('brainroom-legend')).not.toBeInTheDocument()
+    expect(screen.queryByText('Дуга ±60° перед слушателем')).not.toBeInTheDocument()
+    expect(screen.queryByText('вид сверху, стены 1.0 : 1.3')).not.toBeInTheDocument()
   })
 
   it('cached из ответа POST — пилюля «Готово (из кэша)»', async () => {

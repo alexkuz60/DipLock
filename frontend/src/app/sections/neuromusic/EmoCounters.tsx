@@ -12,7 +12,7 @@
  * анимации (`frameIndexAt` → `activeKeySegment` — тот же источник, что
  * вращение звезды). Нет данных/значение не определено — «—».
  *
- * Обновление — `rAF` пишет `textContent` по ref (паттерн `timeRef` хедера:
+ * Обновление — `rAF` пишет `textContent` по ref (паттерн `trackerTimeRef` хедера:
  * без ре-рендеров React на каждый кадр, `docs/rules/frontend-perf.md`).
  */
 import { useEffect, useMemo, useRef } from 'react'
