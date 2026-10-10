@@ -13,6 +13,7 @@ import {
   House,
   Layers,
   Music2,
+  MessagesSquare,
   Radar,
   ServerCog,
   Settings,
@@ -30,6 +31,7 @@ export type SectionId =
   | 'table'
   | 'group'
   | 'summary'
+  | 'consilium'
   | 'emolab'
   | 'neuroaudio'
   | 'neuromusic'
@@ -137,6 +139,18 @@ export const SECTIONS: SectionConfig[] = [
     hotkey: '7',
     icon: ClipboardList,
     route: '/summary',
+    hasToolHeader: true,
+    hasRightPanel: true,
+    group: 'main',
+  },
+  {
+    id: 'consilium',
+    title: 'Консилиум — исследовательское обсуждение',
+    shortTitle: 'Консилиум',
+    hint: 'Исследования, контекст добровольца и снимки досье',
+    hotkey: '',
+    icon: MessagesSquare,
+    route: '/consilium',
     hasToolHeader: true,
     hasRightPanel: true,
     group: 'main',

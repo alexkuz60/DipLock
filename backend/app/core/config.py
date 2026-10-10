@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = Field(default=2)
     jobs_history_limit: int = Field(default=50)
 
+    # Консилиум: копии результатов/досье в БД, без молчаливого усечения.
+    consilium_material_max_bytes: int = Field(default=8_000_000, ge=1024)
+    consilium_snapshot_max_bytes: int = Field(default=16_000_000, ge=1024)
+    consilium_source_max_rows: int = Field(default=20_000, ge=1)
+
     # Локальный ресурс (GPU/CUDA): дефолт тумблера «Использовать GPU» в
     # «Настройках». Выбор пользователя хранится в MNE-конфиге сервера
     # (MNE_USE_CUDA, файл ~/.mne/mne-python.json — переживает рестарт) через

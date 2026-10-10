@@ -9,6 +9,7 @@ Identifier = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[\w.-
 Text = Annotated[str, Field(min_length=1, max_length=20_000)]
 Direction = Literal["music", "meditation", "creativity", "emotional", "other"]
 ContextKind = Literal["volunteer_report", "observation", "conditions", "answer"]
+SourceKind = Literal["job", "session", "analysis", "group"]
 
 
 class ConsiliumContract(BaseModel):
@@ -177,14 +178,19 @@ class ConsiliumDeletionPreview(ConsiliumContract):
     version: int
     context_revisions: int
     message_revisions: int
+    evidence_items: int = 0
+    snapshots: int = 0
     recording_ids: list[str]
     warnings: list[str]
 
 
 class ConsiliumEvidence(ConsiliumContract):
-    """Проектный B15: типизированный паспорт и JSON измерений без defaults прошлого."""
+    """Зафиксированный B15: паспорт и исходные числа без defaults прошлого."""
 
     id: str
+    case_id: str = ""
+    title: str = ""
+    captured_at: datetime | None = None
     revision: int = Field(ge=1)
     source_kind: Literal["job", "session", "analysis", "group", "context", "interview"]
     source_id: str
@@ -201,13 +207,96 @@ class ConsiliumEvidence(ConsiliumContract):
 
 
 class ConsiliumSnapshot(ConsiliumContract):
-    """Проектный снимок B15: источники и контекст зафиксированы по версиям."""
+    """Неизменяемый снимок B15: источники и контекст зафиксированы по версиям."""
 
     id: str
     case_id: str
     case_version: int = Field(ge=1)
     created_at: datetime
     question: str
+    title: str = ""
+    subject_codes: list[str] = Field(default_factory=list)
+    recording_ids: list[str] = Field(default_factory=list)
     evidence: list[ConsiliumEvidence]
     context: list[ConsiliumContextOut]
     sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ConsiliumSource(ConsiliumContract):
+    """Конкретный аналитический источник, не произвольный JSON от клиента."""
+
+    kind: SourceKind
+    id: str
+    title: str
+    recording_ids: list[str]
+    created_at: datetime | None = None
+    available: bool
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ConsiliumSourcesPage(ConsiliumContract):
+    """Каталог до пагинации, со списком отсутствующих записей."""
+
+    total: int
+    items: list[ConsiliumSource]
+    warnings: list[str] = Field(default_factory=list)
+
+
+class ConsiliumEvidenceCreate(ConsiliumContract):
+    """Сервер читает выбранный источник; клиент не поставляет числа."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+    source_kind: SourceKind
+    source_id: Identifier
+
+
+class ConsiliumEvidencePage(ConsiliumContract):
+    """Материалы дела с честным общим числом."""
+
+    total: int
+    items: list[ConsiliumEvidence]
+
+
+class ConsiliumSnapshotCreate(ConsiliumContract):
+    """Фиксирует выбранные материалы и последние ревизии ручного контекста."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+    evidence_ids: list[Identifier] = Field(min_length=1, max_length=100)
+    context_ids: list[Identifier] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_items(self) -> "ConsiliumSnapshotCreate":
+        """Повтор одного материала не увеличивает число доказательств."""
+        for ids in (self.evidence_ids, self.context_ids):
+            if len(set(ids)) != len(ids):
+                raise ValueError("Выбранные материалы не должны повторяться")
+        return self
+
+
+class ConsiliumSnapshotsPage(ConsiliumContract):
+    """Страница опубликованных снимков."""
+
+    total: int
+    items: list[ConsiliumSnapshot]
+
+
+class ConsiliumEvidenceDeletion(ConsiliumContract):
+    """Удаление копий материала и зависящих снимков, не исходного расчёта."""
+
+    case_id: str
+    evidence_id: str
+    version: int
+    snapshot_ids: list[str]
+    warnings: list[str]
+
+
+class ConsiliumRecording(ConsiliumContract):
+    """Паспорт доступной строки EDF для явного связывания исследования."""
+
+    id: str
+    filename: str | None
+    sfreq: float | None
+    duration_sec: float | None

@@ -1926,6 +1926,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consilium/recordings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Recordings
+         * @description Список зарегистрированных записей, без чтения EDF и запуска анализа.
+         */
+        get: operations["list_recordings_api_v1_consilium_recordings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sources
+         * @description Каталог конкретных прогонов только связанных записей.
+         */
+        get: operations["list_sources_api_v1_consilium_cases__case_id__sources_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Evidence
+         * @description Принятые материалы, не свежий пересчёт источников.
+         */
+        get: operations["list_evidence_api_v1_consilium_cases__case_id__evidence_get"];
+        put?: never;
+        /**
+         * Add Evidence
+         * @description Фиксирует серверную копию выбранного источника.
+         */
+        post: operations["add_evidence_api_v1_consilium_cases__case_id__evidence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Snapshots
+         * @description История опубликованных снимков.
+         */
+        get: operations["list_snapshots_api_v1_consilium_cases__case_id__snapshots_get"];
+        put?: never;
+        /**
+         * Create Snapshot
+         * @description Публикует досье из выбранных копий и текущих ревизий контекста.
+         */
+        post: operations["create_snapshot_api_v1_consilium_cases__case_id__snapshots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/snapshots/{snapshot_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Snapshot
+         * @description Точная версия снимка без чтения живой аналитической БД.
+         */
+        get: operations["get_snapshot_api_v1_consilium_cases__case_id__snapshots__snapshot_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/evidence/{evidence_id}/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Evidence Deletion Preview
+         * @description Зависимые снимки перед удалением копии материала.
+         */
+        get: operations["evidence_deletion_preview_api_v1_consilium_cases__case_id__evidence__evidence_id__deletion_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/evidence/{evidence_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Evidence
+         * @description Удаляет копию, зависимые снимки и квитанции, не исходный расчёт.
+         */
+        delete: operations["delete_evidence_api_v1_consilium_cases__case_id__evidence__evidence_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -4527,10 +4675,123 @@ export interface components {
             context_revisions: number;
             /** Message Revisions */
             message_revisions: number;
+            /**
+             * Evidence Items
+             * @default 0
+             */
+            evidence_items: number;
+            /**
+             * Snapshots
+             * @default 0
+             */
+            snapshots: number;
             /** Recording Ids */
             recording_ids: string[];
             /** Warnings */
             warnings: string[];
+        };
+        /**
+         * ConsiliumEvidence
+         * @description Зафиксированный B15: паспорт и исходные числа без defaults прошлого.
+         */
+        ConsiliumEvidence: {
+            /** Id */
+            id: string;
+            /**
+             * Case Id
+             * @default
+             */
+            case_id: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** Captured At */
+            captured_at?: string | null;
+            /** Revision */
+            revision: number;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "job" | "session" | "analysis" | "group" | "context" | "interview";
+            /** Source Id */
+            source_id: string;
+            /** Recording Ids */
+            recording_ids: string[];
+            /** Payload */
+            payload: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Parameters */
+            parameters?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /** Signal State */
+            signal_state?: string | null;
+            /** Versions */
+            versions?: {
+                [key: string]: string;
+            };
+            /** Units */
+            units?: {
+                [key: string]: string;
+            };
+            /** Warnings */
+            warnings?: string[];
+            /** Missing */
+            missing?: string[];
+            /**
+             * Completeness
+             * @enum {string}
+             */
+            completeness: "full" | "aggregate" | "top_n" | "fragment" | "unavailable";
+            /** Sha256 */
+            sha256: string;
+        };
+        /**
+         * ConsiliumEvidenceCreate
+         * @description Сервер читает выбранный источник; клиент не поставляет числа.
+         */
+        ConsiliumEvidenceCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "job" | "session" | "analysis" | "group";
+            /** Source Id */
+            source_id: string;
+        };
+        /**
+         * ConsiliumEvidenceDeletion
+         * @description Удаление копий материала и зависящих снимков, не исходного расчёта.
+         */
+        ConsiliumEvidenceDeletion: {
+            /** Case Id */
+            case_id: string;
+            /** Evidence Id */
+            evidence_id: string;
+            /** Version */
+            version: number;
+            /** Snapshot Ids */
+            snapshot_ids: string[];
+            /** Warnings */
+            warnings: string[];
+        };
+        /**
+         * ConsiliumEvidencePage
+         * @description Материалы дела с честным общим числом.
+         */
+        ConsiliumEvidencePage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumEvidence"][];
         };
         /**
          * ConsiliumMessageCreate
@@ -4608,6 +4869,115 @@ export interface components {
              * @default false
              */
             external_transfer: boolean;
+        };
+        /**
+         * ConsiliumRecording
+         * @description Паспорт доступной строки EDF для явного связывания исследования.
+         */
+        ConsiliumRecording: {
+            /** Id */
+            id: string;
+            /** Filename */
+            filename: string | null;
+            /** Sfreq */
+            sfreq: number | null;
+            /** Duration Sec */
+            duration_sec: number | null;
+        };
+        /**
+         * ConsiliumSnapshot
+         * @description Неизменяемый снимок B15: источники и контекст зафиксированы по версиям.
+         */
+        ConsiliumSnapshot: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /** Case Version */
+            case_version: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Question */
+            question: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** Subject Codes */
+            subject_codes?: string[];
+            /** Recording Ids */
+            recording_ids?: string[];
+            /** Evidence */
+            evidence: components["schemas"]["ConsiliumEvidence"][];
+            /** Context */
+            context: components["schemas"]["ConsiliumContextOut"][];
+            /** Sha256 */
+            sha256: string;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * ConsiliumSnapshotCreate
+         * @description Фиксирует выбранные материалы и последние ревизии ручного контекста.
+         */
+        ConsiliumSnapshotCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Evidence Ids */
+            evidence_ids: string[];
+            /** Context Ids */
+            context_ids?: string[];
+        };
+        /**
+         * ConsiliumSnapshotsPage
+         * @description Страница опубликованных снимков.
+         */
+        ConsiliumSnapshotsPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumSnapshot"][];
+        };
+        /**
+         * ConsiliumSource
+         * @description Конкретный аналитический источник, не произвольный JSON от клиента.
+         */
+        ConsiliumSource: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "job" | "session" | "analysis" | "group";
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Recording Ids */
+            recording_ids: string[];
+            /** Created At */
+            created_at?: string | null;
+            /** Available */
+            available: boolean;
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * ConsiliumSourcesPage
+         * @description Каталог до пагинации, со списком отсутствующих записей.
+         */
+        ConsiliumSourcesPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumSource"][];
+            /** Warnings */
+            warnings?: string[];
         };
         /**
          * ContourShapeOut
@@ -6178,6 +6548,7 @@ export interface components {
              */
             entries?: components["schemas"]["JournalEntry"][];
         };
+        JsonValue: unknown;
         /**
          * LocalResourceOut
          * @description ``GET /api/v1/resource`` — локальный ресурс: детекция GPU + тумблер.
@@ -11043,6 +11414,294 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ConsiliumDeletionPreview"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recordings_api_v1_consilium_recordings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumRecording"][];
+                };
+            };
+        };
+    };
+    list_sources_api_v1_consilium_cases__case_id__sources_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumSourcesPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_evidence_api_v1_consilium_cases__case_id__evidence_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumEvidencePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_evidence_api_v1_consilium_cases__case_id__evidence_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumEvidenceCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumEvidence"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_snapshots_api_v1_consilium_cases__case_id__snapshots_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumSnapshotsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_snapshot_api_v1_consilium_cases__case_id__snapshots_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumSnapshotCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_snapshot_api_v1_consilium_cases__case_id__snapshots__snapshot_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                snapshot_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumSnapshot"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evidence_deletion_preview_api_v1_consilium_cases__case_id__evidence__evidence_id__deletion_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                evidence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumEvidenceDeletion"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_evidence_api_v1_consilium_cases__case_id__evidence__evidence_id__delete: {
+        parameters: {
+            query: {
+                expected_version: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+                evidence_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

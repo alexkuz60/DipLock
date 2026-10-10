@@ -36,7 +36,7 @@
 ### Отдельный роутер Консилиума (начало Т1, 10.10.2026)
 
 `backend/app/api/consilium.py` подключён в main с тем же `settings.api_prefix`:
-12 операций, 7 новых путей. Pydantic — `schemas/consilium.py`; обязательный
+21 операция, 14 путей. Pydantic — `schemas/consilium.py`; обязательный
 сервис хранения — `services/consilium/store.py`; подробности —
 `docs/rules/consilium.md` §0. Не фоновые задачи и не best-effort запись.
 
@@ -49,11 +49,19 @@
 | `POST/GET /consilium/cases/{case_id}/messages` | только ручные реплики, без запуска модели |
 | `PATCH /consilium/cases/{case_id}/messages/{entry_id}` | новая ревизия ручной реплики |
 | `GET /consilium/cases/{case_id}/deletion-preview` | число ревизий и версия для явного удаления; исходные ЭЭГ сохраняются |
+| `GET /consilium/recordings` | зарегистрированные строки для явного связывания дела, без чтения EDF |
+| `GET /consilium/cases/{case_id}/sources` | конкретные источники, пагинация/total, полный состав пары/группы |
+| `POST/GET /consilium/cases/{case_id}/evidence` | принять серверную копию выбранного прогона / читать принятые копии |
+| `POST/GET /consilium/cases/{case_id}/snapshots` | опубликовать снимок / читать историю досье |
+| `GET /consilium/cases/{case_id}/snapshots/{snapshot_id}` | точная зафиксированная версия без пересчёта |
+| `GET /consilium/cases/{case_id}/evidence/{evidence_id}/deletion-preview` | зависимые снимки перед удалением материала |
+| `DELETE /consilium/cases/{case_id}/evidence/{evidence_id}` | очистить копию, содержащие её снимки и квитанции дела; expected_version |
 
 Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
 без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;
 409 — конфликт версии/ключа или запись в архив; 503 — ошибка обязательного
-хранилища. Sources/evidence/snapshots, аудио и модельный чат пока не доступны.
+хранилища. 413 — лимит материала/досье/строк без молчаливого усечения.
+Аудио и модельный чат пока не доступны.
 
 ## Инвентарь эндпоинтов (74 в `routes.py`, порядок файла)
 

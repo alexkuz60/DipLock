@@ -6,6 +6,7 @@
 `tests/test_migrations.py::test_migration_schema_matches_models`.
 """
 import asyncio
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -39,6 +40,7 @@ AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_co
 # alembic.ini и каталог миграций лежат в backend/ (db.py → app/models/ → backend/).
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _ALEMBIC_INI = _BACKEND_DIR / "alembic.ini"
+_MIGRATION_LOCK = threading.Lock()  # контекст Alembic общий даже при разных async-запросах
 
 
 
@@ -433,6 +435,26 @@ class ConsiliumRequest(Base):
     response = Column(JSON, nullable=False)
 
 
+class ConsiliumEvidenceRecord(Base):
+    """Копия конкретного результата; не зависит от TTL и квоты кэша EDF."""
+
+    __tablename__ = "consilium_evidence"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class ConsiliumSnapshotRecord(Base):
+    """Неизменяемое опубликованное досье; чувствительные копии можно удалить."""
+
+    __tablename__ = "consilium_snapshots"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
 def _sync_driver_url(url: URL) -> str:
     """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 
@@ -454,7 +476,8 @@ def _upgrade_to_head(database_url: str) -> None:
     config = Config(str(_ALEMBIC_INI))
     # set_main_option использует ConfigParser-интерполяцию: % в URL экранируем.
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    command.upgrade(config, "head")
+    with _MIGRATION_LOCK:
+        command.upgrade(config, "head")
 
 
 async def init_db() -> None:

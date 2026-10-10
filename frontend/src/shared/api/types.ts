@@ -14,7 +14,7 @@ import type { components } from './schema'
 
 type Schemas = components['schemas']
 
-/** Основание Консилиума: серверный контракт, UI появится отдельным срезом. */
+/** Консилиум: контракт ручного исследования, материалов и снимков. */
 export type ConsiliumCase = Schemas['ConsiliumCaseOut']
 export type ConsiliumCaseCreate = Schemas['ConsiliumCaseCreate']
 export type ConsiliumCaseUpdate = Schemas['ConsiliumCaseUpdate']
@@ -28,6 +28,16 @@ export type ConsiliumMessageCreate = Schemas['ConsiliumMessageCreate']
 export type ConsiliumMessageUpdate = Schemas['ConsiliumMessageUpdate']
 export type ConsiliumMessagesPage = Schemas['ConsiliumMessagesPage']
 export type ConsiliumDeletionPreview = Schemas['ConsiliumDeletionPreview']
+export type ConsiliumRecording = Schemas['ConsiliumRecording']
+export type ConsiliumSource = Schemas['ConsiliumSource']
+export type ConsiliumSourcesPage = Schemas['ConsiliumSourcesPage']
+export type ConsiliumEvidence = Schemas['ConsiliumEvidence']
+export type ConsiliumEvidenceCreate = Schemas['ConsiliumEvidenceCreate']
+export type ConsiliumEvidencePage = Schemas['ConsiliumEvidencePage']
+export type ConsiliumEvidenceDeletion = Schemas['ConsiliumEvidenceDeletion']
+export type ConsiliumSnapshot = Schemas['ConsiliumSnapshot']
+export type ConsiliumSnapshotCreate = Schemas['ConsiliumSnapshotCreate']
+export type ConsiliumSnapshotsPage = Schemas['ConsiliumSnapshotsPage']
 
 /** Статусы фоновой задачи: поле `status` схемы `JobStatus` */
 export type JobState = Schemas['JobStatus']['status']

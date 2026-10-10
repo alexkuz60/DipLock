@@ -156,6 +156,22 @@ def load_records(cfg: Settings, limit: int | None = None) -> list[dict[str, Any]
     return records
 
 
+def load_record(cfg: Settings, job_id: str) -> dict[str, Any] | None:
+    """Одна завершённая задача с диска, даже если вытеснена из RAM-истории."""
+    path = job_path(cfg, job_id)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    if (
+        not isinstance(payload, dict) or payload.get("version") != RECORD_VERSION
+        or payload.get("job_id") != job_id
+    ):
+        return None
+    return payload
+
+
 def prune_records(
     cfg: Settings,
     *,

@@ -681,3 +681,104 @@ def _dipole_mni(row: Dipole) -> list[float] | None:
     if row.mni_x is None or row.mni_y is None or row.mni_z is None:
         return None
     return [float(row.mni_x), float(row.mni_y), float(row.mni_z)]
+
+
+def _row_payload(row: Any, names: tuple[str, ...]) -> dict[str, Any]:
+    """Поля результата как есть; NULL и версии прошлого не достраиваются."""
+    return {name: getattr(row, name) for name in names}
+
+
+async def list_research_sources(recording_ids: list[str]) -> list[dict[str, Any]]:
+    """Каталог конкретных сессий/пакетов для Консилиума, без вычислений."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        rows: list[dict[str, Any]] = []
+        for model, kind in ((Session, "session"), (Analysis, "analysis")):
+            values = (await session.scalars(select(model).where(
+                model.recording_id.in_(recording_ids),
+            ).order_by(model.created_at.desc(), model.id))).all()
+            rows.extend({
+                "kind": kind, "id": str(row.id),
+                "title": f"{'Пакет диполей' if kind == 'analysis' else 'Сессия'} · {row.kind} · {row.id}",
+                "recording_ids": [str(row.recording_id)], "created_at": row.created_at,
+                "available": True, "warnings": [],
+            } for row in values)
+        return rows
+
+
+async def get_session_research_result(session_id: str, max_rows: int) -> dict[str, Any] | None:
+    """Сессия, эпохи и точки одним чтением; превышение лимита не обрезается."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        row = await session.get(Session, session_id)
+        if row is None:
+            return None
+        counts = await _children_counts(session, [session_id])
+        n_epochs, _, n_dipoles = counts.get(session_id, (0, 0, 0))
+        if n_epochs + n_dipoles > max_rows:
+            raise ValueError("Сессия слишком большая для одного материала")
+        epochs = (await session.scalars(select(EpochRecord).where(
+            EpochRecord.session_id == session_id,
+        ).order_by(EpochRecord.epoch_index, EpochRecord.id))).all()
+        points = (await session.scalars(select(Dipole).where(
+            Dipole.session_id == session_id,
+        ).order_by(Dipole.id))).all()
+        return {
+            "recording_ids": [str(row.recording_id)] if row.recording_id else [],
+            "created_at": row.created_at,
+            "parameters": row.params_json,
+            "payload": {
+                "session": _session_summary(row, counts.get(session_id, (0, 0, 0))),
+                "epochs": [{**_row_payload(epoch, (
+                    "epoch_index", "start_time_sec", "duration_ms", "has_artifact",
+                )), "powers": epoch_powers(epoch)} for epoch in epochs],
+                "dipoles": [_row_payload(point, (
+                    "epoch_id", "time_ms", "mni_x", "mni_y", "mni_z", "amplitude_nam",
+                    "gof", "anatomical_roi", "brodmann_area", "freq_band", "method",
+                )) for point in points],
+            },
+        }
+
+
+async def get_analysis_research_result(analysis_id: int, max_rows: int) -> dict[str, Any] | None:
+    """Пакет строго выбранного прогона, включая все полосы/точки и warnings."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        row = await session.get(Analysis, analysis_id)
+        if row is None:
+            return None
+        count = int(await session.scalar(select(func.count()).select_from(DipolePoint).where(
+            DipolePoint.analysis_id == analysis_id,
+        )) or 0)
+        if count > max_rows:
+            raise ValueError("Пакет слишком большой для одного материала")
+        bands = (await session.scalars(select(AnalysisBand).where(
+            AnalysisBand.analysis_id == analysis_id,
+        ).order_by(AnalysisBand.id))).all()
+        points = (await session.scalars(select(DipolePoint).where(
+            DipolePoint.analysis_id == analysis_id,
+        ).order_by(DipolePoint.band_key, DipolePoint.epoch_index, DipolePoint.id))).all()
+        passport = _row_payload(row, (
+            "id", "recording_id", "kind", "job_id", "params_sig", "created_at", "reference",
+            "channels", "sfreq", "epoch_length_ms", "grid_mm", "n_epochs_total", "n_epochs_used",
+            "warnings",
+        ))
+        return {
+            "recording_ids": [str(row.recording_id)], "created_at": row.created_at,
+            "parameters": {key: passport[key] for key in (
+                "reference", "channels", "sfreq", "epoch_length_ms", "grid_mm", "params_sig",
+            )},
+            "payload": {
+                "analysis": passport,
+                "bands": [_row_payload(band, (
+                    "band_key", "band_hz_lo", "band_hz_hi", "state", "n_points", "n_kd_passed",
+                    "n_errors", "moment_max_nam",
+                )) for band in bands],
+                "points": [_row_payload(point, (
+                    "band_key", "band_hz_lo", "band_hz_hi", "epoch_index", "peak_time_ms",
+                    "head_coords", "mni_coords", "moment_dir", "amplitude_nam", "gof",
+                    "anatomical_structure", "brodmann_area", "method", "kd_passed", "kd_basis",
+                    "refined",
+                )) for point in points],
+            },
+        }

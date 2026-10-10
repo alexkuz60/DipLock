@@ -4767,6 +4767,491 @@
         }
       }
     },
+    "/api/v1/consilium/recordings": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Recordings",
+        "description": "Список зарегистрированных записей, без чтения EDF и запуска анализа.",
+        "operationId": "list_recordings_api_v1_consilium_recordings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConsiliumRecording"
+                  },
+                  "type": "array",
+                  "title": "Response List Recordings Api V1 Consilium Recordings Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/sources": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Sources",
+        "description": "Каталог конкретных прогонов только связанных записей.",
+        "operationId": "list_sources_api_v1_consilium_cases__case_id__sources_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumSourcesPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/evidence": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Add Evidence",
+        "description": "Фиксирует серверную копию выбранного источника.",
+        "operationId": "add_evidence_api_v1_consilium_cases__case_id__evidence_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumEvidenceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumEvidence"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Evidence",
+        "description": "Принятые материалы, не свежий пересчёт источников.",
+        "operationId": "list_evidence_api_v1_consilium_cases__case_id__evidence_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumEvidencePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/snapshots": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Create Snapshot",
+        "description": "Публикует досье из выбранных копий и текущих ревизий контекста.",
+        "operationId": "create_snapshot_api_v1_consilium_cases__case_id__snapshots_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumSnapshotCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Snapshots",
+        "description": "История опубликованных снимков.",
+        "operationId": "list_snapshots_api_v1_consilium_cases__case_id__snapshots_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumSnapshotsPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/snapshots/{snapshot_id}": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Get Snapshot",
+        "description": "Точная версия снимка без чтения живой аналитической БД.",
+        "operationId": "get_snapshot_api_v1_consilium_cases__case_id__snapshots__snapshot_id__get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "snapshot_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Snapshot Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/evidence/{evidence_id}/deletion-preview": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Evidence Deletion Preview",
+        "description": "Зависимые снимки перед удалением копии материала.",
+        "operationId": "evidence_deletion_preview_api_v1_consilium_cases__case_id__evidence__evidence_id__deletion_preview_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "evidence_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Evidence Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumEvidenceDeletion"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/evidence/{evidence_id}": {
+      "delete": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Delete Evidence",
+        "description": "Удаляет копию, зависимые снимки и квитанции, не исходный расчёт.",
+        "operationId": "delete_evidence_api_v1_consilium_cases__case_id__evidence__evidence_id__delete",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "evidence_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Evidence Id"
+            }
+          },
+          {
+            "name": "expected_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Expected Version"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -9338,6 +9823,16 @@
             "type": "integer",
             "title": "Message Revisions"
           },
+          "evidence_items": {
+            "type": "integer",
+            "title": "Evidence Items",
+            "default": 0
+          },
+          "snapshots": {
+            "type": "integer",
+            "title": "Snapshots",
+            "default": 0
+          },
           "recording_ids": {
             "items": {
               "type": "string"
@@ -9365,6 +9860,261 @@
         ],
         "title": "ConsiliumDeletionPreview",
         "description": "Что будет удалено; ЭЭГ-записи и соседи не затрагиваются."
+      },
+      "ConsiliumEvidence": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_id": {
+            "type": "string",
+            "title": "Case Id",
+            "default": ""
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision"
+          },
+          "source_kind": {
+            "type": "string",
+            "enum": [
+              "job",
+              "session",
+              "analysis",
+              "group",
+              "context",
+              "interview"
+            ],
+            "title": "Source Kind"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "recording_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recording Ids"
+          },
+          "payload": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Payload"
+          },
+          "parameters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parameters"
+          },
+          "signal_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal State"
+          },
+          "versions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Versions"
+          },
+          "units": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Units"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing"
+          },
+          "completeness": {
+            "type": "string",
+            "enum": [
+              "full",
+              "aggregate",
+              "top_n",
+              "fragment",
+              "unavailable"
+            ],
+            "title": "Completeness"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "revision",
+          "source_kind",
+          "source_id",
+          "recording_ids",
+          "payload",
+          "completeness",
+          "sha256"
+        ],
+        "title": "ConsiliumEvidence",
+        "description": "Зафиксированный B15: паспорт и исходные числа без defaults прошлого."
+      },
+      "ConsiliumEvidenceCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "source_kind": {
+            "type": "string",
+            "enum": [
+              "job",
+              "session",
+              "analysis",
+              "group"
+            ],
+            "title": "Source Kind"
+          },
+          "source_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Source Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "source_kind",
+          "source_id"
+        ],
+        "title": "ConsiliumEvidenceCreate",
+        "description": "Сервер читает выбранный источник; клиент не поставляет числа."
+      },
+      "ConsiliumEvidenceDeletion": {
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "evidence_id": {
+            "type": "string",
+            "title": "Evidence Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "snapshot_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Snapshot Ids"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "case_id",
+          "evidence_id",
+          "version",
+          "snapshot_ids",
+          "warnings"
+        ],
+        "title": "ConsiliumEvidenceDeletion",
+        "description": "Удаление копий материала и зависящих снимков, не исходного расчёта."
+      },
+      "ConsiliumEvidencePage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumEvidence"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumEvidencePage",
+        "description": "Материалы дела с честным общим числом."
       },
       "ConsiliumMessageCreate": {
         "properties": {
@@ -9518,6 +10268,306 @@
         "type": "object",
         "title": "ConsiliumPermissions",
         "description": "Разрешения контекста: использование ИИ и внешняя передача независимы."
+      },
+      "ConsiliumRecording": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "sfreq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sfreq"
+          },
+          "duration_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Sec"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "filename",
+          "sfreq",
+          "duration_sec"
+        ],
+        "title": "ConsiliumRecording",
+        "description": "Паспорт доступной строки EDF для явного связывания исследования."
+      },
+      "ConsiliumSnapshot": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "case_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Case Version"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "subject_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subject Codes"
+          },
+          "recording_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recording Ids"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumEvidence"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "context": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumContextOut"
+            },
+            "type": "array",
+            "title": "Context"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "title": "Sha256"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "case_id",
+          "case_version",
+          "created_at",
+          "question",
+          "evidence",
+          "context",
+          "sha256"
+        ],
+        "title": "ConsiliumSnapshot",
+        "description": "Неизменяемый снимок B15: источники и контекст зафиксированы по версиям."
+      },
+      "ConsiliumSnapshotCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\w.-]+$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Evidence Ids"
+          },
+          "context_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\w.-]+$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Context Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "evidence_ids"
+        ],
+        "title": "ConsiliumSnapshotCreate",
+        "description": "Фиксирует выбранные материалы и последние ревизии ручного контекста."
+      },
+      "ConsiliumSnapshotsPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumSnapshot"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumSnapshotsPage",
+        "description": "Страница опубликованных снимков."
+      },
+      "ConsiliumSource": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "job",
+              "session",
+              "analysis",
+              "group"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "recording_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recording Ids"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "title",
+          "recording_ids",
+          "available"
+        ],
+        "title": "ConsiliumSource",
+        "description": "Конкретный аналитический источник, не произвольный JSON от клиента."
+      },
+      "ConsiliumSourcesPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumSource"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumSourcesPage",
+        "description": "Каталог до пагинации, со списком отсутствующих записей."
       },
       "ContourShapeOut": {
         "properties": {
@@ -12358,6 +13408,7 @@
         "title": "JournalOut",
         "description": "Хвост журнала шагов: последние ``limit`` строк (в порядке записи)."
       },
+      "JsonValue": {},
       "LocalResourceOut": {
         "properties": {
           "gpu": {

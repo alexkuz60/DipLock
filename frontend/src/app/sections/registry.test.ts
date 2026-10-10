@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest'
 import { MAIN_SECTIONS, SECTIONS, UTILITY_SECTIONS, getSection } from './registry'
 
 describe('реестр разделов', () => {
-  it('содержит 10 рабочих и 3 служебных раздела', () => {
-    expect(SECTIONS).toHaveLength(13)
-    expect(MAIN_SECTIONS).toHaveLength(10)
+  it('содержит 11 рабочих и 3 служебных раздела', () => {
+    expect(SECTIONS).toHaveLength(14)
+    expect(MAIN_SECTIONS).toHaveLength(11)
     expect(UTILITY_SECTIONS).toHaveLength(3)
     expect(UTILITY_SECTIONS.map((section) => section.id)).toEqual(['wiki', 'settings', 'server'])
     expect(MAIN_SECTIONS.map((section) => section.id)).toEqual([
-      'home', 'edf', 'eeg', 'dipoles', 'table', 'group', 'summary', 'emolab', 'neuromusic',
+      'home', 'edf', 'eeg', 'dipoles', 'table', 'group', 'summary', 'consilium', 'emolab', 'neuromusic',
       'neuroaudio',
     ])
   })
@@ -23,7 +23,7 @@ describe('реестр разделов', () => {
     // Хоткеи принадлежат разделам, а не позиции в рейле: смена порядка
     // «Нейромузыка» → «Нейроаудио» (06.10.2026) нажатий не меняет
     expect(MAIN_SECTIONS.map((section) => section.hotkey)).toEqual([
-      '1', '2', '3', '4', '5', '6', '7', '8', '0', '9',
+      '1', '2', '3', '4', '5', '6', '7', '', '8', '0', '9',
     ])
     expect(UTILITY_SECTIONS.every((section) => section.hotkey === '')).toBe(true)
   })

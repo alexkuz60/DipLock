@@ -560,6 +560,32 @@ async def get_group_analysis(
     return {"run": _summary_row(run, alive=len(member_ids)), "aggregate": aggregate}
 
 
+async def list_research_groups(recording_ids: list[str]) -> list[dict[str, Any]]:
+    """Группы, чей весь живой состав входит в дело; вычислений при листинге нет."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        runs = (await session.scalars(select(GroupAnalysis))).all()
+        members = (await session.scalars(select(GroupAnalysisMember).order_by(
+            GroupAnalysisMember.position, GroupAnalysisMember.id,
+        ))).all()
+    groups: dict[int, list[str]] = defaultdict(list)
+    for member in members:
+        groups[int(member.group_analysis_id)].append(str(member.recording_id))
+    allowed = set(recording_ids)
+    return [{
+        "kind": "group", "id": str(run.id), "title": f"Группа · {run.name or run.id}",
+        "recording_ids": groups[int(run.id)], "created_at": run.created_at,
+        "available": True,
+        "warnings": ["Числа будут зафиксированы по текущим пакетам при добавлении материала"],
+    } for run in runs if groups[int(run.id)] and set(groups[int(run.id)]) <= allowed]
+
+
+async def research_group_members(run_id: int) -> list[str] | None:
+    """Проверяемый состав до чтения агрегата, без прямого SQL из Консилиума."""
+    run, members = await _run_row(run_id)
+    return members if run is not None else None
+
+
 def _iso(value: Any) -> datetime | None:
     """JSON-дата снимка → ``datetime``; мусор — честный ``None``."""
     if isinstance(value, datetime):

@@ -22,15 +22,18 @@ from app.schemas.consilium import (
     ConsiliumContextUpdate,
     ConsiliumContract,
     ConsiliumDeletionPreview,
+    ConsiliumEvidenceCreate,
     ConsiliumMessageCreate,
     ConsiliumMessageOut,
     ConsiliumMessagesPage,
     ConsiliumMessageUpdate,
+    ConsiliumSnapshotCreate,
 )
 
 type WriteRequest = (
     ConsiliumCaseCreate | ConsiliumCaseUpdate | ConsiliumContextCreate
     | ConsiliumContextUpdate | ConsiliumMessageCreate | ConsiliumMessageUpdate
+    | ConsiliumEvidenceCreate | ConsiliumSnapshotCreate
 )
 
 
@@ -269,6 +272,12 @@ async def deletion_preview(case_id: str) -> ConsiliumDeletionPreview:
             "case_id": case_id, "version": row.version,
             "context_revisions": by_kind.get("context", 0),
             "message_revisions": by_kind.get("message", 0),
+            "evidence_items": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumEvidenceRecord,
+            ).where(db.ConsiliumEvidenceRecord.case_id == case_id)) or 0),
+            "snapshots": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumSnapshotRecord,
+            ).where(db.ConsiliumSnapshotRecord.case_id == case_id)) or 0),
             "recording_ids": row.recording_ids,
             "warnings": ["ЭЭГ-записи не удаляются. Все ревизии ручной истории будут удалены."],
         })
@@ -280,7 +289,10 @@ async def delete_case(case_id: str, expected_version: int) -> None:
     async with db.AsyncSessionLocal() as session:
         row = await require_case(session, case_id)
         await _bump(session, row, expected_version, require_open=False)
-        for model in (db.ConsiliumRequest, db.ConsiliumEntry):
+        for model in (
+            db.ConsiliumRequest, db.ConsiliumEntry,
+            db.ConsiliumSnapshotRecord, db.ConsiliumEvidenceRecord,
+        ):
             await session.execute(delete(model).where(model.case_id == case_id))
         await session.execute(delete(db.ConsiliumCase).where(db.ConsiliumCase.id == case_id))
         await session.commit()

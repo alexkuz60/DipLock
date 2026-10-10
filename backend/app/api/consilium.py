@@ -20,12 +20,22 @@ from app.schemas.consilium import (
     ConsiliumContextPage,
     ConsiliumContextUpdate,
     ConsiliumDeletionPreview,
+    ConsiliumEvidence,
+    ConsiliumEvidenceCreate,
+    ConsiliumEvidenceDeletion,
+    ConsiliumEvidencePage,
     ConsiliumMessageCreate,
     ConsiliumMessageOut,
     ConsiliumMessagesPage,
     ConsiliumMessageUpdate,
+    ConsiliumRecording,
+    ConsiliumSnapshot,
+    ConsiliumSnapshotCreate,
+    ConsiliumSnapshotsPage,
+    ConsiliumSourcesPage,
 )
-from app.services.consilium import store
+from app.services import recording_store
+from app.services.consilium import dossier, sources, store
 
 
 class PrivateRoute(APIRoute):
@@ -180,3 +190,85 @@ async def delete_case(
     """Удалить дело и ревизии после подтверждения версии предварительного просмотра."""
     async with guarded(response):
         await store.delete_case(case_id, expected_version)
+
+
+@router.get("/recordings", response_model=list[ConsiliumRecording])
+async def list_recordings(response: Response) -> list[ConsiliumRecording]:
+    """Список зарегистрированных записей, без чтения EDF и запуска анализа."""
+    async with guarded(response):
+        return [ConsiliumRecording.model_validate(item)
+                for item in await recording_store.list_research_recordings()]
+
+
+@router.get("/cases/{case_id}/sources", response_model=ConsiliumSourcesPage)
+async def list_sources(
+    case_id: str, response: Response,
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+) -> ConsiliumSourcesPage:
+    """Каталог конкретных прогонов только связанных записей."""
+    async with guarded(response):
+        return await sources.list_sources(case_id, limit, offset)
+
+
+@router.post("/cases/{case_id}/evidence", status_code=201, response_model=ConsiliumEvidence)
+async def add_evidence(
+    case_id: str, payload: ConsiliumEvidenceCreate, response: Response,
+) -> ConsiliumEvidence:
+    """Фиксирует серверную копию выбранного источника."""
+    async with guarded(response):
+        return await dossier.add_evidence(case_id, payload)
+
+
+@router.get("/cases/{case_id}/evidence", response_model=ConsiliumEvidencePage)
+async def list_evidence(
+    case_id: str, response: Response,
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+) -> ConsiliumEvidencePage:
+    """Принятые материалы, не свежий пересчёт источников."""
+    async with guarded(response):
+        return await dossier.list_evidence(case_id, limit, offset)
+
+
+@router.post("/cases/{case_id}/snapshots", status_code=201, response_model=ConsiliumSnapshot)
+async def create_snapshot(
+    case_id: str, payload: ConsiliumSnapshotCreate, response: Response,
+) -> ConsiliumSnapshot:
+    """Публикует досье из выбранных копий и текущих ревизий контекста."""
+    async with guarded(response):
+        return await dossier.create_snapshot(case_id, payload)
+
+
+@router.get("/cases/{case_id}/snapshots", response_model=ConsiliumSnapshotsPage)
+async def list_snapshots(
+    case_id: str, response: Response,
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+) -> ConsiliumSnapshotsPage:
+    """История опубликованных снимков."""
+    async with guarded(response):
+        return await dossier.list_snapshots(case_id, limit, offset)
+
+
+@router.get("/cases/{case_id}/snapshots/{snapshot_id}", response_model=ConsiliumSnapshot)
+async def get_snapshot(case_id: str, snapshot_id: str, response: Response) -> ConsiliumSnapshot:
+    """Точная версия снимка без чтения живой аналитической БД."""
+    async with guarded(response):
+        return await dossier.get_snapshot(case_id, snapshot_id)
+
+
+@router.get("/cases/{case_id}/evidence/{evidence_id}/deletion-preview", response_model=ConsiliumEvidenceDeletion)
+async def evidence_deletion_preview(
+    case_id: str, evidence_id: str, response: Response,
+) -> ConsiliumEvidenceDeletion:
+    """Зависимые снимки перед удалением копии материала."""
+    async with guarded(response):
+        return await dossier.evidence_deletion_preview(case_id, evidence_id)
+
+
+@router.delete("/cases/{case_id}/evidence/{evidence_id}", status_code=204)
+async def delete_evidence(
+    case_id: str, evidence_id: str, response: Response,
+    expected_version: int = Query(..., ge=1),
+) -> None:
+    """Удаляет копию, зависимые снимки и квитанции, не исходный расчёт."""
+    async with guarded(response):
+        await dossier.delete_evidence(case_id, evidence_id, expected_version)

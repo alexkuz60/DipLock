@@ -166,3 +166,16 @@ async def drop_orphan_rows() -> list[str]:
     if orphans:
         logger.info("Строки записей-сирот удалены: %s", ", ".join(orphans))
     return orphans
+
+
+async def list_research_recordings() -> list[dict[str, Any]]:
+    """Паспорта строк для связывания дела; не читает и не обрабатывает EDF."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        rows = (await session.scalars(select(RecordingRecord).order_by(
+            RecordingRecord.created_at.desc(), RecordingRecord.recording_id,
+        ))).all()
+        return [{
+            "id": str(row.recording_id), "filename": row.filename,
+            "sfreq": row.sfreq, "duration_sec": row.duration_sec,
+        } for row in rows]
