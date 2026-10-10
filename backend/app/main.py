@@ -10,6 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.consilium import router as consilium_router
 from app.api.routes import router as api_router
 from app.core.config import settings
 from app.services import recording_store
@@ -99,6 +100,7 @@ if os.path.isdir(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 app.include_router(api_router, prefix=settings.api_prefix)
+app.include_router(consilium_router, prefix=settings.api_prefix)
 
 
 def _read_html(path: str) -> str:

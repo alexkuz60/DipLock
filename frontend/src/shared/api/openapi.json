@@ -4131,6 +4131,642 @@
         }
       }
     },
+    "/api/v1/consilium/cases": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Create Case",
+        "description": "Создать исследование без запуска анализа или ИИ.",
+        "operationId": "create_case_api_v1_consilium_cases_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumCaseCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumCaseOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Cases",
+        "description": "Список открытых и архивных исследований.",
+        "operationId": "list_cases_api_v1_consilium_cases_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumCasesPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Get Case",
+        "description": "Паспорт; 404 на неизвестное исследование.",
+        "operationId": "get_case_api_v1_consilium_cases__case_id__get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumCaseOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Update Case",
+        "description": "Изменить паспорт или архивировать с проверкой версии.",
+        "operationId": "update_case_api_v1_consilium_cases__case_id__patch",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumCaseUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumCaseOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Delete Case",
+        "description": "Удалить дело и ревизии после подтверждения версии предварительного просмотра.",
+        "operationId": "delete_case_api_v1_consilium_cases__case_id__delete",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "expected_version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "title": "Expected Version"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/context": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Context",
+        "description": "Контекст со всеми ревизиями, не только текущий текст.",
+        "operationId": "list_context_api_v1_consilium_cases__case_id__context_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumContextPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Create Context",
+        "description": "Сохранить рассказ, условия или наблюдение отдельно от измерений.",
+        "operationId": "create_context_api_v1_consilium_cases__case_id__context_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumContextCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumContextOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/context/{entry_id}": {
+      "patch": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Update Context",
+        "description": "Исправить контекст новой ревизией.",
+        "operationId": "update_context_api_v1_consilium_cases__case_id__context__entry_id__patch",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumContextUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumContextOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/messages": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Messages",
+        "description": "Ручная история; модельных ответов в этом срезе нет.",
+        "operationId": "list_messages_api_v1_consilium_cases__case_id__messages_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumMessagesPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Create Message",
+        "description": "Добавить реплику исследователя, не запуская ИИ.",
+        "operationId": "create_message_api_v1_consilium_cases__case_id__messages_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumMessageCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumMessageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/messages/{entry_id}": {
+      "patch": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Update Message",
+        "description": "Исправить ручную реплику с сохранением исходной версии.",
+        "operationId": "update_message_api_v1_consilium_cases__case_id__messages__entry_id__patch",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumMessageUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumMessageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/deletion-preview": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Deletion Preview",
+        "description": "Посмотреть последствия удаления без изменения данных.",
+        "operationId": "deletion_preview_api_v1_consilium_cases__case_id__deletion_preview_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumDeletionPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -8029,6 +8665,859 @@
         ],
         "title": "CompareStatsOut",
         "description": "Статистика различий: кластерный тест MNE по «канал × частота»."
+      },
+      "ConsiliumCaseCreate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "music",
+              "meditation",
+              "creativity",
+              "emotional",
+              "other"
+            ],
+            "title": "Direction",
+            "default": "other"
+          },
+          "subject_codes": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\w.-]+$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Subject Codes"
+          },
+          "recording_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\w.-]+$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Recording Ids"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "question",
+          "request_id"
+        ],
+        "title": "ConsiliumCaseCreate",
+        "description": "Создание исследования с ключом повторного запроса."
+      },
+      "ConsiliumCaseOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "music",
+              "meditation",
+              "creativity",
+              "emotional",
+              "other"
+            ],
+            "title": "Direction",
+            "default": "other"
+          },
+          "subject_codes": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\w.-]+$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Subject Codes"
+          },
+          "recording_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\w.-]+$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Recording Ids"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "archived"
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "question",
+          "id",
+          "version",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConsiliumCaseOut",
+        "description": "Сохранённый паспорт исследования."
+      },
+      "ConsiliumCaseUpdate": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Question"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "music",
+              "meditation",
+              "creativity",
+              "emotional",
+              "other"
+            ],
+            "title": "Direction",
+            "default": "other"
+          },
+          "subject_codes": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\w.-]+$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Subject Codes"
+          },
+          "recording_ids": {
+            "items": {
+              "type": "string",
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[\\w.-]+$"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Recording Ids"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "archived"
+            ],
+            "title": "Status",
+            "default": "open"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "question",
+          "request_id",
+          "expected_version"
+        ],
+        "title": "ConsiliumCaseUpdate",
+        "description": "Полный новый паспорт: конфликт версии не затирает изменения коллеги."
+      },
+      "ConsiliumCasesPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumCaseOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumCasesPage",
+        "description": "Страница исследований: total до ограничения выдачи."
+      },
+      "ConsiliumContextCreate": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "volunteer_report",
+              "observation",
+              "conditions",
+              "answer"
+            ],
+            "title": "Kind",
+            "default": "observation"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Author",
+            "default": "Исследователь"
+          },
+          "subject_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\w.-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Code"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\w.-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id"
+          },
+          "start_sec": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Sec"
+          },
+          "end_sec": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Sec"
+          },
+          "time_basis": {
+            "type": "string",
+            "enum": [
+              "unspecified",
+              "eeg",
+              "approximate"
+            ],
+            "title": "Time Basis",
+            "default": "unspecified"
+          },
+          "verified": {
+            "type": "boolean",
+            "title": "Verified",
+            "default": false
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/ConsiliumPermissions"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "description": "Версия исследования"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "request_id",
+          "expected_version"
+        ],
+        "title": "ConsiliumContextCreate",
+        "description": "Новая ручная контекстная запись."
+      },
+      "ConsiliumContextOut": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "volunteer_report",
+              "observation",
+              "conditions",
+              "answer"
+            ],
+            "title": "Kind",
+            "default": "observation"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Author",
+            "default": "Исследователь"
+          },
+          "subject_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\w.-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Code"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\w.-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id"
+          },
+          "start_sec": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Sec"
+          },
+          "end_sec": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Sec"
+          },
+          "time_basis": {
+            "type": "string",
+            "enum": [
+              "unspecified",
+              "eeg",
+              "approximate"
+            ],
+            "title": "Time Basis",
+            "default": "unspecified"
+          },
+          "verified": {
+            "type": "boolean",
+            "title": "Verified",
+            "default": false
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/ConsiliumPermissions"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "id",
+          "case_id",
+          "revision",
+          "created_at"
+        ],
+        "title": "ConsiliumContextOut",
+        "description": "Точная ревизия ручного контекста."
+      },
+      "ConsiliumContextPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumContextOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumContextPage",
+        "description": "Страница контекстных ревизий (не только последних)."
+      },
+      "ConsiliumContextUpdate": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "volunteer_report",
+              "observation",
+              "conditions",
+              "answer"
+            ],
+            "title": "Kind",
+            "default": "observation"
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Author",
+            "default": "Исследователь"
+          },
+          "subject_code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\w.-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Code"
+          },
+          "recording_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\w.-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recording Id"
+          },
+          "start_sec": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Sec"
+          },
+          "end_sec": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Sec"
+          },
+          "time_basis": {
+            "type": "string",
+            "enum": [
+              "unspecified",
+              "eeg",
+              "approximate"
+            ],
+            "title": "Time Basis",
+            "default": "unspecified"
+          },
+          "verified": {
+            "type": "boolean",
+            "title": "Verified",
+            "default": false
+          },
+          "permissions": {
+            "$ref": "#/components/schemas/ConsiliumPermissions"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "description": "Версия исследования"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "request_id",
+          "expected_version",
+          "expected_revision"
+        ],
+        "title": "ConsiliumContextUpdate",
+        "description": "Исправление создаёт новую ревизию, не стирая исходную."
+      },
+      "ConsiliumDeletionPreview": {
+        "properties": {
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "context_revisions": {
+            "type": "integer",
+            "title": "Context Revisions"
+          },
+          "message_revisions": {
+            "type": "integer",
+            "title": "Message Revisions"
+          },
+          "recording_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recording Ids"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "case_id",
+          "version",
+          "context_revisions",
+          "message_revisions",
+          "recording_ids",
+          "warnings"
+        ],
+        "title": "ConsiliumDeletionPreview",
+        "description": "Что будет удалено; ЭЭГ-записи и соседи не затрагиваются."
+      },
+      "ConsiliumMessageCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "text"
+        ],
+        "title": "ConsiliumMessageCreate",
+        "description": "Ручная реплика исследователя: нельзя подделать ответ советника."
+      },
+      "ConsiliumMessageOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "author": {
+            "type": "string",
+            "const": "researcher",
+            "title": "Author",
+            "default": "researcher"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "case_id",
+          "revision",
+          "created_at",
+          "text"
+        ],
+        "title": "ConsiliumMessageOut",
+        "description": "Сохранённая реплика, пока без модельных ответов."
+      },
+      "ConsiliumMessageUpdate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 1,
+            "title": "Text"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Revision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "text",
+          "expected_revision"
+        ],
+        "title": "ConsiliumMessageUpdate",
+        "description": "Новая ревизия ручной реплики."
+      },
+      "ConsiliumMessagesPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumMessageOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumMessagesPage",
+        "description": "Страница ручных реплик со всеми ревизиями."
+      },
+      "ConsiliumPermissions": {
+        "properties": {
+          "use_with_advisers": {
+            "type": "boolean",
+            "title": "Use With Advisers",
+            "default": false
+          },
+          "external_transfer": {
+            "type": "boolean",
+            "title": "External Transfer",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ConsiliumPermissions",
+        "description": "Разрешения контекста: использование ИИ и внешняя передача независимы."
       },
       "ContourShapeOut": {
         "properties": {

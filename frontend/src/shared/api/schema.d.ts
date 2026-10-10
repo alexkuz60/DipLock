@@ -1766,6 +1766,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consilium/cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Cases
+         * @description Список открытых и архивных исследований.
+         */
+        get: operations["list_cases_api_v1_consilium_cases_get"];
+        put?: never;
+        /**
+         * Create Case
+         * @description Создать исследование без запуска анализа или ИИ.
+         */
+        post: operations["create_case_api_v1_consilium_cases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Case
+         * @description Паспорт; 404 на неизвестное исследование.
+         */
+        get: operations["get_case_api_v1_consilium_cases__case_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Case
+         * @description Удалить дело и ревизии после подтверждения версии предварительного просмотра.
+         */
+        delete: operations["delete_case_api_v1_consilium_cases__case_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Case
+         * @description Изменить паспорт или архивировать с проверкой версии.
+         */
+        patch: operations["update_case_api_v1_consilium_cases__case_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Context
+         * @description Контекст со всеми ревизиями, не только текущий текст.
+         */
+        get: operations["list_context_api_v1_consilium_cases__case_id__context_get"];
+        put?: never;
+        /**
+         * Create Context
+         * @description Сохранить рассказ, условия или наблюдение отдельно от измерений.
+         */
+        post: operations["create_context_api_v1_consilium_cases__case_id__context_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/context/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Context
+         * @description Исправить контекст новой ревизией.
+         */
+        patch: operations["update_context_api_v1_consilium_cases__case_id__context__entry_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Messages
+         * @description Ручная история; модельных ответов в этом срезе нет.
+         */
+        get: operations["list_messages_api_v1_consilium_cases__case_id__messages_get"];
+        put?: never;
+        /**
+         * Create Message
+         * @description Добавить реплику исследователя, не запуская ИИ.
+         */
+        post: operations["create_message_api_v1_consilium_cases__case_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/messages/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Message
+         * @description Исправить ручную реплику с сохранением исходной версии.
+         */
+        patch: operations["update_message_api_v1_consilium_cases__case_id__messages__entry_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/deletion-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Deletion Preview
+         * @description Посмотреть последствия удаления без изменения данных.
+         */
+        get: operations["deletion_preview_api_v1_consilium_cases__case_id__deletion_preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -4098,6 +4258,356 @@ export interface components {
              * @description Кластеры по возрастанию p; вклад UI показывает значимые (significant=true)
              */
             clusters?: components["schemas"]["CompareClusterOut"][];
+        };
+        /**
+         * ConsiliumCaseCreate
+         * @description Создание исследования с ключом повторного запроса.
+         */
+        ConsiliumCaseCreate: {
+            /** Title */
+            title: string;
+            /** Question */
+            question: string;
+            /**
+             * Direction
+             * @default other
+             * @enum {string}
+             */
+            direction: "music" | "meditation" | "creativity" | "emotional" | "other";
+            /** Subject Codes */
+            subject_codes?: string[];
+            /** Recording Ids */
+            recording_ids?: string[];
+            /** Request Id */
+            request_id: string;
+        };
+        /**
+         * ConsiliumCaseOut
+         * @description Сохранённый паспорт исследования.
+         */
+        ConsiliumCaseOut: {
+            /** Title */
+            title: string;
+            /** Question */
+            question: string;
+            /**
+             * Direction
+             * @default other
+             * @enum {string}
+             */
+            direction: "music" | "meditation" | "creativity" | "emotional" | "other";
+            /** Subject Codes */
+            subject_codes?: string[];
+            /** Recording Ids */
+            recording_ids?: string[];
+            /** Id */
+            id: string;
+            /** Version */
+            version: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "archived";
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ConsiliumCaseUpdate
+         * @description Полный новый паспорт: конфликт версии не затирает изменения коллеги.
+         */
+        ConsiliumCaseUpdate: {
+            /** Title */
+            title: string;
+            /** Question */
+            question: string;
+            /**
+             * Direction
+             * @default other
+             * @enum {string}
+             */
+            direction: "music" | "meditation" | "creativity" | "emotional" | "other";
+            /** Subject Codes */
+            subject_codes?: string[];
+            /** Recording Ids */
+            recording_ids?: string[];
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Status
+             * @default open
+             * @enum {string}
+             */
+            status: "open" | "archived";
+        };
+        /**
+         * ConsiliumCasesPage
+         * @description Страница исследований: total до ограничения выдачи.
+         */
+        ConsiliumCasesPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumCaseOut"][];
+        };
+        /**
+         * ConsiliumContextCreate
+         * @description Новая ручная контекстная запись.
+         */
+        ConsiliumContextCreate: {
+            /** Text */
+            text: string;
+            /**
+             * Kind
+             * @default observation
+             * @enum {string}
+             */
+            kind: "volunteer_report" | "observation" | "conditions" | "answer";
+            /**
+             * Author
+             * @default Исследователь
+             */
+            author: string;
+            /** Subject Code */
+            subject_code?: string | null;
+            /** Recording Id */
+            recording_id?: string | null;
+            /** Start Sec */
+            start_sec?: number | null;
+            /** End Sec */
+            end_sec?: number | null;
+            /**
+             * Time Basis
+             * @default unspecified
+             * @enum {string}
+             */
+            time_basis: "unspecified" | "eeg" | "approximate";
+            /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
+            permissions?: components["schemas"]["ConsiliumPermissions"];
+            /** Request Id */
+            request_id: string;
+            /**
+             * Expected Version
+             * @description Версия исследования
+             */
+            expected_version: number;
+        };
+        /**
+         * ConsiliumContextOut
+         * @description Точная ревизия ручного контекста.
+         */
+        ConsiliumContextOut: {
+            /** Text */
+            text: string;
+            /**
+             * Kind
+             * @default observation
+             * @enum {string}
+             */
+            kind: "volunteer_report" | "observation" | "conditions" | "answer";
+            /**
+             * Author
+             * @default Исследователь
+             */
+            author: string;
+            /** Subject Code */
+            subject_code?: string | null;
+            /** Recording Id */
+            recording_id?: string | null;
+            /** Start Sec */
+            start_sec?: number | null;
+            /** End Sec */
+            end_sec?: number | null;
+            /**
+             * Time Basis
+             * @default unspecified
+             * @enum {string}
+             */
+            time_basis: "unspecified" | "eeg" | "approximate";
+            /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
+            permissions?: components["schemas"]["ConsiliumPermissions"];
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ConsiliumContextPage
+         * @description Страница контекстных ревизий (не только последних).
+         */
+        ConsiliumContextPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumContextOut"][];
+        };
+        /**
+         * ConsiliumContextUpdate
+         * @description Исправление создаёт новую ревизию, не стирая исходную.
+         */
+        ConsiliumContextUpdate: {
+            /** Text */
+            text: string;
+            /**
+             * Kind
+             * @default observation
+             * @enum {string}
+             */
+            kind: "volunteer_report" | "observation" | "conditions" | "answer";
+            /**
+             * Author
+             * @default Исследователь
+             */
+            author: string;
+            /** Subject Code */
+            subject_code?: string | null;
+            /** Recording Id */
+            recording_id?: string | null;
+            /** Start Sec */
+            start_sec?: number | null;
+            /** End Sec */
+            end_sec?: number | null;
+            /**
+             * Time Basis
+             * @default unspecified
+             * @enum {string}
+             */
+            time_basis: "unspecified" | "eeg" | "approximate";
+            /**
+             * Verified
+             * @default false
+             */
+            verified: boolean;
+            permissions?: components["schemas"]["ConsiliumPermissions"];
+            /** Request Id */
+            request_id: string;
+            /**
+             * Expected Version
+             * @description Версия исследования
+             */
+            expected_version: number;
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /**
+         * ConsiliumDeletionPreview
+         * @description Что будет удалено; ЭЭГ-записи и соседи не затрагиваются.
+         */
+        ConsiliumDeletionPreview: {
+            /** Case Id */
+            case_id: string;
+            /** Version */
+            version: number;
+            /** Context Revisions */
+            context_revisions: number;
+            /** Message Revisions */
+            message_revisions: number;
+            /** Recording Ids */
+            recording_ids: string[];
+            /** Warnings */
+            warnings: string[];
+        };
+        /**
+         * ConsiliumMessageCreate
+         * @description Ручная реплика исследователя: нельзя подделать ответ советника.
+         */
+        ConsiliumMessageCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Text */
+            text: string;
+        };
+        /**
+         * ConsiliumMessageOut
+         * @description Сохранённая реплика, пока без модельных ответов.
+         */
+        ConsiliumMessageOut: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Author
+             * @default researcher
+             * @constant
+             */
+            author: "researcher";
+            /** Text */
+            text: string;
+        };
+        /**
+         * ConsiliumMessageUpdate
+         * @description Новая ревизия ручной реплики.
+         */
+        ConsiliumMessageUpdate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Text */
+            text: string;
+            /** Expected Revision */
+            expected_revision: number;
+        };
+        /**
+         * ConsiliumMessagesPage
+         * @description Страница ручных реплик со всеми ревизиями.
+         */
+        ConsiliumMessagesPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumMessageOut"][];
+        };
+        /**
+         * ConsiliumPermissions
+         * @description Разрешения контекста: использование ИИ и внешняя передача независимы.
+         */
+        ConsiliumPermissions: {
+            /**
+             * Use With Advisers
+             * @default false
+             */
+            use_with_advisers: boolean;
+            /**
+             * External Transfer
+             * @default false
+             */
+            external_transfer: boolean;
         };
         /**
          * ContourShapeOut
@@ -10129,6 +10639,409 @@ export interface operations {
                 };
                 content: {
                     "audio/wav": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_cases_api_v1_consilium_cases_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumCasesPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_case_api_v1_consilium_cases_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumCaseCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumCaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_case_api_v1_consilium_cases__case_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumCaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_case_api_v1_consilium_cases__case_id__delete: {
+        parameters: {
+            query: {
+                expected_version: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_case_api_v1_consilium_cases__case_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumCaseUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumCaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_context_api_v1_consilium_cases__case_id__context_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumContextPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_context_api_v1_consilium_cases__case_id__context_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumContextCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumContextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_context_api_v1_consilium_cases__case_id__context__entry_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumContextUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumContextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_messages_api_v1_consilium_cases__case_id__messages_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumMessagesPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_message_api_v1_consilium_cases__case_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumMessageCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumMessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_message_api_v1_consilium_cases__case_id__messages__entry_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumMessageUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumMessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deletion_preview_api_v1_consilium_cases__case_id__deletion_preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumDeletionPreview"];
                 };
             };
             /** @description Validation Error */

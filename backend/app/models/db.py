@@ -386,6 +386,53 @@ class GroupAnalysisMember(Base):
     position = Column(Integer, nullable=True)  # порядок выбора в UI — колонки карты
 
 
+class ConsiliumCase(Base):
+    """Независимое от TTL исследования дело добровольца (Т1.2)."""
+
+    __tablename__ = "consilium_cases"
+    id = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    question = Column(String, nullable=False)
+    direction = Column(String, nullable=False)
+    status = Column(String, nullable=False)
+    version = Column(Integer, nullable=False)
+    subject_codes = Column(JSON, nullable=False)
+    recording_ids = Column(JSON, nullable=False)  # явные ссылки, не TTL-каскад
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+
+class ConsiliumEntry(Base):
+    """Неизменяемая ревизия контекста или ручной реплики."""
+
+    __tablename__ = "consilium_entries"
+    __table_args__ = (
+        UniqueConstraint("case_id", "kind", "entry_id", "revision", name="ux_consilium_revision"),
+    )
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)
+    entry_id = Column(String, nullable=False)
+    revision = Column(Integer, nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class ConsiliumRequest(Base):
+    """Квитанция идемпотентности; удаляется вместе с чувствительным делом."""
+
+    __tablename__ = "consilium_requests"
+    __table_args__ = (
+        UniqueConstraint("scope", "request_id", name="ux_consilium_request"),
+    )
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    scope = Column(String, nullable=False)
+    request_id = Column(String, nullable=False)
+    fingerprint = Column(String, nullable=False)
+    response = Column(JSON, nullable=False)
+
+
 def _sync_driver_url(url: URL) -> str:
     """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 

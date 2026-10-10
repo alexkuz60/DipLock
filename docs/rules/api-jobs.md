@@ -33,6 +33,28 @@
   `test_openapi_json_is_up_to_date` и CI-шаг `git diff`, 4.2).
 - Swagger: `http://localhost:8000/docs`.
 
+### Отдельный роутер Консилиума (начало Т1, 10.10.2026)
+
+`backend/app/api/consilium.py` подключён в main с тем же `settings.api_prefix`:
+12 операций, 7 новых путей. Pydantic — `schemas/consilium.py`; обязательный
+сервис хранения — `services/consilium/store.py`; подробности —
+`docs/rules/consilium.md` §0. Не фоновые задачи и не best-effort запись.
+
+| Метод и путь (относительно `/api/v1`) | Назначение |
+|---|---|
+| `POST/GET /consilium/cases` | дело (201, request_id), список/total с пагинацией |
+| `GET/PATCH/DELETE /consilium/cases/{case_id}` | паспорт, полный новый паспорт с expected_version, удаление после предпросмотра |
+| `POST/GET /consilium/cases/{case_id}/context` | ручной контекст (201), все ревизии с пагинацией |
+| `PATCH /consilium/cases/{case_id}/context/{entry_id}` | новая ревизия с expected_revision и expected_version |
+| `POST/GET /consilium/cases/{case_id}/messages` | только ручные реплики, без запуска модели |
+| `PATCH /consilium/cases/{case_id}/messages/{entry_id}` | новая ревизия ручной реплики |
+| `GET /consilium/cases/{case_id}/deletion-preview` | число ревизий и версия для явного удаления; исходные ЭЭГ сохраняются |
+
+Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
+без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;
+409 — конфликт версии/ключа или запись в архив; 503 — ошибка обязательного
+хранилища. Sources/evidence/snapshots, аудио и модельный чат пока не доступны.
+
 ## Инвентарь эндпоинтов (74 в `routes.py`, порядок файла)
 
 | # | Метод и путь | Назначение |

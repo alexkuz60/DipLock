@@ -14,6 +14,21 @@ import type { components } from './schema'
 
 type Schemas = components['schemas']
 
+/** Основание Консилиума: серверный контракт, UI появится отдельным срезом. */
+export type ConsiliumCase = Schemas['ConsiliumCaseOut']
+export type ConsiliumCaseCreate = Schemas['ConsiliumCaseCreate']
+export type ConsiliumCaseUpdate = Schemas['ConsiliumCaseUpdate']
+export type ConsiliumCasesPage = Schemas['ConsiliumCasesPage']
+export type ConsiliumContext = Schemas['ConsiliumContextOut']
+export type ConsiliumContextCreate = Schemas['ConsiliumContextCreate']
+export type ConsiliumContextUpdate = Schemas['ConsiliumContextUpdate']
+export type ConsiliumContextPage = Schemas['ConsiliumContextPage']
+export type ConsiliumMessage = Schemas['ConsiliumMessageOut']
+export type ConsiliumMessageCreate = Schemas['ConsiliumMessageCreate']
+export type ConsiliumMessageUpdate = Schemas['ConsiliumMessageUpdate']
+export type ConsiliumMessagesPage = Schemas['ConsiliumMessagesPage']
+export type ConsiliumDeletionPreview = Schemas['ConsiliumDeletionPreview']
+
 /** Статусы фоновой задачи: поле `status` схемы `JobStatus` */
 export type JobState = Schemas['JobStatus']['status']
 
