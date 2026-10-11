@@ -33,12 +33,6 @@ LlmChatProbeScenarioKey = Literal["dialog", "role", "insufficient", "leading"]
 _ROUTE_KEYS: tuple[str, ...] = ("chat", "transcribe")
 _ANTHROPIC_VERSION = "2023-06-01"
 _PROBE_PROMPT = "Ответь одним словом: готов"
-# Бюджет пробы: thinking-режим (DeepSeek `thinking`/`reasoning_effort`) требует
-# головы сверх одного слова, иначе модель молчит и проба даёт ложный отказ.
-_PROBE_MAX_TOKENS = 1024
-# Бюджет пробы советника: структурный ответ роли длиннее одного слова — плюс
-# та же голова thinking-режима.
-_CHAT_PROBE_MAX_TOKENS = 2048
 # Список моделей провайдера: id через запятую, пробы идут перебором по каждому.
 _MAX_MODELS = 10
 _MAX_MODEL_CHARS = 200
@@ -81,7 +75,7 @@ class RouterState:
 
     providers: tuple[Provider, ...] = ()
     routes: dict[str, str | None] = field(
-        default_factory=lambda: {"chat": None, "transcribe": None},
+        default_factory=lambda: {"chat": None, "chat_model": None, "transcribe": None},
     )
 
 
@@ -132,6 +126,7 @@ class ChatResult:
     provider_id: str
     model: str
     latency_ms: float
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -258,6 +253,7 @@ class ChatProbeModelResult:
     latency_ms: float | None
     text: str | None
     error: str | None
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -271,6 +267,7 @@ class ChatProbeResult:
     latency_ms: float | None
     text: str | None
     error: str | None
+    truncated: bool = False
     models: tuple[ChatProbeModelResult, ...] = ()
 
 
@@ -528,18 +525,46 @@ def _provider_error(response: httpx.Response, api_key: str | None) -> str:
     return _sanitize(f"Провайдер ответил {response.status_code}: {detail}", api_key)
 
 
-def _extract_text(protocol: LlmProtocol, data: dict) -> str:
-    """Достать текст из ответа модели; отсутствие текста — честная ошибка."""
+def _extract_completion(protocol: LlmProtocol, data: dict) -> tuple[str, bool]:
+    """Достать текст ответа модели и признак обрезки по бюджету токенов.
+
+    Thinking-модели отдают рассуждение отдельным полем (``reasoning_content``),
+    а итоговый ``content`` может остаться пустым (бюджет ушёл на рассуждение) —
+    такое мы не маскируем под ответ, а объясняем в тексте ошибки.
+    """
+    finish: str | None = None
+    reasoning_chars = 0
     try:
         if protocol == "anthropic":
             text = data["content"][0]["text"]
+            finish = data.get("stop_reason")
         else:
-            text = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            message = choice["message"]
+            text = message["content"]
+            finish = choice.get("finish_reason")
+            for key in ("reasoning_content", "reasoning"):
+                value = message.get(key)
+                if isinstance(value, str):
+                    reasoning_chars = max(reasoning_chars, len(value))
     except (KeyError, IndexError, TypeError) as exc:
         raise LlmRouterError("Провайдер вернул ответ без текста модели") from exc
-    if not isinstance(text, str) or not text.strip():
-        raise LlmRouterError("Провайдер вернул пустой ответ модели")
-    return text
+    truncated = finish in {"length", "max_tokens"}
+    if isinstance(text, str) and text.strip():
+        return text, truncated
+    if truncated and reasoning_chars:
+        raise LlmRouterError(
+            f"Бюджет токенов исчерпан на рассуждении (thinking), "
+            f"итоговый текст пуст (рассуждение {reasoning_chars} симв.)",
+        )
+    if truncated:
+        raise LlmRouterError("Бюджет токенов исчерпан, итоговый текст пуст")
+    if reasoning_chars:
+        raise LlmRouterError(
+            f"Модель вернула только рассуждение (thinking, {reasoning_chars} симв.), "
+            "итоговый текст пуст",
+        )
+    raise LlmRouterError("Провайдер вернул пустой ответ модели")
 
 
 async def _chat_completion(
@@ -596,11 +621,13 @@ async def _chat_completion(
         raise LlmRouterError("Провайдер вернул не JSON") from exc
     if not isinstance(data, dict):
         raise LlmRouterError("Провайдер вернул неожиданный формат ответа")
+    text, truncated = _extract_completion(provider.protocol, data)
     return ChatResult(
-        text=_extract_text(provider.protocol, data),
+        text=text,
         provider_id=provider.id,
         model=chosen,
         latency_ms=latency_ms,
+        truncated=truncated,
     )
 
 
@@ -684,24 +711,23 @@ async def probe(
             )
         return await _models_probe(provider, client)
     models = _split_models(provider.model) or (provider.model,)
-    results: list[ProbeModelResult] = []
-    for model in models:
+
+    async def _one(model: str) -> ProbeModelResult:
+        """Проба одной модели списка; ошибка провайдера — в её строке результата."""
         try:
             result = await _chat_completion(
                 provider,
                 [{"role": "user", "content": _PROBE_PROMPT}],
-                max_tokens=_PROBE_MAX_TOKENS,
+                max_tokens=settings.llm_probe_max_tokens,
                 model=model,
                 client=client,
             )
         except LlmRouterError as exc:
-            results.append(ProbeModelResult(
-                model=model, ok=False, latency_ms=None, error=str(exc),
-            ))
-        else:
-            results.append(ProbeModelResult(
-                model=model, ok=True, latency_ms=result.latency_ms, error=None,
-            ))
+            return ProbeModelResult(model=model, ok=False, latency_ms=None, error=str(exc))
+        return ProbeModelResult(model=model, ok=True, latency_ms=result.latency_ms, error=None)
+
+    # модели проверяются параллельно: перебор списка не ждёт по очереди
+    results = list(await asyncio.gather(*(_one(model) for model in models)))
     return _probe_summary(results)
 
 
@@ -757,25 +783,28 @@ async def chat_probe(
         raise LlmRouterError("Провайдер выключен — включите его в настройках")
     scenario = _find_scenario(scenario_key)
     models = _split_models(provider.model) or (provider.model,)
-    results: list[ChatProbeModelResult] = []
-    for model in models:
+
+    async def _one(model: str) -> ChatProbeModelResult:
+        """Проба одной модели списка; ошибка вызова — в её строке результата."""
         try:
             result = await _chat_completion(
                 provider,
                 list(scenario.messages),
-                max_tokens=_CHAT_PROBE_MAX_TOKENS,
+                max_tokens=settings.llm_probe_max_tokens,
                 model=model,
                 client=client,
             )
         except LlmRouterError as exc:
-            results.append(ChatProbeModelResult(
+            return ChatProbeModelResult(
                 model=model, ok=False, latency_ms=None, text=None, error=str(exc),
-            ))
-        else:
-            results.append(ChatProbeModelResult(
-                model=model, ok=True, latency_ms=result.latency_ms,
-                text=result.text, error=None,
-            ))
+            )
+        return ChatProbeModelResult(
+            model=model, ok=True, latency_ms=result.latency_ms,
+            text=result.text, error=None, truncated=result.truncated,
+        )
+
+    # модели проверяются параллельно: перебор списка не ждёт по очереди
+    results = list(await asyncio.gather(*(_one(model) for model in models)))
     successes = [item for item in results if item.ok]
     failures = [item for item in results if not item.ok]
     first = successes[0] if successes else None
@@ -794,5 +823,6 @@ async def chat_probe(
         latency_ms=min(latencies, default=None),
         text=first.text if first else None,
         error=error,
+        truncated=first.truncated if first else False,
         models=tuple(results),
     )

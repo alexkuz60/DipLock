@@ -13600,6 +13600,12 @@
             ],
             "title": "Error",
             "description": "Текст для UI; None при успехе"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "Ответ обрезан по бюджету токенов (модель не закончила)",
+            "default": false
           }
         },
         "type": "object",
@@ -13677,6 +13683,12 @@
             ],
             "title": "Error",
             "description": "Текст для UI; None при успехе"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "Ответ обрезан по бюджету токенов (модель не закончила)",
+            "default": false
           },
           "models": {
             "items": {

@@ -286,6 +286,7 @@ export function ModelRouterPanel() {
           latency_ms: null,
           text: null,
           error: apiErrorText(error),
+          truncated: false,
         },
       }))
     }
@@ -593,6 +594,11 @@ export function ModelRouterPanel() {
                     <p className="whitespace-pre-wrap rounded-lg border border-border bg-bg-2 p-2.5 text-sm text-fg-0">
                       {item.text}
                     </p>
+                    {item.truncated ? (
+                      <p className="text-sm text-danger">
+                        ⚠ Ответ обрезан по бюджету токенов — модель не закончила
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <p key={item.model} role="alert" className="text-sm text-danger">
@@ -610,6 +616,11 @@ export function ModelRouterPanel() {
               <p className="whitespace-pre-wrap rounded-lg border border-border bg-bg-2 p-2.5 text-sm text-fg-0">
                 {chatProbe.result.text}
               </p>
+              {chatProbe.result.truncated ? (
+                <p className="text-sm text-danger">
+                  ⚠ Ответ обрезан по бюджету токенов — модель не закончила
+                </p>
+              ) : null}
             </div>
           ) : (
             <p role="alert" className="text-sm text-danger">

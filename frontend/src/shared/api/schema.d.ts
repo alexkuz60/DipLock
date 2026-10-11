@@ -6637,6 +6637,12 @@ export interface components {
              * @description Текст для UI; None при успехе
              */
             error?: string | null;
+            /**
+             * Truncated
+             * @description Ответ обрезан по бюджету токенов (модель не закончила)
+             * @default false
+             */
+            truncated: boolean;
         };
         /**
          * LlmChatProbeOut
@@ -6672,6 +6678,12 @@ export interface components {
              * @description Текст для UI; None при успехе
              */
             error?: string | null;
+            /**
+             * Truncated
+             * @description Ответ обрезан по бюджету токенов (модель не закончила)
+             * @default false
+             */
+            truncated: boolean;
             /**
              * Models
              * @description Перебор моделей списка провайдера: ответ и задержка каждой

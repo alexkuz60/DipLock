@@ -467,7 +467,7 @@ async def test_chat_probe_scenarios_send_synthetic_messages(router_config, monke
     assert [body["messages"] for body in bodies] == [
         list(scenario.messages) for scenario in llm_router.CHAT_PROBE_SCENARIOS
     ]
-    assert all(body["max_tokens"] == llm_router._CHAT_PROBE_MAX_TOKENS for body in bodies)
+    assert all(body["max_tokens"] == settings.llm_probe_max_tokens for body in bodies)
 
 
 @pytest.mark.asyncio
@@ -730,3 +730,92 @@ def test_chat_model_route_validation(client, router_config):
         "chat_model": "m-b",
         "transcribe": None,
     }
+
+
+# ---------- thinking-модели: рассуждение, бюджет токенов, обрезка ----------
+
+
+@pytest.mark.asyncio
+async def test_chat_probe_reports_reasoning_and_truncation(router_config, monkeypatch):
+    """Пустой content при reasoning/бюджете — честные ошибки; обрезка — флаг truncated."""
+
+    def thinking_handler(request: httpx.Request) -> httpx.Response:
+        model = json.loads(request.content)["model"]
+        if model == "m-think":  # бюджет ушёл на рассуждение, итог пуст
+            return httpx.Response(200, json={
+                "choices": [{
+                    "finish_reason": "length",
+                    "message": {"content": "", "reasoning_content": "А" * 500},
+                }],
+            })
+        if model == "m-reason":  # только рассуждение, стоп штатный
+            return httpx.Response(200, json={
+                "choices": [{
+                    "finish_reason": "stop",
+                    "message": {"content": None, "reasoning": "Б" * 300},
+                }],
+            })
+        if model == "m-empty":  # пусто и без рассуждения
+            return httpx.Response(200, json={
+                "choices": [{"finish_reason": "stop", "message": {"content": ""}}],
+            })
+        return httpx.Response(200, json={  # текст есть, но обрезан по бюджету
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": "част"},
+            }],
+        })
+
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-think, m-reason, m-empty, m-cut", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(thinking_handler))
+    result = await llm_router.chat_probe(state.providers[0].id, "role")
+    by_model = {item.model: item for item in result.models}
+
+    think = by_model["m-think"]
+    assert think.ok is False
+    assert "бюджет" in (think.error or "").lower()
+    assert "500" in (think.error or "")  # размер рассуждения в тексте ошибки
+
+    reason = by_model["m-reason"]
+    assert reason.ok is False
+    assert "рассуждение" in (reason.error or "")
+
+    empty = by_model["m-empty"]
+    assert empty.ok is False
+    assert "пустой ответ" in (empty.error or "")
+
+    cut = by_model["m-cut"]
+    assert cut.ok is True
+    assert cut.text == "част"
+    assert cut.truncated is True  # обрезка видна, а не «тихий» обрыв текста
+
+    assert result.ok is False
+    assert result.model == "m-cut"  # сводка — по первой успешной модели
+    assert result.truncated is True
+
+
+def test_extract_completion_truncation_flags():
+    """Признак обрезки: finish_reason=length / stop_reason=max_tokens — truncated."""
+    text, truncated = llm_router._extract_completion(
+        "openai",
+        {"choices": [{"finish_reason": "length", "message": {"content": "част"}}]},
+    )
+    assert (text, truncated) == ("част", True)
+    text, truncated = llm_router._extract_completion(
+        "anthropic",
+        {"content": [{"text": "част"}], "stop_reason": "max_tokens"},
+    )
+    assert (text, truncated) == ("част", True)
+    text, truncated = llm_router._extract_completion(
+        "openai",
+        {"choices": [{"finish_reason": "stop", "message": {"content": "целиком"}}]},
+    )
+    assert (text, truncated) == ("целиком", False)

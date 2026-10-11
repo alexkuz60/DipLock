@@ -1309,3 +1309,16 @@ Vitest — **1175** (100 файлов).
 400); Vitest +3 (`ModelRouterPanel.test`: выбор и сохранение, сброс при смене
 провайдера, блок сохранения). Итог: pytest — **970** (без `integration` — **950**),
 Vitest — **1178** (100 файлов).
+
+**Thinking-модели проб: рассуждение, бюджет, обрезка (11.10.2026, багфикс):**
+живое воспроизведение (DeepSeek `deepseek-flash`, сценарий `role`) показало
+`finish_reason=length`, пустой `content` и весь бюджет 2048 токенов в
+`reasoning_content` — «Роль и структура» падала как «пустой ответ», не таймаут.
+Фикс: бюджет проб `settings.llm_probe_max_tokens` (8192), тайм-аут
+`llm_request_timeout_s` 180 с, пустой `content` — честные ошибки («бюджет
+исчерпан на рассуждении, N симв.» / «только рассуждение»), обрезка
+(`finish_reason=length`) — флаг `truncated` в контракте + подпись UI, перебор
+моделей — параллельно (`asyncio.gather`). pytest +2 (`test_llm_router.py`:
+`test_chat_probe_reports_reasoning_and_truncation`, `test_extract_completion_truncation_flags`);
+Vitest +1 (`ModelRouterPanel.test`: пометка обрезки). Итог: pytest — **972**
+(без `integration` — **952**), Vitest — **1179** (100 файлов).

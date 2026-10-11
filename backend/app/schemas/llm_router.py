@@ -159,6 +159,10 @@ class LlmChatProbeModelOut(BaseModel):
     latency_ms: float | None = Field(default=None, description="Задержка вызова, мс")
     text: str | None = Field(default=None, description="Ответ модели по сценарию")
     error: str | None = Field(default=None, description="Текст для UI; None при успехе")
+    truncated: bool = Field(
+        default=False,
+        description="Ответ обрезан по бюджету токенов (модель не закончила)",
+    )
 
 
 class LlmChatProbeOut(BaseModel):
@@ -171,6 +175,10 @@ class LlmChatProbeOut(BaseModel):
     latency_ms: float | None = Field(default=None, description="Задержка вызова, мс")
     text: str | None = Field(default=None, description="Ответ модели по сценарию")
     error: str | None = Field(default=None, description="Текст для UI; None при успехе")
+    truncated: bool = Field(
+        default=False,
+        description="Ответ обрезан по бюджету токенов (модель не закончила)",
+    )
     models: list[LlmChatProbeModelOut] = Field(
         default_factory=list,
         description="Перебор моделей списка провайдера: ответ и задержка каждой",

@@ -158,6 +158,7 @@ async def chat_probe_llm_provider(
         latency_ms=result.latency_ms,
         text=result.text,
         error=result.error,
+        truncated=result.truncated,
         models=[
             LlmChatProbeModelOut(
                 model=item.model,
@@ -165,6 +166,7 @@ async def chat_probe_llm_provider(
                 latency_ms=item.latency_ms,
                 text=item.text,
                 error=item.error,
+                truncated=item.truncated,
             )
             for item in result.models
         ],

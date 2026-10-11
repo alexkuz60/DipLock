@@ -1208,6 +1208,7 @@ export function llmChatProbeFixture(
     latency_ms: 320,
     text: 'Замечено: пик около 10 Гц в затылочных.\nСледующий шаг: уточнить условия пробы.',
     error: null,
+    truncated: false,
     models: [
       {
         model: 'big-model-1',
@@ -1215,6 +1216,7 @@ export function llmChatProbeFixture(
         latency_ms: 320,
         text: 'Замечено: пик около 10 Гц в затылочных.\nСледующий шаг: уточнить условия пробы.',
         error: null,
+        truncated: false,
       },
     ],
     ...overrides,

@@ -298,6 +298,7 @@ describe('панель «Модельный роутер ИИ»', () => {
             latency_ms: 320,
             text: 'Замечено: пик около 10 Гц.',
             error: null,
+            truncated: false,
           },
           {
             model: 'alt-model',
@@ -305,6 +306,7 @@ describe('панель «Модельный роутер ИИ»', () => {
             latency_ms: 280,
             text: 'Замечено: ответ второй модели.',
             error: null,
+            truncated: false,
           },
         ],
       }),
@@ -318,6 +320,33 @@ describe('панель «Модельный роутер ИИ»', () => {
     expect(await screen.findByText('big-model-1 · 320 мс')).toBeInTheDocument()
     expect(screen.getByText('alt-model · 280 мс')).toBeInTheDocument()
     expect(screen.getByText(/Замечено: ответ второй модели/)).toBeInTheDocument()
+  })
+
+  it('обрезанный по бюджету токенов ответ помечается предупреждением', async () => {
+    const user = userEvent.setup()
+    mockApiFetch({
+      llmChatProbe: llmChatProbeFixture({
+        truncated: true,
+        text: 'Замечено: пик около 10 Гц, обр',
+        models: [
+          {
+            model: 'big-model-1',
+            ok: true,
+            latency_ms: 320,
+            text: 'Замечено: пик около 10 Гц, обр',
+            error: null,
+            truncated: true,
+          },
+        ],
+      }),
+    })
+    renderWithProviders(<ModelRouterPanel />)
+
+    await screen.findByRole('textbox', { name: 'Имя' })
+    await user.selectOptions(screen.getByLabelText('Провайдер пробы'), 'prov-full')
+    await user.click(screen.getByRole('button', { name: 'Роль и структура' }))
+
+    expect(await screen.findByText(/Ответ обрезан по бюджету токенов/)).toBeInTheDocument()
   })
 
   it('модель маршрута chat выбирается списком моделей провайдера и сохраняется', async () => {
