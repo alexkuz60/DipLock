@@ -5,8 +5,15 @@
 падение/таймаут), привязка ``key_track``/``tempo_track`` к контракту кадров
 «Эмо» и валидация ``AudioEmoOut``; ``integration`` — живой прогон плагинов
 (бинарь в ``tools/``).
+
+Юнит-часть **герметична**: реальный ``sonic-annotator`` не нужен — в CI его
+нет (GPL-бинарь не коммитится), бинарь/transform подставляются фиктивными
+(``_fake_toolchain``), чтобы мок ``subprocess.run`` действительно вызывался
+(ловушка 11.10.2026: ранний выход ``_run_transform`` по ``os.path.isfile``
+оставлял мок незатронутым).
 """
 import subprocess
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -67,7 +74,21 @@ def test_parse_key_csv_skips_garbage():
 # --- юнит: запуск sonic-annotator (мок subprocess) -----------------------------
 
 
-def test_key_track_from_wav_success(monkeypatch):
+def _fake_toolchain(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, transform_name: str) -> None:
+    """Фиктивная цепочка инструмента: бинарь/transform «существуют» на диске.
+
+    В CI нет ``tools/sonic-annotator`` (GPL-бинарь не коммитится), а
+    ``_run_transform`` выходит рано по ``os.path.isfile`` — мок
+    ``subprocess.run`` остаётся незатронутым и тест молча проверяет не то
+    (ловушка 11.10.2026). Здесь бинарь — любой существующий файл
+    (``vamp_analysis.__file__``), transform — созданный в ``tmp_path``.
+    """
+    (tmp_path / transform_name).write_text("# фиктивный transform\n", encoding="utf-8")
+    monkeypatch.setattr(settings, "sonic_annotator_bin", vamp_analysis.__file__)
+    monkeypatch.setattr(settings, "vamp_transforms_dir", str(tmp_path))
+
+
+def test_key_track_from_wav_success(monkeypatch, tmp_path):
     """Успех: команда/окружение собраны верно (VAMP_PATH явно), CSV разобран."""
     captured: dict = {}
 
@@ -76,6 +97,7 @@ def test_key_track_from_wav_success(monkeypatch):
         captured["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 0, stdout=KEY_CSV, stderr="")
 
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.KEY_TRANSFORM_NAME)
     monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
     track = vamp_analysis.key_track_from_wav(b"RIFF-fake")
     assert track is not None and len(track) == 5
@@ -121,22 +143,35 @@ def test_key_track_from_wav_missing_transform(monkeypatch, tmp_path):
     ],
     ids=["not-executed", "timeout"],
 )
-def test_key_track_from_wav_process_failures(monkeypatch, effect):
+def test_key_track_from_wav_process_failures(monkeypatch, tmp_path, effect):
     """Сбой запуска/таймаут — None, рендер и кадры не падают."""
+    called = False
+
     def fake_run(*args, **kwargs):
+        nonlocal called
+        called = True
         raise effect
 
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.KEY_TRANSFORM_NAME)
     monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
     assert vamp_analysis.key_track_from_wav(b"x") is None
+    # Мок обязан быть вызван: ранний выход по isfile — молчаливая потеря теста.
+    assert called is True
 
 
-def test_key_track_from_wav_nonzero_rc(monkeypatch):
+def test_key_track_from_wav_nonzero_rc(monkeypatch, tmp_path):
     """Ненулевой код возврата (например, «buffer overflow») — None."""
+    called = False
+
     def fake_run(cmd, **kwargs):
+        nonlocal called
+        called = True
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.KEY_TRANSFORM_NAME)
     monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
     assert vamp_analysis.key_track_from_wav(b"x") is None
+    assert called is True
 
 
 # --- юнит: контракт кадров «Эмо» с key_track -----------------------------------
@@ -199,7 +234,7 @@ def test_parse_tempo_csv_skips_garbage():
 # --- юнит: запуск sonic-annotator для темпа (мок subprocess) --------------------
 
 
-def test_tempo_track_from_wav_success(monkeypatch):
+def test_tempo_track_from_wav_success(monkeypatch, tmp_path):
     """Успех: команда собрана с transform Tempo, CSV разобран в оценки."""
     captured: dict = {}
     tempo_csv = '"master.wav",0.0,120.185,"120,19 bpm"\n,1.0,122.5,"122,50 bpm"\n'
@@ -208,6 +243,7 @@ def test_tempo_track_from_wav_success(monkeypatch):
         captured["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, stdout=tempo_csv, stderr="")
 
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.TEMPO_TRANSFORM_NAME)
     monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
     track = vamp_analysis.tempo_track_from_wav(b"RIFF-fake")
     assert track == [{"t_sec": 0.0, "bpm": 120.185}, {"t_sec": 1.0, "bpm": 122.5}]
@@ -221,13 +257,19 @@ def test_tempo_track_from_wav_missing_transform(monkeypatch, tmp_path):
     assert vamp_analysis.tempo_track_from_wav(b"x") is None
 
 
-def test_tempo_track_from_wav_nonzero_rc(monkeypatch):
+def test_tempo_track_from_wav_nonzero_rc(monkeypatch, tmp_path):
     """Ненулевой код возврата — None (best-effort, как у key_track)."""
+    called = False
+
     def fake_run(cmd, **kwargs):
+        nonlocal called
+        called = True
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.TEMPO_TRANSFORM_NAME)
     monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
     assert vamp_analysis.tempo_track_from_wav(b"x") is None
+    assert called is True
 
 
 # --- юнит: контракт кадров «Эмо» с tempo_track ----------------------------------

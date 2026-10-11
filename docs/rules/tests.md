@@ -1266,3 +1266,17 @@ Vitest без новых кейсов — **1151** (97 файлов): обнов
 только `aria-label`, контролы после кнопки «Создать аудио») и силуэта
 (`brainroom-legend` отсутствует); `AppShell.test.tsx` — новое имя раздела.
 pytest не менялся — **906** (без `integration` — **886**); eslint/tsc чисты.
+
+**Герметичность VAMP-тестов (11.10.2026, фейл CI):**
+`test_key_track_from_wav_success` и `test_tempo_track_from_wav_success` падали
+в GitHub Actions (`assert (None is not None)`), но проходили локально: юнит-запуск
+`sonic-annotator` зависел от реального GPL-бинаря `tools/sonic-annotator` (не
+коммитится) — без него `_run_transform` выходил рано по `os.path.isfile` и мок
+`subprocess.run` не вызывался. Исправлено фиктивной цепочкой
+`_fake_toolchain` (бинарь = существующий файл `vamp_analysis.__file__`,
+transform — создан в `tmp_path`); тесты сбоев (таймаут/`FileNotFoundError`/rc≠0)
+усилены проверкой `called is True` — мок обязан быть вызван, иначе ранний выход
+по `isfile` теряет тест молча. **Ловушка:** тест с моком внешнего процесса не
+имеет права зависеть от установленного инструмента — и он зелёный только
+«по случаю». Числа не менялись: pytest — **960** (без `integration` — **940**),
+Vitest — **1170** (98 файлов), ruff/mypy чисты.
