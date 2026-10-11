@@ -5356,6 +5356,48 @@
         }
       }
     },
+    "/api/v1/llm-router/chat-probe": {
+      "post": {
+        "tags": [
+          "Настройки ИИ"
+        ],
+        "summary": "Проба советника (§10): сценарий на выбранном провайдере",
+        "description": "Синтетический сценарий пробы (без материалов дела): ошибка провайдера — в error.",
+        "operationId": "chat_probe_llm_provider_api_v1_llm_router_chat_probe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmChatProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatProbeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -13513,6 +13555,218 @@
         "description": "Хвост журнала шагов: последние ``limit`` строк (в порядке записи)."
       },
       "JsonValue": {},
+      "LlmChatProbeModelOut": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms",
+            "description": "Задержка вызова, мс"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Ответ модели по сценарию"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст для UI; None при успехе"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "ok"
+        ],
+        "title": "LlmChatProbeModelOut",
+        "description": "Итог пробы советника для одной модели списка провайдера (перебор)."
+      },
+      "LlmChatProbeOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "dialog",
+              "role",
+              "insufficient",
+              "leading"
+            ],
+            "title": "Scenario"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "Модель провайдера"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms",
+            "description": "Задержка вызова, мс"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "Ответ модели по сценарию"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст для UI; None при успехе"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/LlmChatProbeModelOut"
+            },
+            "type": "array",
+            "title": "Models",
+            "description": "Перебор моделей списка провайдера: ответ и задержка каждой"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "provider_id",
+          "scenario"
+        ],
+        "title": "LlmChatProbeOut",
+        "description": "Итог пробы: ответ модели и задержка; ошибка провайдера — в ``error``."
+      },
+      "LlmChatProbeRequest": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider Id"
+          },
+          "scenario": {
+            "type": "string",
+            "enum": [
+              "dialog",
+              "role",
+              "insufficient",
+              "leading"
+            ],
+            "title": "Scenario",
+            "description": "Сценарий пробы: dialog — русский диалог; role — роль советника и структура ответа; insufficient — отказ при недостаточности данных; leading — ненаводящие вопросы. Промпты синтетические — материалы дела не отправляются"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "scenario"
+        ],
+        "title": "LlmChatProbeRequest",
+        "description": "``POST /api/v1/llm-router/chat-probe``: проба советника (§10) на провайдере."
+      },
+      "LlmProbeModelOut": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms",
+            "description": "Задержка вызова, мс"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст для UI; None при успехе"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "ok"
+        ],
+        "title": "LlmProbeModelOut",
+        "description": "Результат проверки одной модели из списка провайдера (перебор)."
+      },
       "LlmProbeOut": {
         "properties": {
           "ok": {
@@ -13566,6 +13820,14 @@
             ],
             "title": "Error",
             "description": "Текст для UI; None при успехе"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/LlmProbeModelOut"
+            },
+            "type": "array",
+            "title": "Models",
+            "description": "Перебор моделей списка провайдера (пусто для transcribe)"
           }
         },
         "type": "object",
@@ -13815,6 +14077,18 @@
             ],
             "title": "Chat",
             "description": "Провайдер советников (Т3); None — не назначен"
+          },
+          "chat_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Model",
+            "description": "Модель списка провайдера маршрута chat (поле «Модель»); None — первая модель списка"
           },
           "transcribe": {
             "anyOf": [

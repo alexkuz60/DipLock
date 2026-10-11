@@ -10,6 +10,10 @@ from fastapi import APIRouter, HTTPException, Response
 
 from app.api.private import PrivateRoute
 from app.schemas.llm_router import (
+    LlmChatProbeModelOut,
+    LlmChatProbeOut,
+    LlmChatProbeRequest,
+    LlmProbeModelOut,
     LlmProbeOut,
     LlmProbeRequest,
     LlmProviderOut,
@@ -44,6 +48,7 @@ def _router_out(state: RouterState) -> LlmRouterOut:
         providers=[_provider_out(provider) for provider in state.providers],
         routes=LlmRoutes(
             chat=state.routes.get("chat"),
+            chat_model=state.routes.get("chat_model"),
             transcribe=state.routes.get("transcribe"),
         ),
     )
@@ -88,7 +93,11 @@ async def put_llm_router(payload: LlmRouterUpdate, response: Response) -> LlmRou
     try:
         state = await llm_router.apply_update(
             drafts,
-            {"chat": payload.routes.chat, "transcribe": payload.routes.transcribe},
+            {
+                "chat": payload.routes.chat,
+                "chat_model": payload.routes.chat_model,
+                "transcribe": payload.routes.transcribe,
+            },
         )
     except LlmRouterError as exc:
         raise HTTPException(exc.status, str(exc), headers=_NO_STORE) from None
@@ -114,4 +123,49 @@ async def probe_llm_provider(payload: LlmProbeRequest, response: Response) -> Ll
         model=result.model,
         latency_ms=result.latency_ms,
         error=result.error,
+        models=[
+            LlmProbeModelOut(
+                model=item.model,
+                ok=item.ok,
+                latency_ms=item.latency_ms,
+                error=item.error,
+            )
+            for item in result.models
+        ],
+    )
+
+
+@router.post(
+    "/chat-probe",
+    response_model=LlmChatProbeOut,
+    summary="Проба советника (§10): сценарий на выбранном провайдере",
+)
+async def chat_probe_llm_provider(
+    payload: LlmChatProbeRequest,
+    response: Response,
+) -> LlmChatProbeOut:
+    """Синтетический сценарий пробы (без материалов дела): ошибка провайдера — в error."""
+    response.headers["Cache-Control"] = _NO_STORE["Cache-Control"]
+    try:
+        result = await llm_router.chat_probe(payload.provider_id, payload.scenario)
+    except LlmRouterError as exc:
+        raise HTTPException(exc.status, str(exc), headers=_NO_STORE) from None
+    return LlmChatProbeOut(
+        ok=result.ok,
+        provider_id=result.provider_id,
+        scenario=result.scenario,
+        model=result.model,
+        latency_ms=result.latency_ms,
+        text=result.text,
+        error=result.error,
+        models=[
+            LlmChatProbeModelOut(
+                model=item.model,
+                ok=item.ok,
+                latency_ms=item.latency_ms,
+                text=item.text,
+                error=item.error,
+            )
+            for item in result.models
+        ],
     )

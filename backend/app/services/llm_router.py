@@ -26,6 +26,9 @@ from app.core.config import settings
 
 LlmProtocol = Literal["openai", "anthropic"]
 LlmRouteKey = Literal["chat", "transcribe"]
+# Сценарии пробы советника (§10 стратегии): русский диалог, роль/структура ответа,
+# отказ при недостаточности данных, ненаводящие вопросы.
+LlmChatProbeScenarioKey = Literal["dialog", "role", "insufficient", "leading"]
 
 _ROUTE_KEYS: tuple[str, ...] = ("chat", "transcribe")
 _ANTHROPIC_VERSION = "2023-06-01"
@@ -33,6 +36,12 @@ _PROBE_PROMPT = "Ответь одним словом: готов"
 # Бюджет пробы: thinking-режим (DeepSeek `thinking`/`reasoning_effort`) требует
 # головы сверх одного слова, иначе модель молчит и проба даёт ложный отказ.
 _PROBE_MAX_TOKENS = 1024
+# Бюджет пробы советника: структурный ответ роли длиннее одного слова — плюс
+# та же голова thinking-режима.
+_CHAT_PROBE_MAX_TOKENS = 2048
+# Список моделей провайдера: id через запятую, пробы идут перебором по каждому.
+_MAX_MODELS = 10
+_MAX_MODEL_CHARS = 200
 _MAX_ERROR_CHARS = 200
 _MAX_PROVIDERS = 20
 # Поля тела запроса, которые принадлежат роутеру, а не extra провайдера.
@@ -91,13 +100,28 @@ class ProviderDraft:
 
 
 @dataclass(frozen=True)
+class ProbeModelResult:
+    """Итог проверки одной модели из списка провайдера (перебор пробой)."""
+
+    model: str
+    ok: bool
+    latency_ms: float | None
+    error: str | None
+
+
+@dataclass(frozen=True)
 class ProbeResult:
-    """Итог проверки связи: без содержимого ответов и ключей."""
+    """Итог проверки связи: без содержимого ответов и ключей.
+
+    ``models`` — перебор моделей списка провайдера (пусто для transcribe:
+    там проверяются ключ/адрес без конкретной модели).
+    """
 
     ok: bool
     latency_ms: float | None
     model: str | None
     error: str | None
+    models: tuple[ProbeModelResult, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -108,6 +132,146 @@ class ChatResult:
     provider_id: str
     model: str
     latency_ms: float
+
+
+@dataclass(frozen=True)
+class ChatProbeScenario:
+    """Сценарий пробы советника (§10): синтетический запрос, материалов дела нет."""
+
+    key: LlmChatProbeScenarioKey
+    title: str
+    checks: str
+    messages: tuple[dict[str, str], ...]
+
+
+# Пробы §10: выбор модели для маршрута chat по четырём критериям стратегии.
+# Промпты синтетические — никакие материалы дела, записи и имена не участвуют.
+CHAT_PROBE_SCENARIOS: tuple[ChatProbeScenario, ...] = (
+    ChatProbeScenario(
+        key="dialog",
+        title="Русский диалог",
+        checks="Связный русский ответ на реплику и уточняющий вопрос без подсказки",
+        messages=(
+            {
+                "role": "system",
+                "content": "Ты — ассистент исследователя. Отвечай по-русски, живо и коротко.",
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Здравствуйте! Обсудим по-русски, как человек описывает своё состояние "
+                    "после музыкальной пробы."
+                ),
+            },
+            {"role": "assistant", "content": "Хорошо, слушаю. С чего начнём?"},
+            {
+                "role": "user",
+                "content": (
+                    "Что обычно стоит спросить у человека о его переживании, "
+                    "не подсказывая ответ?"
+                ),
+            },
+        ),
+    ),
+    ChatProbeScenario(
+        key="role",
+        title="Роль и структура ответа",
+        checks=(
+            "Роль советника и структура «замечено / возможное объяснение / "
+            "чего не знаем / следующий шаг»"
+        ),
+        messages=(
+            {
+                "role": "system",
+                "content": (
+                    "Ты — методолог исследовательского консилиума. Отвечай строго по структуре: "
+                    "«Замечено: …» / «Возможное объяснение: …» / «Чего не знаем: …» / "
+                    "«Следующий шаг: …». Не выдумывай измерения; синтетические числа "
+                    "помечены как учебные."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Учебные (синтетические) данные досье: запись 32 канала 10-20, спектр — "
+                    "выраженный пик около 10 Гц в затылочных отведениях, GOF быстрого диполя "
+                    "в α-полосе 78%, длина эпохи 2 с, 114 эпох. Вопрос исследователя: что уже "
+                    "можно заметить и какой следующий шаг поможет разобраться?"
+                ),
+            },
+        ),
+    ),
+    ChatProbeScenario(
+        key="insufficient",
+        title="Отказ при недостаточности данных",
+        checks="Честный отказ и перечень недостающего вместо выдуманных выводов",
+        messages=(
+            {
+                "role": "system",
+                "content": (
+                    "Ты — нейрофизиолог исследовательского консилиума. Если данных "
+                    "недостаточно, прямо скажи об этом и перечисли, чего не хватает. "
+                    "Не додумывай факты и не подменяй отсутствие данных нормой."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Досье пустое: измерений нет, рассказ добровольца не записан, "
+                    "наблюдений исследователя нет. Что можно сказать о состоянии "
+                    "добровольца по этим данным?"
+                ),
+            },
+        ),
+    ),
+    ChatProbeScenario(
+        key="leading",
+        title="Ненаводящие вопросы",
+        checks="Вопрос добровольцу без подсказки ожидаемого ответа",
+        messages=(
+            {
+                "role": "system",
+                "content": (
+                    "Ты — психологический советник исследовательского консилиума. "
+                    "Формулируй ненаводящие вопросы: не подсказывай ответ и не закладывай "
+                    "ожидаемое переживание."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Предложи один вопрос добровольцу о том, как он переживал музыкальную "
+                    "пробу. Вопрос должен допускать любой ответ, включая «ничего особенного»."
+                ),
+            },
+        ),
+    ),
+)
+
+
+@dataclass(frozen=True)
+class ChatProbeModelResult:
+    """Итог пробы советника (§10) для одной модели списка провайдера."""
+
+    model: str
+    ok: bool
+    latency_ms: float | None
+    text: str | None
+    error: str | None
+
+
+@dataclass(frozen=True)
+class ChatProbeResult:
+    """Итог пробы советника (§10): сводка + перебор моделей, без ключей."""
+
+    ok: bool
+    scenario: LlmChatProbeScenarioKey
+    provider_id: str
+    model: str | None
+    latency_ms: float | None
+    text: str | None
+    error: str | None
+    models: tuple[ChatProbeModelResult, ...] = ()
 
 
 def key_hint(api_key: str | None) -> str | None:
@@ -158,7 +322,7 @@ def _read_state() -> RouterState:
         )
         for item in raw.get("providers", [])
     )
-    routes: dict[str, str | None] = {"chat": None, "transcribe": None}
+    routes: dict[str, str | None] = {"chat": None, "chat_model": None, "transcribe": None}
     for key, value in dict(raw.get("routes", {})).items():
         if key in routes:
             routes[key] = str(value) if value else None
@@ -197,6 +361,11 @@ def _write_state(state: RouterState) -> None:
 async def get_state() -> RouterState:
     """Текущее состояние роутера (провайдеры с ключами — внутренний уровень)."""
     return await asyncio.to_thread(_read_state)
+
+
+def _split_models(raw: str) -> tuple[str, ...]:
+    """Список моделей провайдера: id через запятую, пустые элементы отброшены."""
+    return tuple(part.strip() for part in raw.split(",") if part.strip())
 
 
 def _validate_extra(extra: dict[str, Any]) -> None:
@@ -271,6 +440,14 @@ def _apply_update_sync(
         model = draft.model.strip()
         if not label or not model:
             raise LlmRouterError("Имя провайдера и модель обязательны")
+        models = _split_models(model)
+        if not models:
+            raise LlmRouterError("Укажите id модели — можно несколько через запятую")
+        if len(models) > _MAX_MODELS:
+            raise LlmRouterError(f"Слишком много моделей: не больше {_MAX_MODELS}")
+        if any(len(item) > _MAX_MODEL_CHARS for item in models):
+            raise LlmRouterError("Слишком длинный id модели — сократите")
+        model = ", ".join(models)  # нормализованный список кандидатов
         if not (base_url.startswith("http://") or base_url.startswith("https://")):
             raise LlmRouterError("Адрес API должен начинаться с http:// или https://")
         if draft.extra is not None:
@@ -294,7 +471,7 @@ def _apply_update_sync(
         providers.append(provider)
 
     by_id = {provider.id: provider for provider in providers}
-    new_routes: dict[str, str | None] = {"chat": None, "transcribe": None}
+    new_routes: dict[str, str | None] = {"chat": None, "chat_model": None, "transcribe": None}
     for key in _ROUTE_KEYS:
         target = routes.get(key)
         if target is None:
@@ -306,6 +483,17 @@ def _apply_update_sync(
                 "Маршрут распознавания поддерживает только совместимый (openai) API",
             )
         new_routes[key] = target
+
+    chat_model = (routes.get("chat_model") or "").strip() or None
+    if chat_model is not None:
+        chat_target = new_routes.get("chat")
+        if chat_target is None:
+            raise LlmRouterError("Модель маршрута chat выбрана без провайдера — назначьте провайдера")
+        if chat_model not in _split_models(by_id[chat_target].model):
+            raise LlmRouterError(
+                "Модель маршрута chat не входит в список моделей провайдера — выберите заново",
+            )
+        new_routes["chat_model"] = chat_model
 
     state = RouterState(providers=tuple(providers), routes=new_routes)
     _write_state(state)
@@ -359,10 +547,16 @@ async def _chat_completion(
     messages: list[dict[str, str]],
     *,
     max_tokens: int,
+    model: str | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> ChatResult:
-    """Один вызов чата провайдера (openai или anthropic) без утечки ключа."""
+    """Один вызов чата провайдера (openai или anthropic) без утечки ключа.
+
+    ``model`` — конкретная модель из списка провайдера (пробы идут перебором);
+    без неё уходит список как есть — только для одиночной модели.
+    """
     http = client or _client()
+    chosen = model or provider.model
     headers = {"content-type": "application/json"}
     if provider.protocol == "anthropic":
         headers["anthropic-version"] = _ANTHROPIC_VERSION
@@ -374,7 +568,7 @@ async def _chat_completion(
             headers["Authorization"] = f"Bearer {provider.api_key}"
         url = f"{provider.base_url}/chat/completions"
     body: dict[str, Any] = {
-        "model": provider.model,
+        "model": chosen,
         "max_tokens": max_tokens,
         "messages": messages,
     }
@@ -405,7 +599,7 @@ async def _chat_completion(
     return ChatResult(
         text=_extract_text(provider.protocol, data),
         provider_id=provider.id,
-        model=provider.model,
+        model=chosen,
         latency_ms=latency_ms,
     )
 
@@ -447,13 +641,36 @@ def _find_provider(state: RouterState, provider_id: str) -> Provider:
     raise LlmRouterError("Провайдер не найден — обновите настройки", 404)
 
 
+def _probe_summary(results: list[ProbeModelResult]) -> ProbeResult:
+    """Сводка перебора моделей: ok — все ответили, error — перечень не прошедших."""
+    successes = [item for item in results if item.ok]
+    failures = [item for item in results if not item.ok]
+    if not failures:
+        error = None
+    elif len(results) == 1:
+        error = failures[0].error
+    else:
+        error = "; ".join(f"«{item.model}»: {item.error}" for item in failures)
+    latencies = [item.latency_ms for item in successes if item.latency_ms is not None]
+    return ProbeResult(
+        ok=not failures,
+        latency_ms=min(latencies, default=None),
+        model=successes[0].model if successes else None,
+        error=error,
+        models=tuple(results),
+    )
+
+
 async def probe(
     provider_id: str,
     route: LlmRouteKey,
     *,
     client: httpx.AsyncClient | None = None,
 ) -> ProbeResult:
-    """Нейтральная проверка связи (без материалов дела): «Ответь одним словом: готов»."""
+    """Нейтральная проверка связи (без материалов дела): «Ответь одним словом: готов».
+
+    Несколько моделей провайдера — перебором по каждой (отдельный результат).
+    """
     provider = _find_provider(await get_state(), provider_id)
     if not provider.enabled:
         raise LlmRouterError("Провайдер выключен — включите его в настройках")
@@ -466,16 +683,26 @@ async def probe(
                 error="Маршрут распознавания через Anthropic пока не поддерживается",
             )
         return await _models_probe(provider, client)
-    try:
-        result = await _chat_completion(
-            provider,
-            [{"role": "user", "content": _PROBE_PROMPT}],
-            max_tokens=_PROBE_MAX_TOKENS,
-            client=client,
-        )
-    except LlmRouterError as exc:
-        return ProbeResult(ok=False, latency_ms=None, model=provider.model, error=str(exc))
-    return ProbeResult(ok=True, latency_ms=result.latency_ms, model=result.model, error=None)
+    models = _split_models(provider.model) or (provider.model,)
+    results: list[ProbeModelResult] = []
+    for model in models:
+        try:
+            result = await _chat_completion(
+                provider,
+                [{"role": "user", "content": _PROBE_PROMPT}],
+                max_tokens=_PROBE_MAX_TOKENS,
+                model=model,
+                client=client,
+            )
+        except LlmRouterError as exc:
+            results.append(ProbeModelResult(
+                model=model, ok=False, latency_ms=None, error=str(exc),
+            ))
+        else:
+            results.append(ProbeModelResult(
+                model=model, ok=True, latency_ms=result.latency_ms, error=None,
+            ))
+    return _probe_summary(results)
 
 
 async def chat(
@@ -493,4 +720,79 @@ async def chat(
     provider = _find_provider(state, target)
     if not provider.enabled:
         raise LlmRouterError("Провайдер маршрута выключен — включите его в настройках")
-    return await _chat_completion(provider, messages, max_tokens=max_tokens, client=client)
+    models = _split_models(provider.model) or (provider.model,)
+    chosen = state.routes.get("chat_model") if route == "chat" else None
+    return await _chat_completion(
+        provider,
+        messages,
+        max_tokens=max_tokens,
+        # выбранная модель маршрута; без выбора — первая модель списка кандидатов
+        model=chosen if chosen in models else models[0],
+        client=client,
+    )
+
+
+def _find_scenario(key: LlmChatProbeScenarioKey) -> ChatProbeScenario:
+    """Найти сценарий пробы; неизвестный ключ — ошибка использования."""
+    for scenario in CHAT_PROBE_SCENARIOS:
+        if scenario.key == key:
+            return scenario
+    raise LlmRouterError("Неизвестный сценарий пробы советника", 400)
+
+
+async def chat_probe(
+    provider_id: str,
+    scenario_key: LlmChatProbeScenarioKey,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> ChatProbeResult:
+    """Проба советника (§10): синтетический сценарий на конкретном провайдере.
+
+    Материалы дела не отправляются — промпты заданы сервером в ``CHAT_PROBE_SCENARIOS``.
+    Ошибка вызова возвращается как ``ok=False`` (без ключа в тексте); неизвестный или
+    выключенный провайдер — ошибка использования, как у ``probe``.
+    """
+    provider = _find_provider(await get_state(), provider_id)
+    if not provider.enabled:
+        raise LlmRouterError("Провайдер выключен — включите его в настройках")
+    scenario = _find_scenario(scenario_key)
+    models = _split_models(provider.model) or (provider.model,)
+    results: list[ChatProbeModelResult] = []
+    for model in models:
+        try:
+            result = await _chat_completion(
+                provider,
+                list(scenario.messages),
+                max_tokens=_CHAT_PROBE_MAX_TOKENS,
+                model=model,
+                client=client,
+            )
+        except LlmRouterError as exc:
+            results.append(ChatProbeModelResult(
+                model=model, ok=False, latency_ms=None, text=None, error=str(exc),
+            ))
+        else:
+            results.append(ChatProbeModelResult(
+                model=model, ok=True, latency_ms=result.latency_ms,
+                text=result.text, error=None,
+            ))
+    successes = [item for item in results if item.ok]
+    failures = [item for item in results if not item.ok]
+    first = successes[0] if successes else None
+    if not failures:
+        error = None
+    elif len(results) == 1:
+        error = failures[0].error
+    else:
+        error = "; ".join(f"«{item.model}»: {item.error}" for item in failures)
+    latencies = [item.latency_ms for item in successes if item.latency_ms is not None]
+    return ChatProbeResult(
+        ok=not failures,
+        scenario=scenario.key,
+        provider_id=provider.id,
+        model=first.model if first else None,
+        latency_ms=min(latencies, default=None),
+        text=first.text if first else None,
+        error=error,
+        models=tuple(results),
+    )

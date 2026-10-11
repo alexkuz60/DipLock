@@ -1,6 +1,8 @@
 /** Адреса модельного роутера ИИ; ошибки и транспорт — общие с остальным приложением. */
 import { API_PREFIX, request } from './client'
 import type {
+  LlmChatProbeRequest,
+  LlmChatProbeResult,
   LlmProbeRequest,
   LlmProbeResult,
   LlmRouter,
@@ -22,4 +24,7 @@ export const llmRouterApi = {
   /** Нейтральная проверка связи (без материалов дела). */
   probe: (payload: LlmProbeRequest) =>
     request<LlmProbeResult>(`${base}/probe`, json('POST', payload)),
+  /** Проба советника (§10): синтетический сценарий на выбранном провайдере. */
+  chatProbe: (payload: LlmChatProbeRequest) =>
+    request<LlmChatProbeResult>(`${base}/chat-probe`, json('POST', payload)),
 }

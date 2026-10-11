@@ -2118,6 +2118,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm-router/chat-probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Проба советника (§10): сценарий на выбранном провайдере
+         * @description Синтетический сценарий пробы (без материалов дела): ошибка провайдера — в error.
+         */
+        post: operations["chat_probe_llm_provider_api_v1_llm_router_chat_probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -6594,6 +6614,105 @@ export interface components {
         };
         JsonValue: unknown;
         /**
+         * LlmChatProbeModelOut
+         * @description Итог пробы советника для одной модели списка провайдера (перебор).
+         */
+        LlmChatProbeModelOut: {
+            /** Model */
+            model: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Latency Ms
+             * @description Задержка вызова, мс
+             */
+            latency_ms?: number | null;
+            /**
+             * Text
+             * @description Ответ модели по сценарию
+             */
+            text?: string | null;
+            /**
+             * Error
+             * @description Текст для UI; None при успехе
+             */
+            error?: string | null;
+        };
+        /**
+         * LlmChatProbeOut
+         * @description Итог пробы: ответ модели и задержка; ошибка провайдера — в ``error``.
+         */
+        LlmChatProbeOut: {
+            /** Ok */
+            ok: boolean;
+            /** Provider Id */
+            provider_id: string;
+            /**
+             * Scenario
+             * @enum {string}
+             */
+            scenario: "dialog" | "role" | "insufficient" | "leading";
+            /**
+             * Model
+             * @description Модель провайдера
+             */
+            model?: string | null;
+            /**
+             * Latency Ms
+             * @description Задержка вызова, мс
+             */
+            latency_ms?: number | null;
+            /**
+             * Text
+             * @description Ответ модели по сценарию
+             */
+            text?: string | null;
+            /**
+             * Error
+             * @description Текст для UI; None при успехе
+             */
+            error?: string | null;
+            /**
+             * Models
+             * @description Перебор моделей списка провайдера: ответ и задержка каждой
+             */
+            models?: components["schemas"]["LlmChatProbeModelOut"][];
+        };
+        /**
+         * LlmChatProbeRequest
+         * @description ``POST /api/v1/llm-router/chat-probe``: проба советника (§10) на провайдере.
+         */
+        LlmChatProbeRequest: {
+            /** Provider Id */
+            provider_id: string;
+            /**
+             * Scenario
+             * @description Сценарий пробы: dialog — русский диалог; role — роль советника и структура ответа; insufficient — отказ при недостаточности данных; leading — ненаводящие вопросы. Промпты синтетические — материалы дела не отправляются
+             * @enum {string}
+             */
+            scenario: "dialog" | "role" | "insufficient" | "leading";
+        };
+        /**
+         * LlmProbeModelOut
+         * @description Результат проверки одной модели из списка провайдера (перебор).
+         */
+        LlmProbeModelOut: {
+            /** Model */
+            model: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Latency Ms
+             * @description Задержка вызова, мс
+             */
+            latency_ms?: number | null;
+            /**
+             * Error
+             * @description Текст для UI; None при успехе
+             */
+            error?: string | null;
+        };
+        /**
          * LlmProbeOut
          * @description Итог проверки: честная ошибка вместо ложного успеха.
          */
@@ -6622,6 +6741,11 @@ export interface components {
              * @description Текст для UI; None при успехе
              */
             error?: string | null;
+            /**
+             * Models
+             * @description Перебор моделей списка провайдера (пусто для transcribe)
+             */
+            models?: components["schemas"]["LlmProbeModelOut"][];
         };
         /**
          * LlmProbeRequest
@@ -6752,6 +6876,11 @@ export interface components {
              * @description Провайдер советников (Т3); None — не назначен
              */
             chat?: string | null;
+            /**
+             * Chat Model
+             * @description Модель списка провайдера маршрута chat (поле «Модель»); None — первая модель списка
+             */
+            chat_model?: string | null;
             /**
              * Transcribe
              * @description Провайдер распознавания (Т2); только protocol=openai; None — не назначен
@@ -11996,6 +12125,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmProbeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    chat_probe_llm_provider_api_v1_llm_router_chat_probe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatProbeOut"];
                 };
             };
             /** @description Validation Error */

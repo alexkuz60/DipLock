@@ -229,6 +229,12 @@ export type LlmRouter = Schemas['LlmRouterOut']
 export type LlmRouterUpdate = Schemas['LlmRouterUpdate']
 export type LlmProbeRequest = Schemas['LlmProbeRequest']
 export type LlmProbeResult = Schemas['LlmProbeOut']
+export type LlmProbeModelResult = Schemas['LlmProbeModelOut']
+/** Проба советника (§10, `POST /llm-router/chat-probe`): синтетический сценарий. */
+export type LlmChatProbeRequest = Schemas['LlmChatProbeRequest']
+export type LlmChatProbeScenario = LlmChatProbeRequest['scenario']
+export type LlmChatProbeResult = Schemas['LlmChatProbeOut']
+export type LlmChatProbeModelResult = Schemas['LlmChatProbeModelOut']
 
 export type MriSliceRef = Schemas['MriSliceRef']
 

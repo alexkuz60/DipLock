@@ -59,7 +59,7 @@ def test_get_empty_router(client, router_config):
     assert result.status_code == 200, result.text
     assert result.json() == {
         "providers": [],
-        "routes": {"chat": None, "transcribe": None},
+        "routes": {"chat": None, "chat_model": None, "transcribe": None},
     }
     assert "no-store" in result.headers["Cache-Control"]
 
@@ -420,3 +420,313 @@ def test_extra_none_keeps_and_empty_clears(client, router_config):
         "routes": {},
     })
     assert cleared.json()["providers"][0]["extra"] is None
+
+
+# ---------- chat-probe (пробы советника, §10) ----------
+
+
+def _capture_chat_handler(store: list[dict]):
+    """Обработчик MockTransport: записывает тела вызовов и отвечает текстом модели."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        store.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "choices": [{"message": {"content": "Замечено: учебный пик."}}],
+        })
+
+    return handler
+
+
+@pytest.mark.asyncio
+async def test_chat_probe_scenarios_send_synthetic_messages(router_config, monkeypatch):
+    """Пробы §10: каждый сценарий уходит своей синтетической постановкой (без материалов дела)."""
+    assert [s.key for s in llm_router.CHAT_PROBE_SCENARIOS] == [
+        "dialog", "role", "insufficient", "leading",
+    ]
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1", model="m1", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+    bodies: list[dict] = []
+    monkeypatch.setattr(
+        llm_router, "_client", lambda: _mock_client(_capture_chat_handler(bodies)),
+    )
+
+    for scenario in llm_router.CHAT_PROBE_SCENARIOS:
+        result = await llm_router.chat_probe(provider_id, scenario.key)
+        assert result.ok is True, result.error
+        assert result.scenario == scenario.key
+        assert result.text == "Замечено: учебный пик."
+        assert result.latency_ms is not None and result.latency_ms >= 0
+
+    assert [body["messages"] for body in bodies] == [
+        list(scenario.messages) for scenario in llm_router.CHAT_PROBE_SCENARIOS
+    ]
+    assert all(body["max_tokens"] == llm_router._CHAT_PROBE_MAX_TOKENS for body in bodies)
+
+
+@pytest.mark.asyncio
+async def test_chat_probe_error_is_honest_and_usage_errors_raise(router_config, monkeypatch):
+    """Ошибка провайдера — ok=False без ключа; чужой сценарий/провайдер — ошибка использования."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1", model="m1", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": f"oops {_TEST_KEY}"}})
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(failing))
+    failed = await llm_router.chat_probe(provider_id, "dialog")
+    assert failed.ok is False
+    assert "Провайдер ответил 500" in (failed.error or "")
+    assert _TEST_KEY not in (failed.error or "")
+    assert failed.text is None
+
+    with pytest.raises(llm_router.LlmRouterError):
+        await llm_router.chat_probe(provider_id, "nope")  # type: ignore[arg-type]
+    with pytest.raises(llm_router.LlmRouterError):
+        await llm_router.chat_probe("missing", "dialog")
+
+
+@pytest.mark.asyncio
+async def test_chat_probe_requires_enabled_provider(router_config):
+    """Выключенный провайдер — ошибка использования, модель не вызывается."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1", model="m1", enabled=False,
+            api_key=None,
+        )],
+        {},
+    )
+    with pytest.raises(llm_router.LlmRouterError):
+        await llm_router.chat_probe(state.providers[0].id, "role")
+
+
+def test_chat_probe_route_and_422_without_echo(client, router_config, monkeypatch):
+    """POST /chat-probe: ответ модели в контракте; неизвестный сценарий — 422 без эха ключа."""
+    created = client.put(PREFIX, json={"providers": [_provider_payload()], "routes": {}})
+    provider_id = created.json()["providers"][0]["id"]
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(_ok_chat_handler))
+
+    result = client.post(f"{PREFIX}/chat-probe", json={
+        "provider_id": provider_id,
+        "scenario": "insufficient",
+    })
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["ok"] is True
+    assert body["scenario"] == "insufficient"
+    assert body["text"] == "готов"
+    assert body["latency_ms"] is not None
+    assert _TEST_KEY not in result.text
+    assert "no-store" in result.headers["Cache-Control"]
+
+    bad = client.post(f"{PREFIX}/chat-probe", json={
+        "provider_id": provider_id,
+        "scenario": "nope",
+        "api_key": _TEST_KEY,
+    })
+    assert bad.status_code == 422
+    assert _TEST_KEY not in bad.text
+
+
+# ---------- список моделей через запятую (перебор пробами) ----------
+
+
+def _model_aware_handler(request: httpx.Request) -> httpx.Response:
+    """Ответ зависит от модели из тела: m-404 не существует, остальные отвечают."""
+    model = json.loads(request.content)["model"]
+    if model == "m-404":
+        return httpx.Response(404, json={"error": {"message": f"модель не найдена {_TEST_KEY}"}})
+    return httpx.Response(200, json={
+        "choices": [{"message": {"content": f"из {model}"}}],
+    })
+
+
+@pytest.mark.asyncio
+async def test_probe_iterates_model_list(router_config, monkeypatch):
+    """Несколько моделей через запятую: проба перебирает каждую по отдельности."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-ok, m-404, m-ok2", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+    assert state.providers[0].model == "m-ok, m-404, m-ok2"
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content)["model"])
+        return _model_aware_handler(request)
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    result = await llm_router.probe(provider_id, "chat")
+    assert seen == ["m-ok", "m-404", "m-ok2"]  # каждая модель — отдельный запрос
+    assert [item.model for item in result.models] == ["m-ok", "m-404", "m-ok2"]
+    assert [item.ok for item in result.models] == [True, False, True]
+    assert result.ok is False  # честно: ответили не все
+    assert result.model == "m-ok"  # сводка — первая успешная
+    assert "m-404" in (result.error or "")
+    assert _TEST_KEY not in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_chat_probe_iterates_model_list(router_config, monkeypatch):
+    """Пробы советника (§10) идут перебором моделей: текст и задержка каждой."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-ok, m-404", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(_model_aware_handler))
+    result = await llm_router.chat_probe(provider_id, "dialog")
+    assert [item.model for item in result.models] == ["m-ok", "m-404"]
+    assert result.models[0].ok is True
+    assert result.models[0].text == "из m-ok"
+    assert result.models[1].ok is False
+    assert "Провайдер ответил 404" in (result.models[1].error or "")
+    assert result.ok is False
+    assert result.text == "из m-ok"  # сводка — ответ первой успешной модели
+
+
+@pytest.mark.asyncio
+async def test_chat_uses_first_model_of_list(router_config, monkeypatch):
+    """Маршрут chat использует первую модель списка кандидатов."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-first, m-second", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {"chat": None},
+    )
+    provider_id = state.providers[0].id
+    await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=provider_id, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-first, m-second", enabled=True,
+            api_key=None,
+        )],
+        {"chat": provider_id},
+    )
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content)["model"])
+        return _model_aware_handler(request)
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    result = await llm_router.chat([{"role": "user", "content": "привет"}])
+    assert seen == ["m-first"]
+    assert result.model == "m-first"
+
+
+def test_model_list_normalized_and_validated(client, router_config):
+    """Список моделей через запятую: нормализация пустых элементов и отказ на мусор."""
+    created = client.put(PREFIX, json={
+        "providers": [_provider_payload(model=" m-a ,, m-b ")],
+        "routes": {},
+    })
+    assert created.status_code == 200, created.text
+    assert created.json()["providers"][0]["model"] == "m-a, m-b"
+
+    bad = client.put(PREFIX, json={
+        "providers": [_provider_payload(model=" , ")],
+        "routes": {},
+    })
+    assert bad.status_code == 400
+    assert "модели" in bad.json()["detail"]
+
+
+# ---------- выбор модели маршрута chat (chat_model) ----------
+
+
+@pytest.mark.asyncio
+async def test_chat_model_route_picks_selected_model(router_config, monkeypatch):
+    """Модель маршрута chat выбирается из списка: chat() работает именно ей."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-first, m-second", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+    await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=provider_id, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-first, m-second", enabled=True,
+            api_key=None,
+        )],
+        {"chat": provider_id, "chat_model": "m-second"},
+    )
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content)["model"])
+        return _model_aware_handler(request)
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    result = await llm_router.chat([{"role": "user", "content": "привет"}])
+    assert seen == ["m-second"]
+    assert result.model == "m-second"
+
+
+def test_chat_model_route_validation(client, router_config):
+    """Модель маршрута chat: только из списка провайдера и только с провайдером."""
+    orphan = client.put(PREFIX, json={
+        "providers": [_provider_payload(model="m-a, m-b")],
+        "routes": {"chat": None, "chat_model": "m-b"},
+    })
+    assert orphan.status_code == 400
+    assert "провайдера" in orphan.json()["detail"]
+
+    created = client.put(PREFIX, json={
+        "providers": [_provider_payload(model="m-a, m-b")],
+        "routes": {},
+    })
+    provider_id = created.json()["providers"][0]["id"]
+
+    bad = client.put(PREFIX, json={
+        "providers": [_provider_payload(id=provider_id, model="m-a, m-b", api_key=None)],
+        "routes": {"chat": provider_id, "chat_model": "m-x"},
+    })
+    assert bad.status_code == 400
+    assert "список моделей" in bad.json()["detail"]
+
+    good = client.put(PREFIX, json={
+        "providers": [_provider_payload(id=provider_id, model="m-a, m-b", api_key=None)],
+        "routes": {"chat": provider_id, "chat_model": "m-b"},
+    })
+    assert good.status_code == 200, good.text
+    assert good.json()["routes"] == {
+        "chat": provider_id,
+        "chat_model": "m-b",
+        "transcribe": None,
+    }

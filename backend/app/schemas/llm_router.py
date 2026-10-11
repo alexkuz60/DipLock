@@ -1,4 +1,5 @@
-"""Контракт модельного роутера ИИ: ``GET/PUT /api/v1/llm-router``, ``POST .../probe``.
+"""Контракт модельного роутера ИИ: ``GET/PUT /api/v1/llm-router``,
+``POST .../probe`` и ``POST .../chat-probe`` (пробы советника, §10).
 
 Раздел «Настройки» → панель «Модельный роутер ИИ»: провайдеры внешних API
 полноценных моделей и маршруты ``chat``/``transcribe`` (источник истины —
@@ -76,6 +77,13 @@ class LlmRoutes(BaseModel):
     """Назначение маршрутов на провайдеров (пер-ролевые маршруты — в Т4)."""
 
     chat: str | None = Field(default=None, description="Провайдер советников (Т3); None — не назначен")
+    chat_model: str | None = Field(
+        default=None,
+        description=(
+            "Модель списка провайдера маршрута chat (поле «Модель»); "
+            "None — первая модель списка"
+        ),
+    )
     transcribe: str | None = Field(
         default=None,
         description="Провайдер распознавания (Т2); только protocol=openai; None — не назначен",
@@ -103,6 +111,15 @@ class LlmProbeRequest(BaseModel):
     route: LlmRouteKey = Field(default="chat", description="Какой маршрут проверять")
 
 
+class LlmProbeModelOut(BaseModel):
+    """Результат проверки одной модели из списка провайдера (перебор)."""
+
+    model: str
+    ok: bool
+    latency_ms: float | None = Field(default=None, description="Задержка вызова, мс")
+    error: str | None = Field(default=None, description="Текст для UI; None при успехе")
+
+
 class LlmProbeOut(BaseModel):
     """Итог проверки: честная ошибка вместо ложного успеха."""
 
@@ -112,3 +129,49 @@ class LlmProbeOut(BaseModel):
     model: str | None = Field(default=None, description="Модель провайдера")
     latency_ms: float | None = Field(default=None, description="Задержка вызова, мс")
     error: str | None = Field(default=None, description="Текст для UI; None при успехе")
+    models: list[LlmProbeModelOut] = Field(
+        default_factory=list,
+        description="Перебор моделей списка провайдера (пусто для transcribe)",
+    )
+
+
+LlmChatProbeScenarioKey = Literal["dialog", "role", "insufficient", "leading"]
+
+
+class LlmChatProbeRequest(BaseModel):
+    """``POST /api/v1/llm-router/chat-probe``: проба советника (§10) на провайдере."""
+
+    provider_id: str = Field(min_length=1, max_length=64)
+    scenario: LlmChatProbeScenarioKey = Field(
+        description=(
+            "Сценарий пробы: dialog — русский диалог; role — роль советника и структура "
+            "ответа; insufficient — отказ при недостаточности данных; leading — "
+            "ненаводящие вопросы. Промпты синтетические — материалы дела не отправляются"
+        ),
+    )
+
+
+class LlmChatProbeModelOut(BaseModel):
+    """Итог пробы советника для одной модели списка провайдера (перебор)."""
+
+    model: str
+    ok: bool
+    latency_ms: float | None = Field(default=None, description="Задержка вызова, мс")
+    text: str | None = Field(default=None, description="Ответ модели по сценарию")
+    error: str | None = Field(default=None, description="Текст для UI; None при успехе")
+
+
+class LlmChatProbeOut(BaseModel):
+    """Итог пробы: ответ модели и задержка; ошибка провайдера — в ``error``."""
+
+    ok: bool
+    provider_id: str
+    scenario: LlmChatProbeScenarioKey
+    model: str | None = Field(default=None, description="Модель провайдера")
+    latency_ms: float | None = Field(default=None, description="Задержка вызова, мс")
+    text: str | None = Field(default=None, description="Ответ модели по сценарию")
+    error: str | None = Field(default=None, description="Текст для UI; None при успехе")
+    models: list[LlmChatProbeModelOut] = Field(
+        default_factory=list,
+        description="Перебор моделей списка провайдера: ответ и задержка каждой",
+    )

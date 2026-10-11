@@ -15,6 +15,7 @@ import type {
   GroupAnalysisSummary,
   InitStatus,
   JobStatus,
+  LlmChatProbeResult,
   LlmProbeResult,
   LlmRouter,
   LocalResource,
@@ -1176,7 +1177,7 @@ export function llmRouterFixture(overrides: Partial<LlmRouter> = {}): LlmRouter 
         key_hint: '…1234',
       },
     ],
-    routes: { chat: 'prov-full', transcribe: null },
+    routes: { chat: 'prov-full', chat_model: null, transcribe: null },
     ...overrides,
   }
 }
@@ -1190,6 +1191,32 @@ export function llmProbeFixture(overrides: Partial<LlmProbeResult> = {}): LlmPro
     model: 'big-model-1',
     latency_ms: 420,
     error: null,
+    models: [{ model: 'big-model-1', ok: true, latency_ms: 420, error: null }],
+    ...overrides,
+  }
+}
+
+/** Результат пробы советника (`POST /llm-router/chat-probe`, §10): синтетический сценарий. */
+export function llmChatProbeFixture(
+  overrides: Partial<LlmChatProbeResult> = {},
+): LlmChatProbeResult {
+  return {
+    ok: true,
+    provider_id: 'prov-full',
+    scenario: 'role',
+    model: 'big-model-1',
+    latency_ms: 320,
+    text: 'Замечено: пик около 10 Гц в затылочных.\nСледующий шаг: уточнить условия пробы.',
+    error: null,
+    models: [
+      {
+        model: 'big-model-1',
+        ok: true,
+        latency_ms: 320,
+        text: 'Замечено: пик около 10 Гц в затылочных.\nСледующий шаг: уточнить условия пробы.',
+        error: null,
+      },
+    ],
     ...overrides,
   }
 }

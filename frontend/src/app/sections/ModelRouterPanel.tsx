@@ -10,7 +10,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 import { llmRouterApi } from '@/shared/api/llmRouter'
 import { apiErrorText } from '@/shared/api/client'
-import type { LlmProbeResult, LlmProviderIn, LlmRouterUpdate, LlmRoutes } from '@/shared/api/types'
+import type {
+  LlmChatProbeResult,
+  LlmChatProbeScenario,
+  LlmProbeResult,
+  LlmProviderIn,
+  LlmRouterUpdate,
+  LlmRoutes,
+} from '@/shared/api/types'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { Panel } from '@/shared/ui/Panel'
@@ -38,6 +45,40 @@ type ProviderRow = {
 }
 
 type ProbeState = { pending: boolean; result: LlmProbeResult | null }
+
+/** Состояние пробы советника (§10): выбранный провайдер и последний результат. */
+type ChatProbeState = {
+  providerId: string | null
+  pending: boolean
+  result: LlmChatProbeResult | null
+}
+
+/** Сценарии проб §10: русский диалог, роль/структура, отказ при нехватке данных, вопросы. */
+const CHAT_PROBE_SCENARIOS: { value: LlmChatProbeScenario; label: string }[] = [
+  { value: 'dialog', label: 'Русский диалог' },
+  { value: 'role', label: 'Роль и структура' },
+  { value: 'insufficient', label: 'Отказ при нехватке данных' },
+  { value: 'leading', label: 'Ненаводящие вопросы' },
+]
+
+/** Сводка проверки связи: для списка моделей — сколько ответили, иначе прежний текст. */
+function probeSummary(result: LlmProbeResult | null): string {
+  if (!result) return ''
+  const models = result.models ?? []
+  if (models.length > 1) {
+    const okCount = models.filter((item) => item.ok).length
+    return `Модели: ${okCount} из ${models.length} ответили`
+  }
+  return result.ok
+    ? `Связь есть (${Math.round(result.latency_ms ?? 0)} мс)`
+    : `Нет связи: ${result.error ?? 'неизвестная ошибка'}`
+}
+
+/** Построчный перебор моделей — только для списков из двух и больше. */
+function probeModels(result: LlmProbeResult | null) {
+  const models = result?.models ?? []
+  return models.length > 1 ? models : []
+}
 
 const PROTOCOL_OPTIONS: { value: Protocol; label: string; hint: string }[] = [
   {
@@ -77,6 +118,14 @@ function parseExtra(text: string): { [key: string]: unknown } {
   return parsed as { [key: string]: unknown }
 }
 
+/** Список моделей провайдера: id через запятую (зеркало `services/llm_router.py`). */
+function splitModels(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+}
+
 /** Тело PUT: api_key/extra отправляются по явному видимому состоянию формы. */
 function toProviderIn(row: ProviderRow): LlmProviderIn {
   const base: LlmProviderIn = {
@@ -104,10 +153,15 @@ export function ModelRouterPanel() {
 
   /** Черновик формы: null — ещё не заполнен из сервера (поздний ответ не мешает правке). */
   const [rows, setRows] = useState<ProviderRow[] | null>(null)
-  const [routes, setRoutes] = useState<LlmRoutes>({ chat: null, transcribe: null })
+  const [routes, setRoutes] = useState<LlmRoutes>({ chat: null, chat_model: null, transcribe: null })
   const [dirty, setDirty] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [probes, setProbes] = useState<Record<string, ProbeState>>({})
+  const [chatProbe, setChatProbe] = useState<ChatProbeState>({
+    providerId: null,
+    pending: false,
+    result: null,
+  })
 
   useEffect(() => {
     const data = routerQuery.data
@@ -126,7 +180,11 @@ export function ModelRouterPanel() {
         extraText: provider.extra ? JSON.stringify(provider.extra, null, 2) : '',
       })),
     )
-    setRoutes({ chat: data.routes.chat, transcribe: data.routes.transcribe })
+    setRoutes({
+      chat: data.routes.chat,
+      chat_model: data.routes.chat_model ?? null,
+      transcribe: data.routes.transcribe,
+    })
   }, [routerQuery.data, rows])
 
   const editRow = (index: number, patch: Partial<ProviderRow>) => {
@@ -146,6 +204,7 @@ export function ModelRouterPanel() {
       if (removed.id) {
         setRoutes((current) => ({
           chat: current.chat === removed.id ? null : current.chat,
+          chat_model: current.chat === removed.id ? null : current.chat_model,
           transcribe: current.transcribe === removed.id ? null : current.transcribe,
         }))
       }
@@ -172,7 +231,11 @@ export function ModelRouterPanel() {
           extraText: provider.extra ? JSON.stringify(provider.extra, null, 2) : '',
         })),
       )
-      setRoutes({ chat: data.routes.chat, transcribe: data.routes.transcribe })
+      setRoutes({
+        chat: data.routes.chat,
+        chat_model: data.routes.chat_model ?? null,
+        transcribe: data.routes.transcribe,
+      })
       setDirty(false)
       setSaveError(null)
     },
@@ -198,6 +261,31 @@ export function ModelRouterPanel() {
             latency_ms: null,
             error: apiErrorText(error),
           },
+        },
+      }))
+    }
+  }
+
+  /** Проба советника (§10): синтетический сценарий, только по кнопке, без материалов дела. */
+  const runChatProbe = async (scenario: LlmChatProbeScenario) => {
+    const providerId = chatProbe.providerId
+    if (!providerId) return
+    setChatProbe((prev) => ({ ...prev, pending: true, result: null }))
+    try {
+      const result = await llmRouterApi.chatProbe({ provider_id: providerId, scenario })
+      setChatProbe((prev) => ({ ...prev, pending: false, result }))
+    } catch (error) {
+      setChatProbe((prev) => ({
+        ...prev,
+        pending: false,
+        result: {
+          ok: false,
+          provider_id: providerId,
+          scenario,
+          model: null,
+          latency_ms: null,
+          text: null,
+          error: apiErrorText(error),
         },
       }))
     }
@@ -239,6 +327,11 @@ export function ModelRouterPanel() {
       label: row.label.trim() || 'Без имени',
       disabled: row.protocol !== 'openai',
     })),
+  ]
+  const chatProviderRow = providerRows.find((row) => row.id === routes.chat)
+  const chatModelOptions = [
+    { value: '', label: '— первая модель списка —' },
+    ...splitModels(chatProviderRow?.model ?? '').map((model) => ({ value: model, label: model })),
   ]
 
   return (
@@ -288,7 +381,7 @@ export function ModelRouterPanel() {
               label="Модель"
               mono
               value={row.model}
-              hint="Например: deepseek-flash, deepseek-v4-pro, gpt-4o, claude-sonnet"
+              hint="Одна модель или список через запятую: пробы идут по каждой, маршруты используют первую. Например: deepseek-flash, deepseek-v4-pro, gpt-4o"
               onChange={(value) => editRow(index, { model: value })}
             />
             <div className="ui-list-row flex items-start gap-3 py-2">
@@ -351,16 +444,24 @@ export function ModelRouterPanel() {
                 {row.id ? 'Проверить связь' : 'Сохраните, чтобы проверить'}
               </Button>
               {probeState ? (
-                <span
-                  role="status"
-                  className={probeState.result?.ok ? 'text-sm text-fg-1' : 'text-sm text-danger'}
-                >
-                  {probeState.pending
-                    ? 'Проверка…'
-                    : probeState.result?.ok
-                      ? `Связь есть (${Math.round(probeState.result.latency_ms ?? 0)} мс)`
-                      : `Нет связи: ${probeState.result?.error ?? 'неизвестная ошибка'}`}
-                </span>
+                <div className="space-y-1">
+                  <span
+                    role="status"
+                    className={probeState.result?.ok ? 'text-sm text-fg-1' : 'text-sm text-danger'}
+                  >
+                    {probeState.pending ? 'Проверка…' : probeSummary(probeState.result)}
+                  </span>
+                  {probeModels(probeState.result).map((item) => (
+                    <p
+                      key={item.model}
+                      className={item.ok ? 'text-sm text-fg-1' : 'text-sm text-danger'}
+                    >
+                      {item.ok
+                        ? `✓ ${item.model} — ${Math.round(item.latency_ms ?? 0)} мс`
+                        : `✗ ${item.model} — ${item.error ?? 'неизвестная ошибка'}`}
+                    </p>
+                  ))}
+                </div>
               ) : null}
             </div>
           </div>
@@ -375,7 +476,22 @@ export function ModelRouterPanel() {
         options={routeOptions}
         hint="Кому поручать разговор в «Консилиуме» (Т3)"
         onChange={(value) => {
-          setRoutes((prev) => ({ ...prev, chat: value || null }))
+          setRoutes((prev) => ({
+            ...prev,
+            chat: value || null,
+            chat_model: value === prev.chat ? prev.chat_model : null,
+          }))
+          setDirty(true)
+        }}
+      />
+      <SelectField
+        label="Модель советников (chat)"
+        value={routes.chat_model ?? ''}
+        options={chatModelOptions}
+        disabled={!chatProviderRow}
+        hint="Какая модель списка провайдера отвечает в «Консилиуме» (Т3); «первая» — верхняя в поле «Модель»"
+        onChange={(value) => {
+          setRoutes((prev) => ({ ...prev, chat_model: value || null }))
           setDirty(true)
         }}
       />
@@ -395,10 +511,22 @@ export function ModelRouterPanel() {
           variant="primary"
           disabled={!dirty || save.isPending}
           onClick={() => {
+            const chosen = routes.chat_model ?? null
+            const allowed = splitModels(chatProviderRow?.model ?? '')
+            if (chosen && (!routes.chat || !allowed.includes(chosen))) {
+              setSaveError(
+                'Модель маршрута chat не входит в список моделей выбранного провайдера — выберите заново',
+              )
+              return
+            }
             try {
               save.mutate({
                 providers: providerRows.map(toProviderIn),
-                routes: { chat: routes.chat, transcribe: routes.transcribe },
+                routes: {
+                  chat: routes.chat,
+                  chat_model: chosen,
+                  transcribe: routes.transcribe,
+                },
               })
             } catch {
               setSaveError(
@@ -416,6 +544,80 @@ export function ModelRouterPanel() {
           {saveError}
         </p>
       ) : null}
+
+      <div className="space-y-2 rounded-lg border border-border p-3">
+        <p className="text-sm font-medium text-fg-0">Пробы советника (§10)</p>
+        <p className="text-sm text-fg-2">
+          Синтетические сценарии для выбора модели маршрута «Советники (chat)»: русский диалог,
+          роль и структура ответа, отказ при недостаточности данных, ненаводящие вопросы. При
+          списке моделей провайдера проба идёт по каждой. Запрос уйдёт внешнему провайдеру;
+          материалы дела не отправляются. Запуск — только кнопкой.
+        </p>
+        <SelectField
+          label="Провайдер пробы"
+          value={chatProbe.providerId ?? ''}
+          options={[
+            { value: '', label: '— выберите —' },
+            ...savedProviders.map((row) => ({
+              value: row.id as string,
+              label: row.label.trim() || 'Без имени',
+            })),
+          ]}
+          onChange={(value) => setChatProbe((prev) => ({ ...prev, providerId: value || null }))}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          {CHAT_PROBE_SCENARIOS.map((scenario) => (
+            <Button
+              key={scenario.value}
+              disabled={!chatProbe.providerId || chatProbe.pending || save.isPending}
+              onClick={() => runChatProbe(scenario.value)}
+            >
+              {scenario.label}
+            </Button>
+          ))}
+          {chatProbe.pending ? (
+            <span role="status" className="text-sm text-fg-2">
+              Запрос к модели…
+            </span>
+          ) : null}
+        </div>
+        {chatProbe.result ? (
+          (chatProbe.result.models ?? []).length > 1 ? (
+            <div className="space-y-2">
+              {(chatProbe.result.models ?? []).map((item) =>
+                item.ok ? (
+                  <div key={item.model} className="space-y-1" role="status">
+                    <p className="text-sm text-fg-1">
+                      {item.model} · {Math.round(item.latency_ms ?? 0)} мс
+                    </p>
+                    <p className="whitespace-pre-wrap rounded-lg border border-border bg-bg-2 p-2.5 text-sm text-fg-0">
+                      {item.text}
+                    </p>
+                  </div>
+                ) : (
+                  <p key={item.model} role="alert" className="text-sm text-danger">
+                    {item.model}: проба не прошла — {item.error ?? 'неизвестная ошибка'}
+                  </p>
+                ),
+              )}
+            </div>
+          ) : chatProbe.result.ok ? (
+            <div className="space-y-1" role="status">
+              <p className="text-sm text-fg-1">
+                {chatProbe.result.model ?? 'модель неизвестна'} ·{' '}
+                {Math.round(chatProbe.result.latency_ms ?? 0)} мс
+              </p>
+              <p className="whitespace-pre-wrap rounded-lg border border-border bg-bg-2 p-2.5 text-sm text-fg-0">
+                {chatProbe.result.text}
+              </p>
+            </div>
+          ) : (
+            <p role="alert" className="text-sm text-danger">
+              Проба не прошла: {chatProbe.result.error ?? 'неизвестная ошибка'}
+            </p>
+          )
+        ) : null}
+      </div>
     </Panel>
   )
 }
