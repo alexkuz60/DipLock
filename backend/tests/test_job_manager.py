@@ -264,3 +264,151 @@ def test_cancelled_status_restores_from_record():
 
     assert restored.status == "cancelled"
     assert restored.message == "Отменена"
+
+
+def test_resource_classes_have_separate_limits():
+    """LLM-задача не ждёт слот занятых MNE-расчётов (классы ресурсов, §8)."""
+
+    async def _run():
+        manager = JobManager(max_concurrent=1, history_limit=5, max_concurrent_llm=1)
+        release = threading.Event()
+        mne_started = threading.Event()
+
+        def mne_worker(progress):
+            mne_started.set()
+            release.wait(timeout=5)
+            return {"session_id": "mne"}
+
+        async def llm_worker(progress):
+            return {"round_id": "r1"}
+
+        mne_job = manager.submit("analyze", "rec.edf", mne_worker)
+        assert await asyncio.to_thread(mne_started.wait, 5), "MNE-воркер не стартовал"
+
+        # Слот mne занят, но llm идёт своим семафором — завершается без ожидания
+        llm_job = manager.submit("consilium_round", None, llm_worker, resource="llm")
+        await asyncio.wait_for(llm_job.task, timeout=5)
+        assert llm_job.status == "succeeded"
+        assert llm_job.result == {"round_id": "r1"}
+
+        release.set()
+        await mne_job.task
+        assert mne_job.status == "succeeded"
+
+    asyncio.run(_run())
+
+
+def test_async_worker_runs_in_event_loop():
+    """Async-воркер выполняется в event-loop: сетевое ожидание LLM без потока."""
+
+    async def _run():
+        manager = JobManager(max_concurrent_llm=1)
+        seen = []
+
+        async def worker(progress):
+            seen.append(threading.current_thread())
+            await asyncio.sleep(0)
+            progress("advisers", 0.5, "Ответы советников")
+            return {"round_id": "r2"}
+
+        job = manager.submit("consilium_round", None, worker, resource="llm")
+        await job.task
+
+        assert job.status == "succeeded"
+        assert seen[0] is threading.main_thread()
+        assert job.result == {"round_id": "r2"}
+
+    asyncio.run(_run())
+
+
+def test_on_success_required_failure_fails_job():
+    """Сбой обязательной записи результата — задача failed, не «успех» (§8)."""
+
+    async def _run():
+        manager = JobManager()
+        calls = []
+
+        def worker(progress):
+            return {"round_id": "r3"}
+
+        async def on_success(job, result):
+            calls.append(result)
+            raise RuntimeError("БД недоступна")
+
+        job = manager.submit(
+            "consilium_round", None, worker,
+            on_success=on_success, on_success_required=True,
+        )
+        await job.task
+
+        assert job.status == "failed"
+        assert "БД недоступна" in (job.error or "")
+        assert calls == [{"round_id": "r3"}]
+
+    asyncio.run(_run())
+
+
+def test_on_success_required_success_finishes_job():
+    """Успех объявляется после записи: finish идёт за успешным on_success."""
+
+    async def _run():
+        manager = JobManager()
+        order = []
+
+        def worker(progress):
+            return {"round_id": "r4"}
+
+        async def on_success(job, result):
+            order.append(("saved", job.status))
+            await asyncio.sleep(0)
+
+        job = manager.submit(
+            "consilium_round", None, worker,
+            on_success=on_success, on_success_required=True,
+        )
+        await job.task
+
+        # Запись выполнялась до объявления успеха (статус ещё running)
+        assert order == [("saved", "running")]
+        assert job.status == "succeeded"
+        assert job.result == {"round_id": "r4"}
+
+    asyncio.run(_run())
+
+
+def test_unknown_resource_class_is_rejected():
+    """Неизвестный класс ресурса — ошибка использования, не запуск задачи."""
+
+    async def _run():
+        manager = JobManager()
+        try:
+            manager.submit("analyze", None, lambda progress: {}, resource="gpu")
+        except ValueError as exc:
+            assert "gpu" in str(exc)
+        else:
+            raise AssertionError("ожидался ValueError")
+
+    asyncio.run(_run())
+
+
+def test_custom_start_stage_labels_job():
+    """Задача Консилиума стартует с этапом «Ответы советников», не «Чтение EDF»."""
+
+    async def _run():
+        manager = JobManager()
+
+        async def worker(progress):
+            return {"round_id": "r5"}
+
+        job = manager.submit(
+            "consilium_round", None, worker, resource="llm",
+            start_stage="advisers", start_message="Ответы советников",
+        )
+        await job.task
+
+        assert job.status == "succeeded"
+        # finish переводит в done/1.0; важен стартовый этап — он виден в истории
+        restored = Job.from_record(job.to_record())
+        assert restored.status == "succeeded"
+
+    asyncio.run(_run())

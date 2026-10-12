@@ -16,6 +16,7 @@ import { StatusPill } from '@/shared/ui/StatusPill'
 import { CaseForm } from './CaseForm'
 import { CaseHistory } from './CaseHistory'
 import { CaseMaterials } from './CaseMaterials'
+import { CaseDiscussion } from './CaseDiscussion'
 import { QueryState } from './common'
 import { useCaseAction } from './useCaseAction'
 
@@ -28,7 +29,7 @@ export function CaseWorkspace({
   recordings: ConsiliumRecording[]
   onDeleted: () => void
 }) {
-  const [tab, setTab] = useState<'history' | 'materials'>('history')
+  const [tab, setTab] = useState<'discussion' | 'history' | 'materials'>('discussion')
   const [editing, setEditing] = useState(false)
   const [preview, setPreview] = useState<ConsiliumDeletionPreview | null>(null)
   const queryClient = useQueryClient()
@@ -141,7 +142,8 @@ export function CaseWorkspace({
               <p>
                 Будут удалены: контекст — {preview.context_revisions}, реплики —{' '}
                 {preview.message_revisions}, материалы — {preview.evidence_items}, снимки —{' '}
-                {preview.snapshots}.
+                {preview.snapshots}, раунды советников — {preview.rounds}, ответы —{' '}
+                {preview.answers}.
               </p>
               {preview.warnings.map((warning) => (
                 <p key={warning}>{warning}</p>
@@ -170,11 +172,14 @@ export function CaseWorkspace({
             value={tab}
             onChange={setTab}
             options={[
+              { value: 'discussion', label: 'Обсуждение' },
               { value: 'history', label: 'Контекст и история' },
               { value: 'materials', label: 'Материалы и досье' },
             ]}
           />
-          {tab === 'history' ? (
+          {tab === 'discussion' ? (
+            <CaseDiscussion current={current} />
+          ) : tab === 'history' ? (
             <CaseHistory current={current} />
           ) : (
             <CaseMaterials current={current} />

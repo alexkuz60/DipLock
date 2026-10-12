@@ -38,11 +38,20 @@ class Settings(BaseSettings):
     # и сколько записей хранить в истории задач.
     max_concurrent_jobs: int = Field(default=2)
     jobs_history_limit: int = Field(default=50)
+    # Классы ресурсов (docs/rules/consilium.md §8): сетевое ожидание LLM/ASR
+    # не занимает слот тяжёлых MNE-расчётов и наоборот.
+    max_concurrent_llm_jobs: int = Field(default=2, ge=1)
+    max_concurrent_asr_jobs: int = Field(default=1, ge=1)
 
     # Консилиум: копии результатов/досье в БД, без молчаливого усечения.
     consilium_material_max_bytes: int = Field(default=8_000_000, ge=1024)
     consilium_snapshot_max_bytes: int = Field(default=16_000_000, ge=1024)
     consilium_source_max_rows: int = Field(default=20_000, ge=1)
+    # Консилиум Т3: расход и сжатие досье в промпт советника. Превышение
+    # бюджета промпта честно помечается в предупреждениях раунда, не
+    # молча обрезается (правило «никогда молчаливый топ-N»).
+    consilium_answer_max_tokens: int = Field(default=4096, gt=0)
+    consilium_prompt_max_chars: int = Field(default=24_000, ge=2000)
 
     # Модельный роутер ИИ (docs/rules/consilium.md §5): провайдеры внешних API
     # полноценных моделей. Локальные урезанные модели (llama.cpp) отклонены

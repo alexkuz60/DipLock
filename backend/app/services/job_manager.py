@@ -6,7 +6,12 @@
 
 * ``submit()`` создаёт задачу и возвращает её сразу (HTTP 202 + ``job_id``);
 * исполнение — в потоке (``asyncio.to_thread``), event-loop не блокируется;
+* **async-воркеры** (``async def``) выполняются прямо в event-loop — так
+  сетевое ожидание LLM (Консилиум Т3) не занимает поток;
 * ``asyncio.Semaphore`` ограничивает число одновременных тяжёлых расчётов;
+* **классы ресурсов** (``resource='mne' | 'llm' | 'asr'``) — отдельные пределы
+  параллелизма (docs/rules/consilium.md §8): MNE-расчёт не блокирует LLM и
+  наоборот;
 * воркер сообщает этап и прогресс колбэком — UI рисует прогресс-бар по этапам;
 * шаги расчёта видны в журнале (`services/journal.py`) с ``job_id`` задачи:
   ``job_scope`` ставит контекст вокруг потока, а сервисы пишут замеры сами.
@@ -25,7 +30,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from app.core.config import Settings, settings
 from app.schemas.analysis import JOB_STATES, JobState
@@ -85,8 +90,16 @@ STAGE_TITLES: dict[str, str] = {
     "erds": "TFR/ERDS по событию",
     # eLORETA (остаток B9): пик/ROI распределения одной эпохи
     "eloreta": "eLORETA (пик и ROI эпохи)",
+    # Консилиум Т3: этапы задачи раунда советников
+    "advisers": "Ответы советников",
+    "remarks": "Замечания советников",
+    "summary": "Итог консилиума",
     "done": "Готово",
 }
+
+# Классы ресурсов фоновых задач (docs/rules/consilium.md §8): каждый со своим
+# пределом параллелизма, чтобы сетевое ожидание LLM/ASR не ждало MNE-слот.
+ResourceClass = Literal["mne", "llm", "asr"]
 
 
 class JobCancelledError(Exception):
@@ -132,12 +145,16 @@ class Job:
     task: asyncio.Task | None = field(default=None, repr=False)
     restored: bool = False
     """true — задача поднята с диска (``job_store``), а не исполнялась этим процессом."""
+    # Первый этап после старта: у анализа это чтение EDF, у раунда Консилиума —
+    # ожидание ответов советников. Подпись не должна врать про EDF (Т3).
+    start_stage: str = field(default="load_edf", repr=False)
+    start_message: str = field(default="Чтение EDF и монтаж 10-20", repr=False)
 
     def mark_started(self) -> None:
         """Переводит задачу в ``running`` (слот семафора получен)."""
         self.status = "running"
         self.started_at = datetime.utcnow()
-        self.set_progress("load_edf", message="Чтение EDF и монтаж 10-20")
+        self.set_progress(self.start_stage, message=self.start_message)
 
     def set_progress(
         self,
@@ -328,12 +345,22 @@ class Job:
 
 
 class JobManager:
-    """Реестр задач с ограничением параллелизма и историей."""
+    """Реестр задач с ограничением параллелизма (по классам ресурсов) и историей."""
 
-    def __init__(self, max_concurrent: int = 2, history_limit: int = 50) -> None:
+    def __init__(
+        self,
+        max_concurrent: int = 2,
+        history_limit: int = 50,
+        max_concurrent_llm: int = 2,
+        max_concurrent_asr: int = 1,
+    ) -> None:
         self._max_concurrent = max(1, int(max_concurrent))
         self._history_limit = max(1, int(history_limit))
-        self._semaphore = asyncio.Semaphore(self._max_concurrent)
+        self._semaphores: dict[ResourceClass, asyncio.Semaphore] = {
+            "mne": asyncio.Semaphore(self._max_concurrent),
+            "llm": asyncio.Semaphore(max(1, int(max_concurrent_llm))),
+            "asr": asyncio.Semaphore(max(1, int(max_concurrent_asr))),
+        }
         self._jobs: dict[str, Job] = {}
         self._order: list[str] = []
         self._tasks: set[asyncio.Task] = set()
@@ -343,9 +370,20 @@ class JobManager:
         """Сколько тяжёлых расчётов может идти одновременно."""
         return self._max_concurrent
 
-    def create(self, kind: str, filename: str | None = None, **meta: Any) -> Job:
+    def create(
+        self,
+        kind: str,
+        filename: str | None = None,
+        *,
+        start_stage: str = "load_edf",
+        start_message: str = "Чтение EDF и монтаж 10-20",
+        **meta: Any,
+    ) -> Job:
         """Регистрирует задачу в состоянии ``queued``."""
-        job = Job(job_id=str(uuid.uuid4()), kind=kind, filename=filename, meta=dict(meta))
+        job = Job(
+            job_id=str(uuid.uuid4()), kind=kind, filename=filename, meta=dict(meta),
+            start_stage=start_stage, start_message=start_message,
+        )
         self._jobs[job.job_id] = job
         self._order.append(job.job_id)
         self._trim_history()
@@ -357,18 +395,34 @@ class JobManager:
         filename: str | None,
         fn: Callable,
         *args: Any,
+        resource: ResourceClass = "mne",
         on_success: Callable[..., Any] | None = None,
+        on_success_required: bool = False,
+        start_stage: str = "load_edf",
+        start_message: str = "Чтение EDF и монтаж 10-20",
         **kwargs: Any,
     ) -> Job:
         """Создаёт задачу и запускает её фоном; возвращает сразу (для HTTP 202).
 
-        ``fn`` вызывается как ``fn(progress_cb, *args, **kwargs)`` в потоке.
-        ``on_success(job, result)`` — async-колбэк, выполняется в event-loop
-        после успеха (например, запись результата в БД).
+        ``fn`` вызывается как ``fn(progress_cb, *args, **kwargs)``: синхронный
+        воркер — в потоке, ``async def`` — прямо в event-loop (сетевое ожидание
+        LLM не занимает поток). ``on_success(job, result)`` — async-колбэк после
+        воркера (например, запись результата в БД). При ``on_success_required``
+        успех объявляется **только после** успешной постобработки: сбой записи
+        превращает задачу в ``failed`` (docs/rules/consilium.md §8), а не в
+        «успешно, но история потеряна».
         """
+        if resource not in self._semaphores:
+            raise ValueError(f"Неизвестный класс ресурса задачи: {resource}")
         meta = kwargs.pop("meta", None) or {}
-        job = self.create(kind, filename, **meta)
-        task = asyncio.create_task(self._execute(job, fn, *args, on_success=on_success, **kwargs))
+        job = self.create(
+            kind, filename, start_stage=start_stage, start_message=start_message, **meta,
+        )
+        task = asyncio.create_task(self._execute(
+            job, fn, *args,
+            on_success=on_success, on_success_required=on_success_required,
+            resource=resource, **kwargs,
+        ))
         job.task = task
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -380,10 +434,12 @@ class JobManager:
         fn: Callable,
         *args: Any,
         on_success: Callable[..., Any] | None = None,
+        on_success_required: bool = False,
+        resource: ResourceClass = "mne",
         **kwargs: Any,
     ) -> Job:
-        """Ждёт свободный слот, выполняет воркер в потоке, фиксирует итог."""
-        async with self._semaphore:
+        """Ждёт слот класса ресурса, выполняет воркер, фиксирует итог."""
+        async with self._semaphores[resource]:
             if job.cancel_requested or job.status == "cancelled":
                 # Отмена в очереди: слот занят только проверкой, воркер не запускается
                 job.mark_cancelled()
@@ -401,7 +457,12 @@ class JobManager:
                     with journal.job_scope(
                         job.job_id, recording_id=job.meta.get("recording_id"),
                     ):
-                        result = await asyncio.to_thread(fn, job.progress_cb(), *args, **kwargs)
+                        if asyncio.iscoroutinefunction(fn):
+                            # Async-воркер (LLM/ASR): сетевое ожидание живёт в
+                            # event-loop, поток задачей не занимается.
+                            result = await fn(job.progress_cb(), *args, **kwargs)
+                        else:
+                            result = await asyncio.to_thread(fn, job.progress_cb(), *args, **kwargs)
                 except JobCancelledError:
                     job.mark_cancelled()
                     logger.info("Задача %s (%s) отменена пользователем", job.job_id, job.kind)
@@ -418,6 +479,24 @@ class JobManager:
                             "Задача %s (%s) отменена — результат отброшен",
                             job.job_id, job.kind,
                         )
+                    elif on_success is not None and on_success_required:
+                        # Успех — только после обязательной записи результата
+                        # (docs/rules/consilium.md §8): сбой записи превращает
+                        # задачу в честную ошибку, а не «успех без истории».
+                        try:
+                            await on_success(job, result)
+                        except Exception as exc:
+                            job.fail(exc)
+                            logger.exception(
+                                "Задача %s (%s): обязательная запись результата не выполнена",
+                                job.job_id, job.kind,
+                            )
+                        else:
+                            job.finish(result)
+                            logger.info(
+                                "Задача %s (%s) выполнена за %.1f с",
+                                job.job_id, job.kind, job.elapsed_sec or 0.0,
+                            )
                     else:
                         job.finish(result)
                         logger.info(
@@ -501,5 +580,7 @@ class JobManager:
 job_manager = JobManager(
     max_concurrent=settings.max_concurrent_jobs,
     history_limit=settings.jobs_history_limit,
+    max_concurrent_llm=settings.max_concurrent_llm_jobs,
+    max_concurrent_asr=settings.max_concurrent_asr_jobs,
 )
 

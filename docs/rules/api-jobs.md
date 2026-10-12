@@ -56,6 +56,11 @@
 | `GET /consilium/cases/{case_id}/snapshots/{snapshot_id}` | точная зафиксированная версия без пересчёта |
 | `GET /consilium/cases/{case_id}/evidence/{evidence_id}/deletion-preview` | зависимые снимки перед удалением материала |
 | `DELETE /consilium/cases/{case_id}/evidence/{evidence_id}` | очистить копию, содержащие её снимки и квитанции дела; expected_version |
+| `POST /consilium/cases/{case_id}/rounds` | раунд советников Т3: старт 202, состояние — в строке раунда |
+| `GET /consilium/cases/{case_id}/rounds` | раунды с append-only ответами, пагинация/total |
+| `GET /consilium/cases/{case_id}/rounds/{round_id}` | раунд со всеми попытками; `interrupted` — честный статус прерванного |
+| `POST /consilium/cases/{case_id}/rounds/{round_id}/summary` | итог с сохранением разногласий, один на снимок |
+| `POST /consilium/cases/{case_id}/rounds/{round_id}/retry` | повтор одного неудавшегося ответа (новая попытка в истории) |
 
 Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
 без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;

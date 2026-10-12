@@ -168,10 +168,23 @@ async def evidence_deletion_preview(case_id: str, evidence_id: str) -> Consilium
             evidence.id == evidence_id
             for evidence in ConsiliumSnapshot.model_validate(row.payload).evidence
         )]
+        # Ответы советников — производные сводки этих снимков (§10): удаление
+        # материала очищает и их, оставляя лишь отметки без содержания.
+        rounds = (await session.scalars(select(db.ConsiliumRound).where(
+            db.ConsiliumRound.case_id == case_id,
+            db.ConsiliumRound.snapshot_id.in_(dependent),
+        ))).all() if dependent else []
+        round_ids = [str(row.id) for row in rounds]
+        answers = int(await session.scalar(select(func.count()).select_from(
+            db.ConsiliumAnswer,
+        ).where(db.ConsiliumAnswer.round_id.in_(round_ids))) or 0) if round_ids else 0
         return ConsiliumEvidenceDeletion(
             case_id=case_id, evidence_id=evidence_id, version=int(case.version),
-            snapshot_ids=dependent,
-            warnings=["Удаляется материал, содержащие его снимки и квитанции дела. Исходные расчёты сохраняются."],
+            snapshot_ids=dependent, rounds=len(rounds), answers=answers,
+            warnings=[
+                "Удаляется материал, содержащие его снимки, ответы советников "
+                "и квитанции дела. Исходные расчёты сохраняются.",
+            ],
         )
 
 
@@ -183,6 +196,19 @@ async def delete_evidence(case_id: str, evidence_id: str, expected_version: int)
         if preview.version != expected_version:
             raise store.ConsiliumError(409, "Состав исследования изменился — повторите предпросмотр")
         await store._bump(session, case, expected_version, require_open=False)
+        rounds = (await session.scalars(select(db.ConsiliumRound).where(
+            db.ConsiliumRound.case_id == case_id,
+            db.ConsiliumRound.snapshot_id.in_(preview.snapshot_ids),
+        ))).all() if preview.snapshot_ids else []
+        round_ids = [str(row.id) for row in rounds]
+        if round_ids:
+            # Производные сводки (ответы советников) очищаются вместе со снимками
+            await session.execute(delete(db.ConsiliumAnswer).where(
+                db.ConsiliumAnswer.round_id.in_(round_ids),
+            ))
+            await session.execute(delete(db.ConsiliumRound).where(
+                db.ConsiliumRound.id.in_(round_ids),
+            ))
         await session.execute(delete(db.ConsiliumSnapshotRecord).where(
             db.ConsiliumSnapshotRecord.case_id == case_id,
             db.ConsiliumSnapshotRecord.id.in_(preview.snapshot_ids),

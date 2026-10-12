@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import db
 from app.schemas.consilium import (
+    ConsiliumAnswerRetry,
     ConsiliumCaseCreate,
     ConsiliumCaseOut,
     ConsiliumCasesPage,
@@ -27,6 +28,8 @@ from app.schemas.consilium import (
     ConsiliumMessageOut,
     ConsiliumMessagesPage,
     ConsiliumMessageUpdate,
+    ConsiliumRoundAction,
+    ConsiliumRoundCreate,
     ConsiliumSnapshotCreate,
 )
 
@@ -34,6 +37,7 @@ type WriteRequest = (
     ConsiliumCaseCreate | ConsiliumCaseUpdate | ConsiliumContextCreate
     | ConsiliumContextUpdate | ConsiliumMessageCreate | ConsiliumMessageUpdate
     | ConsiliumEvidenceCreate | ConsiliumSnapshotCreate
+    | ConsiliumRoundCreate | ConsiliumRoundAction | ConsiliumAnswerRetry
 )
 
 
@@ -268,6 +272,9 @@ async def deletion_preview(case_id: str) -> ConsiliumDeletionPreview:
             db.ConsiliumEntry.case_id == case_id,
         ).group_by(db.ConsiliumEntry.kind))
         by_kind = {str(row["kind"]): int(row["count"]) for row in counts.mappings()}
+        rounds = (await session.scalars(select(db.ConsiliumRound).where(
+            db.ConsiliumRound.case_id == case_id,
+        ))).all()
         return ConsiliumDeletionPreview.model_validate({
             "case_id": case_id, "version": row.version,
             "context_revisions": by_kind.get("context", 0),
@@ -278,8 +285,15 @@ async def deletion_preview(case_id: str) -> ConsiliumDeletionPreview:
             "snapshots": int(await session.scalar(select(func.count()).select_from(
                 db.ConsiliumSnapshotRecord,
             ).where(db.ConsiliumSnapshotRecord.case_id == case_id)) or 0),
+            "rounds": len(rounds),
+            "answers": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumAnswer,
+            ).where(db.ConsiliumAnswer.case_id == case_id)) or 0),
             "recording_ids": row.recording_ids,
-            "warnings": ["ЭЭГ-записи не удаляются. Все ревизии ручной истории будут удалены."],
+            "warnings": [
+                "ЭЭГ-записи не удаляются. Все ревизии ручной истории, ответы советников "
+                "и снимки будут удалены.",
+            ],
         })
 
 
@@ -290,8 +304,8 @@ async def delete_case(case_id: str, expected_version: int) -> None:
         row = await require_case(session, case_id)
         await _bump(session, row, expected_version, require_open=False)
         for model in (
-            db.ConsiliumRequest, db.ConsiliumEntry,
-            db.ConsiliumSnapshotRecord, db.ConsiliumEvidenceRecord,
+            db.ConsiliumRequest, db.ConsiliumEntry, db.ConsiliumAnswer,
+            db.ConsiliumRound, db.ConsiliumSnapshotRecord, db.ConsiliumEvidenceRecord,
         ):
             await session.execute(delete(model).where(model.case_id == case_id))
         await session.execute(delete(db.ConsiliumCase).where(db.ConsiliumCase.id == case_id))

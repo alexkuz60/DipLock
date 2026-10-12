@@ -455,6 +455,49 @@ class ConsiliumSnapshotRecord(Base):
     created_at = Column(DateTime, nullable=False)
 
 
+class ConsiliumRound(Base):
+    """Раунд советников (Т3): долговременная строка вместо состояния файла задачи.
+
+    Состояние прерванной операции живёт здесь (docs/rules/consilium.md §8):
+    ``status='running'`` при рестарте процесса переводится в ``interrupted``.
+    ``snapshot_id`` — неизменяемая основа ответов: новый расчёт не переобувает
+    прошлые реплики. Тексты ответов хранятся в ``ConsiliumAnswer``.
+    """
+
+    __tablename__ = "consilium_rounds"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)  # initial | remarks | summary
+    snapshot_id = Column(String, nullable=False)
+    source_round_id = Column(String, nullable=True)  # исходный раунд замечаний/итога
+    status = Column(String, nullable=False)  # running | done | partial | failed | cancelled | interrupted
+    model = Column(String, nullable=True)  # провайдер/модель маршрутного роутера
+    instruction_versions = Column(JSON, nullable=False)  # {роль: версия инструкции}
+    limits = Column(JSON, nullable=False)  # границы раунда (роли, max_tokens, время)
+    warnings = Column(JSON, nullable=False)  # честные предупреждения (сокращение досье и др.)
+    error = Column(String, nullable=True)  # общий отказ раунна (маршрут, сеть)
+    job_id = Column(String, nullable=True)  # связь с задачей очереди (без текстов)
+    created_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class ConsiliumAnswer(Base):
+    """Ответ советника: роль, модель, версия инструкции и связь с раундом."""
+
+    __tablename__ = "consilium_answers"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    round_id = Column(String, ForeignKey("consilium_rounds.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # psychological | neurophysiological | methodological | summary
+    status = Column(String, nullable=False)  # running | ok | failed
+    text = Column(String, nullable=True)  # None при ошибке — фиктивных ответов нет
+    error = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    instruction_version = Column(String, nullable=False)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
 def _sync_driver_url(url: URL) -> str:
     """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 

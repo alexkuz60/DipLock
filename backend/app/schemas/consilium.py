@@ -171,6 +171,95 @@ class ConsiliumMessagesPage(ConsiliumContract):
     items: list[ConsiliumMessageOut]
 
 
+# --- Раунды советников (Т3): ответы моделей живут отдельно от ручной истории ---
+
+AdvisorRole = Literal["psychological", "neurophysiological", "methodological", "summary"]
+RoundKind = Literal["initial", "remarks", "summary"]
+RoundStatus = Literal["running", "done", "partial", "failed", "cancelled", "interrupted"]
+AnswerStatus = Literal["running", "ok", "failed"]
+
+
+class ConsiliumAnswerOut(ConsiliumContract):
+    """Сохранённый ответ советника; текст есть только при статусе ok."""
+
+    id: str
+    case_id: str
+    round_id: str
+    role: AdvisorRole
+    status: AnswerStatus
+    text: str | None = None
+    error: str | None = None
+    model: str | None = None
+    instruction_version: str
+    latency_ms: float | None = None
+    created_at: datetime
+
+
+class ConsiliumRoundOut(ConsiliumContract):
+    """Раунд советников: состояние прерванной операции — в этой строке (§8)."""
+
+    id: str
+    case_id: str
+    kind: RoundKind
+    snapshot_id: str
+    source_round_id: str | None = None
+    status: RoundStatus
+    model: str | None = None
+    instruction_versions: dict[str, str]
+    limits: dict[str, JsonValue]
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+    job_id: str | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
+    answers: list[ConsiliumAnswerOut] = Field(default_factory=list)
+
+
+class ConsiliumRoundsPage(ConsiliumContract):
+    """Страница раундов исследования с честным total."""
+
+    total: int
+    items: list[ConsiliumRoundOut]
+
+
+class ConsiliumRoundAction(ConsiliumContract):
+    """Действие раунда (итог, повтор ответа) с ключом повтора и версией дела."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+
+
+class ConsiliumRoundCreate(ConsiliumRoundAction):
+    """Запуск раунда советников по опубликованному снимку досье.
+
+    Пустой ``roles`` означает все три роли; итог ролёй не считается.
+    """
+
+    snapshot_id: Identifier
+    kind: Literal["initial", "remarks"] = "initial"
+    source_round_id: Identifier | None = None
+    roles: list[AdvisorRole] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="after")
+    def validate_round(self) -> "ConsiliumRoundCreate":
+        """Замечания адресуются исходному раунду; роли уникальны и без итога."""
+        if self.kind == "remarks" and self.source_round_id is None:
+            raise ValueError("Раунд замечаний требует исходного раунда")
+        if self.kind == "initial" and self.source_round_id is not None:
+            raise ValueError("Исходный раунд указывается только для замечаний")
+        if "summary" in self.roles:
+            raise ValueError("Итог запускается отдельным действием")
+        if len(set(self.roles)) != len(self.roles):
+            raise ValueError("Роли советников не должны повторяться")
+        return self
+
+
+class ConsiliumAnswerRetry(ConsiliumRoundAction):
+    """Повтор одного неудавшегося ответа; успешные ответы не переспрашиваются."""
+
+    role: AdvisorRole
+
+
 class ConsiliumDeletionPreview(ConsiliumContract):
     """Что будет удалено; ЭЭГ-записи и соседи не затрагиваются."""
 
@@ -180,6 +269,8 @@ class ConsiliumDeletionPreview(ConsiliumContract):
     message_revisions: int
     evidence_items: int = 0
     snapshots: int = 0
+    rounds: int = 0
+    answers: int = 0
     recording_ids: list[str]
     warnings: list[str]
 
@@ -290,6 +381,8 @@ class ConsiliumEvidenceDeletion(ConsiliumContract):
     evidence_id: str
     version: int
     snapshot_ids: list[str]
+    rounds: int = 0
+    answers: int = 0
     warnings: list[str]
 
 

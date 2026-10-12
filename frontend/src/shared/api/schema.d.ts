@@ -2074,6 +2074,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consilium/cases/{case_id}/rounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rounds
+         * @description Раунды исследования с append-only историей ответов.
+         */
+        get: operations["list_rounds_api_v1_consilium_cases__case_id__rounds_get"];
+        put?: never;
+        /**
+         * Start Round
+         * @description Запускает раунд советников; ответы приходят задачей в строку раунда.
+         */
+        post: operations["start_round_api_v1_consilium_cases__case_id__rounds_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/rounds/{round_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Round
+         * @description Раунд со всеми попытками; прерванная операция видна в статусе строки.
+         */
+        get: operations["get_round_api_v1_consilium_cases__case_id__rounds__round_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/rounds/{round_id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Summary
+         * @description Составляет итог по завершённому раунду, сохраняя разногласия (§6).
+         */
+        post: operations["run_summary_api_v1_consilium_cases__case_id__rounds__round_id__summary_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/rounds/{round_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Answer
+         * @description Повтор одного неудавшегося ответа советника; история попыток остаётся.
+         */
+        post: operations["retry_answer_api_v1_consilium_cases__case_id__rounds__round_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router": {
         parameters: {
             query?: never;
@@ -4472,6 +4556,58 @@ export interface components {
             clusters?: components["schemas"]["CompareClusterOut"][];
         };
         /**
+         * ConsiliumAnswerOut
+         * @description Сохранённый ответ советника; текст есть только при статусе ok.
+         */
+        ConsiliumAnswerOut: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /** Round Id */
+            round_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "psychological" | "neurophysiological" | "methodological" | "summary";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "ok" | "failed";
+            /** Text */
+            text?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Instruction Version */
+            instruction_version: string;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ConsiliumAnswerRetry
+         * @description Повтор одного неудавшегося ответа; успешные ответы не переспрашиваются.
+         */
+        ConsiliumAnswerRetry: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "psychological" | "neurophysiological" | "methodological" | "summary";
+        };
+        /**
          * ConsiliumCaseCreate
          * @description Создание исследования с ключом повторного запроса.
          */
@@ -4749,6 +4885,16 @@ export interface components {
              * @default 0
              */
             snapshots: number;
+            /**
+             * Rounds
+             * @default 0
+             */
+            rounds: number;
+            /**
+             * Answers
+             * @default 0
+             */
+            answers: number;
             /** Recording Ids */
             recording_ids: string[];
             /** Warnings */
@@ -4844,6 +4990,16 @@ export interface components {
             version: number;
             /** Snapshot Ids */
             snapshot_ids: string[];
+            /**
+             * Rounds
+             * @default 0
+             */
+            rounds: number;
+            /**
+             * Answers
+             * @default 0
+             */
+            answers: number;
             /** Warnings */
             warnings: string[];
         };
@@ -4947,6 +5103,99 @@ export interface components {
             sfreq: number | null;
             /** Duration Sec */
             duration_sec: number | null;
+        };
+        /**
+         * ConsiliumRoundAction
+         * @description Действие раунда (итог, повтор ответа) с ключом повтора и версией дела.
+         */
+        ConsiliumRoundAction: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /**
+         * ConsiliumRoundCreate
+         * @description Запуск раунда советников по опубликованному снимку досье.
+         *
+         *     Пустой ``roles`` означает все три роли; итог ролёй не считается.
+         */
+        ConsiliumRoundCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /**
+             * Kind
+             * @default initial
+             * @enum {string}
+             */
+            kind: "initial" | "remarks";
+            /** Source Round Id */
+            source_round_id?: string | null;
+            /** Roles */
+            roles?: ("psychological" | "neurophysiological" | "methodological" | "summary")[];
+        };
+        /**
+         * ConsiliumRoundOut
+         * @description Раунд советников: состояние прерванной операции — в этой строке (§8).
+         */
+        ConsiliumRoundOut: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "initial" | "remarks" | "summary";
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Source Round Id */
+            source_round_id?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "done" | "partial" | "failed" | "cancelled" | "interrupted";
+            /** Model */
+            model?: string | null;
+            /** Instruction Versions */
+            instruction_versions: {
+                [key: string]: string;
+            };
+            /** Limits */
+            limits: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Warnings */
+            warnings?: string[];
+            /** Error */
+            error?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Answers */
+            answers?: components["schemas"]["ConsiliumAnswerOut"][];
+        };
+        /**
+         * ConsiliumRoundsPage
+         * @description Страница раундов исследования с честным total.
+         */
+        ConsiliumRoundsPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumRoundOut"][];
         };
         /**
          * ConsiliumSnapshot
@@ -12052,6 +12301,179 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_rounds_api_v1_consilium_cases__case_id__rounds_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumRoundsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_round_api_v1_consilium_cases__case_id__rounds_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumRoundCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumRoundOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_round_api_v1_consilium_cases__case_id__rounds__round_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumRoundOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_summary_api_v1_consilium_cases__case_id__rounds__round_id__summary_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumRoundAction"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumRoundOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_answer_api_v1_consilium_cases__case_id__rounds__round_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumAnswerRetry"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumRoundOut"];
+                };
             };
             /** @description Validation Error */
             422: {

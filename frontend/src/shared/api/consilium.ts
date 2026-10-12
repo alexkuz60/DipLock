@@ -13,6 +13,11 @@ import type {
   ConsiliumMessageCreate,
   ConsiliumMessageUpdate,
   ConsiliumMessagesPage,
+  ConsiliumRound,
+  ConsiliumRoundAction,
+  ConsiliumRoundCreate,
+  ConsiliumRoundsPage,
+  ConsiliumAnswerRetry,
   ConsiliumEvidence,
   ConsiliumEvidenceCreate,
   ConsiliumEvidencePage,
@@ -77,4 +82,14 @@ export const consiliumApi = {
     request<void>(`${path(id)}/evidence/${evidenceId}?expected_version=${version}`, {
       method: 'DELETE',
     }),
+  rounds: (id: string, offset = 0, signal?: AbortSignal) =>
+    request<ConsiliumRoundsPage>(`${path(id)}/rounds${page(offset)}`, { signal }),
+  round: (id: string, roundId: string, signal?: AbortSignal) =>
+    request<ConsiliumRound>(`${path(id)}/rounds/${roundId}`, { signal }),
+  startRound: (id: string, payload: ConsiliumRoundCreate) =>
+    request<ConsiliumRound>(`${path(id)}/rounds`, json('POST', payload)),
+  runSummary: (id: string, roundId: string, payload: ConsiliumRoundAction) =>
+    request<ConsiliumRound>(`${path(id)}/rounds/${roundId}/summary`, json('POST', payload)),
+  retryAnswer: (id: string, roundId: string, payload: ConsiliumAnswerRetry) =>
+    request<ConsiliumRound>(`${path(id)}/rounds/${roundId}/retry`, json('POST', payload)),
 }

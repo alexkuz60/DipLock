@@ -194,6 +194,7 @@ describe('Консилиум: ручное исследование Т1', () => 
     const fetchMock = mockServer()
     renderWithProviders(<ConsiliumSection />, { route: '/consilium?case=case-a' })
     await screen.findByRole('heading', { name: 'Музыка' })
+    fireEvent.click(screen.getByRole('button', { name: 'Контекст и история' }))
     fireEvent.change(screen.getByLabelText('Источник контекста'), {
       target: { value: 'volunteer_report' },
     })
@@ -228,6 +229,7 @@ describe('Консилиум: ручное исследование Т1', () => 
     mockServer({ conflict: true })
     renderWithProviders(<ConsiliumSection />, { route: '/consilium?case=case-a' })
     await screen.findByRole('heading', { name: 'Музыка' })
+    fireEvent.click(screen.getByRole('button', { name: 'Контекст и история' }))
     fireEvent.change(screen.getByLabelText('Текст контекста'), { target: { value: 'Черновик' } })
     fireEvent.click(screen.getByRole('button', { name: 'Добавить контекст' }))
     await screen.findByText('Исследование изменилось — обновите данные')
@@ -238,6 +240,7 @@ describe('Консилиум: ручное исследование Т1', () => 
     const fetchMock = mockServer({ conflict: true })
     renderWithProviders(<ConsiliumSection />, { route: '/consilium?case=case-a' })
     await screen.findByRole('heading', { name: 'Музыка' })
+    fireEvent.click(screen.getByRole('button', { name: 'Контекст и история' }))
     fireEvent.change(screen.getByLabelText('Текст контекста'), {
       target: { value: 'Первый ответ' },
     })
@@ -270,6 +273,7 @@ describe('Консилиум: ручное исследование Т1', () => 
     mockServer()
     renderWithProviders(<ConsiliumSection />, { route: '/consilium?case=case-a' })
     await screen.findByRole('heading', { name: 'Музыка' })
+    fireEvent.click(screen.getByRole('button', { name: 'Контекст и история' }))
     fireEvent.click(screen.getByRole('button', { name: 'Архивировать' }))
     await screen.findByText(/Архив · только чтение/)
     expect(screen.getByLabelText('Текст контекста')).toBeDisabled()

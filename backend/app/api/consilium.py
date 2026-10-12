@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api.private import PrivateRoute
 from app.schemas.consilium import (
+    ConsiliumAnswerRetry,
     ConsiliumCaseCreate,
     ConsiliumCaseOut,
     ConsiliumCasesPage,
@@ -26,13 +27,17 @@ from app.schemas.consilium import (
     ConsiliumMessagesPage,
     ConsiliumMessageUpdate,
     ConsiliumRecording,
+    ConsiliumRoundAction,
+    ConsiliumRoundCreate,
+    ConsiliumRoundOut,
+    ConsiliumRoundsPage,
     ConsiliumSnapshot,
     ConsiliumSnapshotCreate,
     ConsiliumSnapshotsPage,
     ConsiliumSourcesPage,
 )
 from app.services import recording_store
-from app.services.consilium import dossier, sources, store
+from app.services.consilium import dossier, rounds, rounds_store, sources, store
 
 router = APIRouter(prefix="/consilium", tags=["Консилиум"], route_class=PrivateRoute)
 
@@ -245,3 +250,56 @@ async def delete_evidence(
     """Удаляет копию, зависимые снимки и квитанции, не исходный расчёт."""
     async with guarded(response):
         await dossier.delete_evidence(case_id, evidence_id, expected_version)
+
+
+# --- Раунды советников (Т3): запуск — явная кнопка, состояние — в строке раунда ---
+
+
+@router.post("/cases/{case_id}/rounds", status_code=202, response_model=ConsiliumRoundOut)
+async def start_round(
+    case_id: str, payload: ConsiliumRoundCreate, response: Response,
+) -> ConsiliumRoundOut:
+    """Запускает раунд советников; ответы приходят задачей в строку раунда."""
+    async with guarded(response):
+        return await rounds.start_round(case_id, payload)
+
+
+@router.get("/cases/{case_id}/rounds", response_model=ConsiliumRoundsPage)
+async def list_rounds(
+    case_id: str, response: Response,
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+) -> ConsiliumRoundsPage:
+    """Раунды исследования с append-only историей ответов."""
+    async with guarded(response):
+        return await rounds_store.list_rounds(case_id, limit, offset)
+
+
+@router.get("/cases/{case_id}/rounds/{round_id}", response_model=ConsiliumRoundOut)
+async def get_round(case_id: str, round_id: str, response: Response) -> ConsiliumRoundOut:
+    """Раунд со всеми попытками; прерванная операция видна в статусе строки."""
+    async with guarded(response):
+        return await rounds_store.get_round(case_id, round_id)
+
+
+@router.post(
+    "/cases/{case_id}/rounds/{round_id}/summary",
+    status_code=202, response_model=ConsiliumRoundOut,
+)
+async def run_summary(
+    case_id: str, round_id: str, payload: ConsiliumRoundAction, response: Response,
+) -> ConsiliumRoundOut:
+    """Составляет итог по завершённому раунду, сохраняя разногласия (§6)."""
+    async with guarded(response):
+        return await rounds.run_summary(case_id, round_id, payload)
+
+
+@router.post(
+    "/cases/{case_id}/rounds/{round_id}/retry",
+    status_code=202, response_model=ConsiliumRoundOut,
+)
+async def retry_answer(
+    case_id: str, round_id: str, payload: ConsiliumAnswerRetry, response: Response,
+) -> ConsiliumRoundOut:
+    """Повтор одного неудавшегося ответа советника; история попыток остаётся."""
+    async with guarded(response):
+        return await rounds.retry_role(case_id, round_id, payload)

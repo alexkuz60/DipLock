@@ -1322,3 +1322,18 @@ Vitest — **1178** (100 файлов).
 `test_chat_probe_reports_reasoning_and_truncation`, `test_extract_completion_truncation_flags`);
 Vitest +1 (`ModelRouterPanel.test`: пометка обрезки). Итог: pytest — **972**
 (без `integration` — **952**), Vitest — **1179** (100 файлов).
+
+**Консилиум Т3: раунды советников (12.10.2026):** очередь задач получила
+классы ресурсов `mne`/`llm`/`asr` с отдельными пределами, async-воркеры и
+`on_success_required` (успех — только после обязательной записи результата);
+миграция 0008 (`consilium_rounds`/`consilium_answers`, append-only ответы,
+`interrupted` при рестарте), сервис раундов (`services/consilium/rounds.py`:
+три роли, дайджест снимка с честными сокращениями, изоляция отказов) и UI
+«Обсуждение» (`CaseDiscussion`/`RoundCard`: скелетоны, повтор одной роли,
+итог, четыре действия ответа). pytest +16 (`test_job_manager.py` +6:
+классы ресурсов, async-воркер, обязательная запись; `test_consilium_rounds.py`
++10: оркестрация, границы раундов, append-only повтор, приватность дайджеста,
+`interrupted`, каскад удаления, честный 400 без маршрута); Vitest +5
+(`CaseDiscussion.test`: действия без запуска модели, скелетоны, повтор,
+итог один раз, границы). Итог: pytest — **988** (без `integration` — **968**),
+Vitest — **1184** (100 файлов).
