@@ -5,6 +5,12 @@ import type {
   ConsiliumCaseCreate,
   ConsiliumCaseUpdate,
   ConsiliumCasesPage,
+  ConsiliumChatMessage,
+  ConsiliumChatMessageCreate,
+  ConsiliumChatMessageRetry,
+  ConsiliumChatMessagesPage,
+  ConsiliumChatsPage,
+  ConsiliumChatSend,
   ConsiliumContext,
   ConsiliumContextCreate,
   ConsiliumContextUpdate,
@@ -156,5 +162,22 @@ export const consiliumApi = {
   executeProposal: (id: string, proposalId: string, payload: ConsiliumExecutionCreate) =>
     request<ConsiliumExecution>(
       `${path(id)}/proposals/${proposalId}/executions`, json('POST', payload),
+    ),
+  /** Боковая консультация (срез 0015): нити чата, реплики и повтор ответа. */
+  chats: (id: string, signal?: AbortSignal) =>
+    request<ConsiliumChatsPage>(`${path(id)}/chats`, { signal }),
+  chatMessages: (id: string, chatId: string, signal?: AbortSignal) =>
+    request<ConsiliumChatMessagesPage>(
+      `${path(id)}/chats/${encodeURIComponent(chatId)}/messages?limit=200&offset=0`,
+      { signal },
+    ),
+  /** Сообщение исследователя; ответ советника — задача очереди (202). */
+  sendChatMessage: (id: string, payload: ConsiliumChatMessageCreate) =>
+    request<ConsiliumChatSend>(`${path(id)}/chat-messages`, json('POST', payload)),
+  /** Повтор неудавшегося ответа советника новой попыткой (append-only). */
+  retryChatMessage: (id: string, messageId: string, payload: ConsiliumChatMessageRetry) =>
+    request<ConsiliumChatMessage>(
+      `${path(id)}/chat-messages/${encodeURIComponent(messageId)}/retry`,
+      json('POST', payload),
     ),
 }

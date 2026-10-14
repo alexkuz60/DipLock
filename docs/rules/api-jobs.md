@@ -36,7 +36,7 @@
 ### Отдельный роутер Консилиума (начало Т1, 10.10.2026)
 
 `backend/app/api/consilium.py` подключён в main с тем же `settings.api_prefix`:
-45 операций, 33 уникальных пути. Pydantic — `schemas/consilium.py`; обязательный
+50 операций, 38 уникальных путей. Pydantic — `schemas/consilium.py`; обязательный
 сервис хранения — `services/consilium/store.py`; подробности —
 `docs/rules/consilium.md` §0. Не фоновые задачи и не best-effort запись.
 
@@ -77,13 +77,18 @@
 | `GET/PATCH /consilium/cases/{case_id}/proposals/{proposal_id}` | карточка с append-only решениями/исполнениями; правка — новая версия карточки |
 | `POST /consilium/cases/{case_id}/proposals/{proposal_id}/decisions` | решение человека «принято/отклонено» (201, append-only) с адресом версии карточки |
 | `POST /consilium/cases/{case_id}/proposals/{proposal_id}/executions` | ручное исполнение предложения и результат (201, append-only) |
+| `GET /consilium/cases/{case_id}/chats` | нити боковой консультации (срез 0015): одна на пару дело × советник, число реплик |
+| `GET /consilium/cases/{case_id}/chats/{chat_id}/messages` | реплики нити по порядку переписки (append-only, без правок) |
+| `POST /consilium/cases/{case_id}/chat-messages` | сообщение исследователя и задача ответа советника (202); нить заводится первым сообщением; повтор `request_id` — прежний ответ; без снимка/маршрута `chat` — 400, идущий ответ — 409 |
+| `POST /consilium/cases/{case_id}/chat-messages/{message_id}/retry` | повтор неудавшегося ответа советника новой попыткой (202, append-only) |
+| `GET /consilium/cases/{case_id}/chat-messages/{message_id}/stream` | SSE-стрим ответа консультации (механизм 0011, роль советника): растущий текст, `round_done` на границе |
 
 Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
 без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;
 409 — конфликт версии/ключа или запись в архив; 503 — ошибка обязательного
 хранилища. 413 — лимит материала/досье/строк без молчаливого усечения.
-Аудио и ответы советников пока не доступны (Т2/Т3); провайдеры моделей
-настраиваются отдельным роутером ниже.
+Аудио пока не доступно (Т2); ответы советников и боковых консультаций идут
+через модельный роутер ниже.
 
 ### Модельный роутер ИИ («Настройки», 10.10.2026)
 
@@ -103,10 +108,12 @@
 Ответы приватные `no-store`, 422 без эха `input` (`PrivateRoute`); 400 — текст
 для UI (адрес/маршруты), 404 — нет провайдера, 409 — устаревший id.
 
-### SSE-стрим ответов советников (срез 0011, 14.10.2026)
+### SSE-стрим ответов (срез 0011, 14.10.2026)
 
-`GET /consilium/cases/{id}/rounds/{id}/stream` — единственный SSE-эндпоинт:
-`StreamingResponse(text/event-stream)` отдаёт фреймы `event:` + JSON
+Три SSE-эндпоинта с общим механизмом: `GET .../rounds/{id}/stream` (раунд),
+`GET .../brainstorms/{id}/stream` (штурм) и `GET .../chat-messages/{id}/stream`
+(ответ боковой консультации, срез 0015). `StreamingResponse(text/event-stream)`
+отдаёт фреймы `event:` + JSON
 `ConsiliumStreamEvent` (`role_started`/`delta`/`role_done`/`error`/`ping`,
 завершение — `round_done`). Частичный текст живёт только в RAM
 (`services/consilium/streams.py`), в БД и файл задачи дельты не пишутся.

@@ -25,6 +25,7 @@ import { CaseTriage } from './CaseTriage'
 import { CaseRoundPlan } from './CaseRoundPlan'
 import { RoundCard } from './RoundCard'
 import { useCaseAction } from './useCaseAction'
+import { useCaseRounds } from './useCaseRounds'
 
 export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
   const [snapshotId, setSnapshotId] = useState('')
@@ -40,13 +41,7 @@ export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
     queryFn: ({ signal }) => consiliumApi.snapshots(current.id, 0, signal),
     gcTime: 0,
   })
-  const rounds = useQuery({
-    queryKey: ['consilium', current.id, 'rounds'],
-    queryFn: ({ signal }) => consiliumApi.rounds(current.id, 0, signal),
-    gcTime: 0,
-    refetchInterval: (query) =>
-      query.state.data?.items.some((item) => item.status === 'running') ? 2000 : false,
-  })
+  const rounds = useCaseRounds(current.id)
   const start = useCaseAction<ConsiliumRoundCreate>(current.id, (payload) =>
     consiliumApi.startRound(current.id, payload),
   )

@@ -18,6 +18,8 @@ from app.schemas.consilium import (
     ConsiliumCaseOut,
     ConsiliumCasesPage,
     ConsiliumCaseUpdate,
+    ConsiliumChatMessageCreate,
+    ConsiliumChatMessageRetry,
     ConsiliumContextCreate,
     ConsiliumContextOut,
     ConsiliumContextPage,
@@ -50,6 +52,7 @@ type WriteRequest = (
     | ConsiliumJevMarkAnswerCreate | ConsiliumBrainstormCreate
     | ConsiliumProposalCreate | ConsiliumProposalUpdate
     | ConsiliumDecisionCreate | ConsiliumExecutionCreate
+    | ConsiliumChatMessageCreate | ConsiliumChatMessageRetry
 )
 
 
@@ -322,11 +325,18 @@ async def deletion_preview(case_id: str) -> ConsiliumDeletionPreview:
             "executions": int(await session.scalar(select(func.count()).select_from(
                 db.ConsiliumExecution,
             ).where(db.ConsiliumExecution.case_id == case_id)) or 0),
+            "chats": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumChat,
+            ).where(db.ConsiliumChat.case_id == case_id)) or 0),
+            "chat_messages": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumChatMessage,
+            ).where(db.ConsiliumChatMessage.case_id == case_id)) or 0),
             "recording_ids": row.recording_ids,
             "warnings": [
                 "ЭЭГ-записи не удаляются. Все ревизии ручной истории, ответы советников, "
                 "результаты триажа и разметки Jev, запуски мозгового штурма с идеями, "
-                "библиотека предложений с решениями и снимки будут удалены.",
+                "переписки боковых консультаций, библиотека предложений с решениями "
+                "и снимки будут удалены.",
             ],
         })
 
@@ -341,6 +351,7 @@ async def delete_case(case_id: str, expected_version: int) -> None:
             db.ConsiliumRequest, db.ConsiliumEntry, db.ConsiliumTriage,
             db.ConsiliumJevMark, db.ConsiliumBrainstormIdea, db.ConsiliumBrainstorm,
             db.ConsiliumExecution, db.ConsiliumDecision, db.ConsiliumProposal,
+            db.ConsiliumChatMessage, db.ConsiliumChat,
             db.ConsiliumAnswer, db.ConsiliumRound,
             db.ConsiliumSnapshotRecord, db.ConsiliumEvidenceRecord,
         ):

@@ -18,6 +18,12 @@ from app.schemas.consilium import (
     ConsiliumCaseOut,
     ConsiliumCasesPage,
     ConsiliumCaseUpdate,
+    ConsiliumChatMessageCreate,
+    ConsiliumChatMessageOut,
+    ConsiliumChatMessageRetry,
+    ConsiliumChatMessagesPage,
+    ConsiliumChatSendOut,
+    ConsiliumChatsPage,
     ConsiliumContextCreate,
     ConsiliumContextOut,
     ConsiliumContextPage,
@@ -60,6 +66,8 @@ from app.schemas.consilium import (
 from app.services import recording_store
 from app.services.consilium import (
     brainstorm,
+    chat,
+    chat_store,
     dossier,
     jev_marks,
     library,
@@ -633,3 +641,86 @@ async def add_execution(
     """Ручное исполнение предложения и результат; каждое — новой строкой."""
     async with guarded(response):
         return await library.add_execution(case_id, proposal_id, payload)
+
+
+# --- Боковая консультация (срез 0015): чат с одним советником ---
+
+
+@router.get("/cases/{case_id}/chats", response_model=ConsiliumChatsPage)
+async def list_chats(case_id: str, response: Response) -> ConsiliumChatsPage:
+    """Нити консультаций: одна на пару (дело, советник), переписка — отдельно."""
+    async with guarded(response):
+        return await chat_store.list_chats(case_id)
+
+
+@router.get(
+    "/cases/{case_id}/chats/{chat_id}/messages",
+    response_model=ConsiliumChatMessagesPage,
+)
+async def list_chat_messages(
+    case_id: str, chat_id: str, response: Response,
+    limit: int = Query(200, ge=1, le=500), offset: int = Query(0, ge=0),
+) -> ConsiliumChatMessagesPage:
+    """Реплики консультации по порядку переписки (append-only, без правок)."""
+    async with guarded(response):
+        return await chat_store.list_messages(case_id, chat_id, limit, offset)
+
+
+@router.post(
+    "/cases/{case_id}/chat-messages", status_code=202, response_model=ConsiliumChatSendOut,
+)
+async def send_chat_message(
+    case_id: str, payload: ConsiliumChatMessageCreate, response: Response,
+) -> ConsiliumChatSendOut:
+    """Сообщение исследователя и задача ответа советника; отправка — кнопкой."""
+    async with guarded(response):
+        return await chat.send_message(case_id, payload)
+
+
+@router.post(
+    "/cases/{case_id}/chat-messages/{message_id}/retry",
+    status_code=202, response_model=ConsiliumChatMessageOut,
+)
+async def retry_chat_reply(
+    case_id: str, message_id: str, payload: ConsiliumChatMessageRetry, response: Response,
+) -> ConsiliumChatMessageOut:
+    """Повтор неудавшегося ответа советника новой попыткой (append-only)."""
+    async with guarded(response):
+        return await chat.retry_message(case_id, message_id, payload)
+
+
+@router.get(
+    "/cases/{case_id}/chat-messages/{message_id}/stream",
+    responses={
+        200: {
+            "model": ConsiliumStreamEvent,
+            "description": (
+                "SSE-поток событий ответа консультации: фреймы `event:` + JSON "
+                "`ConsiliumStreamEvent` (роль советника: role_started/delta/"
+                "role_done/error/ping); после `round_done` поздних дельт нет"
+            ),
+            "content": {
+                "text/event-stream": {
+                    "schema": {"$ref": "#/components/schemas/ConsiliumStreamEvent"},
+                },
+            },
+        },
+    },
+)
+async def stream_chat_reply(
+    case_id: str, message_id: str, response: Response,
+) -> StreamingResponse:
+    """Стрим ответа консультации: растущий текст по мере генерации (механизм 0011).
+
+    Живой поток — только удобство: фолбэк клиента остаётся прежним (поллинг
+    `GET /chats/{id}/messages`), готовый ответ приходит из БД. Тексты в файл
+    задачи не попадают (§8), частичный текст живёт в RAM процесса.
+    """
+    async with guarded(response):
+        # Принадлежность реплики делу: чужая/отсутствующая — честный 404
+        await chat_store.require_message(case_id, message_id)
+    return StreamingResponse(
+        _stream_frames(streams.get_round(message_id)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "private, no-store", "X-Accel-Buffering": "no"},
+    )

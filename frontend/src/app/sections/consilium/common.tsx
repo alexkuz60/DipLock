@@ -64,11 +64,16 @@ export function QueryState({
   loading,
   error,
   retry,
+  retryLabel,
 }: {
   loading: boolean
   error: Error | null
   retry: () => void
+  /** Ярлык кнопки повтора (по умолчанию «Повторить») */
+  retryLabel?: string
 }) {
   if (loading) return <LoadingBlock />
-  return error ? <ErrorBlock message={apiErrorText(error)} onRetry={retry} /> : null
+  return error ? (
+    <ErrorBlock message={apiErrorText(error)} onRetry={retry} retryLabel={retryLabel} />
+  ) : null
 }

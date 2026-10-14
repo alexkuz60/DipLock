@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Консилиум (§8): живых LLM-задач после рестарта нет, строки «running» —
     # прерванная операция; состояние честно показывается в строке раунда/штурма.
     try:
-        from app.services.consilium import brainstorm, rounds_store
+        from app.services.consilium import brainstorm, chat_store, rounds_store
 
         interrupted = await rounds_store.mark_interrupted()
         if interrupted:
@@ -83,6 +83,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         brainstormed = await brainstorm.mark_interrupted()
         if brainstormed:
             logger.info("Прерванные штурмы Консилиума помечены: %d", brainstormed)
+        chatted = await chat_store.mark_interrupted()
+        if chatted:
+            logger.info("Прерванные ответы консультаций помечены: %d", chatted)
     except Exception:
         logger.exception("Не удалось пометить прерванные операции Консилиума")
     yield

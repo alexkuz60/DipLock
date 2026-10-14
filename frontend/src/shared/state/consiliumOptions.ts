@@ -21,6 +21,35 @@ export type ConsiliumOptions = {
   openAnswerSections: boolean
 }
 
+/** Вкладка выдвижного левого сайдбара рабочей области (срез 0015). */
+export type ConsiliumSidebarTab = 'chat' | 'tree'
+
+export type ConsiliumSidebar = {
+  /** Левый сайдбар рабочей области развёрнут */
+  open: boolean
+  /** Ширина сайдбара, px (clamp 240–640) */
+  width: number
+  /** Активная вкладка: чат с одним советником или дерево навигации по раундам */
+  tab: ConsiliumSidebarTab
+  /** Советник боковой консультации (вкладка «Чат») */
+  chatRole: string
+}
+
+export const SIDEBAR_WIDTH_MIN = 240
+export const SIDEBAR_WIDTH_MAX = 640
+
+export const CONSILIUM_SIDEBAR_DEFAULTS: ConsiliumSidebar = {
+  open: true,
+  width: 320,
+  tab: 'chat',
+  chatRole: 'psychological',
+}
+
+/** Ширина сайдбара в допустимых границах (px, целое). */
+export function clampSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)))
+}
+
 export const CONSILIUM_OPTIONS_DEFAULTS: ConsiliumOptions = {
   roles: ['psychological', 'neurophysiological', 'methodological'],
   roleFilter: ['psychological', 'neurophysiological', 'methodological'],
@@ -29,12 +58,18 @@ export const CONSILIUM_OPTIONS_DEFAULTS: ConsiliumOptions = {
 
 export type ConsiliumOptionsState = {
   options: ConsiliumOptions
+  /** Выдвижной левый сайдбар рабочей области (ширина, вкладка, советник чата) */
+  sidebar: ConsiliumSidebar
   /** Выбор ролей целиком (подсказка Jev «Применить к выбору ролей») */
   setRoles: (roles: string[]) => void
   toggleRole: (role: string) => void
   setRoleFilter: (roles: string[]) => void
   toggleRoleFilter: (role: string) => void
   setOpenAnswerSections: (open: boolean) => void
+  setSidebarOpen: (open: boolean) => void
+  setSidebarWidth: (width: number) => void
+  setSidebarTab: (tab: ConsiliumSidebarTab) => void
+  setChatRole: (role: string) => void
   /** Вернуть разовые настройки к значениям по умолчанию */
   reset: () => void
 }
@@ -43,6 +78,7 @@ export const useConsiliumOptions = create<ConsiliumOptionsState>()(
   persist(
     (set) => ({
       options: { ...CONSILIUM_OPTIONS_DEFAULTS },
+      sidebar: { ...CONSILIUM_SIDEBAR_DEFAULTS },
 
       setRoles: (roles) => set((state) => ({ options: { ...state.options, roles } })),
 
@@ -72,16 +108,48 @@ export const useConsiliumOptions = create<ConsiliumOptionsState>()(
       setOpenAnswerSections: (open) =>
         set((state) => ({ options: { ...state.options, openAnswerSections: open } })),
 
-      reset: () => set({ options: { ...CONSILIUM_OPTIONS_DEFAULTS } }),
+      setSidebarOpen: (open) =>
+        set((state) => ({ sidebar: { ...state.sidebar, open } })),
+
+      setSidebarWidth: (width) =>
+        set((state) => ({ sidebar: { ...state.sidebar, width: clampSidebarWidth(width) } })),
+
+      setSidebarTab: (tab) => set((state) => ({ sidebar: { ...state.sidebar, tab } })),
+
+      setChatRole: (role) => set((state) => ({ sidebar: { ...state.sidebar, chatRole: role } })),
+
+      reset: () =>
+        set({
+          options: { ...CONSILIUM_OPTIONS_DEFAULTS },
+          sidebar: { ...CONSILIUM_SIDEBAR_DEFAULTS },
+        }),
     }),
     {
       name: 'diplock.consilium',
-      partialize: (state) => ({ options: state.options }),
+      partialize: (state) => ({ options: state.options, sidebar: state.sidebar }),
       merge: (persisted, current) => {
-        const stored = (persisted ?? {}) as { options?: Partial<ConsiliumOptions> }
+        const stored = (persisted ?? {}) as {
+          options?: Partial<ConsiliumOptions>
+          sidebar?: Partial<ConsiliumSidebar>
+        }
         const storedOptions = stored.options ?? {}
+        const storedSidebar = stored.sidebar ?? {}
         return {
           ...current,
+          sidebar: {
+            ...current.sidebar,
+            ...storedSidebar,
+            // Ширина из localStorage всегда в границах, вкладка — только известная
+            width: clampSidebarWidth(storedSidebar.width ?? current.sidebar.width),
+            tab:
+              storedSidebar.tab === 'chat' || storedSidebar.tab === 'tree'
+                ? storedSidebar.tab
+                : current.sidebar.tab,
+            chatRole:
+              typeof storedSidebar.chatRole === 'string' && storedSidebar.chatRole
+                ? storedSidebar.chatRole
+                : current.sidebar.chatRole,
+          },
           options: {
             ...current.options,
             ...storedOptions,

@@ -128,6 +128,15 @@ ADVISOR_BY_ROLE: dict[str, Advisor] = {
     "summary": SUMMARY_ADVISOR,
 }
 
+
+def chat_instruction(advisor: Advisor) -> str:
+    """Системный промпт боковой консультации (срез 0015): без формата разделов раунда.
+
+    Инструкции советников собраны как «база + HONESTY + формат раунда», поэтому
+    формат снимается точным суффиксом — ракурс и правила честности остаются.
+    """
+    return advisor.instruction.removesuffix("\n\n" + ANSWER_FORMAT)
+
 DEFAULT_ROLES: tuple[str, ...] = tuple(advisor.role for advisor in ADVISORS)
 
 

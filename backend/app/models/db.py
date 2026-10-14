@@ -651,6 +651,51 @@ class ConsiliumExecution(Base):
     created_at = Column(DateTime, nullable=False)
 
 
+class ConsiliumChat(Base):
+    """Боковая консультация (срез 0015): нить переписки с одним советником.
+
+    Нить — одна на пару (дело, советник) и заводится при первом сообщении;
+    реплики живут в ``ConsiliumChatMessage`` (append-only, без правок).
+    """
+
+    __tablename__ = "consilium_chats"
+    __table_args__ = (
+        UniqueConstraint("case_id", "role", name="ux_consilium_chat_case_role"),
+    )
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    role = Column(String, nullable=False)  # psychological | neurophysiological | methodological
+    created_at = Column(DateTime, nullable=False)
+
+
+class ConsiliumChatMessage(Base):
+    """Реплика боковой консультации: ручная или ответ советника-задачи (§8).
+
+    Ответ советника создаётся ожидающей строкой (``status='running'``); текст
+    пишется в БД до объявления успеха задачи, прерванный запрос при рестарте
+    переводится в ``interrupted``. ``snapshot_id`` — неизменяемое основание
+    ответа: новый расчёт не переобувает прошлые реплики.
+    """
+
+    __tablename__ = "consilium_chat_messages"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    chat_id = Column(String, ForeignKey("consilium_chats.id"), nullable=False, index=True)
+    author_kind = Column(String, nullable=False)  # researcher | advisor
+    role = Column(String, nullable=False)  # роль советника нити
+    status = Column(String, nullable=False)  # running | ok | failed | cancelled | interrupted
+    text = Column(String, nullable=True)  # NULL у ожидающего/неудавшегося ответа
+    model = Column(String, nullable=True)  # провайдер/модель маршрутного роутера
+    instruction_version = Column(String, nullable=True)  # версия инструкции советника
+    snapshot_id = Column(String, nullable=True)  # снимок досье — основание ответа
+    warnings = Column(JSON, nullable=False)  # сокращения промпта/усечения ответа
+    error = Column(String, nullable=True)  # ошибка вызова — честный отказ
+    job_id = Column(String, nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+
 def _sync_driver_url(url: URL) -> str:
     """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 

@@ -1,5 +1,5 @@
 /** Выбранное дело: ключ компонента отделяет поздние ответы другого исследования. */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiErrorText } from '@/shared/api/client'
 import { consiliumApi } from '@/shared/api/consilium'
@@ -13,11 +13,13 @@ import { Button } from '@/shared/ui/Button'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { ErrorBlock } from '@/shared/ui/StateViews'
 import { StatusPill } from '@/shared/ui/StatusPill'
+import { useConsiliumOptions } from '@/shared/state/consiliumOptions'
 import { CaseForm } from './CaseForm'
 import { CaseHistory } from './CaseHistory'
 import { CaseLibrary } from './CaseLibrary'
 import { CaseMaterials } from './CaseMaterials'
 import { CaseDiscussion } from './CaseDiscussion'
+import { CaseSidebar } from './CaseSidebar'
 import { QueryState } from './common'
 import { useCaseAction } from './useCaseAction'
 
@@ -33,6 +35,10 @@ export function CaseWorkspace({
   const [tab, setTab] = useState<'discussion' | 'history' | 'materials' | 'library'>('discussion')
   const [editing, setEditing] = useState(false)
   const [preview, setPreview] = useState<ConsiliumDeletionPreview | null>(null)
+  // Левая панель (срез 0015) и переход к якорю дерева навигации
+  const sidebarOpen = useConsiliumOptions((state) => state.sidebar.open)
+  const setSidebarOpen = useConsiliumOptions((state) => state.setSidebarOpen)
+  const [jump, setJump] = useState<string | null>(null)
   const queryClient = useQueryClient()
   const detail = useQuery({
     queryKey: ['consilium', caseId, 'case'],
@@ -47,6 +53,37 @@ export function CaseWorkspace({
     setPreview(await consiliumApi.deletion(caseId))
   })
   const current = detail.data
+
+  /** Переход дерева навигации: показать «Обсуждение» и прокрутить к карточке. */
+  function navigateTo(target: string) {
+    setTab('discussion')
+    setJump(target)
+  }
+
+  // Прокрутка к якорю выполняется, когда карточка смонтирована: лента раундов
+  // может догружаться, поэтому поиск повторяется до находки якоря (guard jsdom).
+  useEffect(() => {
+    if (!jump) return
+    let cancelled = false
+    let attempts = 0
+    const tryJump = () => {
+      if (cancelled) return
+      const el = document.getElementById(jump)
+      if (!el) {
+        attempts += 1
+        if (attempts < 100) window.setTimeout(tryJump, 50)
+        return
+      }
+      if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'start' })
+      el.classList.add('ring-2', 'ring-accent')
+      window.setTimeout(() => el.classList.remove('ring-2', 'ring-accent'), 1500)
+      setJump(null)
+    }
+    tryJump()
+    return () => {
+      cancelled = true
+    }
+  }, [jump])
 
   return (
     <section aria-label="Текущее исследование" className="space-y-4">
@@ -144,7 +181,7 @@ export function CaseWorkspace({
                 Будут удалены: контекст — {preview.context_revisions}, реплики —{' '}
                 {preview.message_revisions}, материалы — {preview.evidence_items}, снимки —{' '}
                 {preview.snapshots}, раунды советников — {preview.rounds}, ответы —{' '}
-                {preview.answers}.
+                {preview.answers}, переписки консультаций — {preview.chat_messages ?? 0}.
               </p>
               {preview.warnings.map((warning) => (
                 <p key={warning}>{warning}</p>
@@ -167,27 +204,39 @@ export function CaseWorkspace({
               </Button>
             </div>
           )}
-          <SegmentedControl
-            label="Рабочая область"
-            layout="inline"
-            value={tab}
-            onChange={setTab}
-            options={[
-              { value: 'discussion', label: 'Обсуждение' },
-              { value: 'history', label: 'Контекст и история' },
-              { value: 'materials', label: 'Материалы и досье' },
-              { value: 'library', label: 'Библиотека' },
-            ]}
-          />
-          {tab === 'discussion' ? (
-            <CaseDiscussion current={current} />
-          ) : tab === 'history' ? (
-            <CaseHistory current={current} />
-          ) : tab === 'library' ? (
-            <CaseLibrary current={current} />
-          ) : (
-            <CaseMaterials current={current} />
-          )}
+          <div className="flex gap-4">
+            {sidebarOpen && <CaseSidebar current={current} onJump={navigateTo} />}
+            <div className="min-w-0 flex-1 space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <SegmentedControl
+                  label="Рабочая область"
+                  layout="inline"
+                  value={tab}
+                  onChange={setTab}
+                  options={[
+                    { value: 'discussion', label: 'Обсуждение' },
+                    { value: 'history', label: 'Контекст и история' },
+                    { value: 'materials', label: 'Материалы и досье' },
+                    { value: 'library', label: 'Библиотека' },
+                  ]}
+                />
+                {!sidebarOpen && (
+                  <Button variant="ghost" onClick={() => setSidebarOpen(true)}>
+                    Показать левую панель
+                  </Button>
+                )}
+              </div>
+              {tab === 'discussion' ? (
+                <CaseDiscussion current={current} />
+              ) : tab === 'history' ? (
+                <CaseHistory current={current} />
+              ) : tab === 'library' ? (
+                <CaseLibrary current={current} />
+              ) : (
+                <CaseMaterials current={current} />
+              )}
+            </div>
+          </div>
         </>
       )}
     </section>

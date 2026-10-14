@@ -92,6 +92,14 @@ export function brainstormStreamUrl(caseId: string, brainstormId: string): strin
   )
 }
 
+/** Адрес потока ответа боковой консультации (SSE, механизм 0011, срез 0015). */
+export function chatReplyStreamUrl(caseId: string, messageId: string): string {
+  return (
+    `${API_PREFIX}/consilium/cases/${encodeURIComponent(caseId)}` +
+    `/chat-messages/${encodeURIComponent(messageId)}/stream`
+  )
+}
+
 /** Разобрать SSE-фрейм (`data:` + JSON) в событие; мусорные фреймы — мимо. */
 function parseFrame(frame: string): ConsiliumStreamEvent | null {
   const data = frame

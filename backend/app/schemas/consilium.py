@@ -278,6 +278,8 @@ class ConsiliumDeletionPreview(ConsiliumContract):
     proposals: int = 0
     decisions: int = 0
     executions: int = 0
+    chats: int = 0
+    chat_messages: int = 0
     recording_ids: list[str]
     warnings: list[str]
 
@@ -708,3 +710,81 @@ class ConsiliumExecutionCreate(ConsiliumContract):
     expected_version: int = Field(ge=1)
     note: Annotated[str, Field(min_length=1, max_length=2000)]
     result: str | None = Field(default=None, max_length=20_000)
+
+
+# --- Боковая консультация (срез 0015): чат с одним советником ---
+
+ChatRole = Literal["psychological", "neurophysiological", "methodological"]
+ChatAuthor = Literal["researcher", "advisor"]
+ChatMessageStatus = Literal["running", "ok", "failed", "cancelled", "interrupted"]
+
+
+class ConsiliumChatOut(ConsiliumContract):
+    """Нить боковой консультации: одна на пару (дело, советник)."""
+
+    id: str
+    case_id: str
+    role: ChatRole
+    messages: int = 0
+    created_at: datetime
+
+
+class ConsiliumChatsPage(ConsiliumContract):
+    """Нити консультаций исследования (пусто — консультации ещё не было)."""
+
+    total: int
+    items: list[ConsiliumChatOut]
+
+
+class ConsiliumChatMessageOut(ConsiliumContract):
+    """Реплика консультации: append-only, правок нет (повтор — новая строка).
+
+    ``text`` есть у реплики исследователя и успешного ответа советника; у
+    ожидающего/неудавшегося ответа — ``None`` вместе с честным ``error``.
+    """
+
+    id: str
+    case_id: str
+    chat_id: str
+    author: ChatAuthor
+    role: ChatRole
+    status: ChatMessageStatus
+    text: str | None = None
+    model: str | None = None
+    instruction_version: str | None = None
+    snapshot_id: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+    latency_ms: float | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
+
+
+class ConsiliumChatMessagesPage(ConsiliumContract):
+    """Страница реплик нити: append-only листинг, честный total."""
+
+    total: int
+    items: list[ConsiliumChatMessageOut]
+
+
+class ConsiliumChatMessageCreate(ConsiliumContract):
+    """Сообщение исследователя в консультации; ответ советника — задача очереди."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+    role: ChatRole
+    text: Text
+
+
+class ConsiliumChatMessageRetry(ConsiliumContract):
+    """Повтор неудавшегося ответа советника новой строкой (append-only)."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+
+
+class ConsiliumChatSendOut(ConsiliumContract):
+    """Отправка: реплика исследователя и ожидающая строка ответа советника."""
+
+    message: ConsiliumChatMessageOut
+    reply: ConsiliumChatMessageOut

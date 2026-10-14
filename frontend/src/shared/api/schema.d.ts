@@ -2482,6 +2482,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consilium/cases/{case_id}/chats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Chats
+         * @description Нити консультаций: одна на пару (дело, советник), переписка — отдельно.
+         */
+        get: operations["list_chats_api_v1_consilium_cases__case_id__chats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/chats/{chat_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Chat Messages
+         * @description Реплики консультации по порядку переписки (append-only, без правок).
+         */
+        get: operations["list_chat_messages_api_v1_consilium_cases__case_id__chats__chat_id__messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/chat-messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Chat Message
+         * @description Сообщение исследователя и задача ответа советника; отправка — кнопкой.
+         */
+        post: operations["send_chat_message_api_v1_consilium_cases__case_id__chat_messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/chat-messages/{message_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Chat Reply
+         * @description Повтор неудавшегося ответа советника новой попыткой (append-only).
+         */
+        post: operations["retry_chat_reply_api_v1_consilium_cases__case_id__chat_messages__message_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/chat-messages/{message_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Chat Reply
+         * @description Стрим ответа консультации: растущий текст по мере генерации (механизм 0011).
+         *
+         *     Живой поток — только удобство: фолбэк клиента остаётся прежним (поллинг
+         *     `GET /chats/{id}/messages`), готовый ответ приходит из БД. Тексты в файл
+         *     задачи не попадают (§8), частичный текст живёт в RAM процесса.
+         */
+        get: operations["stream_chat_reply_api_v1_consilium_cases__case_id__chat_messages__message_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router": {
         parameters: {
             query?: never;
@@ -5146,6 +5250,137 @@ export interface components {
             items: components["schemas"]["ConsiliumCaseOut"][];
         };
         /**
+         * ConsiliumChatMessageCreate
+         * @description Сообщение исследователя в консультации; ответ советника — задача очереди.
+         */
+        ConsiliumChatMessageCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "psychological" | "neurophysiological" | "methodological";
+            /** Text */
+            text: string;
+        };
+        /**
+         * ConsiliumChatMessageOut
+         * @description Реплика консультации: append-only, правок нет (повтор — новая строка).
+         *
+         *     ``text`` есть у реплики исследователя и успешного ответа советника; у
+         *     ожидающего/неудавшегося ответа — ``None`` вместе с честным ``error``.
+         */
+        ConsiliumChatMessageOut: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /** Chat Id */
+            chat_id: string;
+            /**
+             * Author
+             * @enum {string}
+             */
+            author: "researcher" | "advisor";
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "psychological" | "neurophysiological" | "methodological";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "ok" | "failed" | "cancelled" | "interrupted";
+            /** Text */
+            text?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Instruction Version */
+            instruction_version?: string | null;
+            /** Snapshot Id */
+            snapshot_id?: string | null;
+            /** Warnings */
+            warnings?: string[];
+            /** Error */
+            error?: string | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+        };
+        /**
+         * ConsiliumChatMessageRetry
+         * @description Повтор неудавшегося ответа советника новой строкой (append-only).
+         */
+        ConsiliumChatMessageRetry: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /**
+         * ConsiliumChatMessagesPage
+         * @description Страница реплик нити: append-only листинг, честный total.
+         */
+        ConsiliumChatMessagesPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumChatMessageOut"][];
+        };
+        /**
+         * ConsiliumChatOut
+         * @description Нить боковой консультации: одна на пару (дело, советник).
+         */
+        ConsiliumChatOut: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "psychological" | "neurophysiological" | "methodological";
+            /**
+             * Messages
+             * @default 0
+             */
+            messages: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ConsiliumChatSendOut
+         * @description Отправка: реплика исследователя и ожидающая строка ответа советника.
+         */
+        ConsiliumChatSendOut: {
+            message: components["schemas"]["ConsiliumChatMessageOut"];
+            reply: components["schemas"]["ConsiliumChatMessageOut"];
+        };
+        /**
+         * ConsiliumChatsPage
+         * @description Нити консультаций исследования (пусто — консультации ещё не было).
+         */
+        ConsiliumChatsPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumChatOut"][];
+        };
+        /**
          * ConsiliumContextCreate
          * @description Новая ручная контекстная запись.
          */
@@ -5408,6 +5643,16 @@ export interface components {
              * @default 0
              */
             executions: number;
+            /**
+             * Chats
+             * @default 0
+             */
+            chats: number;
+            /**
+             * Chat Messages
+             * @default 0
+             */
+            chat_messages: number;
             /** Recording Ids */
             recording_ids: string[];
             /** Warnings */
@@ -14084,6 +14329,176 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsiliumExecutionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_chats_api_v1_consilium_cases__case_id__chats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumChatsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_chat_messages_api_v1_consilium_cases__case_id__chats__chat_id__messages_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+                chat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumChatMessagesPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_chat_message_api_v1_consilium_cases__case_id__chat_messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumChatMessageCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumChatSendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_chat_reply_api_v1_consilium_cases__case_id__chat_messages__message_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumChatMessageRetry"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumChatMessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_chat_reply_api_v1_consilium_cases__case_id__chat_messages__message_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE-поток событий ответа консультации: фреймы `event:` + JSON `ConsiliumStreamEvent` (роль советника: role_started/delta/role_done/error/ping); после `round_done` поздних дельт нет */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumStreamEvent"];
+                    "text/event-stream": components["schemas"]["ConsiliumStreamEvent"];
                 };
             };
             /** @description Validation Error */

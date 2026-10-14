@@ -89,7 +89,10 @@ function AnswerCard({
   )
 
   return (
-    <article className="space-y-2 rounded-lg border border-border p-3">
+    <article
+      id={`answer-${answer.id}`}
+      className="space-y-2 rounded-lg border border-border p-3"
+    >
       <header className="flex flex-wrap items-center gap-2 text-sm">
         <span className="font-medium text-fg-0">{roleLabel(answer.role)}</span>
         {answer.model && <span className="text-fg-2">модель: {answer.model}</span>}
@@ -234,7 +237,10 @@ export function RoundCard({
   const visibleRoles = expected.filter((role) => rolesFilter.includes(role))
 
   return (
-    <section className="space-y-3 rounded-lg border border-border bg-bg-1 p-3">
+    <section
+      id={`round-${round.id}`}
+      className="space-y-3 rounded-lg border border-border bg-bg-1 p-3"
+    >
       <header className="flex flex-wrap items-center gap-2">
         <h3 className="font-semibold text-fg-0">{kindLabel(round.kind)}</h3>
         <StatusPill tone={status.tone}>{status.label}</StatusPill>
