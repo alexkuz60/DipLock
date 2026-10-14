@@ -72,24 +72,3 @@ export function QueryState({
   if (loading) return <LoadingBlock />
   return error ? <ErrorBlock message={apiErrorText(error)} onRetry={retry} /> : null
 }
-
-export function ConsiliumPanel() {
-  return (
-    <div className="space-y-3 p-3 text-sm text-fg-1">
-      <h2 className="font-semibold">Рабочее исследование</h2>
-      <p>
-        Сформулируйте вопрос, добавьте рассказ добровольца и выберите результаты конкретных
-        прогонов.
-      </p>
-      <p>Досье сохраняет то, что вы обсуждали: новый расчёт не меняет прошлый снимок.</p>
-      <p>
-        Измерения и модели, рассказ человека и ваши наблюдения — разные основания. Подробности
-        доступны по раскрытию.
-      </p>
-      <p>
-        Сейчас доступна ручная работа. ИИ-советники и стенография беседы появятся отдельными
-        этапами.
-      </p>
-    </div>
-  )
-}

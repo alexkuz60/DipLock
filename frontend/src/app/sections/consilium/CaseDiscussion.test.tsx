@@ -3,8 +3,9 @@
  * границы раундов и обязательные действия ответа.
  */
 import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CaseDiscussion } from './CaseDiscussion'
+import { useConsiliumOptions } from '@/shared/state/consiliumOptions'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import type {
   ConsiliumAnswer,
@@ -127,7 +128,27 @@ function response(body: unknown, status = 200) {
   })
 }
 
-function mockServer(rounds: ConsiliumRound[], triage: ConsiliumTriage[] = []) {
+/** Тело SSE-ответа стрима (срез 0011): фреймы `data:` + JSON событий. */
+function sseResponse(frames: unknown[]) {
+  const encoder = new TextEncoder()
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (const item of frames) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(item)}\n\n`))
+        }
+        controller.close()
+      },
+    }),
+    { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+  )
+}
+
+function mockServer(
+  rounds: ConsiliumRound[],
+  triage: ConsiliumTriage[] = [],
+  streamFrames: unknown[] = [],
+) {
   const triageItems = [...triage]
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost')
@@ -145,6 +166,7 @@ function mockServer(rounds: ConsiliumRound[], triage: ConsiliumTriage[] = []) {
       return response({ total: rounds.length, items: rounds })
     if (path === '/rounds' && method === 'POST')
       return response({ ...makeRound({ id: 'round-new', status: 'running', answers: [] }) }, 202)
+    if (path.endsWith('/stream')) return sseResponse(streamFrames)
     if (path.endsWith('/summary'))
       return response(
         makeRound({ id: 'round-sum', kind: 'summary', source_round_id: 'round-1' }),
@@ -162,6 +184,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+beforeEach(() => {
+  // Настройки «Опций» общие для файла: сброс, чтобы роли одного теста
+  // не подменили роли другого
+  localStorage.clear()
+  useConsiliumOptions.getState().reset()
+})
+
 describe('CaseDiscussion', () => {
   it('показывает ответы советников и раскрытия без запуска модели', async () => {
     const fetchMock = mockServer([makeRound()])
@@ -177,6 +206,50 @@ describe('CaseDiscussion', () => {
     expect(await screen.findByText(/зафиксированные материалы/)).toBeInTheDocument()
     // Рендер и раскрытия не запускают модель — POST отсутствует
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('роли раунда берутся из панели «Опции» (стор), а не из локального состояния', async () => {
+    useConsiliumOptions.getState().setRoles(['psychological'])
+    const fetchMock = mockServer([])
+    renderWithProviders(<CaseDiscussion current={testCase} />)
+
+    // Кнопка включается после загрузки снимков (иначе клик по disabled — no-op)
+    const button = await screen.findByRole('button', { name: 'Ответы советников' })
+    await waitFor(() => expect(button).toBeEnabled())
+    fireEvent.click(button)
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')
+      expect(posts).toHaveLength(1)
+      const body = JSON.parse(String(posts[0][1]?.body))
+      expect(body.roles).toEqual(['psychological'])
+    })
+  })
+
+  it('опция «раскрывать сразу» показывает разделы ответов без нажатий', async () => {
+    useConsiliumOptions.getState().setOpenAnswerSections(true)
+    mockServer([makeRound()])
+    renderWithProviders(<CaseDiscussion current={testCase} />)
+
+    // У трёх советников одинаковый текст — все три раскрыты без нажатий
+    expect(await screen.findAllByText('Вариант один.')).toHaveLength(3)
+    expect(screen.getAllByText(/зафиксированные материалы/)).toHaveLength(3)
+  })
+
+  it('стриминг: живой ответ модели виден до завершения раунда', async () => {
+    mockServer([makeRound({ id: 'round-run', status: 'running', answers: [] })], [], [
+      { type: 'role_started', role: 'psychological', status: 'streaming' },
+      { type: 'delta', role: 'psychological', delta: '## Замечено\nЗаметили (' },
+      { type: 'delta', role: 'psychological', delta: 'psychological).' },
+    ])
+    renderWithProviders(<CaseDiscussion current={testCase} />)
+
+    // Индикация запроса к внешней модели + растущий текст из стрима
+    expect(await screen.findByText('Запрос к внешней модели выполняется…')).toBeInTheDocument()
+    const live = await screen.findByTestId('answer-live')
+    expect(live.textContent).toContain('Модель отвечает')
+    expect(live.textContent).toContain('Заметили (psychological).')
+    // Остальные роли ждут ответа — скелетоны остаются
+    expect(screen.getAllByTestId('answer-skeleton')).toHaveLength(2)
   })
 
   it('running-раунд показывает скелетоны ролей', async () => {

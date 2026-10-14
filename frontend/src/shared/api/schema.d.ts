@@ -2118,6 +2118,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consilium/cases/{case_id}/rounds/{round_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Round
+         * @description Стрим событий раунда: частичные тексты ролей по мере генерации (срез 0011).
+         *
+         *     Живой поток — только удобство: фолбэк клиента остаётся прежним (поллинг
+         *     `GET /rounds/{id}`), готовые ответы приходят из БД. Тексты в файл задачи не
+         *     попадают (§8), частичный текст живёт в RAM процесса.
+         */
+        get: operations["stream_round_api_v1_consilium_cases__case_id__rounds__round_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/consilium/cases/{case_id}/rounds/{round_id}/summary": {
         parameters: {
             query?: never;
@@ -5582,6 +5606,33 @@ export interface components {
             items: components["schemas"]["ConsiliumSource"][];
             /** Warnings */
             warnings?: string[];
+        };
+        /**
+         * ConsiliumStreamEvent
+         * @description Событие SSE-стрима раунда (срез 0011): один фрейм `event:` + JSON.
+         *
+         *     Обычный ``BaseModel`` (без ``str_strip_whitespace``): ``delta`` — кусочек
+         *     текста как есть, обрезка краёв исказила бы склейку потока. Поля заполняются
+         *     по типу события: ``delta`` — только у ``delta``, ``status`` — у смены
+         *     состояния роли (``role_started``/``role_done``); ``error`` перед ``round_done``
+         *     завершает поток, поздних дельт после него нет.
+         */
+        ConsiliumStreamEvent: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "role_started" | "delta" | "role_done" | "round_done" | "error" | "ping";
+            /** Role */
+            role?: string | null;
+            /** Delta */
+            delta?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Status */
+            status?: ("waiting" | "streaming" | "done" | "failed") | null;
+            /** Error */
+            error?: string | null;
         };
         /**
          * ConsiliumTriageCreate
@@ -12847,6 +12898,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsiliumRoundOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_round_api_v1_consilium_cases__case_id__rounds__round_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE-поток событий раунда: фреймы `event:` + JSON `ConsiliumStreamEvent` (role_started/delta/role_done/error/ping); после `round_done` поздних дельт нет */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumStreamEvent"];
+                    "text/event-stream": components["schemas"]["ConsiliumStreamEvent"];
                 };
             };
             /** @description Validation Error */

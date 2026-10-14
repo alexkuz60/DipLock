@@ -5421,6 +5421,63 @@
         }
       }
     },
+    "/api/v1/consilium/cases/{case_id}/rounds/{round_id}/stream": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Stream Round",
+        "description": "Стрим событий раунда: частичные тексты ролей по мере генерации (срез 0011).\n\nЖивой поток — только удобство: фолбэк клиента остаётся прежним (поллинг\n`GET /rounds/{id}`), готовые ответы приходят из БД. Тексты в файл задачи не\nпопадают (§8), частичный текст живёт в RAM процесса.",
+        "operationId": "stream_round_api_v1_consilium_cases__case_id__rounds__round_id__stream_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "round_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Round Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE-поток событий раунда: фреймы `event:` + JSON `ConsiliumStreamEvent` (role_started/delta/role_done/error/ping); после `round_done` поздних дельт нет",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumStreamEvent"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumStreamEvent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/consilium/cases/{case_id}/rounds/{round_id}/summary": {
       "post": {
         "tags": [
@@ -12201,6 +12258,89 @@
         ],
         "title": "ConsiliumSourcesPage",
         "description": "Каталог до пагинации, со списком отсутствующих записей."
+      },
+      "ConsiliumStreamEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "role_started",
+              "delta",
+              "role_done",
+              "round_done",
+              "error",
+              "ping"
+            ],
+            "title": "Type"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "waiting",
+                  "streaming",
+                  "done",
+                  "failed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "ConsiliumStreamEvent",
+        "description": "Событие SSE-стрима раунда (срез 0011): один фрейм `event:` + JSON.\n\nОбычный ``BaseModel`` (без ``str_strip_whitespace``): ``delta`` — кусочек\nтекста как есть, обрезка краёв исказила бы склейку потока. Поля заполняются\nпо типу события: ``delta`` — только у ``delta``, ``status`` — у смены\nсостояния роли (``role_started``/``role_done``); ``error`` перед ``round_done``\nзавершает поток, поздних дельт после него нет."
       },
       "ConsiliumTriageCreate": {
         "properties": {

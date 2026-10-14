@@ -2,6 +2,8 @@
 import { useMemo, useState } from 'react'
 import { apiErrorText } from '@/shared/api/client'
 import type { ConsiliumAnswer, ConsiliumRound } from '@/shared/api/types'
+import type { LiveRole, LiveRound } from '@/shared/lib/roundStream'
+import { useConsiliumOptions } from '@/shared/state/consiliumOptions'
 import { Button } from '@/shared/ui/Button'
 import { ErrorBlock } from '@/shared/ui/StateViews'
 import { StatusPill, type StatusPillTone } from '@/shared/ui/StatusPill'
@@ -60,6 +62,8 @@ function AnswerCard({
   retrying: boolean
 }) {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  /** Развернутость по умолчанию — опция «Раскрывать разделы ответов сразу» (панель «Опции»). */
+  const openAll = useConsiliumOptions((state) => state.options.openAnswerSections)
   const sections = useMemo(
     () => (answer.text ? parseSections(answer.text) : []),
     [answer.text],
@@ -70,7 +74,8 @@ function AnswerCard({
     return map
   }, [sections])
   const recognized = sections.some((section) => section.title in SECTION_TITLES)
-  const toggle = (key: string) => setRevealed((previous) => ({ ...previous, [key]: !previous[key] }))
+  const shown = (key: string) => revealed[key] ?? openAll
+  const toggle = (key: string) => setRevealed((previous) => ({ ...previous, [key]: !shown(key) }))
   const action = (key: string, title: string, section?: Section) => (
     <Button
       variant="ghost"
@@ -79,7 +84,7 @@ function AnswerCard({
       onClick={() => toggle(key)}
     >
       {title}
-      {section ? (revealed[key] ? ' −' : ' +') : ''}
+      {section ? (shown(key) ? ' −' : ' +') : ''}
     </Button>
   )
 
@@ -124,7 +129,7 @@ function AnswerCard({
                 return (
                   <div key={key}>
                     {action(key, title, section)}
-                    {section && revealed[key] && (
+                    {section && shown(key) && (
                       <div className="mt-1 rounded border border-border bg-bg-2 p-2 text-sm">
                         <p className="font-medium text-fg-2">{section.title}</p>
                         <p>{section.body}</p>
@@ -145,9 +150,9 @@ function AnswerCard({
       <div>
         <Button variant="ghost" onClick={() => toggle('provenance')}>
           На чём основано?
-          {revealed.provenance ? ' −' : ' +'}
+          {shown('provenance') ? ' −' : ' +'}
         </Button>
-        {revealed.provenance && (
+        {shown('provenance') && (
           <div className="mt-1 space-y-1 rounded border border-border bg-bg-2 p-2 text-sm text-fg-2">
             <p>
               Основание: снимок досье {snapshotId.slice(0, 8)}… — зафиксированные материалы и
@@ -169,9 +174,33 @@ function AnswerCard({
   )
 }
 
+/** Живой ответ (срез 0011): текст модели растёт по мере стриминга. */
+function LiveAnswer({ role, live }: { role: string; live: LiveRole }) {
+  return (
+    <article
+      className="space-y-2 rounded-lg border border-border p-3"
+      data-testid="answer-live"
+      role="status"
+    >
+      <header className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="font-medium text-fg-0">{roleLabel(role)}</span>
+        <StatusPill tone="accent">Модель отвечает…</StatusPill>
+        <span className="text-fg-2">{live.text.length} симв.</span>
+      </header>
+      <p className="whitespace-pre-wrap text-fg-1">
+        {live.text}
+        <span aria-hidden="true" className="animate-pulse">
+          ▍
+        </span>
+      </p>
+    </article>
+  )
+}
+
 export function RoundCard({
   current,
   round,
+  live,
   rolesFilter,
   canSummary,
   summaryPending,
@@ -182,6 +211,8 @@ export function RoundCard({
 }: {
   current: ConsiliumCase
   round: ConsiliumRound
+  /** Частичные тексты идущего запуска из стрима (нет — только скелетоны/ответы) */
+  live?: LiveRound | null
   rolesFilter: readonly string[]
   canSummary: boolean
   summaryPending: boolean
@@ -207,6 +238,11 @@ export function RoundCard({
       <header className="flex flex-wrap items-center gap-2">
         <h3 className="font-semibold text-fg-0">{kindLabel(round.kind)}</h3>
         <StatusPill tone={status.tone}>{status.label}</StatusPill>
+        {round.status === 'running' && (
+          <span role="status" className="text-sm text-fg-2">
+            Запрос к внешней модели выполняется…
+          </span>
+        )}
         <span className="text-sm text-fg-2">
           снимок {round.snapshot_id.slice(0, 8)}… · {new Date(round.created_at).toLocaleString('ru')}
         </span>
@@ -223,7 +259,26 @@ export function RoundCard({
         {visibleRoles.map((role) => {
           const attempts = attemptsByRole.get(role) ?? []
           const latest = attempts[attempts.length - 1]
+          const liveRole = live?.roles[role]
           if (!latest) {
+            // Живой стрим: модель уже отвечает — текст виден без ожидания поллинга
+            if (liveRole && (liveRole.text || liveRole.status === 'streaming')) {
+              return <LiveAnswer key={`live-${role}`} role={role} live={liveRole} />
+            }
+            if (liveRole?.status === 'failed') {
+              return (
+                <article
+                  key={`live-${role}`}
+                  className="space-y-1 rounded-lg border border-border p-3"
+                  data-testid="answer-live-failed"
+                >
+                  <span className="font-medium text-fg-0">{roleLabel(role)}</span>
+                  <p className="text-sm text-danger">
+                    Модель не ответила: {liveRole.error ?? 'неизвестная ошибка'}
+                  </p>
+                </article>
+              )
+            }
             return (
               <article
                 key={role}

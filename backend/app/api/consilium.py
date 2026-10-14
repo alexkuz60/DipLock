@@ -1,9 +1,11 @@
 """HTTP-контракт основания Консилиума: работа выполняется сервисом хранения."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api.private import PrivateRoute
@@ -39,6 +41,7 @@ from app.schemas.consilium import (
     ConsiliumSnapshotCreate,
     ConsiliumSnapshotsPage,
     ConsiliumSourcesPage,
+    ConsiliumStreamEvent,
     ConsiliumTriageCreate,
     ConsiliumTriageOut,
     ConsiliumTriagePage,
@@ -51,6 +54,7 @@ from app.services.consilium import (
     rounds_store,
     sources,
     store,
+    streams,
     triage,
 )
 
@@ -294,6 +298,76 @@ async def get_round(case_id: str, round_id: str, response: Response) -> Consiliu
     """Раунд со всеми попытками; прерванная операция видна в статусе строки."""
     async with guarded(response):
         return await rounds_store.get_round(case_id, round_id)
+
+
+_SSE_PING_S = 15.0
+
+
+def _sse_frame(event: ConsiliumStreamEvent) -> str:
+    """Один фрейм SSE: тип события и JSON-данные (без обрезки дельт)."""
+    return f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
+
+
+@router.get(
+    "/cases/{case_id}/rounds/{round_id}/stream",
+    responses={
+        200: {
+            "model": ConsiliumStreamEvent,
+            "description": (
+                "SSE-поток событий раунда: фреймы `event:` + JSON "
+                "`ConsiliumStreamEvent` (role_started/delta/role_done/error/ping); "
+                "после `round_done` поздних дельт нет"
+            ),
+            "content": {
+                "text/event-stream": {
+                    "schema": {"$ref": "#/components/schemas/ConsiliumStreamEvent"},
+                },
+            },
+        },
+    },
+)
+async def stream_round(
+    case_id: str, round_id: str, response: Response,
+) -> StreamingResponse:
+    """Стрим событий раунда: частичные тексты ролей по мере генерации (срез 0011).
+
+    Живой поток — только удобство: фолбэк клиента остаётся прежним (поллинг
+    `GET /rounds/{id}`), готовые ответы приходят из БД. Тексты в файл задачи не
+    попадают (§8), частичный текст живёт в RAM процесса.
+    """
+    async with guarded(response):
+        # Принадлежность раунда делу: чужой/отсутствующий — честный 404
+        await rounds_store.get_round(case_id, round_id)
+
+    async def frames() -> AsyncIterator[str]:
+        progress = streams.get_round(round_id)
+        if progress is None:
+            # Запуск завершён (или бэкенд перезапущен) — только round_done
+            yield _sse_frame(ConsiliumStreamEvent(type="round_done"))
+            return
+        sent = 0
+        while True:
+            progress.changed.clear()
+            while sent < len(progress.log):
+                yield _sse_frame(progress.log[sent])
+                sent += 1
+            if progress.finished:
+                if progress.error:
+                    yield _sse_frame(ConsiliumStreamEvent(type="error", error=progress.error))
+                yield _sse_frame(
+                    ConsiliumStreamEvent(type="round_done", error=progress.error),
+                )
+                return
+            try:
+                await asyncio.wait_for(progress.changed.wait(), timeout=_SSE_PING_S)
+            except TimeoutError:
+                yield _sse_frame(ConsiliumStreamEvent(type="ping"))
+
+    return StreamingResponse(
+        frames(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "private, no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post(

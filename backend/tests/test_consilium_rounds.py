@@ -109,6 +109,7 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     async def fake_chat(
         messages: list[dict[str, str]], *, route: str = "chat",
         max_tokens: int = 1024, client: Any = None,
+        on_delta: Any = None,
     ) -> llm_router.ChatResult:
         system = messages[0]["content"] if messages else ""
         role = role_of(system)
@@ -120,6 +121,11 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             f"## Чего не знаем\nПробел.\n## Вопрос добровольцу\nКак себя чувствовали?\n"
             f"## Следующий шаг\nУточнить условия."
         )
+        if on_delta is not None and text:
+            # Стриминг (0011): текст приходит кусочками, как у настоящего провайдера
+            mid = len(text) // 2
+            on_delta(text[:mid])
+            on_delta(text[mid:])
         return llm_router.ChatResult(
             text=text, provider_id="prov", model="model-x", latency_ms=5.0,
         )

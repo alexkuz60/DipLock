@@ -1008,3 +1008,117 @@ def test_put_validates_decide_route_protocol(client, router_config):
     })
     assert good.status_code == 200, good.text
     assert good.json()["routes"]["decide"] == jev_id
+
+
+# ---------- стриминг ответа (срез 0011) ----------
+
+
+def _sse_body(frames: list[dict]) -> bytes:
+    """Тело SSE-ответа провайдера: фреймы `data:` + завершающий [DONE]."""
+    lines = [f"data: {json.dumps(frame)}\n" for frame in frames]
+    lines.append("data: [DONE]\n")
+    return "".join(lines).encode("utf-8")
+
+
+async def _chat_state() -> llm_router.RouterState:
+    provider = llm_router.Provider(
+        id="prov", label="P", protocol="openai",
+        base_url="https://api.example.com/v1", model="m1",
+        enabled=True, api_key=_TEST_KEY,
+    )
+    return llm_router.RouterState(
+        providers=(provider,), routes={"chat": "prov", "chat_model": None, "transcribe": None},
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_openai_deltas(monkeypatch):
+    """Стрим openai: дельты уходят в on_delta и складываются в текст без обрезки."""
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, content=_sse_body([
+            {"choices": [{"delta": {"content": "При"}}]},
+            {"choices": [{"delta": {"content": " вет"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+        ]))
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    monkeypatch.setattr(llm_router, "get_state", _chat_state)
+    seen: list[str] = []
+    result = await llm_router.chat(
+        [{"role": "user", "content": "привет"}], on_delta=seen.append,
+    )
+
+    assert bodies[0]["stream"] is True
+    assert seen == ["При", " вет"]
+    assert result.text == "При вет"
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_anthropic_deltas(monkeypatch):
+    """Стрим anthropic: content_block_delta → дельты, message_delta → stop_reason."""
+    async def anthropic_state() -> llm_router.RouterState:
+        provider = llm_router.Provider(
+            id="prov", label="P", protocol="anthropic",
+            base_url="https://api.example.com", model="m1",
+            enabled=True, api_key=_TEST_KEY,
+        )
+        return llm_router.RouterState(
+            providers=(provider,), routes={"chat": "prov", "chat_model": None, "transcribe": None},
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("x-api-key") == _TEST_KEY
+        return httpx.Response(200, content=_sse_body([
+            {"type": "message_start", "message": {}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "раз"}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "-два"}},
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}},
+        ]))
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    monkeypatch.setattr(llm_router, "get_state", anthropic_state)
+    seen: list[str] = []
+    result = await llm_router.chat(
+        [{"role": "user", "content": "привет"}], on_delta=seen.append,
+    )
+
+    assert seen == ["раз", "-два"]
+    assert result.text == "раз-два"
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_reasoning_only_is_honest(monkeypatch):
+    """Стрим с одним рассуждением thinking-модели — честная ошибка, не пустота."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=_sse_body([
+            {"choices": [{"delta": {"reasoning_content": "думаю-думаю"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "length"}]},
+        ]))
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    monkeypatch.setattr(llm_router, "get_state", _chat_state)
+    with pytest.raises(llm_router.LlmRouterError, match="рассуждении"):
+        await llm_router.chat(
+            [{"role": "user", "content": "привет"}], on_delta=lambda _: None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_chat_stream_http_error_is_honest(monkeypatch):
+    """Ошибка провайдера в стриме честная и без ключа в тексте."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": f"oops {_TEST_KEY}"}})
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    monkeypatch.setattr(llm_router, "get_state", _chat_state)
+    with pytest.raises(llm_router.LlmRouterError) as excinfo:
+        await llm_router.chat(
+            [{"role": "user", "content": "привет"}], on_delta=lambda _: None,
+        )
+    assert "Провайдер ответил 500" in str(excinfo.value)
+    assert _TEST_KEY not in str(excinfo.value)

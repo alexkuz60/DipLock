@@ -4,28 +4,35 @@
  * Запуск — только кнопками; состояние раунда живёт на сервере (поллинг при
  * «running»), фиктивных ответов ИИ нет: без маршрута роутера — честный отказ.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiErrorText } from '@/shared/api/client'
 import { consiliumApi } from '@/shared/api/consilium'
 import type { ConsiliumCase, ConsiliumRoundCreate } from '@/shared/api/types'
+import {
+  applyStreamEvent,
+  emptyLiveRound,
+  subscribeRoundStream,
+  type LiveRound,
+} from '@/shared/lib/roundStream'
+import { useConsiliumOptions } from '@/shared/state/consiliumOptions'
 import { Button } from '@/shared/ui/Button'
-import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { SelectField } from '@/shared/ui/SelectField'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { QueryState } from './common'
-import { advisorRoles } from './options'
+import { advisorRoleLabel } from './options'
 import { CaseTriage } from './CaseTriage'
 import { CaseRoundPlan } from './CaseRoundPlan'
 import { RoundCard } from './RoundCard'
 import { useCaseAction } from './useCaseAction'
 
-const ADVISOR_ROLES = advisorRoles.filter((role) => role.value !== 'summary')
-
 export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
   const [snapshotId, setSnapshotId] = useState('')
-  const [roles, setRoles] = useState<string[]>(ADVISOR_ROLES.map((role) => role.value))
-  const [filter, setFilter] = useState<string[]>(ADVISOR_ROLES.map((role) => role.value))
+  // Разовые настройки (роли раунда, фильтр советников) живут в панели «Опции»
+  // (`consiliumOptions`): правка там ничего не запускает, старт — только кнопками.
+  const roles = useConsiliumOptions((state) => state.options.roles)
+  const setRoles = useConsiliumOptions((state) => state.setRoles)
+  const filter = useConsiliumOptions((state) => state.options.roleFilter)
   const readOnly = current.status !== 'open'
 
   const snapshots = useQuery({
@@ -78,9 +85,17 @@ export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
   )
   const busy = running || start.isPending || summary.isPending || retry.isPending
 
-  function toggle(list: string[], value: string): string[] {
-    return list.includes(value) ? list.filter((item) => item !== value) : [...list, value]
-  }
+  // Живой стрим (срез 0011): частичные тексты идущего запуска видны сразу;
+  // готовые ответы всё равно приходят поллингом из БД (стрим — только удобство)
+  const runningRoundId = items.find((item) => item.status === 'running')?.id ?? ''
+  const [live, setLive] = useState<LiveRound | null>(null)
+  useEffect(() => {
+    if (!runningRoundId) return
+    setLive(emptyLiveRound(runningRoundId))
+    return subscribeRoundStream(current.id, runningRoundId, (event) => {
+      setLive((previous) => applyStreamEvent(previous, runningRoundId, event))
+    })
+  }, [current.id, runningRoundId])
 
   function startRound(kind: 'initial' | 'remarks', sourceRoundId?: string) {
     if (!selected) return
@@ -124,16 +139,11 @@ export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
             onChange={setSnapshotId}
           />
         )}
-        <div className="flex flex-wrap gap-3">
-          {ADVISOR_ROLES.map((role) => (
-            <CheckboxRow
-              key={role.value}
-              label={role.label}
-              checked={roles.includes(role.value)}
-              onChange={() => setRoles((previous) => toggle(previous, role.value))}
-            />
-          ))}
-        </div>
+        <p className="text-sm text-fg-2">
+          Роли раунда:{' '}
+          {roles.length > 0 ? roles.map(advisorRoleLabel).join(', ') : 'не выбраны'} — состав
+          задаётся в панели «Опции» справа или подсказкой Jev.
+        </p>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="primary"
@@ -162,18 +172,6 @@ export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
         onApply={(recommended) => setRoles(recommended)}
       />
 
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Фильтр советников">
-        {ADVISOR_ROLES.map((role) => (
-          <Button
-            key={role.value}
-            variant={filter.includes(role.value) ? 'primary' : 'secondary'}
-            onClick={() => setFilter((previous) => toggle(previous, role.value))}
-          >
-            {role.label}
-          </Button>
-        ))}
-      </div>
-
       <QueryState
         loading={rounds.isPending}
         error={rounds.error}
@@ -191,6 +189,7 @@ export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
             key={round.id}
             current={current}
             round={round}
+            live={live?.roundId === round.id ? live : null}
             rolesFilter={filter}
             canSummary={
               !readOnly &&

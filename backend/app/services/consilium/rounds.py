@@ -28,7 +28,7 @@ from app.schemas.consilium import (
     ConsiliumSnapshot,
 )
 from app.services import llm_router
-from app.services.consilium import dossier, rounds_store, store
+from app.services.consilium import dossier, rounds_store, store, streams
 from app.services.job_manager import Job, JobCancelledError
 from app.services.job_manager import job_manager as jobs
 
@@ -241,20 +241,43 @@ async def _ask(
     model_label: str | None,
     max_tokens: int,
     warnings: list[str],
+    hub: streams.RoundProgress | None = None,
 ) -> rounds_store.AnswerOutcome:
-    """Один вызов советника: отказ роли — её статус, не крушение раунда."""
+    """Один вызов советника: отказ роли — её статус, не крушение раунда.
+
+    ``hub`` — стриминг (срез 0011): события роли уходят подписчикам SSE по мере
+    генерации; текст в БД пишется только итоговый, дельты остаются в RAM.
+    """
     started = time.perf_counter()
+    if hub is not None:
+        hub.role_started(advisor.role)
+
+    def on_delta(chunk: str) -> None:
+        if hub is not None:
+            hub.append_delta(advisor.role, chunk)
+
     try:
-        result = await llm_router.chat(messages, max_tokens=max_tokens)
+        result = await llm_router.chat(
+            messages, max_tokens=max_tokens, on_delta=on_delta,
+        )
     except Exception as exc:  # провайдер, сеть, тайм-аут — честная ошибка роли
         logger.warning("Советник %s: вызов модели не удался: %s", advisor.role, exc)
+        error = str(exc) or type(exc).__name__
+        if hub is not None:
+            hub.role_finished(advisor.role, status="failed", error=error)
         return rounds_store.AnswerOutcome(
-            role=advisor.role, status="failed", error=str(exc) or type(exc).__name__,
+            role=advisor.role, status="failed", error=error,
             instruction_version=advisor.instruction_version, model=model_label,
             latency_ms=round((time.perf_counter() - started) * 1000, 1),
         )
     text = (result.text or "").strip()
     if not text:
+        if hub is not None:
+            hub.role_finished(
+                advisor.role, status="failed",
+                error="Модель вернула пустой ответ",
+                model=f"{result.provider_id}/{result.model}",
+            )
         return rounds_store.AnswerOutcome(
             role=advisor.role, status="failed", error="Модель вернула пустой ответ",
             instruction_version=advisor.instruction_version,
@@ -262,6 +285,10 @@ async def _ask(
         )
     if result.truncated:
         warnings.append(f"Ответ «{advisor.label}» усечён лимитом токенов")
+    if hub is not None:
+        hub.role_finished(
+            advisor.role, status="done", model=f"{result.provider_id}/{result.model}",
+        )
     return rounds_store.AnswerOutcome(
         role=advisor.role, status="ok", text=result.text,
         model=f"{result.provider_id}/{result.model}",
@@ -321,6 +348,8 @@ def _submit(
     kind = str(round.kind)
     stage = _STAGES[kind]
     max_tokens = settings.consilium_answer_max_tokens
+    # Стриминг (0011): журнал событий раунда живёт в RAM, пока идёт запуск
+    hub = streams.open_round(str(round.id), roles)
 
     async def worker(progress: Any) -> dict[str, Any]:
         advisors = [ADVISOR_BY_ROLE[role] for role in roles]
@@ -330,7 +359,7 @@ def _submit(
             asyncio.create_task(_ask(
                 advisor,
                 build_messages(advisor, question, digest, kind, colleagues),
-                round.model, max_tokens, warnings,
+                round.model, max_tokens, warnings, hub,
             )): advisor
             for advisor in advisors
         }
@@ -349,11 +378,13 @@ def _submit(
             for task in tasks:
                 task.cancel()
             await rounds_store.mark_aborted(round.id, "cancelled", "Отменено пользователем")
+            streams.close_round(str(round.id), "Отменено пользователем")
             raise
         except Exception as exc:
             for task in tasks:
                 task.cancel()
             await rounds_store.mark_aborted(round.id, "failed", str(exc))
+            streams.close_round(str(round.id), str(exc))
             raise
         progress(stage, 1.0, "Ответы получены")
         # В файл задачи не попадают тексты — только счётчики (§8)
@@ -369,7 +400,10 @@ def _submit(
         except Exception as exc:
             # Обязательная запись не удалась: строка раунда не должна «висеть»
             await rounds_store.mark_aborted(round.id, "failed", str(exc))
+            streams.close_round(str(round.id), str(exc))
             raise
+        # Ответы в БД — подписчики стрима получают round_done и дочитывают их поллингом
+        streams.close_round(str(round.id))
 
     job = jobs.submit(
         "consilium_round", None, worker,

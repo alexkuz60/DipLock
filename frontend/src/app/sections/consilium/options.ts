@@ -22,6 +22,11 @@ export const advisorRoles = [
   { value: 'summary', label: 'Итог консилиума' },
 ] as const
 
+/** Подпись роли советника; неизвестная роль показывается как есть (без выдумывания). */
+export function advisorRoleLabel(role: string): string {
+  return advisorRoles.find((item) => item.value === role)?.label ?? role
+}
+
 export const roundKinds = [
   { value: 'initial', label: 'Раунд ответов' },
   { value: 'remarks', label: 'Замечания коллег' },

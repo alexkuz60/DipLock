@@ -54,6 +54,7 @@
 | `dipoleCalc.ts` | `useDipoleCalc` | `diplock.dipoleCalc` | задача расчёта, результат, порог «КД», окно FFT, окно уточнения (`refineHalfwinMs`), playback, `seekSeq` |
 | `tableParams.ts` | `useTableParams` | `diplock.table` | сортировка и состав колонок таблицы (только отображение) |
 | `summaryReport.ts` | `useSummaryReport` | `diplock.summary` | параметры пакета автоотчёта (полосы `bandKeys`, шаг сетки), идущая задача `kind=report`, результат и ошибка (результат/задача сессионные — сбрасываются при смене записи, `SummarySection`); вид отчёта `kind` и отчёты группового анализа (выбор источника `compareJobId`/`groupRunId`, сборка `buildCompareReport`/`buildGroupReport` — только кнопка, §3.9.8; состояние сессии, не персистится) |
+| `consiliumOptions.ts` | `useConsiliumOptions` | `diplock.consilium` | разовые настройки Консилиума (срез 0014): роли запуска раунда, фильтр советников, «раскрывать разделы ответов сразу» — правая панель «Опции» |
 
 Правила:
 

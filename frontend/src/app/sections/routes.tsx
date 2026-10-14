@@ -46,7 +46,7 @@ import {
 } from './Stubs'
 import { getSection, type SectionId } from './registry'
 import { ConsiliumSection } from './consilium/ConsiliumSection'
-import { ConsiliumPanel } from './consilium/common'
+import { ConsiliumOptionsPanel } from './consilium/ConsiliumOptionsPanel'
 
 type SectionModule = {
   Component: ComponentType
@@ -96,7 +96,7 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
     ToolActions: SummaryToolActions,
   },
   emolab: { Component: EmoLabSection, Panel: EmoLabPanel },
-  consilium: { Component: ConsiliumSection, Panel: ConsiliumPanel },
+  consilium: { Component: ConsiliumSection, Panel: ConsiliumOptionsPanel },
   neuroaudio: { Component: NeuroAudioSection, Panel: NeuroAudioPanel },
   neuromusic: {
     Component: NeuromusicSection,

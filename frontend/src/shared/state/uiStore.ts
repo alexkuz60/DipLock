@@ -40,7 +40,17 @@ type UiState = {
 }
 
 const DEFAULTS = {
-  rightPanelOpen: { edf: true, eeg: true, dipoles: true, table: true, group: true, neuromusic: true } as Record<string, boolean>,
+  // consilium — с панелью «Опции» по умолчанию: разовые настройки обсуждения
+  // (роли, фильтр, раскрытия) должны быть видны без поиска (срез 0014).
+  rightPanelOpen: {
+    edf: true,
+    eeg: true,
+    dipoles: true,
+    table: true,
+    group: true,
+    neuromusic: true,
+    consilium: true,
+  } as Record<string, boolean>,
   collapsedPanels: {} as Record<string, boolean>,
   fontScale: 'normal' as FontScale,
   density: 'normal' as Density,

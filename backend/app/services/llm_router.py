@@ -16,6 +16,7 @@ import json
 import os
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -605,13 +606,32 @@ def _provider_error(response: httpx.Response, api_key: str | None) -> str:
     return _sanitize(f"Провайдер ответил {response.status_code}: {detail}", api_key)
 
 
-def _extract_completion(protocol: LlmProtocol, data: dict) -> tuple[str, bool]:
-    """Достать текст ответа модели и признак обрезки по бюджету токенов.
+def _honest_text(text: str | None, truncated: bool, reasoning_chars: int) -> str:
+    """Честный итог вызова: пустой/только-рассуждение текст не маскируется.
 
     Thinking-модели отдают рассуждение отдельным полем (``reasoning_content``),
     а итоговый ``content`` может остаться пустым (бюджет ушёл на рассуждение) —
     такое мы не маскируем под ответ, а объясняем в тексте ошибки.
     """
+    if isinstance(text, str) and text.strip():
+        return text
+    if truncated and reasoning_chars:
+        raise LlmRouterError(
+            f"Бюджет токенов исчерпан на рассуждении (thinking), "
+            f"итоговый текст пуст (рассуждение {reasoning_chars} симв.)",
+        )
+    if truncated:
+        raise LlmRouterError("Бюджет токенов исчерпан, итоговый текст пуст")
+    if reasoning_chars:
+        raise LlmRouterError(
+            f"Модель вернула только рассуждение (thinking, {reasoning_chars} симв.), "
+            "итоговый текст пуст",
+        )
+    raise LlmRouterError("Провайдер вернул пустой ответ модели")
+
+
+def _extract_completion(protocol: LlmProtocol, data: dict) -> tuple[str, bool]:
+    """Достать текст ответа модели и признак обрезки по бюджету токенов."""
     finish: str | None = None
     reasoning_chars = 0
     try:
@@ -630,21 +650,56 @@ def _extract_completion(protocol: LlmProtocol, data: dict) -> tuple[str, bool]:
     except (KeyError, IndexError, TypeError) as exc:
         raise LlmRouterError("Провайдер вернул ответ без текста модели") from exc
     truncated = finish in {"length", "max_tokens"}
-    if isinstance(text, str) and text.strip():
-        return text, truncated
-    if truncated and reasoning_chars:
-        raise LlmRouterError(
-            f"Бюджет токенов исчерпан на рассуждении (thinking), "
-            f"итоговый текст пуст (рассуждение {reasoning_chars} симв.)",
-        )
-    if truncated:
-        raise LlmRouterError("Бюджет токенов исчерпан, итоговый текст пуст")
-    if reasoning_chars:
-        raise LlmRouterError(
-            f"Модель вернула только рассуждение (thinking, {reasoning_chars} симв.), "
-            "итоговый текст пуст",
-        )
-    raise LlmRouterError("Провайдер вернул пустой ответ модели")
+    return _honest_text(text, truncated, reasoning_chars), truncated
+
+
+def _stream_payload(line: str) -> dict[str, Any] | None:
+    """Строка SSE провайдера → данные события; комментарии и ``[DONE]`` — None."""
+    if not line.startswith("data:"):
+        return None
+    raw = line[5:].strip()
+    if not raw or raw == "[DONE]":
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _stream_delta(
+    protocol: LlmProtocol, data: dict[str, Any],
+) -> tuple[str, int, str | None]:
+    """Событие потока → (текст-дельта, символы рассуждения, finish_reason)."""
+    text = ""
+    reasoning = 0
+    finish: str | None = None
+    if protocol == "anthropic":
+        kind = data.get("type")
+        if kind == "content_block_delta":
+            delta = data.get("delta") or {}
+            if isinstance(delta, dict) and isinstance(delta.get("text"), str):
+                text = delta["text"]
+        elif kind == "message_delta":
+            stop = (data.get("delta") or {}).get("stop_reason")
+            if isinstance(stop, str):
+                finish = stop
+    else:
+        choices = data.get("choices")
+        if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+            choice = choices[0]
+            delta = choice.get("delta")
+            if isinstance(delta, dict):
+                if isinstance(delta.get("content"), str):
+                    text = delta["content"]
+                for key in ("reasoning_content", "reasoning"):
+                    value = delta.get(key)
+                    if isinstance(value, str):
+                        reasoning = max(reasoning, len(value))
+            stop = choice.get("finish_reason")
+            if isinstance(stop, str):
+                finish = stop
+    return text, reasoning, finish
 
 
 async def _chat_completion(
@@ -654,11 +709,14 @@ async def _chat_completion(
     max_tokens: int,
     model: str | None = None,
     client: httpx.AsyncClient | None = None,
+    on_delta: Callable[[str], None] | None = None,
 ) -> ChatResult:
     """Один вызов чата провайдера (openai или anthropic) без утечки ключа.
 
     ``model`` — конкретная модель из списка провайдера (пробы идут перебором);
     без неё уходит список как есть — только для одиночной модели.
+    ``on_delta`` — стриминг ответа (срез 0011): колбэк получает кусочки текста
+    по мере генерации; без него запрос остаётся обычным (без ``stream``).
     """
     http = client or _client()
     chosen = model or provider.model
@@ -684,6 +742,42 @@ async def _chat_completion(
             for key, value in provider.extra.items()
             if key not in _RESERVED_BODY_KEYS
         })
+
+    if on_delta is not None:
+        body["stream"] = True
+        parts: list[str] = []
+        reasoning_chars = 0
+        finish: str | None = None
+        started = time.perf_counter()
+        try:
+            async with http.stream("POST", url, json=body, headers=headers) as response:
+                if response.status_code != 200:
+                    await response.aread()
+                    raise LlmRouterError(_provider_error(response, provider.api_key))
+                async for line in response.aiter_lines():
+                    payload = _stream_payload(line)
+                    if payload is None:
+                        continue
+                    delta, reasoning, done = _stream_delta(provider.protocol, payload)
+                    reasoning_chars += reasoning
+                    if delta:
+                        parts.append(delta)
+                        on_delta(delta)
+                    if done is not None:
+                        finish = done
+        except httpx.HTTPError as exc:
+            raise LlmRouterError(
+                _sanitize(f"Провайдер недоступен: {exc}", provider.api_key),
+            ) from None
+        latency_ms = (time.perf_counter() - started) * 1000
+        truncated = finish in {"length", "max_tokens"}
+        return ChatResult(
+            text=_honest_text("".join(parts), truncated, reasoning_chars),
+            provider_id=provider.id,
+            model=chosen,
+            latency_ms=latency_ms,
+            truncated=truncated,
+        )
 
     started = time.perf_counter()
     try:
@@ -828,8 +922,13 @@ async def chat(
     route: LlmRouteKey = "chat",
     max_tokens: int = 1024,
     client: httpx.AsyncClient | None = None,
+    on_delta: Callable[[str], None] | None = None,
 ) -> ChatResult:
-    """Вызов модели по маршруту: примитив советников (Т3), без инструментов и очереди."""
+    """Вызов модели по маршруту: примитив советников (Т3), без инструментов и очереди.
+
+    ``on_delta`` — стриминг кусочков ответа (срез 0011): вызывается синхронно
+    по мере прихода текста; без него вызов обычный, без потока.
+    """
     state = await get_state()
     target = state.routes.get(route)
     if target is None:
@@ -846,6 +945,7 @@ async def chat(
         # выбранная модель маршрута; без выбора — первая модель списка кандидатов
         model=chosen if chosen in models else models[0],
         client=client,
+        on_delta=on_delta,
     )
 
 

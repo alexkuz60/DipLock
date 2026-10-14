@@ -43,6 +43,8 @@ export type ConsiliumRoundCreate = Schemas['ConsiliumRoundCreate']
 export type ConsiliumRoundAction = Schemas['ConsiliumRoundAction']
 export type ConsiliumAnswer = Schemas['ConsiliumAnswerOut']
 export type ConsiliumAnswerRetry = Schemas['ConsiliumAnswerRetry']
+/** Событие SSE-стрима раунда (срез 0011): дельты ролей и границы ответов. */
+export type ConsiliumStreamEvent = Schemas['ConsiliumStreamEvent']
 export type ConsiliumRecording = Schemas['ConsiliumRecording']
 export type ConsiliumSource = Schemas['ConsiliumSource']
 export type ConsiliumSourcesPage = Schemas['ConsiliumSourcesPage']

@@ -19,7 +19,8 @@ describe('uiStore', () => {
   })
 
   it('по умолчанию открывает панели рабочих разделов и закрывает новые', () => {
-    // neuromusic — с панелью опций (параметры рендера живут там, 06.10.2026)
+    // neuromusic — с панелью опций (параметры рендера живут там, 06.10.2026);
+    // consilium — с панелью «Опции» (разовые настройки обсуждения, срез 0014)
     expect(useUiStore.getState().rightPanelOpen).toEqual({
       edf: true,
       eeg: true,
@@ -27,6 +28,7 @@ describe('uiStore', () => {
       table: true,
       group: true,
       neuromusic: true,
+      consilium: true,
     })
     expect(useUiStore.getState().rightPanelOpen.server).toBeUndefined()
   })
