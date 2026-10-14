@@ -1,4 +1,4 @@
-"""Модельный роутер ИИ: провайдеры внешних API и маршруты chat/transcribe.
+"""Модельный роутер ИИ: провайдеры внешних API и маршруты chat/transcribe/decide.
 
 Локальные урезанные модели (llama.cpp) отклонены 10.10.2026 как советники
 Консилиума: работа идёт с полноценными моделями через внешние API (правила —
@@ -24,13 +24,13 @@ import httpx
 
 from app.core.config import settings
 
-LlmProtocol = Literal["openai", "anthropic"]
-LlmRouteKey = Literal["chat", "transcribe"]
+LlmProtocol = Literal["openai", "anthropic", "systemone"]
+LlmRouteKey = Literal["chat", "transcribe", "decide"]
 # Сценарии пробы советника (§10 стратегии): русский диалог, роль/структура ответа,
 # отказ при недостаточности данных, ненаводящие вопросы.
 LlmChatProbeScenarioKey = Literal["dialog", "role", "insufficient", "leading"]
 
-_ROUTE_KEYS: tuple[str, ...] = ("chat", "transcribe")
+_ROUTE_KEYS: tuple[str, ...] = ("chat", "transcribe", "decide")
 _ANTHROPIC_VERSION = "2023-06-01"
 _PROBE_PROMPT = "Ответь одним словом: готов"
 # Список моделей провайдера: id через запятую, пробы идут перебором по каждому.
@@ -38,8 +38,9 @@ _MAX_MODELS = 10
 _MAX_MODEL_CHARS = 200
 _MAX_ERROR_CHARS = 200
 _MAX_PROVIDERS = 20
-# Поля тела запроса, которые принадлежат роутеру, а не extra провайдера.
-_RESERVED_BODY_KEYS: frozenset[str] = frozenset({"model", "messages", "stream"})
+# Поля тела запроса, которые принадлежат роутеру, а не extra провайдера
+# (state/questions — тело решающего классификатора systemone).
+_RESERVED_BODY_KEYS: frozenset[str] = frozenset({"model", "messages", "stream", "state", "questions"})
 _MAX_EXTRA_KEYS = 30
 _MAX_EXTRA_CHARS = 4000
 
@@ -75,7 +76,9 @@ class RouterState:
 
     providers: tuple[Provider, ...] = ()
     routes: dict[str, str | None] = field(
-        default_factory=lambda: {"chat": None, "chat_model": None, "transcribe": None},
+        default_factory=lambda: {
+            "chat": None, "chat_model": None, "transcribe": None, "decide": None,
+        },
     )
 
 
@@ -271,6 +274,71 @@ class ChatProbeResult:
     models: tuple[ChatProbeModelResult, ...] = ()
 
 
+# --- Решающий классификатор (маршрут decide, System One): типизированные решения ---
+
+
+@dataclass(frozen=True)
+class DecideResult:
+    """Типизированные решения одного вызова: choice/score/noul без свободного текста.
+
+    ``answers`` — как в контракте Jev: ``{"имя": {"type": ..., ...}}``; вызывающий
+    слой проверяет и сохраняет решения (файл задачи их не хранит).
+    """
+
+    answers: dict[str, Any]
+    provider_id: str
+    model: str
+    latency_ms: float
+
+
+@dataclass(frozen=True)
+class DecideProbeModelResult:
+    """Итог пробы решающего классификатора для одной модели списка провайдера."""
+
+    model: str
+    ok: bool
+    latency_ms: float | None
+    answers: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class DecideProbeResult:
+    """Итог пробы decide: синтетический state, материалы дела не отправляются."""
+
+    ok: bool
+    provider_id: str
+    model: str | None
+    latency_ms: float | None
+    answers: dict[str, Any]
+    error: str | None
+    models: tuple[DecideProbeModelResult, ...] = ()
+
+
+# Проба decide (§5.2): синтетическое описание — проверка протокола и русского
+# языка инструкций; никакие материалы дела, записи и имена не участвуют.
+DECIDE_PROBE_STATE = (
+    "Учебное (синтетическое) описание досье: есть расчёт спектра с пиком около "
+    "10 Гц и краткий рассказ человека о спокойном состоянии после музыкальной пробы."
+)
+DECIDE_PROBE_QUESTIONS: dict[str, dict[str, Any]] = {
+    "probe_source": {
+        "type": "choice",
+        "instructions": "Какие источники описаны в учебном описании досье?",
+        "criteria": {
+            "measurements_and_report": "есть и измерения с расчётами, и рассказ человека",
+            "measurements_only": "есть только измерения и расчёты",
+            "report_only": "есть только рассказ человека",
+            "nothing": "описание пустое",
+        },
+    },
+    "probe_synthetic": {
+        "type": "noul",
+        "instructions": "Описание явно помечено как учебное (синтетическое)?",
+    },
+}
+
+
 def key_hint(api_key: str | None) -> str | None:
     """Маска ключа для UI (``…abcd``); None — ключ не задан. Сам ключ не отдаётся."""
     if not api_key:
@@ -319,7 +387,9 @@ def _read_state() -> RouterState:
         )
         for item in raw.get("providers", [])
     )
-    routes: dict[str, str | None] = {"chat": None, "chat_model": None, "transcribe": None}
+    routes: dict[str, str | None] = {
+        "chat": None, "chat_model": None, "transcribe": None, "decide": None,
+    }
     for key, value in dict(raw.get("routes", {})).items():
         if key in routes:
             routes[key] = str(value) if value else None
@@ -468,7 +538,9 @@ def _apply_update_sync(
         providers.append(provider)
 
     by_id = {provider.id: provider for provider in providers}
-    new_routes: dict[str, str | None] = {"chat": None, "chat_model": None, "transcribe": None}
+    new_routes: dict[str, str | None] = {
+        "chat": None, "chat_model": None, "transcribe": None, "decide": None,
+    }
     for key in _ROUTE_KEYS:
         target = routes.get(key)
         if target is None:
@@ -478,6 +550,14 @@ def _apply_update_sync(
         if key == "transcribe" and by_id[target].protocol != "openai":
             raise LlmRouterError(
                 "Маршрут распознавания поддерживает только совместимый (openai) API",
+            )
+        if key == "decide" and by_id[target].protocol != "systemone":
+            raise LlmRouterError(
+                "Маршрут решающего классификатора поддерживает только protocol=systemone (Jev)",
+            )
+        if key == "chat" and by_id[target].protocol == "systemone":
+            raise LlmRouterError(
+                "Маршрут chat не работает с решающим классификатором — выберите openai или anthropic",
             )
         new_routes[key] = target
 
@@ -698,6 +778,17 @@ async def probe(
 
     Несколько моделей провайдера — перебором по каждой (отдельный результат).
     """
+    if route == "decide":
+        result = await decide_probe(provider_id, client=client)
+        return ProbeResult(
+            ok=result.ok,
+            latency_ms=result.latency_ms,
+            model=result.model,
+            error=result.error,
+            models=tuple(ProbeModelResult(
+                model=item.model, ok=item.ok, latency_ms=item.latency_ms, error=item.error,
+            ) for item in result.models),
+        )
     provider = _find_provider(await get_state(), provider_id)
     if not provider.enabled:
         raise LlmRouterError("Провайдер выключен — включите его в настройках")
@@ -755,6 +846,158 @@ async def chat(
         # выбранная модель маршрута; без выбора — первая модель списка кандидатов
         model=chosen if chosen in models else models[0],
         client=client,
+    )
+
+
+def _extract_answers(data: dict) -> dict[str, Any]:
+    """Типизированные решения из ответа; неожиданный формат — честная ошибка.
+
+    Формат Jev: ``{"answers": {"имя": {"type": "choice"|"score"|"noul", ...}}}``;
+    свободного текста нет, поэтому «пустой» или не-JSON ответ не маскируется
+    под решение.
+    """
+    raw = data.get("answers")
+    if not isinstance(raw, dict) or not raw:
+        raise LlmRouterError("Решающий классификатор вернул ответ без решений")
+    answers: dict[str, Any] = {}
+    for name, item in raw.items():
+        if not isinstance(item, dict) or item.get("type") not in {"choice", "score", "noul"}:
+            raise LlmRouterError("Решающий классификатор вернул решения в неожиданном формате")
+        answers[str(name)] = item
+    return answers
+
+
+async def _decide_completion(
+    provider: Provider,
+    state: str | dict[str, Any] | list[Any],
+    questions: dict[str, dict[str, Any]],
+    *,
+    model: str | None = None,
+    client: httpx.AsyncClient | None = None,
+) -> DecideResult:
+    """Один вызов решающего классификатора (protocol systemone) без утечки ключа.
+
+    В отличие от чата роутер **не дописывает путь**: для ``systemone`` поле
+    ``base_url`` — полный адрес вызова, так как хосты Jev различаются путями
+    (``/v1/systemone``, ``/api/v1/decide``).
+    """
+    http = client or _client()
+    chosen = model or provider.model
+    headers = {"content-type": "application/json"}
+    if provider.api_key:
+        headers["Authorization"] = f"Bearer {provider.api_key}"
+    body: dict[str, Any] = {"model": chosen, "state": state, "questions": questions}
+    if provider.extra:
+        # Зарезервированные ключи отсекаются и здесь: файл мог быть отредактирован вручную.
+        body.update({
+            key: value
+            for key, value in provider.extra.items()
+            if key not in _RESERVED_BODY_KEYS
+        })
+
+    started = time.perf_counter()
+    try:
+        response = await http.post(provider.base_url, json=body, headers=headers)
+    except httpx.HTTPError as exc:
+        raise LlmRouterError(
+            _sanitize(f"Провайдер недоступен: {exc}", provider.api_key),
+        ) from None
+    latency_ms = (time.perf_counter() - started) * 1000
+    if response.status_code != 200:
+        raise LlmRouterError(_provider_error(response, provider.api_key))
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise LlmRouterError("Провайдер вернул не JSON") from exc
+    if not isinstance(data, dict):
+        raise LlmRouterError("Провайдер вернул неожиданный формат ответа")
+    return DecideResult(
+        answers=_extract_answers(data),
+        provider_id=provider.id,
+        model=str(data.get("model") or chosen),
+        latency_ms=latency_ms,
+    )
+
+
+async def decide(
+    state: str | dict[str, Any] | list[Any],
+    questions: dict[str, dict[str, Any]],
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> DecideResult:
+    """Вызов решающего классификатора по маршруту ``decide`` (System One).
+
+    Примитив для быстрых типизированных решений (триаж досье Консилиума):
+    один round-trip на карту вопросов, без свободного текста в ответе.
+    """
+    router_state = await get_state()
+    target = router_state.routes.get("decide")
+    if target is None:
+        raise LlmRouterError("Маршрут решающего классификатора не назначен в модельном роутере")
+    provider = _find_provider(router_state, target)
+    if not provider.enabled:
+        raise LlmRouterError("Провайдер маршрута выключен — включите его в настройках")
+    if provider.protocol != "systemone":
+        raise LlmRouterError("Маршрут decide требует провайдера protocol=systemone")
+    models = _split_models(provider.model) or (provider.model,)
+    return await _decide_completion(
+        provider, state, questions, model=models[0], client=client,
+    )
+
+
+async def decide_probe(
+    provider_id: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> DecideProbeResult:
+    """Проба решающего классификатора: синтетический state, материалов дела нет.
+
+    Проверяет протокол (типизированные ответы) и русский язык инструкций;
+    ответы возвращаются для сверки и в историю дела не сохраняются.
+    """
+    provider = _find_provider(await get_state(), provider_id)
+    if not provider.enabled:
+        raise LlmRouterError("Провайдер выключен — включите его в настройках")
+    if provider.protocol != "systemone":
+        raise LlmRouterError(
+            "Проба решающего классификатора доступна только для protocol=systemone",
+        )
+    models = _split_models(provider.model) or (provider.model,)
+
+    async def _one(model: str) -> DecideProbeModelResult:
+        """Проба одной модели списка; ошибка вызова — в её строке результата."""
+        try:
+            result = await _decide_completion(
+                provider, DECIDE_PROBE_STATE, DECIDE_PROBE_QUESTIONS,
+                model=model, client=client,
+            )
+        except LlmRouterError as exc:
+            return DecideProbeModelResult(model=model, ok=False, latency_ms=None, error=str(exc))
+        return DecideProbeModelResult(
+            model=model, ok=True, latency_ms=result.latency_ms,
+            answers=result.answers, error=None,
+        )
+
+    # модели проверяются параллельно: перебор списка не ждёт по очереди
+    results = list(await asyncio.gather(*(_one(model) for model in models)))
+    successes = [item for item in results if item.ok]
+    failures = [item for item in results if not item.ok]
+    first = successes[0] if successes else None
+    if not failures:
+        error = None
+    elif len(results) == 1:
+        error = failures[0].error
+    else:
+        error = "; ".join(f"«{item.model}»: {item.error}" for item in failures)
+    latencies = [item.latency_ms for item in successes if item.latency_ms is not None]
+    return DecideProbeResult(
+        ok=not failures,
+        provider_id=provider.id,
+        model=first.model if first else None,
+        latency_ms=min(latencies, default=None),
+        answers=dict(first.answers) if first else {},
+        error=error,
+        models=tuple(results),
     )
 
 

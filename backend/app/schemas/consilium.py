@@ -271,6 +271,7 @@ class ConsiliumDeletionPreview(ConsiliumContract):
     snapshots: int = 0
     rounds: int = 0
     answers: int = 0
+    triage: int = 0
     recording_ids: list[str]
     warnings: list[str]
 
@@ -383,6 +384,7 @@ class ConsiliumEvidenceDeletion(ConsiliumContract):
     snapshot_ids: list[str]
     rounds: int = 0
     answers: int = 0
+    triage: int = 0
     warnings: list[str]
 
 
@@ -393,3 +395,63 @@ class ConsiliumRecording(ConsiliumContract):
     filename: str | None
     sfreq: float | None
     duration_sec: float | None
+
+
+# --- Триаж готовности досье (Jev): быстрые типизированные решения до раунда ---
+
+TriageStatus = Literal["ok", "failed"]
+TriageDeficit = Literal[
+    "no_measurements",
+    "no_volunteer_report",
+    "no_observations",
+    "incompatible_parameters",
+    "no_deficit",
+]
+
+
+class ConsiliumTriageCreate(ConsiliumContract):
+    """Запуск триажа досье решающим классификатором (только явной кнопкой)."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+    snapshot_id: Identifier
+
+
+class ConsiliumTriageOut(ConsiliumContract):
+    """Результат триажа: уверенность калибрована, но не гарантирует правильность.
+
+    ``sufficient_prob`` — калиброванная вероятность ответа «достаточно»;
+    ``sufficient`` — вердикт по явному порогу настроек. Ошибка вызова даёт
+    ``status='failed'`` без достроенных решений.
+    """
+
+    id: str
+    case_id: str
+    snapshot_id: str
+    status: TriageStatus
+    model: str | None = None
+    questions_version: str
+    sufficient: bool | None = None
+    sufficient_prob: float | None = Field(default=None, ge=0, le=1)
+    deficit: TriageDeficit | None = None
+    deficit_confidence: float | None = Field(default=None, ge=0, le=1)
+    completeness_score: float | None = Field(
+        default=None,
+        ge=0,
+        description="Позиция на шкале полноты (0 — пусто … 3 — полно), может быть дробной",
+    )
+    answers: dict[str, JsonValue] = Field(
+        default_factory=dict,
+        description="Типизированные ответы классификатора (choice/score/noul) как есть",
+    )
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+    latency_ms: float | None = None
+    created_at: datetime
+
+
+class ConsiliumTriagePage(ConsiliumContract):
+    """Страница попыток триажа: append-only история, честный total."""
+
+    total: int
+    items: list[ConsiliumTriageOut]

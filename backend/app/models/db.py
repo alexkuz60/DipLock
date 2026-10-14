@@ -13,6 +13,7 @@ from pathlib import Path
 from alembic.config import Config
 from sqlalchemy import (
     JSON,
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -494,6 +495,33 @@ class ConsiliumAnswer(Base):
     error = Column(String, nullable=True)
     model = Column(String, nullable=True)
     instruction_version = Column(String, nullable=False)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
+class ConsiliumTriage(Base):
+    """Триаж готовности досье решающим классификатором (Jev, §5.2).
+
+    Append-only история попыток: повтор — новая строка, прежняя остаётся.
+    ``sufficient`` — вердикт по явному порогу калиброванной вероятности
+    (``settings.consilium_triage_sufficient_min``), не «вера» модели.
+    """
+
+    __tablename__ = "consilium_triage"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    snapshot_id = Column(String, nullable=False, index=True)
+    status = Column(String, nullable=False)  # ok | failed
+    model = Column(String, nullable=True)  # провайдер/модель маршрутного роутера
+    questions_version = Column(String, nullable=False)  # версия карты вопросов
+    sufficient = Column(Boolean, nullable=True)  # вердикт по порогу; NULL при ошибке
+    sufficient_prob = Column(Float, nullable=True)  # noul: калиброванная вероятность
+    deficit = Column(String, nullable=True)  # ключ choice: основной дефицит досье
+    deficit_confidence = Column(Float, nullable=True)  # confidence выбора дефицита
+    completeness_score = Column(Float, nullable=True)  # score: позиция шкалы полноты
+    answers = Column(JSON, nullable=False)  # типизированные ответы ({} при ошибке)
+    warnings = Column(JSON, nullable=False)  # предупреждения дайджеста снимка
+    error = Column(String, nullable=True)  # ошибка вызова; решений нет — не достраиваем
     latency_ms = Column(Float, nullable=True)
     created_at = Column(DateTime, nullable=False)
 

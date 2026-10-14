@@ -178,12 +178,18 @@ async def evidence_deletion_preview(case_id: str, evidence_id: str) -> Consilium
         answers = int(await session.scalar(select(func.count()).select_from(
             db.ConsiliumAnswer,
         ).where(db.ConsiliumAnswer.round_id.in_(round_ids))) or 0) if round_ids else 0
+        triage = int(await session.scalar(select(func.count()).select_from(
+            db.ConsiliumTriage,
+        ).where(
+            db.ConsiliumTriage.case_id == case_id,
+            db.ConsiliumTriage.snapshot_id.in_(dependent),
+        )) or 0) if dependent else 0
         return ConsiliumEvidenceDeletion(
             case_id=case_id, evidence_id=evidence_id, version=int(case.version),
-            snapshot_ids=dependent, rounds=len(rounds), answers=answers,
+            snapshot_ids=dependent, rounds=len(rounds), answers=answers, triage=triage,
             warnings=[
-                "Удаляется материал, содержащие его снимки, ответы советников "
-                "и квитанции дела. Исходные расчёты сохраняются.",
+                "Удаляется материал, содержащие его снимки, ответы советников, "
+                "результаты триажа и квитанции дела. Исходные расчёты сохраняются.",
             ],
         )
 
@@ -208,6 +214,12 @@ async def delete_evidence(case_id: str, evidence_id: str, expected_version: int)
             ))
             await session.execute(delete(db.ConsiliumRound).where(
                 db.ConsiliumRound.id.in_(round_ids),
+            ))
+        if preview.snapshot_ids:
+            # Результаты триажа адресуют снимок — производные этих копий (§10)
+            await session.execute(delete(db.ConsiliumTriage).where(
+                db.ConsiliumTriage.case_id == case_id,
+                db.ConsiliumTriage.snapshot_id.in_(preview.snapshot_ids),
             ))
         await session.execute(delete(db.ConsiliumSnapshotRecord).where(
             db.ConsiliumSnapshotRecord.case_id == case_id,

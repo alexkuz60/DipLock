@@ -11,8 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-LlmProtocol = Literal["openai", "anthropic"]
-LlmRouteKey = Literal["chat", "transcribe"]
+LlmProtocol = Literal["openai", "anthropic", "systemone"]
+LlmRouteKey = Literal["chat", "transcribe", "decide"]
 
 
 class LlmProviderIn(BaseModel):
@@ -25,7 +25,10 @@ class LlmProviderIn(BaseModel):
     )
     label: str = Field(min_length=1, max_length=80, description="Человеческое имя провайдера")
     protocol: LlmProtocol = Field(
-        description="openai — совместимый /chat/completions; anthropic — Messages API",
+        description=(
+            "openai — совместимый /chat/completions; anthropic — Messages API; "
+            "systemone — решающий классификатор Jev (типизированные решения)"
+        ),
     )
     base_url: str = Field(
         min_length=8,
@@ -33,7 +36,9 @@ class LlmProviderIn(BaseModel):
         description=(
             "Адрес API как у провайдера (с /v1 или без — роутер дописывает только "
             "/chat/completions или /messages): https://api.deepseek.com, "
-            "https://api.openai.com/v1, https://api.anthropic.com/v1"
+            "https://api.openai.com/v1, https://api.anthropic.com/v1. "
+            "Для protocol=systemone — полный адрес вызова решений, путь не "
+            "дописывается: https://api.typesafe.ai/v1/systemone"
         ),
     )
     model: str = Field(min_length=1, max_length=120, description="Идентификатор модели провайдера")
@@ -87,6 +92,13 @@ class LlmRoutes(BaseModel):
     transcribe: str | None = Field(
         default=None,
         description="Провайдер распознавания (Т2); только protocol=openai; None — не назначен",
+    )
+    decide: str | None = Field(
+        default=None,
+        description=(
+            "Провайдер решающего классификатора Jev (Т3+, триаж досье); "
+            "только protocol=systemone; None — не назначен"
+        ),
     )
 
 
@@ -182,4 +194,41 @@ class LlmChatProbeOut(BaseModel):
     models: list[LlmChatProbeModelOut] = Field(
         default_factory=list,
         description="Перебор моделей списка провайдера: ответ и задержка каждой",
+    )
+
+
+class LlmDecideProbeRequest(BaseModel):
+    """``POST /api/v1/llm-router/decide-probe``: проба решающего классификатора."""
+
+    provider_id: str = Field(min_length=1, max_length=64)
+
+
+class LlmDecideProbeModelOut(BaseModel):
+    """Итог пробы decide для одной модели списка провайдера (перебор)."""
+
+    model: str
+    ok: bool
+    latency_ms: float | None = Field(default=None, description="Задержка вызова, мс")
+    answers: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Типизированные решения пробы (choice/score/noul); {} при ошибке",
+    )
+    error: str | None = Field(default=None, description="Текст для UI; None при успехе")
+
+
+class LlmDecideProbeOut(BaseModel):
+    """Итог пробы decide: типизированные решения синтетического state."""
+
+    ok: bool
+    provider_id: str
+    model: str | None = Field(default=None, description="Модель провайдера")
+    latency_ms: float | None = Field(default=None, description="Задержка вызова, мс")
+    answers: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Типизированные решения пробы; материалы дела не отправляются",
+    )
+    error: str | None = Field(default=None, description="Текст для UI; None при успехе")
+    models: list[LlmDecideProbeModelOut] = Field(
+        default_factory=list,
+        description="Перебор моделей списка провайдера: решения и задержка каждой",
     )

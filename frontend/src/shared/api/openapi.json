@@ -5545,6 +5545,175 @@
         }
       }
     },
+    "/api/v1/consilium/cases/{case_id}/triage": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Run Triage",
+        "description": "Запускает триаж досье решающим классификатором; только явной кнопкой.",
+        "operationId": "run_triage_api_v1_consilium_cases__case_id__triage_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumTriageCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumTriageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Triage",
+        "description": "История попыток триажа: append-only, новые сверху.",
+        "operationId": "list_triage_api_v1_consilium_cases__case_id__triage_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumTriagePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/triage/{triage_id}": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Get Triage",
+        "description": "Точная строка триажа с типизированными решениями классификатора.",
+        "operationId": "get_triage_api_v1_consilium_cases__case_id__triage__triage_id__get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "triage_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Triage Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumTriageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/llm-router": {
       "get": {
         "tags": [
@@ -5674,6 +5843,48 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LlmChatProbeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/llm-router/decide-probe": {
+      "post": {
+        "tags": [
+          "Настройки ИИ"
+        ],
+        "summary": "Проба решающего классификатора Jev (маршрут decide)",
+        "description": "Синтетический state пробы (без материалов дела): типизированные решения и задержка.",
+        "operationId": "decide_probe_llm_provider_api_v1_llm_router_decide_probe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmDecideProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmDecideProbeOut"
                 }
               }
             }
@@ -10418,6 +10629,11 @@
             "title": "Answers",
             "default": 0
           },
+          "triage": {
+            "type": "integer",
+            "title": "Triage",
+            "default": 0
+          },
           "recording_ids": {
             "items": {
               "type": "string"
@@ -10666,6 +10882,11 @@
           "answers": {
             "type": "integer",
             "title": "Answers",
+            "default": 0
+          },
+          "triage": {
+            "type": "integer",
+            "title": "Triage",
             "default": 0
           },
           "warnings": {
@@ -11419,6 +11640,222 @@
         ],
         "title": "ConsiliumSourcesPage",
         "description": "Каталог до пагинации, со списком отсутствующих записей."
+      },
+      "ConsiliumTriageCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Snapshot Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "snapshot_id"
+        ],
+        "title": "ConsiliumTriageCreate",
+        "description": "Запуск триажа досье решающим классификатором (только явной кнопкой)."
+      },
+      "ConsiliumTriageOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "questions_version": {
+            "type": "string",
+            "title": "Questions Version"
+          },
+          "sufficient": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sufficient"
+          },
+          "sufficient_prob": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sufficient Prob"
+          },
+          "deficit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "no_measurements",
+                  "no_volunteer_report",
+                  "no_observations",
+                  "incompatible_parameters",
+                  "no_deficit"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deficit"
+          },
+          "deficit_confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deficit Confidence"
+          },
+          "completeness_score": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completeness Score",
+            "description": "Позиция на шкале полноты (0 — пусто … 3 — полно), может быть дробной"
+          },
+          "answers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Answers",
+            "description": "Типизированные ответы классификатора (choice/score/noul) как есть"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "case_id",
+          "snapshot_id",
+          "status",
+          "questions_version",
+          "created_at"
+        ],
+        "title": "ConsiliumTriageOut",
+        "description": "Результат триажа: уверенность калибрована, но не гарантирует правильность.\n\n``sufficient_prob`` — калиброванная вероятность ответа «достаточно»;\n``sufficient`` — вердикт по явному порогу настроек. Ошибка вызова даёт\n``status='failed'`` без достроенных решений."
+      },
+      "ConsiliumTriagePage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumTriageOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumTriagePage",
+        "description": "Страница попыток триажа: append-only история, честный total."
       },
       "ContourShapeOut": {
         "properties": {
@@ -14441,6 +14878,140 @@
         "title": "LlmChatProbeRequest",
         "description": "``POST /api/v1/llm-router/chat-probe``: проба советника (§10) на провайдере."
       },
+      "LlmDecideProbeModelOut": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms",
+            "description": "Задержка вызова, мс"
+          },
+          "answers": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Answers",
+            "description": "Типизированные решения пробы (choice/score/noul); {} при ошибке"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст для UI; None при успехе"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model",
+          "ok"
+        ],
+        "title": "LlmDecideProbeModelOut",
+        "description": "Итог пробы decide для одной модели списка провайдера (перебор)."
+      },
+      "LlmDecideProbeOut": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model",
+            "description": "Модель провайдера"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms",
+            "description": "Задержка вызова, мс"
+          },
+          "answers": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Answers",
+            "description": "Типизированные решения пробы; материалы дела не отправляются"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст для UI; None при успехе"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/LlmDecideProbeModelOut"
+            },
+            "type": "array",
+            "title": "Models",
+            "description": "Перебор моделей списка провайдера: решения и задержка каждой"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "provider_id"
+        ],
+        "title": "LlmDecideProbeOut",
+        "description": "Итог пробы decide: типизированные решения синтетического state."
+      },
+      "LlmDecideProbeRequest": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Provider Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id"
+        ],
+        "title": "LlmDecideProbeRequest",
+        "description": "``POST /api/v1/llm-router/decide-probe``: проба решающего классификатора."
+      },
       "LlmProbeModelOut": {
         "properties": {
           "model": {
@@ -14498,7 +15069,8 @@
             "type": "string",
             "enum": [
               "chat",
-              "transcribe"
+              "transcribe",
+              "decide"
             ],
             "title": "Route"
           },
@@ -14568,7 +15140,8 @@
             "type": "string",
             "enum": [
               "chat",
-              "transcribe"
+              "transcribe",
+              "decide"
             ],
             "title": "Route",
             "description": "Какой маршрут проверять",
@@ -14608,17 +15181,18 @@
             "type": "string",
             "enum": [
               "openai",
-              "anthropic"
+              "anthropic",
+              "systemone"
             ],
             "title": "Protocol",
-            "description": "openai — совместимый /chat/completions; anthropic — Messages API"
+            "description": "openai — совместимый /chat/completions; anthropic — Messages API; systemone — решающий классификатор Jev (типизированные решения)"
           },
           "base_url": {
             "type": "string",
             "maxLength": 300,
             "minLength": 8,
             "title": "Base Url",
-            "description": "Адрес API как у провайдера (с /v1 или без — роутер дописывает только /chat/completions или /messages): https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1"
+            "description": "Адрес API как у провайдера (с /v1 или без — роутер дописывает только /chat/completions или /messages): https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1. Для protocol=systemone — полный адрес вызова решений, путь не дописывается: https://api.typesafe.ai/v1/systemone"
           },
           "model": {
             "type": "string",
@@ -14684,7 +15258,8 @@
             "type": "string",
             "enum": [
               "openai",
-              "anthropic"
+              "anthropic",
+              "systemone"
             ],
             "title": "Protocol"
           },
@@ -14818,6 +15393,18 @@
             ],
             "title": "Transcribe",
             "description": "Провайдер распознавания (Т2); только protocol=openai; None — не назначен"
+          },
+          "decide": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decide",
+            "description": "Провайдер решающего классификатора Jev (Т3+, триаж досье); только protocol=systemone; None — не назначен"
           }
         },
         "type": "object",

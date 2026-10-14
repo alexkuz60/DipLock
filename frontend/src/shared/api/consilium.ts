@@ -28,6 +28,9 @@ import type {
   ConsiliumSourcesPage,
   ConsiliumRecording,
   ConsiliumDeletionPreview,
+  ConsiliumTriage,
+  ConsiliumTriageCreate,
+  ConsiliumTriagePage,
 } from './types'
 
 const base = `${API_PREFIX}/consilium`
@@ -92,4 +95,10 @@ export const consiliumApi = {
     request<ConsiliumRound>(`${path(id)}/rounds/${roundId}/summary`, json('POST', payload)),
   retryAnswer: (id: string, roundId: string, payload: ConsiliumAnswerRetry) =>
     request<ConsiliumRound>(`${path(id)}/rounds/${roundId}/retry`, json('POST', payload)),
+  /** История триажа досье (Jev): append-only, новые сверху. */
+  triage: (id: string, offset = 0, signal?: AbortSignal) =>
+    request<ConsiliumTriagePage>(`${path(id)}/triage${page(offset)}`, { signal }),
+  /** Запуск триажа решающим классификатором — только явной кнопкой. */
+  runTriage: (id: string, payload: ConsiliumTriageCreate) =>
+    request<ConsiliumTriage>(`${path(id)}/triage`, json('POST', payload)),
 }

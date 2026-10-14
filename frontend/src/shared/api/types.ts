@@ -28,6 +28,10 @@ export type ConsiliumMessageCreate = Schemas['ConsiliumMessageCreate']
 export type ConsiliumMessageUpdate = Schemas['ConsiliumMessageUpdate']
 export type ConsiliumMessagesPage = Schemas['ConsiliumMessagesPage']
 export type ConsiliumDeletionPreview = Schemas['ConsiliumDeletionPreview']
+/** Консилиум: триаж готовности досье решающим классификатором (Jev, §5.2). */
+export type ConsiliumTriage = Schemas['ConsiliumTriageOut']
+export type ConsiliumTriageCreate = Schemas['ConsiliumTriageCreate']
+export type ConsiliumTriagePage = Schemas['ConsiliumTriagePage']
 /** Консилиум Т3: раунды советников и их ответы (append-only история). */
 export type ConsiliumRound = Schemas['ConsiliumRoundOut']
 export type ConsiliumRoundsPage = Schemas['ConsiliumRoundsPage']
@@ -242,6 +246,10 @@ export type LlmChatProbeRequest = Schemas['LlmChatProbeRequest']
 export type LlmChatProbeScenario = LlmChatProbeRequest['scenario']
 export type LlmChatProbeResult = Schemas['LlmChatProbeOut']
 export type LlmChatProbeModelResult = Schemas['LlmChatProbeModelOut']
+/** Проба решающего классификатора Jev (`POST /llm-router/decide-probe`): синтетический state. */
+export type LlmDecideProbeRequest = Schemas['LlmDecideProbeRequest']
+export type LlmDecideProbeResult = Schemas['LlmDecideProbeOut']
+export type LlmDecideProbeModelResult = Schemas['LlmDecideProbeModelOut']
 
 export type MriSliceRef = Schemas['MriSliceRef']
 

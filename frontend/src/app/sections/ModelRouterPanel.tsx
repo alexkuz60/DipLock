@@ -1,6 +1,6 @@
 /**
  * Панель «Модельный роутер ИИ» раздела «Настройки»: провайдеры внешних API
- * полноценных моделей и маршруты chat/transcribe (llama.cpp отклонён 10.10.2026).
+ * полноценных моделей и маршруты chat/transcribe/decide (llama.cpp отклонён 10.10.2026).
  *
  * Правила: правка формы ничего не отправляет наружу (считает только кнопка
  * «Сохранить»), ключ вводится один раз и не возвращается сервером (только маска
@@ -13,6 +13,7 @@ import { apiErrorText } from '@/shared/api/client'
 import type {
   LlmChatProbeResult,
   LlmChatProbeScenario,
+  LlmDecideProbeResult,
   LlmProbeResult,
   LlmProviderIn,
   LlmRouterUpdate,
@@ -53,6 +54,13 @@ type ChatProbeState = {
   result: LlmChatProbeResult | null
 }
 
+/** Состояние пробы решающего классификатора (Jev): провайдер и последний результат. */
+type DecideProbeState = {
+  providerId: string | null
+  pending: boolean
+  result: LlmDecideProbeResult | null
+}
+
 /** Сценарии проб §10: русский диалог, роль/структура, отказ при нехватке данных, вопросы. */
 const CHAT_PROBE_SCENARIOS: { value: LlmChatProbeScenario; label: string }[] = [
   { value: 'dialog', label: 'Русский диалог' },
@@ -87,6 +95,11 @@ const PROTOCOL_OPTIONS: { value: Protocol; label: string; hint: string }[] = [
     hint: '/chat/completions: OpenAI, DeepSeek, Groq, OpenRouter, GigaChat/YandexGPT-совместимые',
   },
   { value: 'anthropic', label: 'Anthropic Messages', hint: 'Claude: /messages (без распознавания)' },
+  {
+    value: 'systemone',
+    label: 'System One (Jev)',
+    hint: 'Решающий классификатор: типизированные решения choice/score/noul; полный адрес вызова',
+  },
 ]
 
 function emptyRow(): ProviderRow {
@@ -153,11 +166,21 @@ export function ModelRouterPanel() {
 
   /** Черновик формы: null — ещё не заполнен из сервера (поздний ответ не мешает правке). */
   const [rows, setRows] = useState<ProviderRow[] | null>(null)
-  const [routes, setRoutes] = useState<LlmRoutes>({ chat: null, chat_model: null, transcribe: null })
+  const [routes, setRoutes] = useState<LlmRoutes>({
+    chat: null,
+    chat_model: null,
+    transcribe: null,
+    decide: null,
+  })
   const [dirty, setDirty] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [probes, setProbes] = useState<Record<string, ProbeState>>({})
   const [chatProbe, setChatProbe] = useState<ChatProbeState>({
+    providerId: null,
+    pending: false,
+    result: null,
+  })
+  const [decideProbe, setDecideProbe] = useState<DecideProbeState>({
     providerId: null,
     pending: false,
     result: null,
@@ -184,6 +207,7 @@ export function ModelRouterPanel() {
       chat: data.routes.chat,
       chat_model: data.routes.chat_model ?? null,
       transcribe: data.routes.transcribe,
+      decide: data.routes.decide ?? null,
     })
   }, [routerQuery.data, rows])
 
@@ -206,6 +230,7 @@ export function ModelRouterPanel() {
           chat: current.chat === removed.id ? null : current.chat,
           chat_model: current.chat === removed.id ? null : current.chat_model,
           transcribe: current.transcribe === removed.id ? null : current.transcribe,
+          decide: current.decide === removed.id ? null : current.decide,
         }))
       }
       return prev.filter((_, i) => i !== index)
@@ -235,6 +260,7 @@ export function ModelRouterPanel() {
         chat: data.routes.chat,
         chat_model: data.routes.chat_model ?? null,
         transcribe: data.routes.transcribe,
+        decide: data.routes.decide ?? null,
       })
       setDirty(false)
       setSaveError(null)
@@ -243,10 +269,10 @@ export function ModelRouterPanel() {
   })
 
   /** Нейтральная проверка связи (без материалов дела) — только по сохранённому провайдеру. */
-  const runProbe = async (providerId: string) => {
+  const runProbe = async (providerId: string, route: 'chat' | 'decide' = 'chat') => {
     setProbes((prev) => ({ ...prev, [providerId]: { pending: true, result: null } }))
     try {
-      const result = await llmRouterApi.probe({ provider_id: providerId, route: 'chat' })
+      const result = await llmRouterApi.probe({ provider_id: providerId, route })
       setProbes((prev) => ({ ...prev, [providerId]: { pending: false, result } }))
     } catch (error) {
       setProbes((prev) => ({
@@ -256,7 +282,7 @@ export function ModelRouterPanel() {
           result: {
             ok: false,
             provider_id: providerId,
-            route: 'chat',
+            route,
             model: null,
             latency_ms: null,
             error: apiErrorText(error),
@@ -287,6 +313,30 @@ export function ModelRouterPanel() {
           text: null,
           error: apiErrorText(error),
           truncated: false,
+        },
+      }))
+    }
+  }
+
+  /** Проба решающего классификатора (Jev): синтетический state, только кнопкой. */
+  const runDecideProbe = async () => {
+    const providerId = decideProbe.providerId
+    if (!providerId) return
+    setDecideProbe((prev) => ({ ...prev, pending: true, result: null }))
+    try {
+      const result = await llmRouterApi.decideProbe({ provider_id: providerId })
+      setDecideProbe((prev) => ({ ...prev, pending: false, result }))
+    } catch (error) {
+      setDecideProbe((prev) => ({
+        ...prev,
+        pending: false,
+        result: {
+          ok: false,
+          provider_id: providerId,
+          model: null,
+          latency_ms: null,
+          answers: {},
+          error: apiErrorText(error),
         },
       }))
     }
@@ -329,6 +379,14 @@ export function ModelRouterPanel() {
       disabled: row.protocol !== 'openai',
     })),
   ]
+  const decideOptions = [
+    { value: '', label: '— не назначен' },
+    ...savedProviders.map((row) => ({
+      value: row.id as string,
+      label: row.label.trim() || 'Без имени',
+      disabled: row.protocol !== 'systemone',
+    })),
+  ]
   const chatProviderRow = providerRows.find((row) => row.id === routes.chat)
   const chatModelOptions = [
     { value: '', label: '— первая модель списка —' },
@@ -338,8 +396,9 @@ export function ModelRouterPanel() {
   return (
     <Panel title="Модельный роутер ИИ" hint={panelHint}>
       <p className="text-sm text-fg-2">
-        Маршруты указывают, каким провайдером пользуются советники (chat) и распознавание
-        (transcribe). «Проверить связь» шлёт нейтральный запрос без данных дела.
+        Маршруты указывают, каким провайдером пользуются советники (chat), распознавание
+        (transcribe) и решающий классификатор Jev (decide). «Проверить связь» шлёт нейтральный
+        запрос без данных дела.
       </p>
 
       {providerRows.length === 0 ? (
@@ -375,7 +434,11 @@ export function ModelRouterPanel() {
               label="Адрес API"
               mono
               value={row.baseUrl}
-              hint="Как у провайдера, с /v1 или без: https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1"
+              hint={
+                row.protocol === 'systemone'
+                  ? 'Полный адрес вызова решений Jev (путь не дописывается): https://api.typesafe.ai/v1/systemone'
+                  : 'Как у провайдера, с /v1 или без: https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1'
+              }
               onChange={(value) => editRow(index, { baseUrl: value })}
             />
             <TextField
@@ -440,7 +503,9 @@ export function ModelRouterPanel() {
             <div className="flex items-center gap-3 pt-1">
               <Button
                 disabled={!row.id || probeState?.pending || save.isPending}
-                onClick={() => row.id && runProbe(row.id)}
+                onClick={() =>
+                  row.id && runProbe(row.id, row.protocol === 'systemone' ? 'decide' : 'chat')
+                }
               >
                 {row.id ? 'Проверить связь' : 'Сохраните, чтобы проверить'}
               </Button>
@@ -506,6 +571,16 @@ export function ModelRouterPanel() {
           setDirty(true)
         }}
       />
+      <SelectField
+        label="Решающий классификатор (decide)"
+        value={routes.decide ?? ''}
+        options={decideOptions}
+        hint="Триаж досье «Консилиума» (Jev, §5.2): типизированные решения choice/score/noul; только protocol=systemone"
+        onChange={(value) => {
+          setRoutes((prev) => ({ ...prev, decide: value || null }))
+          setDirty(true)
+        }}
+      />
 
       <div className="flex items-center gap-3 pt-2">
         <Button
@@ -527,6 +602,7 @@ export function ModelRouterPanel() {
                   chat: routes.chat,
                   chat_model: chosen,
                   transcribe: routes.transcribe,
+                  decide: routes.decide,
                 },
               })
             } catch {
@@ -625,6 +701,57 @@ export function ModelRouterPanel() {
           ) : (
             <p role="alert" className="text-sm text-danger">
               Проба не прошла: {chatProbe.result.error ?? 'неизвестная ошибка'}
+            </p>
+          )
+        ) : null}
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-border p-3">
+        <p className="text-sm font-medium text-fg-0">Проба решающего классификатора (Jev)</p>
+        <p className="text-sm text-fg-2">
+          Синтетический state (учебное описание досье) для маршрута «Решающий классификатор
+          (decide)»: проверка протокола и русского языка инструкций. Материалы дела не
+          отправляются; запуск — только кнопкой.
+        </p>
+        <SelectField
+          label="Провайдер пробы (Jev)"
+          value={decideProbe.providerId ?? ''}
+          options={[
+            { value: '', label: '— выберите —' },
+            ...savedProviders.map((row) => ({
+              value: row.id as string,
+              label: row.label.trim() || 'Без имени',
+            })),
+          ]}
+          onChange={(value) => setDecideProbe((prev) => ({ ...prev, providerId: value || null }))}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            disabled={!decideProbe.providerId || decideProbe.pending || save.isPending}
+            onClick={() => void runDecideProbe()}
+          >
+            Проба Jev
+          </Button>
+          {decideProbe.pending ? (
+            <span role="status" className="text-sm text-fg-2">
+              Запрос к классификатору…
+            </span>
+          ) : null}
+        </div>
+        {decideProbe.result ? (
+          decideProbe.result.ok ? (
+            <div className="space-y-1" role="status">
+              <p className="text-sm text-fg-1">
+                {decideProbe.result.model ?? 'модель неизвестна'} ·{' '}
+                {Math.round(decideProbe.result.latency_ms ?? 0)} мс
+              </p>
+              <pre className="overflow-x-auto rounded-lg border border-border bg-bg-2 p-2.5 font-mono text-xs text-fg-0">
+                {JSON.stringify(decideProbe.result.answers, null, 2)}
+              </pre>
+            </div>
+          ) : (
+            <p role="alert" className="text-sm text-danger">
+              Проба не прошла: {decideProbe.result.error ?? 'неизвестная ошибка'}
             </p>
           )
         ) : null}

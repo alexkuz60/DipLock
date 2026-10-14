@@ -15,6 +15,7 @@ import { SelectField } from '@/shared/ui/SelectField'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { QueryState } from './common'
 import { advisorRoles } from './options'
+import { CaseTriage } from './CaseTriage'
 import { RoundCard } from './RoundCard'
 import { useCaseAction } from './useCaseAction'
 
@@ -151,6 +152,8 @@ export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
         {summary.error != null && <ErrorBlock message={apiErrorText(summary.error)} />}
         {retry.error != null && <ErrorBlock message={apiErrorText(retry.error)} />}
       </section>
+
+      <CaseTriage current={current} snapshotId={selected} />
 
       <div className="flex flex-wrap gap-2" role="group" aria-label="Фильтр советников">
         {ADVISOR_ROLES.map((role) => (

@@ -14,6 +14,7 @@ import {
   groupRunSummaryFixture,
   initStatusFixture,
   llmChatProbeFixture,
+  llmDecideProbeFixture,
   llmProbeFixture,
   llmRouterFixture,
   localResourceFixture,
@@ -45,6 +46,7 @@ import type {
   InitStatus,
   JobStatus,
   LlmChatProbeResult,
+  LlmDecideProbeResult,
   LlmProbeResult,
   LlmRouter,
   LocalResource,
@@ -136,6 +138,8 @@ export type MockApiOptions = {
   llmProbe?: LlmProbeResult
   /** Результат пробы советника `POST /llm-router/chat-probe` (§10; ошибка провайдера) */
   llmChatProbe?: LlmChatProbeResult
+  /** Результат пробы решающего классификатора `POST /llm-router/decide-probe` (§5.2) */
+  llmDecideProbe?: LlmDecideProbeResult
   /** Смоделировать отказ сигналов записи (например 404 после TTL) */
   signalsFail?: boolean
   /** Стадия предподготовки, если запрос её не указал (срез 2.7) */
@@ -495,6 +499,10 @@ export function mockApiFetch(options: MockApiOptions = {}) {
     if (url.includes('/mains')) {
       // Раньше общей ветки `/recordings/`: URL mains её содержит
       return jsonResponse(options.mains ?? mainsFixture())
+    }
+    if (url.includes('/llm-router/decide-probe')) {
+      // Проба решающего классификатора (§5.2): по умолчанию успех, ошибка — через options
+      return jsonResponse(options.llmDecideProbe ?? llmDecideProbeFixture())
     }
     if (url.includes('/llm-router/chat-probe')) {
       // Проба советника (§10): по умолчанию успех, ошибка — через options.llmChatProbe

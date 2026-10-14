@@ -2158,6 +2158,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consilium/cases/{case_id}/triage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Triage
+         * @description История попыток триажа: append-only, новые сверху.
+         */
+        get: operations["list_triage_api_v1_consilium_cases__case_id__triage_get"];
+        put?: never;
+        /**
+         * Run Triage
+         * @description Запускает триаж досье решающим классификатором; только явной кнопкой.
+         */
+        post: operations["run_triage_api_v1_consilium_cases__case_id__triage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/triage/{triage_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Triage
+         * @description Точная строка триажа с типизированными решениями классификатора.
+         */
+        get: operations["get_triage_api_v1_consilium_cases__case_id__triage__triage_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router": {
         parameters: {
             query?: never;
@@ -2216,6 +2260,26 @@ export interface paths {
          * @description Синтетический сценарий пробы (без материалов дела): ошибка провайдера — в error.
          */
         post: operations["chat_probe_llm_provider_api_v1_llm_router_chat_probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm-router/decide-probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Проба решающего классификатора Jev (маршрут decide)
+         * @description Синтетический state пробы (без материалов дела): типизированные решения и задержка.
+         */
+        post: operations["decide_probe_llm_provider_api_v1_llm_router_decide_probe_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4895,6 +4959,11 @@ export interface components {
              * @default 0
              */
             answers: number;
+            /**
+             * Triage
+             * @default 0
+             */
+            triage: number;
             /** Recording Ids */
             recording_ids: string[];
             /** Warnings */
@@ -5000,6 +5069,11 @@ export interface components {
              * @default 0
              */
             answers: number;
+            /**
+             * Triage
+             * @default 0
+             */
+            triage: number;
             /** Warnings */
             warnings: string[];
         };
@@ -5291,6 +5365,84 @@ export interface components {
             items: components["schemas"]["ConsiliumSource"][];
             /** Warnings */
             warnings?: string[];
+        };
+        /**
+         * ConsiliumTriageCreate
+         * @description Запуск триажа досье решающим классификатором (только явной кнопкой).
+         */
+        ConsiliumTriageCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+        };
+        /**
+         * ConsiliumTriageOut
+         * @description Результат триажа: уверенность калибрована, но не гарантирует правильность.
+         *
+         *     ``sufficient_prob`` — калиброванная вероятность ответа «достаточно»;
+         *     ``sufficient`` — вердикт по явному порогу настроек. Ошибка вызова даёт
+         *     ``status='failed'`` без достроенных решений.
+         */
+        ConsiliumTriageOut: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "failed";
+            /** Model */
+            model?: string | null;
+            /** Questions Version */
+            questions_version: string;
+            /** Sufficient */
+            sufficient?: boolean | null;
+            /** Sufficient Prob */
+            sufficient_prob?: number | null;
+            /** Deficit */
+            deficit?: ("no_measurements" | "no_volunteer_report" | "no_observations" | "incompatible_parameters" | "no_deficit") | null;
+            /** Deficit Confidence */
+            deficit_confidence?: number | null;
+            /**
+             * Completeness Score
+             * @description Позиция на шкале полноты (0 — пусто … 3 — полно), может быть дробной
+             */
+            completeness_score?: number | null;
+            /**
+             * Answers
+             * @description Типизированные ответы классификатора (choice/score/noul) как есть
+             */
+            answers?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Warnings */
+            warnings?: string[];
+            /** Error */
+            error?: string | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ConsiliumTriagePage
+         * @description Страница попыток триажа: append-only история, честный total.
+         */
+        ConsiliumTriagePage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumTriageOut"][];
         };
         /**
          * ContourShapeOut
@@ -6954,6 +7106,78 @@ export interface components {
             scenario: "dialog" | "role" | "insufficient" | "leading";
         };
         /**
+         * LlmDecideProbeModelOut
+         * @description Итог пробы decide для одной модели списка провайдера (перебор).
+         */
+        LlmDecideProbeModelOut: {
+            /** Model */
+            model: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Latency Ms
+             * @description Задержка вызова, мс
+             */
+            latency_ms?: number | null;
+            /**
+             * Answers
+             * @description Типизированные решения пробы (choice/score/noul); {} при ошибке
+             */
+            answers?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Error
+             * @description Текст для UI; None при успехе
+             */
+            error?: string | null;
+        };
+        /**
+         * LlmDecideProbeOut
+         * @description Итог пробы decide: типизированные решения синтетического state.
+         */
+        LlmDecideProbeOut: {
+            /** Ok */
+            ok: boolean;
+            /** Provider Id */
+            provider_id: string;
+            /**
+             * Model
+             * @description Модель провайдера
+             */
+            model?: string | null;
+            /**
+             * Latency Ms
+             * @description Задержка вызова, мс
+             */
+            latency_ms?: number | null;
+            /**
+             * Answers
+             * @description Типизированные решения пробы; материалы дела не отправляются
+             */
+            answers?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Error
+             * @description Текст для UI; None при успехе
+             */
+            error?: string | null;
+            /**
+             * Models
+             * @description Перебор моделей списка провайдера: решения и задержка каждой
+             */
+            models?: components["schemas"]["LlmDecideProbeModelOut"][];
+        };
+        /**
+         * LlmDecideProbeRequest
+         * @description ``POST /api/v1/llm-router/decide-probe``: проба решающего классификатора.
+         */
+        LlmDecideProbeRequest: {
+            /** Provider Id */
+            provider_id: string;
+        };
+        /**
          * LlmProbeModelOut
          * @description Результат проверки одной модели из списка провайдера (перебор).
          */
@@ -6986,7 +7210,7 @@ export interface components {
              * Route
              * @enum {string}
              */
-            route: "chat" | "transcribe";
+            route: "chat" | "transcribe" | "decide";
             /**
              * Model
              * @description Модель провайдера
@@ -7021,7 +7245,7 @@ export interface components {
              * @default chat
              * @enum {string}
              */
-            route: "chat" | "transcribe";
+            route: "chat" | "transcribe" | "decide";
         };
         /**
          * LlmProviderIn
@@ -7040,13 +7264,13 @@ export interface components {
             label: string;
             /**
              * Protocol
-             * @description openai — совместимый /chat/completions; anthropic — Messages API
+             * @description openai — совместимый /chat/completions; anthropic — Messages API; systemone — решающий классификатор Jev (типизированные решения)
              * @enum {string}
              */
-            protocol: "openai" | "anthropic";
+            protocol: "openai" | "anthropic" | "systemone";
             /**
              * Base Url
-             * @description Адрес API как у провайдера (с /v1 или без — роутер дописывает только /chat/completions или /messages): https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1
+             * @description Адрес API как у провайдера (с /v1 или без — роутер дописывает только /chat/completions или /messages): https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1. Для protocol=systemone — полный адрес вызова решений, путь не дописывается: https://api.typesafe.ai/v1/systemone
              */
             base_url: string;
             /**
@@ -7086,7 +7310,7 @@ export interface components {
              * Protocol
              * @enum {string}
              */
-            protocol: "openai" | "anthropic";
+            protocol: "openai" | "anthropic" | "systemone";
             /** Base Url */
             base_url: string;
             /** Model */
@@ -7147,6 +7371,11 @@ export interface components {
              * @description Провайдер распознавания (Т2); только protocol=openai; None — не назначен
              */
             transcribe?: string | null;
+            /**
+             * Decide
+             * @description Провайдер решающего классификатора Jev (Т3+, триаж досье); только protocol=systemone; None — не назначен
+             */
+            decide?: string | null;
         };
         /**
          * LocalResourceOut
@@ -12486,6 +12715,107 @@ export interface operations {
             };
         };
     };
+    list_triage_api_v1_consilium_cases__case_id__triage_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumTriagePage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_triage_api_v1_consilium_cases__case_id__triage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumTriageCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumTriageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_triage_api_v1_consilium_cases__case_id__triage__triage_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                triage_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumTriageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_llm_router_api_v1_llm_router_get: {
         parameters: {
             query?: never;
@@ -12592,6 +12922,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmChatProbeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_probe_llm_provider_api_v1_llm_router_decide_probe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmDecideProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmDecideProbeOut"];
                 };
             };
             /** @description Validation Error */

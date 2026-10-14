@@ -35,9 +35,12 @@ from app.schemas.consilium import (
     ConsiliumSnapshotCreate,
     ConsiliumSnapshotsPage,
     ConsiliumSourcesPage,
+    ConsiliumTriageCreate,
+    ConsiliumTriageOut,
+    ConsiliumTriagePage,
 )
 from app.services import recording_store
-from app.services.consilium import dossier, rounds, rounds_store, sources, store
+from app.services.consilium import dossier, rounds, rounds_store, sources, store, triage
 
 router = APIRouter(prefix="/consilium", tags=["Консилиум"], route_class=PrivateRoute)
 
@@ -303,3 +306,34 @@ async def retry_answer(
     """Повтор одного неудавшегося ответа советника; история попыток остаётся."""
     async with guarded(response):
         return await rounds.retry_role(case_id, round_id, payload)
+
+
+# --- Триаж готовности досье (Jev): быстрый типизированный ответ до раунда ---
+
+
+@router.post("/cases/{case_id}/triage", status_code=201, response_model=ConsiliumTriageOut)
+async def run_triage(
+    case_id: str, payload: ConsiliumTriageCreate, response: Response,
+) -> ConsiliumTriageOut:
+    """Запускает триаж досье решающим классификатором; только явной кнопкой."""
+    async with guarded(response):
+        return await triage.run_triage(case_id, payload)
+
+
+@router.get("/cases/{case_id}/triage", response_model=ConsiliumTriagePage)
+async def list_triage(
+    case_id: str, response: Response,
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+) -> ConsiliumTriagePage:
+    """История попыток триажа: append-only, новые сверху."""
+    async with guarded(response):
+        return await triage.list_triage(case_id, limit, offset)
+
+
+@router.get("/cases/{case_id}/triage/{triage_id}", response_model=ConsiliumTriageOut)
+async def get_triage(
+    case_id: str, triage_id: str, response: Response,
+) -> ConsiliumTriageOut:
+    """Точная строка триажа с типизированными решениями классификатора."""
+    async with guarded(response):
+        return await triage.get_triage(case_id, triage_id)

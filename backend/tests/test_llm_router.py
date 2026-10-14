@@ -59,7 +59,7 @@ def test_get_empty_router(client, router_config):
     assert result.status_code == 200, result.text
     assert result.json() == {
         "providers": [],
-        "routes": {"chat": None, "chat_model": None, "transcribe": None},
+        "routes": {"chat": None, "chat_model": None, "transcribe": None, "decide": None},
     }
     assert "no-store" in result.headers["Cache-Control"]
 
@@ -729,6 +729,7 @@ def test_chat_model_route_validation(client, router_config):
         "chat": provider_id,
         "chat_model": "m-b",
         "transcribe": None,
+        "decide": None,
     }
 
 
@@ -819,3 +820,191 @@ def test_extract_completion_truncation_flags():
         {"choices": [{"finish_reason": "stop", "message": {"content": "целиком"}}]},
     )
     assert (text, truncated) == ("целиком", False)
+
+
+# ---------- decide (решающий классификатор, System One) ----------
+
+
+def _jev_payload(**overrides) -> dict:
+    payload = _provider_payload(
+        label="Jev", protocol="systemone",
+        base_url="https://jev.test/v1/systemone", model="jev-1.13.0",
+    )
+    payload.update(overrides)
+    return payload
+
+
+_OK_DECIDE_ANSWERS = {
+    "sufficient": {"type": "noul", "noul": 0.9},
+    "deficit": {
+        "type": "choice", "choice": "no_deficit",
+        "probabilities": {"no_deficit": 0.9, "no_measurements": 0.1},
+        "confidence": 0.8,
+    },
+    "completeness": {
+        "type": "score", "score": 2.5,
+        "probabilities": {"2": 0.5, "3": 0.5}, "confidence": 0.7,
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_decide_calls_full_endpoint_and_parses_answers(router_config, monkeypatch):
+    """decide шлёт state/questions на полный адрес systemone и читает типизированные ответы."""
+    created = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="Jev", protocol="systemone",
+            base_url="https://jev.test/v1/systemone", model="jev-1.13.0", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = created.providers[0].id
+    await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=provider_id, label="Jev", protocol="systemone",
+            base_url="https://jev.test/v1/systemone", model="jev-1.13.0", enabled=True,
+            api_key=None,
+        )],
+        {"decide": provider_id},
+    )
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["body"] = json.loads(request.content)
+        captured["auth"] = request.headers.get("Authorization")
+        return httpx.Response(200, json={"model": "jev-1.13.0", "answers": _OK_DECIDE_ANSWERS})
+
+    result = await llm_router.decide(
+        "Описание досье", {"q": {"type": "noul", "instructions": "Достаточно?"}},
+        client=_mock_client(handler),
+    )
+    assert captured["url"] == "https://jev.test/v1/systemone"  # путь не дописывается
+    assert captured["auth"] == f"Bearer {_TEST_KEY}"
+    assert captured["body"]["model"] == "jev-1.13.0"
+    assert captured["body"]["state"] == "Описание досье"
+    assert captured["body"]["questions"]["q"]["type"] == "noul"
+    assert result.answers["sufficient"]["noul"] == 0.9
+    assert result.provider_id == provider_id
+    assert result.model == "jev-1.13.0"
+    assert result.latency_ms >= 0
+
+
+@pytest.mark.asyncio
+async def test_decide_rejects_bad_answer_shapes(router_config):
+    """Ответ без решений или с чужим типом — честная ошибка, не выдуманное решение."""
+    created = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="Jev", protocol="systemone",
+            base_url="https://jev.test/v1/systemone", model="jev-1.13.0", enabled=True,
+            api_key=None,
+        )],
+        {},
+    )
+    provider_id = created.providers[0].id
+    await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=provider_id, label="Jev", protocol="systemone",
+            base_url="https://jev.test/v1/systemone", model="jev-1.13.0", enabled=True,
+            api_key=None,
+        )],
+        {"decide": provider_id},
+    )
+
+    async def run(payload: dict) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json=payload)
+
+        await llm_router.decide("state", {}, client=_mock_client(handler))
+
+    with pytest.raises(llm_router.LlmRouterError, match="без решений"):
+        await run({"model": "jev-1.13.0", "answers": {}})
+    with pytest.raises(llm_router.LlmRouterError, match="неожиданном формате"):
+        await run({"answers": {"q": {"type": "text", "text": "привет"}}})
+    with pytest.raises(llm_router.LlmRouterError, match="не JSON"):
+        def raw(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"oops")
+
+        await llm_router.decide("state", {}, client=_mock_client(raw))
+
+
+@pytest.mark.asyncio
+async def test_decide_probe_reports_typed_answers(router_config, monkeypatch):
+    """Проба decide шлёт синтетический state и возвращает решения без материалов дела."""
+    created = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="Jev", protocol="systemone",
+            base_url="https://jev.test/v1/systemone", model="jev-1.13.0", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = created.providers[0].id
+
+    captured: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={
+            "model": "jev-1.13.0",
+            "answers": {
+                "probe_source": {
+                    "type": "choice", "choice": "measurements_and_report",
+                    "probabilities": {"measurements_and_report": 0.9},
+                    "confidence": 0.9,
+                },
+                "probe_synthetic": {"type": "noul", "noul": 0.95},
+            },
+        })
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    ok = await llm_router.decide_probe(provider_id)
+    assert ok.ok is True
+    assert ok.answers["probe_source"]["choice"] == "measurements_and_report"
+    assert captured[0]["state"] == llm_router.DECIDE_PROBE_STATE
+    assert captured[0]["model"] == "jev-1.13.0"
+    assert ok.latency_ms is not None and ok.latency_ms >= 0
+
+    # Маршрут decide проверяется и обычной пробой связи (делегирование)
+    via_probe = await llm_router.probe(provider_id, "decide")
+    assert via_probe.ok is True
+    assert via_probe.models and via_probe.models[0].model == "jev-1.13.0"
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": f"oops {_TEST_KEY}"}})
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(failing))
+    failed = await llm_router.decide_probe(provider_id)
+    assert failed.ok is False
+    assert "Провайдер ответил 500" in (failed.error or "")
+    assert _TEST_KEY not in (failed.error or "")
+
+
+def test_put_validates_decide_route_protocol(client, router_config):
+    """decide — только systemone; chat — не systemone; протоколы не смешиваются."""
+    openai = client.put(PREFIX, json={"providers": [_provider_payload()], "routes": {}})
+    openai_id = openai.json()["providers"][0]["id"]
+    bad = client.put(PREFIX, json={
+        "providers": [_provider_payload(id=openai_id, api_key=None)],
+        "routes": {"decide": openai_id},
+    })
+    assert bad.status_code == 400
+    assert "systemone" in bad.json()["detail"]
+
+    jev = client.put(PREFIX, json={"providers": [_jev_payload()], "routes": {}})
+    jev_id = jev.json()["providers"][0]["id"]
+    bad_chat = client.put(PREFIX, json={
+        "providers": [_jev_payload(id=jev_id, api_key=None)],
+        "routes": {"chat": jev_id},
+    })
+    assert bad_chat.status_code == 400
+    assert "openai или anthropic" in bad_chat.json()["detail"]
+
+    good = client.put(PREFIX, json={
+        "providers": [_jev_payload(id=jev_id, api_key=None)],
+        "routes": {"decide": jev_id},
+    })
+    assert good.status_code == 200, good.text
+    assert good.json()["routes"]["decide"] == jev_id

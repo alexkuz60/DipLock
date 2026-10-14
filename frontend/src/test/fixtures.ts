@@ -16,6 +16,7 @@ import type {
   InitStatus,
   JobStatus,
   LlmChatProbeResult,
+  LlmDecideProbeResult,
   LlmProbeResult,
   LlmRouter,
   LocalResource,
@@ -1177,7 +1178,7 @@ export function llmRouterFixture(overrides: Partial<LlmRouter> = {}): LlmRouter 
         key_hint: '…1234',
       },
     ],
-    routes: { chat: 'prov-full', chat_model: null, transcribe: null },
+    routes: { chat: 'prov-full', chat_model: null, transcribe: null, decide: null },
     ...overrides,
   }
 }
@@ -1219,6 +1220,25 @@ export function llmChatProbeFixture(
         truncated: false,
       },
     ],
+    ...overrides,
+  }
+}
+
+/** Результат пробы решающего классификатора (`POST /llm-router/decide-probe`, §5.2). */
+export function llmDecideProbeFixture(
+  overrides: Partial<LlmDecideProbeResult> = {},
+): LlmDecideProbeResult {
+  return {
+    ok: true,
+    provider_id: 'prov-full',
+    model: 'jev-1.13.0',
+    latency_ms: 150,
+    answers: {
+      probe_source: { type: 'choice', choice: 'measurements_and_report' },
+      probe_synthetic: { type: 'noul', noul: 0.95 },
+    },
+    error: null,
+    models: [],
     ...overrides,
   }
 }

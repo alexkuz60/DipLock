@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # молча обрезается (правило «никогда молчаливый топ-N»).
     consilium_answer_max_tokens: int = Field(default=4096, gt=0)
     consilium_prompt_max_chars: int = Field(default=24_000, ge=2000)
+    # Триаж готовности досье (docs/rules/consilium.md §5.2): порог калиброванной
+    # вероятности noul, выше которого досье объявляется достаточным для раунда.
+    # Уверенность классификатора калибрована, но не гарантирует правильность.
+    consilium_triage_sufficient_min: float = Field(default=0.6, ge=0, le=1)
 
     # Модельный роутер ИИ (docs/rules/consilium.md §5): провайдеры внешних API
     # полноценных моделей. Локальные урезанные модели (llama.cpp) отклонены
