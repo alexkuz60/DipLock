@@ -2326,6 +2326,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consilium/cases/{case_id}/brainstorms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Brainstorms
+         * @description История запусков штурма: append-only, новые сверху.
+         */
+        get: operations["list_brainstorms_api_v1_consilium_cases__case_id__brainstorms_get"];
+        put?: never;
+        /**
+         * Run Brainstorm
+         * @description Запускает мозговой штурм по снимку досье; только явной кнопкой.
+         */
+        post: operations["run_brainstorm_api_v1_consilium_cases__case_id__brainstorms_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/brainstorms/{brainstorm_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Brainstorm
+         * @description Точный запуск штурма: резюме, идеи и сырой текст ответа модели.
+         */
+        get: operations["get_brainstorm_api_v1_consilium_cases__case_id__brainstorms__brainstorm_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/brainstorms/{brainstorm_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Brainstorm
+         * @description Стрим событий штурма: растущий текст по мере генерации (механизм 0011).
+         *
+         *     Живой поток — только удобство: фолбэк клиента остаётся прежним (поллинг
+         *     `GET /brainstorms/{id}`), готовый результат приходит из БД. Тексты в файл
+         *     задачи не попадают (§8), частичный текст живёт в RAM процесса.
+         */
+        get: operations["stream_brainstorm_api_v1_consilium_cases__case_id__brainstorms__brainstorm_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Proposals
+         * @description Библиотека исследования: карточки предложений с решениями и исполнениями.
+         */
+        get: operations["list_proposals_api_v1_consilium_cases__case_id__proposals_get"];
+        put?: never;
+        /**
+         * Create Proposal
+         * @description Новое предложение: вручную или из идеи штурма/ответа советника.
+         */
+        post: operations["create_proposal_api_v1_consilium_cases__case_id__proposals_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Proposal
+         * @description Точная карточка предложения с append-only историей решений.
+         */
+        get: operations["get_proposal_api_v1_consilium_cases__case_id__proposals__proposal_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Proposal
+         * @description Правка карточки: новая версия, решения прежних версий остаются.
+         */
+        patch: operations["update_proposal_api_v1_consilium_cases__case_id__proposals__proposal_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/proposals/{proposal_id}/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Decision
+         * @description Решение человека (принято/отклонено) с комментарием; append-only.
+         */
+        post: operations["add_decision_api_v1_consilium_cases__case_id__proposals__proposal_id__decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/proposals/{proposal_id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Execution
+         * @description Ручное исполнение предложения и результат; каждое — новой строкой.
+         */
+        post: operations["add_execution_api_v1_consilium_cases__case_id__proposals__proposal_id__executions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router": {
         parameters: {
             query?: never;
@@ -4796,6 +4952,99 @@ export interface components {
             role: "psychological" | "neurophysiological" | "methodological" | "summary";
         };
         /**
+         * ConsiliumBrainstormCreate
+         * @description Запуск мозгового штурма по снимку досье (только явной кнопкой).
+         */
+        ConsiliumBrainstormCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+        };
+        /**
+         * ConsiliumBrainstormIdeaOut
+         * @description Идея штурма: карточка шага §7 с основанием, рисками и способом проверки.
+         */
+        ConsiliumBrainstormIdeaOut: {
+            /** Id */
+            id: string;
+            /** Brainstorm Id */
+            brainstorm_id: string;
+            /** Ordinal */
+            ordinal: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "ask_volunteer" | "clarify_observation" | "run_probe" | "run_calculation";
+            /** Title */
+            title: string;
+            /** Hypothesis */
+            hypothesis?: string | null;
+            /** Rationale */
+            rationale?: string | null;
+            /** Risks */
+            risks?: string | null;
+            /** Check Method */
+            check_method?: string | null;
+        };
+        /**
+         * ConsiliumBrainstormOut
+         * @description Запуск штурма: резюме, идеи и сырой текст как честное основание разбора.
+         *
+         *     ``draft`` — ответ модели как есть: при сбое разбора ничего не теряется;
+         *     ``summary`` и ``ideas`` заполняются только разобранными частями, без
+         *     достраивания за модель. Ошибка вызова даёт ``status='failed'`` без идей.
+         */
+        ConsiliumBrainstormOut: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /** Snapshot Id */
+            snapshot_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "done" | "failed" | "cancelled" | "interrupted";
+            /** Model */
+            model?: string | null;
+            /** Instruction Version */
+            instruction_version: string;
+            /** Summary */
+            summary?: string | null;
+            /** Draft */
+            draft?: string | null;
+            /** Ideas */
+            ideas?: components["schemas"]["ConsiliumBrainstormIdeaOut"][];
+            /** Warnings */
+            warnings?: string[];
+            /** Error */
+            error?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+        };
+        /**
+         * ConsiliumBrainstormsPage
+         * @description Страница запусков штурма: append-only история, честный total.
+         */
+        ConsiliumBrainstormsPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumBrainstormOut"][];
+        };
+        /**
          * ConsiliumCaseCreate
          * @description Создание исследования с ключом повторного запроса.
          */
@@ -5051,6 +5300,47 @@ export interface components {
             expected_revision: number;
         };
         /**
+         * ConsiliumDecisionCreate
+         * @description Решение человека (принято/отклонено) с комментарием; история не правится.
+         */
+        ConsiliumDecisionCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accepted" | "rejected";
+            /** Comment */
+            comment?: string | null;
+        };
+        /**
+         * ConsiliumDecisionOut
+         * @description Решение человека: принято/отклонено с адресом версии карточки (§7).
+         */
+        ConsiliumDecisionOut: {
+            /** Id */
+            id: string;
+            /** Proposal Id */
+            proposal_id: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "accepted" | "rejected";
+            /** Proposal Version */
+            proposal_version: number;
+            /** Comment */
+            comment?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
          * ConsiliumDeletionPreview
          * @description Что будет удалено; ЭЭГ-записи и соседи не затрагиваются.
          */
@@ -5093,6 +5383,31 @@ export interface components {
              * @default 0
              */
             jev_marks: number;
+            /**
+             * Brainstorms
+             * @default 0
+             */
+            brainstorms: number;
+            /**
+             * Brainstorm Ideas
+             * @default 0
+             */
+            brainstorm_ideas: number;
+            /**
+             * Proposals
+             * @default 0
+             */
+            proposals: number;
+            /**
+             * Decisions
+             * @default 0
+             */
+            decisions: number;
+            /**
+             * Executions
+             * @default 0
+             */
+            executions: number;
             /** Recording Ids */
             recording_ids: string[];
             /** Warnings */
@@ -5220,6 +5535,39 @@ export interface components {
             total: number;
             /** Items */
             items: components["schemas"]["ConsiliumEvidence"][];
+        };
+        /**
+         * ConsiliumExecutionCreate
+         * @description Ручное исполнение предложения и результат; каждое — новой строкой.
+         */
+        ConsiliumExecutionCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Note */
+            note: string;
+            /** Result */
+            result?: string | null;
+        };
+        /**
+         * ConsiliumExecutionOut
+         * @description Ручное исполнение предложения и его результат (Т5).
+         */
+        ConsiliumExecutionOut: {
+            /** Id */
+            id: string;
+            /** Proposal Id */
+            proposal_id: string;
+            /** Note */
+            note: string;
+            /** Result */
+            result?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * ConsiliumJevMarkAnswerCreate
@@ -5404,6 +5752,122 @@ export interface components {
              * @default false
              */
             external_transfer: boolean;
+        };
+        /**
+         * ConsiliumProposalCreate
+         * @description Новое предложение: вручную или из идеи штурма/ответа советника.
+         */
+        ConsiliumProposalCreate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "ask_volunteer" | "clarify_observation" | "run_probe" | "run_calculation";
+            /** Title */
+            title: string;
+            /** Hypothesis */
+            hypothesis?: string | null;
+            /** Rationale */
+            rationale?: string | null;
+            /** Risks */
+            risks?: string | null;
+            /** Check Method */
+            check_method?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Source
+             * @default manual
+             * @enum {string}
+             */
+            source: "brainstorm" | "advisor" | "manual";
+            /** Source Id */
+            source_id?: string | null;
+        };
+        /**
+         * ConsiliumProposalOut
+         * @description Предложение библиотеки: версия карточки, решения и исполнения append-only.
+         */
+        ConsiliumProposalOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "ask_volunteer" | "clarify_observation" | "run_probe" | "run_calculation";
+            /** Title */
+            title: string;
+            /** Hypothesis */
+            hypothesis?: string | null;
+            /** Rationale */
+            rationale?: string | null;
+            /** Risks */
+            risks?: string | null;
+            /** Check Method */
+            check_method?: string | null;
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "brainstorm" | "advisor" | "manual";
+            /** Source Id */
+            source_id?: string | null;
+            /** Version */
+            version: number;
+            /** Decisions */
+            decisions?: components["schemas"]["ConsiliumDecisionOut"][];
+            /** Executions */
+            executions?: components["schemas"]["ConsiliumExecutionOut"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * ConsiliumProposalUpdate
+         * @description Правка карточки: содержимое меняется, история решений остаётся.
+         */
+        ConsiliumProposalUpdate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "ask_volunteer" | "clarify_observation" | "run_probe" | "run_calculation";
+            /** Title */
+            title: string;
+            /** Hypothesis */
+            hypothesis?: string | null;
+            /** Rationale */
+            rationale?: string | null;
+            /** Risks */
+            risks?: string | null;
+            /** Check Method */
+            check_method?: string | null;
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /**
+         * ConsiliumProposalsPage
+         * @description Страница библиотеки: append-only история, честный total.
+         */
+        ConsiliumProposalsPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumProposalOut"][];
         };
         /**
          * ConsiliumRecording
@@ -13277,6 +13741,349 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsiliumJevMarkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_brainstorms_api_v1_consilium_cases__case_id__brainstorms_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumBrainstormsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_brainstorm_api_v1_consilium_cases__case_id__brainstorms_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumBrainstormCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumBrainstormOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_brainstorm_api_v1_consilium_cases__case_id__brainstorms__brainstorm_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                brainstorm_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumBrainstormOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_brainstorm_api_v1_consilium_cases__case_id__brainstorms__brainstorm_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                brainstorm_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE-поток событий штурма: фреймы `event:` + JSON `ConsiliumStreamEvent` (роль `brainstorm`: role_started/delta/role_done/error/ping); после `round_done` поздних дельт нет */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumStreamEvent"];
+                    "text/event-stream": components["schemas"]["ConsiliumStreamEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_proposals_api_v1_consilium_cases__case_id__proposals_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumProposalsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_proposal_api_v1_consilium_cases__case_id__proposals_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumProposalCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumProposalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_proposal_api_v1_consilium_cases__case_id__proposals__proposal_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumProposalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_proposal_api_v1_consilium_cases__case_id__proposals__proposal_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumProposalUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumProposalOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_decision_api_v1_consilium_cases__case_id__proposals__proposal_id__decisions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumDecisionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumDecisionOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_execution_api_v1_consilium_cases__case_id__proposals__proposal_id__executions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumExecutionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumExecutionOut"];
                 };
             };
             /** @description Validation Error */

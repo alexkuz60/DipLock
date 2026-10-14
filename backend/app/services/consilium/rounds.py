@@ -316,7 +316,7 @@ async def _colleagues_for(round: ConsiliumRoundOut) -> list[tuple[str, str]]:
     return _latest_ok(source.answers)
 
 
-async def _chat_target() -> str:
+async def chat_target() -> str:
     """Маршрут chat роутера: подпись раунда; без маршрута — честный 400."""
     state = await llm_router.get_state()
     provider_id = state.routes.get("chat")
@@ -425,7 +425,7 @@ def _limits(roles: tuple[str, ...]) -> dict[str, Any]:
 
 async def start_round(case_id: str, payload: ConsiliumRoundCreate) -> ConsiliumRoundOut:
     """Запускает раунд советников (ответы или замечания) по снимку досье."""
-    model_label = await _chat_target()
+    model_label = await chat_target()
     snapshot = await dossier.get_snapshot(case_id, payload.snapshot_id)
     digest, digest_warnings = build_digest(snapshot)
     roles = tuple(payload.roles) or DEFAULT_ROLES
@@ -451,7 +451,7 @@ async def run_summary(
     case_id: str, round_id: str, payload: ConsiliumRoundAction,
 ) -> ConsiliumRoundOut:
     """Составляет итог по завершённому раунду, сохраняя разногласия (§6)."""
-    model_label = await _chat_target()
+    model_label = await chat_target()
     source = await rounds_store.get_round(case_id, round_id)
     snapshot = await dossier.get_snapshot(case_id, source.snapshot_id)
     digest, digest_warnings = build_digest(snapshot)
@@ -475,7 +475,7 @@ async def retry_role(
     case_id: str, round_id: str, payload: ConsiliumAnswerRetry,
 ) -> ConsiliumRoundOut:
     """Повтор одного неудавшегося ответа: новая попытка, история остаётся."""
-    await _chat_target()  # без маршрута повтор не запускается — честный отказ
+    await chat_target()  # без маршрута повтор не запускается — честный отказ
     round, created = await rounds_store.retry_answer(case_id, round_id, payload)
     if created:
         snapshot = await dossier.get_snapshot(case_id, round.snapshot_id)

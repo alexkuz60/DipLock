@@ -555,6 +555,102 @@ class ConsiliumJevMark(Base):
     created_at = Column(DateTime, nullable=False)
 
 
+class ConsiliumBrainstorm(Base):
+    """Мозговой штурм (срез 0012): один запуск идей и резюме по снимку досье.
+
+    Состояние прерванной операции живёт здесь (§8 ``docs/rules/consilium.md``):
+    ``status='running'`` при рестарте процесса переводится в ``interrupted``.
+    ``draft`` — сырой текст ответа модели как есть: при сбое разбора ничего не
+    теряется, ``summary`` и идеи достраиваются только из разобранного.
+    """
+
+    __tablename__ = "consilium_brainstorms"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    snapshot_id = Column(String, nullable=False)
+    status = Column(String, nullable=False)  # running | done | failed | cancelled | interrupted
+    model = Column(String, nullable=True)  # провайдер/модель маршрутного роутера
+    instruction_version = Column(String, nullable=False)  # версия инструкции штурма
+    summary = Column(String, nullable=True)  # резюме; NULL — не разобрано или не было ответа
+    draft = Column(String, nullable=True)  # сырой текст ответа модели (основание разбора)
+    warnings = Column(JSON, nullable=False)  # предупреждения дайджеста/разбора
+    error = Column(String, nullable=True)  # ошибка вызова/записи — честный отказ
+    job_id = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class ConsiliumBrainstormIdea(Base):
+    """Идея мозгового штурма: карточка шага §7 с основанием и способом проверки."""
+
+    __tablename__ = "consilium_brainstorm_ideas"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    brainstorm_id = Column(
+        String, ForeignKey("consilium_brainstorms.id"), nullable=False, index=True,
+    )
+    ordinal = Column(Integer, nullable=False)  # порядок в ответе модели
+    kind = Column(String, nullable=False)  # ask_volunteer | clarify_observation | run_probe | run_calculation
+    title = Column(String, nullable=False)
+    hypothesis = Column(String, nullable=True)
+    rationale = Column(String, nullable=True)
+    risks = Column(String, nullable=True)
+    check_method = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
+class ConsiliumProposal(Base):
+    """Исследовательское предложение (Т5, срез 0013): карточка шага §7 в библиотеке.
+
+    ``version`` — версия содержимого карточки: правка поднимает её, а решения
+    адресуют точную версию (§7: смена основания делает старое решение прошлым).
+    """
+
+    __tablename__ = "consilium_proposals"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    source = Column(String, nullable=False)  # brainstorm | advisor | manual
+    source_id = Column(String, nullable=True, index=True)  # idea_id / answer_id; NULL — вручную
+    version = Column(Integer, nullable=False)
+    kind = Column(String, nullable=False)  # четыре вида шага §7
+    title = Column(String, nullable=False)
+    hypothesis = Column(String, nullable=True)
+    rationale = Column(String, nullable=True)
+    risks = Column(String, nullable=True)
+    check_method = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    updated_at = Column(DateTime, nullable=False)
+
+
+class ConsiliumDecision(Base):
+    """Решение человека о предложении (Т5): append-only, с версией карточки."""
+
+    __tablename__ = "consilium_decisions"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    proposal_id = Column(
+        String, ForeignKey("consilium_proposals.id"), nullable=False, index=True,
+    )
+    decision = Column(String, nullable=False)  # accepted | rejected
+    proposal_version = Column(Integer, nullable=False)  # версия карточки на момент решения
+    comment = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
+class ConsiliumExecution(Base):
+    """Ручное исполнение предложения и его результат (Т5): append-only."""
+
+    __tablename__ = "consilium_executions"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    proposal_id = Column(
+        String, ForeignKey("consilium_proposals.id"), nullable=False, index=True,
+    )
+    note = Column(String, nullable=False)  # что сделано вручную
+    result = Column(String, nullable=True)  # что получено
+    created_at = Column(DateTime, nullable=False)
+
+
 def _sync_driver_url(url: URL) -> str:
     """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 

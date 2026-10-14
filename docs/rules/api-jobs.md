@@ -36,7 +36,7 @@
 ### Отдельный роутер Консилиума (начало Т1, 10.10.2026)
 
 `backend/app/api/consilium.py` подключён в main с тем же `settings.api_prefix`:
-34 операции, 25 уникальных путей. Pydantic — `schemas/consilium.py`; обязательный
+45 операций, 33 уникальных пути. Pydantic — `schemas/consilium.py`; обязательный
 сервис хранения — `services/consilium/store.py`; подробности —
 `docs/rules/consilium.md` §0. Не фоновые задачи и не best-effort запись.
 
@@ -61,6 +61,7 @@
 | `GET /consilium/cases/{case_id}/rounds/{round_id}` | раунд со всеми попытками; `interrupted` — честный статус прерванного |
 | `POST /consilium/cases/{case_id}/rounds/{round_id}/summary` | итог с сохранением разногласий, один на снимок |
 | `POST /consilium/cases/{case_id}/rounds/{round_id}/retry` | повтор одного неудавшегося ответа (новая попытка в истории) |
+| `GET /consilium/cases/{case_id}/rounds/{round_id}/stream` | SSE-стрим раунда (срез 0011): дельты ролей по мере генерации, позднему подписчику — `round_done`; тексты в файл задачи не попадают |
 | `POST /consilium/cases/{case_id}/triage` | триаж готовности досье Jev (§5.2): типизированные решения одного вызова, 201; повтор `request_id` — прежняя строка без повторной передачи данных; ошибка провайдера — строка `failed` без достроенных решений |
 | `GET /consilium/cases/{case_id}/triage` | история попыток триажа (append-only, новые сверху), пагинация/total |
 | `GET /consilium/cases/{case_id}/triage/{triage_id}` | точная строка триажа с сырыми решениями и предупреждениями |
@@ -69,6 +70,13 @@
 | `POST /consilium/cases/{case_id}/jev-marks/source-marks` | разметка источников утверждений ответа (три источника не смешиваются, advisory), 201 |
 | `GET /consilium/cases/{case_id}/jev-marks` | история попыток разметки (append-only, новые сверху) с фильтрами `kind`/`subject_id` |
 | `GET /consilium/cases/{case_id}/jev-marks/{mark_id}` | точная строка разметки с метками, вероятностями и предупреждениями |
+| `POST/GET /consilium/cases/{case_id}/brainstorms` | мозговой штурм (срез 0012): запуск 202 кнопкой по снимку досье, история (новые сверху); повтор `request_id` — прежняя строка |
+| `GET /consilium/cases/{case_id}/brainstorms/{brainstorm_id}` | точный запуск: резюме, идеи §7 и сырой текст ответа модели (`draft`) |
+| `GET /consilium/cases/{case_id}/brainstorms/{brainstorm_id}/stream` | SSE-стрим штурма (механизм 0011, роль `brainstorm`): растущий текст, `round_done` на границе |
+| `POST/GET /consilium/cases/{case_id}/proposals` | библиотека исследования (Т5, срез 0013): предложение вручную/из идеи штурма (201), список с пагинацией |
+| `GET/PATCH /consilium/cases/{case_id}/proposals/{proposal_id}` | карточка с append-only решениями/исполнениями; правка — новая версия карточки |
+| `POST /consilium/cases/{case_id}/proposals/{proposal_id}/decisions` | решение человека «принято/отклонено» (201, append-only) с адресом версии карточки |
+| `POST /consilium/cases/{case_id}/proposals/{proposal_id}/executions` | ручное исполнение предложения и результат (201, append-only) |
 
 Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
 без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;

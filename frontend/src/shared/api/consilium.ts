@@ -35,6 +35,17 @@ import type {
   ConsiliumJevMarkAnswerCreate,
   ConsiliumJevMarksPage,
   ConsiliumJevMarkRoundPlanCreate,
+  ConsiliumBrainstorm,
+  ConsiliumBrainstormCreate,
+  ConsiliumBrainstormsPage,
+  ConsiliumDecision,
+  ConsiliumDecisionCreate,
+  ConsiliumExecution,
+  ConsiliumExecutionCreate,
+  ConsiliumProposal,
+  ConsiliumProposalCreate,
+  ConsiliumProposalsPage,
+  ConsiliumProposalUpdate,
 } from './types'
 
 const base = `${API_PREFIX}/consilium`
@@ -121,4 +132,29 @@ export const consiliumApi = {
     if (subjectId) params.set('subject_id', subjectId)
     return request<ConsiliumJevMarksPage>(`${path(id)}/jev-marks?${params}`, { signal })
   },
+  /** Мозговой штурм (срез 0012): история запусков, запуск кнопкой, точная строка. */
+  brainstorms: (id: string, offset = 0, signal?: AbortSignal) =>
+    request<ConsiliumBrainstormsPage>(`${path(id)}/brainstorms${page(offset)}`, { signal }),
+  brainstorm: (id: string, brainstormId: string, signal?: AbortSignal) =>
+    request<ConsiliumBrainstorm>(`${path(id)}/brainstorms/${brainstormId}`, { signal }),
+  /** Запуск мозгового штурма по снимку досье — только явной кнопкой. */
+  runBrainstorm: (id: string, payload: ConsiliumBrainstormCreate) =>
+    request<ConsiliumBrainstorm>(`${path(id)}/brainstorms`, json('POST', payload)),
+  /** Библиотека исследования (Т5, срез 0013): предложения, решения, исполнения. */
+  proposals: (id: string, offset = 0, signal?: AbortSignal) =>
+    request<ConsiliumProposalsPage>(`${path(id)}/proposals${page(offset)}`, { signal }),
+  proposal: (id: string, proposalId: string, signal?: AbortSignal) =>
+    request<ConsiliumProposal>(`${path(id)}/proposals/${proposalId}`, { signal }),
+  addProposal: (id: string, payload: ConsiliumProposalCreate) =>
+    request<ConsiliumProposal>(`${path(id)}/proposals`, json('POST', payload)),
+  updateProposal: (id: string, proposalId: string, payload: ConsiliumProposalUpdate) =>
+    request<ConsiliumProposal>(`${path(id)}/proposals/${proposalId}`, json('PATCH', payload)),
+  /** Решение человека (принято/отклонено); append-only история не правится. */
+  decideProposal: (id: string, proposalId: string, payload: ConsiliumDecisionCreate) =>
+    request<ConsiliumDecision>(`${path(id)}/proposals/${proposalId}/decisions`, json('POST', payload)),
+  /** Ручное исполнение предложения и результат; каждое — новой строкой. */
+  executeProposal: (id: string, proposalId: string, payload: ConsiliumExecutionCreate) =>
+    request<ConsiliumExecution>(
+      `${path(id)}/proposals/${proposalId}/executions`, json('POST', payload),
+    ),
 }

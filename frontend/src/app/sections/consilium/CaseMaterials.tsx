@@ -13,6 +13,7 @@ import type {
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { ErrorBlock } from '@/shared/ui/StateViews'
+import { CaseBrainstorm } from './CaseBrainstorm'
 import { PageButtons, QueryState } from './common'
 import { useCaseAction } from './useCaseAction'
 
@@ -279,6 +280,7 @@ export function CaseMaterials({ current }: { current: ConsiliumCase }) {
           </Button>
         </div>
       )}
+      <CaseBrainstorm current={current} />
       <h3 className="font-semibold">История досье</h3>
       <QueryState
         loading={snapshots.isPending}

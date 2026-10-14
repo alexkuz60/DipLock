@@ -273,6 +273,11 @@ class ConsiliumDeletionPreview(ConsiliumContract):
     answers: int = 0
     triage: int = 0
     jev_marks: int = 0
+    brainstorms: int = 0
+    brainstorm_ideas: int = 0
+    proposals: int = 0
+    decisions: int = 0
+    executions: int = 0
     recording_ids: list[str]
     warnings: list[str]
 
@@ -551,3 +556,155 @@ class ConsiliumStreamEvent(BaseModel):
     model: str | None = None
     status: StreamRoleStatus | None = None
     error: str | None = None
+
+
+# --- Мозговой штурм (срез 0012): идеи и резюме по снимку досье ---
+
+BrainstormKind = Literal["ask_volunteer", "clarify_observation", "run_probe", "run_calculation"]
+BrainstormStatus = Literal["running", "done", "failed", "cancelled", "interrupted"]
+
+
+class ConsiliumBrainstormCreate(ConsiliumContract):
+    """Запуск мозгового штурма по снимку досье (только явной кнопкой)."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+    snapshot_id: Identifier
+
+
+class ConsiliumBrainstormIdeaOut(ConsiliumContract):
+    """Идея штурма: карточка шага §7 с основанием, рисками и способом проверки."""
+
+    id: str
+    brainstorm_id: str
+    ordinal: int
+    kind: BrainstormKind
+    title: str
+    hypothesis: str | None = None
+    rationale: str | None = None
+    risks: str | None = None
+    check_method: str | None = None
+
+
+class ConsiliumBrainstormOut(ConsiliumContract):
+    """Запуск штурма: резюме, идеи и сырой текст как честное основание разбора.
+
+    ``draft`` — ответ модели как есть: при сбое разбора ничего не теряется;
+    ``summary`` и ``ideas`` заполняются только разобранными частями, без
+    достраивания за модель. Ошибка вызова даёт ``status='failed'`` без идей.
+    """
+
+    id: str
+    case_id: str
+    snapshot_id: str
+    status: BrainstormStatus
+    model: str | None = None
+    instruction_version: str
+    summary: str | None = None
+    draft: str | None = None
+    ideas: list[ConsiliumBrainstormIdeaOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+    job_id: str | None = None
+    created_at: datetime
+    finished_at: datetime | None = None
+
+
+class ConsiliumBrainstormsPage(ConsiliumContract):
+    """Страница запусков штурма: append-only история, честный total."""
+
+    total: int
+    items: list[ConsiliumBrainstormOut]
+
+
+# --- Библиотека исследования (Т5, срез 0013): предложения и решения ---
+
+ProposalSource = Literal["brainstorm", "advisor", "manual"]
+ProposalDecision = Literal["accepted", "rejected"]
+
+
+class ConsiliumProposalFields(ConsiliumContract):
+    """Карточка предложения: вид шага §7, основание и способ проверки."""
+
+    kind: BrainstormKind
+    title: Annotated[str, Field(min_length=1, max_length=300)]
+    hypothesis: str | None = Field(default=None, max_length=2000)
+    rationale: str | None = Field(default=None, max_length=2000)
+    risks: str | None = Field(default=None, max_length=2000)
+    check_method: str | None = Field(default=None, max_length=2000)
+
+
+class ConsiliumProposalCreate(ConsiliumProposalFields):
+    """Новое предложение: вручную или из идеи штурма/ответа советника."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+    source: ProposalSource = "manual"
+    source_id: Identifier | None = None
+
+
+class ConsiliumProposalUpdate(ConsiliumProposalFields):
+    """Правка карточки: содержимое меняется, история решений остаётся."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+
+
+class ConsiliumDecisionOut(ConsiliumContract):
+    """Решение человека: принято/отклонено с адресом версии карточки (§7)."""
+
+    id: str
+    proposal_id: str
+    decision: ProposalDecision
+    proposal_version: int
+    comment: str | None = None
+    created_at: datetime
+
+
+class ConsiliumExecutionOut(ConsiliumContract):
+    """Ручное исполнение предложения и его результат (Т5)."""
+
+    id: str
+    proposal_id: str
+    note: str
+    result: str | None = None
+    created_at: datetime
+
+
+class ConsiliumProposalOut(ConsiliumProposalFields):
+    """Предложение библиотеки: версия карточки, решения и исполнения append-only."""
+
+    id: str
+    case_id: str
+    source: ProposalSource
+    source_id: str | None = None
+    version: int
+    decisions: list[ConsiliumDecisionOut] = Field(default_factory=list)
+    executions: list[ConsiliumExecutionOut] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConsiliumProposalsPage(ConsiliumContract):
+    """Страница библиотеки: append-only история, честный total."""
+
+    total: int
+    items: list[ConsiliumProposalOut]
+
+
+class ConsiliumDecisionCreate(ConsiliumContract):
+    """Решение человека (принято/отклонено) с комментарием; история не правится."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+    decision: ProposalDecision
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class ConsiliumExecutionCreate(ConsiliumContract):
+    """Ручное исполнение предложения и результат; каждое — новой строкой."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+    note: Annotated[str, Field(min_length=1, max_length=2000)]
+    result: str | None = Field(default=None, max_length=20_000)

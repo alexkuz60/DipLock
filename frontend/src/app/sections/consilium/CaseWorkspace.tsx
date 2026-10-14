@@ -15,6 +15,7 @@ import { ErrorBlock } from '@/shared/ui/StateViews'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { CaseForm } from './CaseForm'
 import { CaseHistory } from './CaseHistory'
+import { CaseLibrary } from './CaseLibrary'
 import { CaseMaterials } from './CaseMaterials'
 import { CaseDiscussion } from './CaseDiscussion'
 import { QueryState } from './common'
@@ -29,7 +30,7 @@ export function CaseWorkspace({
   recordings: ConsiliumRecording[]
   onDeleted: () => void
 }) {
-  const [tab, setTab] = useState<'discussion' | 'history' | 'materials'>('discussion')
+  const [tab, setTab] = useState<'discussion' | 'history' | 'materials' | 'library'>('discussion')
   const [editing, setEditing] = useState(false)
   const [preview, setPreview] = useState<ConsiliumDeletionPreview | null>(null)
   const queryClient = useQueryClient()
@@ -175,12 +176,15 @@ export function CaseWorkspace({
               { value: 'discussion', label: 'Обсуждение' },
               { value: 'history', label: 'Контекст и история' },
               { value: 'materials', label: 'Материалы и досье' },
+              { value: 'library', label: 'Библиотека' },
             ]}
           />
           {tab === 'discussion' ? (
             <CaseDiscussion current={current} />
           ) : tab === 'history' ? (
             <CaseHistory current={current} />
+          ) : tab === 'library' ? (
+            <CaseLibrary current={current} />
           ) : (
             <CaseMaterials current={current} />
           )}

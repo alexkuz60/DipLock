@@ -84,6 +84,14 @@ export function roundStreamUrl(caseId: string, roundId: string): string {
   )
 }
 
+/** Адрес потока событий штурма (SSE, тот же механизм 0011, роль `brainstorm`). */
+export function brainstormStreamUrl(caseId: string, brainstormId: string): string {
+  return (
+    `${API_PREFIX}/consilium/cases/${encodeURIComponent(caseId)}` +
+    `/brainstorms/${encodeURIComponent(brainstormId)}/stream`
+  )
+}
+
 /** Разобрать SSE-фрейм (`data:` + JSON) в событие; мусорные фреймы — мимо. */
 function parseFrame(frame: string): ConsiliumStreamEvent | null {
   const data = frame
@@ -100,19 +108,19 @@ function parseFrame(frame: string): ConsiliumStreamEvent | null {
 }
 
 /**
- * Подписка на стрим раунда: события приходят в `onEvent`, обрыв/отказ — в
- * `onError` (клиент остаётся на поллинге). Возврат — отмена подписки.
+ * Подписка на стрим (раунд или штурм — механизм 0011): события приходят в
+ * `onEvent`, обрыв/отказ — в `onError` (клиент остаётся на поллинге).
+ * Возврат — отмена подписки.
  */
-export function subscribeRoundStream(
-  caseId: string,
-  roundId: string,
+export function subscribeStream(
+  url: string,
   onEvent: (event: ConsiliumStreamEvent) => void,
   onError?: () => void,
 ): () => void {
   const controller = new AbortController()
   void (async () => {
     try {
-      const response = await fetch(roundStreamUrl(caseId, roundId), {
+      const response = await fetch(url, {
         signal: controller.signal,
         headers: { Accept: 'text/event-stream' },
       })
@@ -140,4 +148,24 @@ export function subscribeRoundStream(
     }
   })()
   return () => controller.abort()
+}
+
+/** Подписка на стрим раунда: обёртка над общим `subscribeStream`. */
+export function subscribeRoundStream(
+  caseId: string,
+  roundId: string,
+  onEvent: (event: ConsiliumStreamEvent) => void,
+  onError?: () => void,
+): () => void {
+  return subscribeStream(roundStreamUrl(caseId, roundId), onEvent, onError)
+}
+
+/** Подписка на стрим штурма (роль `brainstorm`): тот же механизм 0011. */
+export function subscribeBrainstormStream(
+  caseId: string,
+  brainstormId: string,
+  onEvent: (event: ConsiliumStreamEvent) => void,
+  onError?: () => void,
+): () => void {
+  return subscribeStream(brainstormStreamUrl(caseId, brainstormId), onEvent, onError)
 }

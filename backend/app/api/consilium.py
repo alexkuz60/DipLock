@@ -11,6 +11,9 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from app.api.private import PrivateRoute
 from app.schemas.consilium import (
     ConsiliumAnswerRetry,
+    ConsiliumBrainstormCreate,
+    ConsiliumBrainstormOut,
+    ConsiliumBrainstormsPage,
     ConsiliumCaseCreate,
     ConsiliumCaseOut,
     ConsiliumCasesPage,
@@ -19,11 +22,15 @@ from app.schemas.consilium import (
     ConsiliumContextOut,
     ConsiliumContextPage,
     ConsiliumContextUpdate,
+    ConsiliumDecisionCreate,
+    ConsiliumDecisionOut,
     ConsiliumDeletionPreview,
     ConsiliumEvidence,
     ConsiliumEvidenceCreate,
     ConsiliumEvidenceDeletion,
     ConsiliumEvidencePage,
+    ConsiliumExecutionCreate,
+    ConsiliumExecutionOut,
     ConsiliumJevMarkAnswerCreate,
     ConsiliumJevMarkOut,
     ConsiliumJevMarkRoundPlanCreate,
@@ -32,6 +39,10 @@ from app.schemas.consilium import (
     ConsiliumMessageOut,
     ConsiliumMessagesPage,
     ConsiliumMessageUpdate,
+    ConsiliumProposalCreate,
+    ConsiliumProposalOut,
+    ConsiliumProposalsPage,
+    ConsiliumProposalUpdate,
     ConsiliumRecording,
     ConsiliumRoundAction,
     ConsiliumRoundCreate,
@@ -48,8 +59,10 @@ from app.schemas.consilium import (
 )
 from app.services import recording_store
 from app.services.consilium import (
+    brainstorm,
     dossier,
     jev_marks,
+    library,
     rounds,
     rounds_store,
     sources,
@@ -308,6 +321,31 @@ def _sse_frame(event: ConsiliumStreamEvent) -> str:
     return f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
 
 
+async def _stream_frames(progress: streams.RoundProgress | None) -> AsyncIterator[str]:
+    """Кадры SSE из журнала потока (механизм 0011); позднему подписчику — round_done."""
+    if progress is None:
+        # Запуск завершён (или бэкенд перезапущен) — только round_done
+        yield _sse_frame(ConsiliumStreamEvent(type="round_done"))
+        return
+    sent = 0
+    while True:
+        progress.changed.clear()
+        while sent < len(progress.log):
+            yield _sse_frame(progress.log[sent])
+            sent += 1
+        if progress.finished:
+            if progress.error:
+                yield _sse_frame(ConsiliumStreamEvent(type="error", error=progress.error))
+            yield _sse_frame(
+                ConsiliumStreamEvent(type="round_done", error=progress.error),
+            )
+            return
+        try:
+            await asyncio.wait_for(progress.changed.wait(), timeout=_SSE_PING_S)
+        except TimeoutError:
+            yield _sse_frame(ConsiliumStreamEvent(type="ping"))
+
+
 @router.get(
     "/cases/{case_id}/rounds/{round_id}/stream",
     responses={
@@ -339,32 +377,8 @@ async def stream_round(
         # Принадлежность раунда делу: чужой/отсутствующий — честный 404
         await rounds_store.get_round(case_id, round_id)
 
-    async def frames() -> AsyncIterator[str]:
-        progress = streams.get_round(round_id)
-        if progress is None:
-            # Запуск завершён (или бэкенд перезапущен) — только round_done
-            yield _sse_frame(ConsiliumStreamEvent(type="round_done"))
-            return
-        sent = 0
-        while True:
-            progress.changed.clear()
-            while sent < len(progress.log):
-                yield _sse_frame(progress.log[sent])
-                sent += 1
-            if progress.finished:
-                if progress.error:
-                    yield _sse_frame(ConsiliumStreamEvent(type="error", error=progress.error))
-                yield _sse_frame(
-                    ConsiliumStreamEvent(type="round_done", error=progress.error),
-                )
-                return
-            try:
-                await asyncio.wait_for(progress.changed.wait(), timeout=_SSE_PING_S)
-            except TimeoutError:
-                yield _sse_frame(ConsiliumStreamEvent(type="ping"))
-
     return StreamingResponse(
-        frames(),
+        _stream_frames(streams.get_round(round_id)),
         media_type="text/event-stream",
         headers={"Cache-Control": "private, no-store", "X-Accel-Buffering": "no"},
     )
@@ -483,3 +497,139 @@ async def get_jev_mark(
     """Точная строка разметки с типизированными метками и предупреждениями."""
     async with guarded(response):
         return await jev_marks.get_mark(case_id, mark_id)
+
+
+# --- Мозговой штурм (срез 0012): идеи и резюме по снимку досье ---
+
+
+@router.post(
+    "/cases/{case_id}/brainstorms", status_code=202, response_model=ConsiliumBrainstormOut,
+)
+async def run_brainstorm(
+    case_id: str, payload: ConsiliumBrainstormCreate, response: Response,
+) -> ConsiliumBrainstormOut:
+    """Запускает мозговой штурм по снимку досье; только явной кнопкой."""
+    async with guarded(response):
+        return await brainstorm.run(case_id, payload)
+
+
+@router.get("/cases/{case_id}/brainstorms", response_model=ConsiliumBrainstormsPage)
+async def list_brainstorms(
+    case_id: str, response: Response,
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+) -> ConsiliumBrainstormsPage:
+    """История запусков штурма: append-only, новые сверху."""
+    async with guarded(response):
+        return await brainstorm.list_brainstorms(case_id, limit, offset)
+
+
+@router.get(
+    "/cases/{case_id}/brainstorms/{brainstorm_id}", response_model=ConsiliumBrainstormOut,
+)
+async def get_brainstorm(
+    case_id: str, brainstorm_id: str, response: Response,
+) -> ConsiliumBrainstormOut:
+    """Точный запуск штурма: резюме, идеи и сырой текст ответа модели."""
+    async with guarded(response):
+        return await brainstorm.get_brainstorm(case_id, brainstorm_id)
+
+
+@router.get(
+    "/cases/{case_id}/brainstorms/{brainstorm_id}/stream",
+    responses={
+        200: {
+            "model": ConsiliumStreamEvent,
+            "description": (
+                "SSE-поток событий штурма: фреймы `event:` + JSON "
+                "`ConsiliumStreamEvent` (роль `brainstorm`: role_started/delta/"
+                "role_done/error/ping); после `round_done` поздних дельт нет"
+            ),
+            "content": {
+                "text/event-stream": {
+                    "schema": {"$ref": "#/components/schemas/ConsiliumStreamEvent"},
+                },
+            },
+        },
+    },
+)
+async def stream_brainstorm(
+    case_id: str, brainstorm_id: str, response: Response,
+) -> StreamingResponse:
+    """Стрим событий штурма: растущий текст по мере генерации (механизм 0011).
+
+    Живой поток — только удобство: фолбэк клиента остаётся прежним (поллинг
+    `GET /brainstorms/{id}`), готовый результат приходит из БД. Тексты в файл
+    задачи не попадают (§8), частичный текст живёт в RAM процесса.
+    """
+    async with guarded(response):
+        # Принадлежность запуска делу: чужой/отсутствующий — честный 404
+        await brainstorm.get_brainstorm(case_id, brainstorm_id)
+    return StreamingResponse(
+        _stream_frames(streams.get_round(brainstorm_id)),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "private, no-store", "X-Accel-Buffering": "no"},
+    )
+
+
+# --- Библиотека исследования (Т5, срез 0013): предложения и решения ---
+
+
+@router.post("/cases/{case_id}/proposals", status_code=201, response_model=ConsiliumProposalOut)
+async def create_proposal(
+    case_id: str, payload: ConsiliumProposalCreate, response: Response,
+) -> ConsiliumProposalOut:
+    """Новое предложение: вручную или из идеи штурма/ответа советника."""
+    async with guarded(response):
+        return await library.create(case_id, payload)
+
+
+@router.get("/cases/{case_id}/proposals", response_model=ConsiliumProposalsPage)
+async def list_proposals(
+    case_id: str, response: Response,
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+) -> ConsiliumProposalsPage:
+    """Библиотека исследования: карточки предложений с решениями и исполнениями."""
+    async with guarded(response):
+        return await library.list_proposals(case_id, limit, offset)
+
+
+@router.get("/cases/{case_id}/proposals/{proposal_id}", response_model=ConsiliumProposalOut)
+async def get_proposal(
+    case_id: str, proposal_id: str, response: Response,
+) -> ConsiliumProposalOut:
+    """Точная карточка предложения с append-only историей решений."""
+    async with guarded(response):
+        return await library.get_proposal(case_id, proposal_id)
+
+
+@router.patch("/cases/{case_id}/proposals/{proposal_id}", response_model=ConsiliumProposalOut)
+async def update_proposal(
+    case_id: str, proposal_id: str, payload: ConsiliumProposalUpdate, response: Response,
+) -> ConsiliumProposalOut:
+    """Правка карточки: новая версия, решения прежних версий остаются."""
+    async with guarded(response):
+        return await library.update(case_id, proposal_id, payload)
+
+
+@router.post(
+    "/cases/{case_id}/proposals/{proposal_id}/decisions",
+    status_code=201, response_model=ConsiliumDecisionOut,
+)
+async def add_decision(
+    case_id: str, proposal_id: str, payload: ConsiliumDecisionCreate, response: Response,
+) -> ConsiliumDecisionOut:
+    """Решение человека (принято/отклонено) с комментарием; append-only."""
+    async with guarded(response):
+        return await library.add_decision(case_id, proposal_id, payload)
+
+
+@router.post(
+    "/cases/{case_id}/proposals/{proposal_id}/executions",
+    status_code=201, response_model=ConsiliumExecutionOut,
+)
+async def add_execution(
+    case_id: str, proposal_id: str, payload: ConsiliumExecutionCreate, response: Response,
+) -> ConsiliumExecutionOut:
+    """Ручное исполнение предложения и результат; каждое — новой строкой."""
+    async with guarded(response):
+        return await library.add_execution(case_id, proposal_id, payload)

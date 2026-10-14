@@ -6082,6 +6082,585 @@
         }
       }
     },
+    "/api/v1/consilium/cases/{case_id}/brainstorms": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Run Brainstorm",
+        "description": "Запускает мозговой штурм по снимку досье; только явной кнопкой.",
+        "operationId": "run_brainstorm_api_v1_consilium_cases__case_id__brainstorms_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumBrainstormCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumBrainstormOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Brainstorms",
+        "description": "История запусков штурма: append-only, новые сверху.",
+        "operationId": "list_brainstorms_api_v1_consilium_cases__case_id__brainstorms_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumBrainstormsPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/brainstorms/{brainstorm_id}": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Get Brainstorm",
+        "description": "Точный запуск штурма: резюме, идеи и сырой текст ответа модели.",
+        "operationId": "get_brainstorm_api_v1_consilium_cases__case_id__brainstorms__brainstorm_id__get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "brainstorm_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Brainstorm Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumBrainstormOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/brainstorms/{brainstorm_id}/stream": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Stream Brainstorm",
+        "description": "Стрим событий штурма: растущий текст по мере генерации (механизм 0011).\n\nЖивой поток — только удобство: фолбэк клиента остаётся прежним (поллинг\n`GET /brainstorms/{id}`), готовый результат приходит из БД. Тексты в файл\nзадачи не попадают (§8), частичный текст живёт в RAM процесса.",
+        "operationId": "stream_brainstorm_api_v1_consilium_cases__case_id__brainstorms__brainstorm_id__stream_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "brainstorm_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Brainstorm Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE-поток событий штурма: фреймы `event:` + JSON `ConsiliumStreamEvent` (роль `brainstorm`: role_started/delta/role_done/error/ping); после `round_done` поздних дельт нет",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumStreamEvent"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumStreamEvent"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/proposals": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Create Proposal",
+        "description": "Новое предложение: вручную или из идеи штурма/ответа советника.",
+        "operationId": "create_proposal_api_v1_consilium_cases__case_id__proposals_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumProposalCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumProposalOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Proposals",
+        "description": "Библиотека исследования: карточки предложений с решениями и исполнениями.",
+        "operationId": "list_proposals_api_v1_consilium_cases__case_id__proposals_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumProposalsPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/proposals/{proposal_id}": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Get Proposal",
+        "description": "Точная карточка предложения с append-only историей решений.",
+        "operationId": "get_proposal_api_v1_consilium_cases__case_id__proposals__proposal_id__get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumProposalOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Update Proposal",
+        "description": "Правка карточки: новая версия, решения прежних версий остаются.",
+        "operationId": "update_proposal_api_v1_consilium_cases__case_id__proposals__proposal_id__patch",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumProposalUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumProposalOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/proposals/{proposal_id}/decisions": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Add Decision",
+        "description": "Решение человека (принято/отклонено) с комментарием; append-only.",
+        "operationId": "add_decision_api_v1_consilium_cases__case_id__proposals__proposal_id__decisions_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumDecisionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumDecisionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/proposals/{proposal_id}/executions": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Add Execution",
+        "description": "Ручное исполнение предложения и результат; каждое — новой строкой.",
+        "operationId": "add_execution_api_v1_consilium_cases__case_id__proposals__proposal_id__executions_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumExecutionCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumExecutionOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/llm-router": {
       "get": {
         "tags": [
@@ -10305,6 +10884,275 @@
         "title": "ConsiliumAnswerRetry",
         "description": "Повтор одного неудавшегося ответа; успешные ответы не переспрашиваются."
       },
+      "ConsiliumBrainstormCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Snapshot Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "snapshot_id"
+        ],
+        "title": "ConsiliumBrainstormCreate",
+        "description": "Запуск мозгового штурма по снимку досье (только явной кнопкой)."
+      },
+      "ConsiliumBrainstormIdeaOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "brainstorm_id": {
+            "type": "string",
+            "title": "Brainstorm Id"
+          },
+          "ordinal": {
+            "type": "integer",
+            "title": "Ordinal"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ask_volunteer",
+              "clarify_observation",
+              "run_probe",
+              "run_calculation"
+            ],
+            "title": "Kind"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "hypothesis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "risks": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risks"
+          },
+          "check_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Method"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "brainstorm_id",
+          "ordinal",
+          "kind",
+          "title"
+        ],
+        "title": "ConsiliumBrainstormIdeaOut",
+        "description": "Идея штурма: карточка шага §7 с основанием, рисками и способом проверки."
+      },
+      "ConsiliumBrainstormOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "title": "Snapshot Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "done",
+              "failed",
+              "cancelled",
+              "interrupted"
+            ],
+            "title": "Status"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "instruction_version": {
+            "type": "string",
+            "title": "Instruction Version"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
+          },
+          "ideas": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumBrainstormIdeaOut"
+            },
+            "type": "array",
+            "title": "Ideas"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "case_id",
+          "snapshot_id",
+          "status",
+          "instruction_version",
+          "created_at"
+        ],
+        "title": "ConsiliumBrainstormOut",
+        "description": "Запуск штурма: резюме, идеи и сырой текст как честное основание разбора.\n\n``draft`` — ответ модели как есть: при сбое разбора ничего не теряется;\n``summary`` и ``ideas`` заполняются только разобранными частями, без\nдостраивания за модель. Ошибка вызова даёт ``status='failed'`` без идей."
+      },
+      "ConsiliumBrainstormsPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumBrainstormOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumBrainstormsPage",
+        "description": "Страница запусков штурма: append-only история, честный total."
+      },
       "ConsiliumCaseCreate": {
         "properties": {
           "title": {
@@ -10959,6 +11807,102 @@
         "title": "ConsiliumContextUpdate",
         "description": "Исправление создаёт новую ревизию, не стирая исходную."
       },
+      "ConsiliumDecisionCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "title": "Decision"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "decision"
+        ],
+        "title": "ConsiliumDecisionCreate",
+        "description": "Решение человека (принято/отклонено) с комментарием; история не правится."
+      },
+      "ConsiliumDecisionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "proposal_id": {
+            "type": "string",
+            "title": "Proposal Id"
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected"
+            ],
+            "title": "Decision"
+          },
+          "proposal_version": {
+            "type": "integer",
+            "title": "Proposal Version"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "proposal_id",
+          "decision",
+          "proposal_version",
+          "created_at"
+        ],
+        "title": "ConsiliumDecisionOut",
+        "description": "Решение человека: принято/отклонено с адресом версии карточки (§7)."
+      },
       "ConsiliumDeletionPreview": {
         "properties": {
           "case_id": {
@@ -11005,6 +11949,31 @@
           "jev_marks": {
             "type": "integer",
             "title": "Jev Marks",
+            "default": 0
+          },
+          "brainstorms": {
+            "type": "integer",
+            "title": "Brainstorms",
+            "default": 0
+          },
+          "brainstorm_ideas": {
+            "type": "integer",
+            "title": "Brainstorm Ideas",
+            "default": 0
+          },
+          "proposals": {
+            "type": "integer",
+            "title": "Proposals",
+            "default": 0
+          },
+          "decisions": {
+            "type": "integer",
+            "title": "Decisions",
+            "default": 0
+          },
+          "executions": {
+            "type": "integer",
+            "title": "Executions",
             "default": 0
           },
           "recording_ids": {
@@ -11309,6 +12278,91 @@
         ],
         "title": "ConsiliumEvidencePage",
         "description": "Материалы дела с честным общим числом."
+      },
+      "ConsiliumExecutionCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Note"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "note"
+        ],
+        "title": "ConsiliumExecutionCreate",
+        "description": "Ручное исполнение предложения и результат; каждое — новой строкой."
+      },
+      "ConsiliumExecutionOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "proposal_id": {
+            "type": "string",
+            "title": "Proposal Id"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "proposal_id",
+          "note",
+          "created_at"
+        ],
+        "title": "ConsiliumExecutionOut",
+        "description": "Ручное исполнение предложения и его результат (Т5)."
       },
       "ConsiliumJevMarkAnswerCreate": {
         "properties": {
@@ -11702,6 +12756,371 @@
         "type": "object",
         "title": "ConsiliumPermissions",
         "description": "Разрешения контекста: использование ИИ и внешняя передача независимы."
+      },
+      "ConsiliumProposalCreate": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ask_volunteer",
+              "clarify_observation",
+              "run_probe",
+              "run_calculation"
+            ],
+            "title": "Kind"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "hypothesis": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "risks": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risks"
+          },
+          "check_method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Method"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "brainstorm",
+              "advisor",
+              "manual"
+            ],
+            "title": "Source",
+            "default": "manual"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[\\w.-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "title",
+          "request_id",
+          "expected_version"
+        ],
+        "title": "ConsiliumProposalCreate",
+        "description": "Новое предложение: вручную или из идеи штурма/ответа советника."
+      },
+      "ConsiliumProposalOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ask_volunteer",
+              "clarify_observation",
+              "run_probe",
+              "run_calculation"
+            ],
+            "title": "Kind"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "hypothesis": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "risks": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risks"
+          },
+          "check_method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Method"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "brainstorm",
+              "advisor",
+              "manual"
+            ],
+            "title": "Source"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumDecisionOut"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "executions": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumExecutionOut"
+            },
+            "type": "array",
+            "title": "Executions"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "title",
+          "id",
+          "case_id",
+          "source",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConsiliumProposalOut",
+        "description": "Предложение библиотеки: версия карточки, решения и исполнения append-only."
+      },
+      "ConsiliumProposalUpdate": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "ask_volunteer",
+              "clarify_observation",
+              "run_probe",
+              "run_calculation"
+            ],
+            "title": "Kind"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "hypothesis": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hypothesis"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "risks": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risks"
+          },
+          "check_method": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check Method"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "title",
+          "request_id",
+          "expected_version"
+        ],
+        "title": "ConsiliumProposalUpdate",
+        "description": "Правка карточки: содержимое меняется, история решений остаётся."
+      },
+      "ConsiliumProposalsPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumProposalOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumProposalsPage",
+        "description": "Страница библиотеки: append-only история, честный total."
       },
       "ConsiliumRecording": {
         "properties": {

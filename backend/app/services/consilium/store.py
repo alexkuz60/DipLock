@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import db
 from app.schemas.consilium import (
     ConsiliumAnswerRetry,
+    ConsiliumBrainstormCreate,
     ConsiliumCaseCreate,
     ConsiliumCaseOut,
     ConsiliumCasesPage,
@@ -22,14 +23,18 @@ from app.schemas.consilium import (
     ConsiliumContextPage,
     ConsiliumContextUpdate,
     ConsiliumContract,
+    ConsiliumDecisionCreate,
     ConsiliumDeletionPreview,
     ConsiliumEvidenceCreate,
+    ConsiliumExecutionCreate,
     ConsiliumJevMarkAnswerCreate,
     ConsiliumJevMarkRoundPlanCreate,
     ConsiliumMessageCreate,
     ConsiliumMessageOut,
     ConsiliumMessagesPage,
     ConsiliumMessageUpdate,
+    ConsiliumProposalCreate,
+    ConsiliumProposalUpdate,
     ConsiliumRoundAction,
     ConsiliumRoundCreate,
     ConsiliumSnapshotCreate,
@@ -42,7 +47,9 @@ type WriteRequest = (
     | ConsiliumEvidenceCreate | ConsiliumSnapshotCreate
     | ConsiliumRoundCreate | ConsiliumRoundAction | ConsiliumAnswerRetry
     | ConsiliumTriageCreate | ConsiliumJevMarkRoundPlanCreate
-    | ConsiliumJevMarkAnswerCreate
+    | ConsiliumJevMarkAnswerCreate | ConsiliumBrainstormCreate
+    | ConsiliumProposalCreate | ConsiliumProposalUpdate
+    | ConsiliumDecisionCreate | ConsiliumExecutionCreate
 )
 
 
@@ -300,10 +307,26 @@ async def deletion_preview(case_id: str) -> ConsiliumDeletionPreview:
             "jev_marks": int(await session.scalar(select(func.count()).select_from(
                 db.ConsiliumJevMark,
             ).where(db.ConsiliumJevMark.case_id == case_id)) or 0),
+            "brainstorms": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumBrainstorm,
+            ).where(db.ConsiliumBrainstorm.case_id == case_id)) or 0),
+            "brainstorm_ideas": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumBrainstormIdea,
+            ).where(db.ConsiliumBrainstormIdea.case_id == case_id)) or 0),
+            "proposals": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumProposal,
+            ).where(db.ConsiliumProposal.case_id == case_id)) or 0),
+            "decisions": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumDecision,
+            ).where(db.ConsiliumDecision.case_id == case_id)) or 0),
+            "executions": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumExecution,
+            ).where(db.ConsiliumExecution.case_id == case_id)) or 0),
             "recording_ids": row.recording_ids,
             "warnings": [
                 "ЭЭГ-записи не удаляются. Все ревизии ручной истории, ответы советников, "
-                "результаты триажа и разметки Jev, и снимки будут удалены.",
+                "результаты триажа и разметки Jev, запуски мозгового штурма с идеями, "
+                "библиотека предложений с решениями и снимки будут удалены.",
             ],
         })
 
@@ -316,7 +339,9 @@ async def delete_case(case_id: str, expected_version: int) -> None:
         await _bump(session, row, expected_version, require_open=False)
         for model in (
             db.ConsiliumRequest, db.ConsiliumEntry, db.ConsiliumTriage,
-            db.ConsiliumJevMark, db.ConsiliumAnswer, db.ConsiliumRound,
+            db.ConsiliumJevMark, db.ConsiliumBrainstormIdea, db.ConsiliumBrainstorm,
+            db.ConsiliumExecution, db.ConsiliumDecision, db.ConsiliumProposal,
+            db.ConsiliumAnswer, db.ConsiliumRound,
             db.ConsiliumSnapshotRecord, db.ConsiliumEvidenceRecord,
         ):
             await session.execute(delete(model).where(model.case_id == case_id))
