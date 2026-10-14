@@ -5,7 +5,8 @@ import hashlib
 import uuid
 from datetime import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.config import settings
@@ -153,6 +154,26 @@ async def list_snapshots(case_id: str, limit: int, offset: int) -> ConsiliumSnap
         ])
 
 
+async def _count_marks(
+    session: AsyncSession,
+    case_id: str,
+    snapshot_ids: list[str],
+    answer_ids: list[str],
+) -> int:
+    """Счётчик строк разметки Jev по снимкам (план раунда) и ответам (прочие)."""
+    if not snapshot_ids and not answer_ids:
+        return 0
+    conditions = [
+        (db.ConsiliumJevMark.subject_type == "snapshot")
+        & db.ConsiliumJevMark.subject_id.in_(snapshot_ids),
+        (db.ConsiliumJevMark.subject_type == "answer")
+        & db.ConsiliumJevMark.subject_id.in_(answer_ids),
+    ]
+    return int(await session.scalar(select(func.count()).select_from(
+        db.ConsiliumJevMark,
+    ).where(db.ConsiliumJevMark.case_id == case_id, or_(*conditions))) or 0)
+
+
 async def evidence_deletion_preview(case_id: str, evidence_id: str) -> ConsiliumEvidenceDeletion:
     """Предпросмотр зависимых копий; не удаляет исходный расчёт."""
     await db.init_db()
@@ -184,12 +205,18 @@ async def evidence_deletion_preview(case_id: str, evidence_id: str) -> Consilium
             db.ConsiliumTriage.case_id == case_id,
             db.ConsiliumTriage.snapshot_id.in_(dependent),
         )) or 0) if dependent else 0
+        answer_ids = [str(row.id) for row in (await session.scalars(select(
+            db.ConsiliumAnswer,
+        ).where(db.ConsiliumAnswer.round_id.in_(round_ids)))).all()] if round_ids else []
+        marks = await _count_marks(session, case_id, dependent, answer_ids)
         return ConsiliumEvidenceDeletion(
             case_id=case_id, evidence_id=evidence_id, version=int(case.version),
             snapshot_ids=dependent, rounds=len(rounds), answers=answers, triage=triage,
+            jev_marks=marks,
             warnings=[
                 "Удаляется материал, содержащие его снимки, ответы советников, "
-                "результаты триажа и квитанции дела. Исходные расчёты сохраняются.",
+                "результаты триажа и разметки Jev, и квитанции дела. "
+                "Исходные расчёты сохраняются.",
             ],
         )
 
@@ -207,6 +234,9 @@ async def delete_evidence(case_id: str, evidence_id: str, expected_version: int)
             db.ConsiliumRound.snapshot_id.in_(preview.snapshot_ids),
         ))).all() if preview.snapshot_ids else []
         round_ids = [str(row.id) for row in rounds]
+        answer_ids = [str(row.id) for row in (await session.scalars(select(
+            db.ConsiliumAnswer,
+        ).where(db.ConsiliumAnswer.round_id.in_(round_ids)))).all()] if round_ids else []
         if round_ids:
             # Производные сводки (ответы советников) очищаются вместе со снимками
             await session.execute(delete(db.ConsiliumAnswer).where(
@@ -220,6 +250,16 @@ async def delete_evidence(case_id: str, evidence_id: str, expected_version: int)
             await session.execute(delete(db.ConsiliumTriage).where(
                 db.ConsiliumTriage.case_id == case_id,
                 db.ConsiliumTriage.snapshot_id.in_(preview.snapshot_ids),
+            ))
+            # Разметка Jev адресует снимки и ответы — производные этих копий (§10)
+            await session.execute(delete(db.ConsiliumJevMark).where(
+                db.ConsiliumJevMark.case_id == case_id,
+                or_(
+                    (db.ConsiliumJevMark.subject_type == "snapshot")
+                    & db.ConsiliumJevMark.subject_id.in_(preview.snapshot_ids),
+                    (db.ConsiliumJevMark.subject_type == "answer")
+                    & db.ConsiliumJevMark.subject_id.in_(answer_ids),
+                ),
             ))
         await session.execute(delete(db.ConsiliumSnapshotRecord).where(
             db.ConsiliumSnapshotRecord.case_id == case_id,

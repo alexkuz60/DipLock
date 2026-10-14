@@ -36,7 +36,7 @@
 ### Отдельный роутер Консилиума (начало Т1, 10.10.2026)
 
 `backend/app/api/consilium.py` подключён в main с тем же `settings.api_prefix`:
-21 операция, 14 путей. Pydantic — `schemas/consilium.py`; обязательный
+34 операции, 25 уникальных путей. Pydantic — `schemas/consilium.py`; обязательный
 сервис хранения — `services/consilium/store.py`; подробности —
 `docs/rules/consilium.md` §0. Не фоновые задачи и не best-effort запись.
 
@@ -64,6 +64,11 @@
 | `POST /consilium/cases/{case_id}/triage` | триаж готовности досье Jev (§5.2): типизированные решения одного вызова, 201; повтор `request_id` — прежняя строка без повторной передачи данных; ошибка провайдера — строка `failed` без достроенных решений |
 | `GET /consilium/cases/{case_id}/triage` | история попыток триажа (append-only, новые сверху), пагинация/total |
 | `GET /consilium/cases/{case_id}/triage/{triage_id}` | точная строка триажа с сырыми решениями и предупреждениями |
+| `POST /consilium/cases/{case_id}/jev-marks/round-plan` | разметка Jev (§5.3) «быстрый раунд»: подсказка ролей/глубины по снимку, 201; advisory-метки по порогу настроек, не вердикт |
+| `POST /consilium/cases/{case_id}/jev-marks/proposal` | карточка предложения из текста ответа советника: вид шага §7 и поля (advisory), 201 |
+| `POST /consilium/cases/{case_id}/jev-marks/source-marks` | разметка источников утверждений ответа (три источника не смешиваются, advisory), 201 |
+| `GET /consilium/cases/{case_id}/jev-marks` | история попыток разметки (append-only, новые сверху) с фильтрами `kind`/`subject_id` |
+| `GET /consilium/cases/{case_id}/jev-marks/{mark_id}` | точная строка разметки с метками, вероятностями и предупреждениями |
 
 Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
 без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;

@@ -16,6 +16,7 @@ import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { QueryState } from './common'
 import { advisorRoles } from './options'
 import { CaseTriage } from './CaseTriage'
+import { CaseRoundPlan } from './CaseRoundPlan'
 import { RoundCard } from './RoundCard'
 import { useCaseAction } from './useCaseAction'
 
@@ -155,6 +156,12 @@ export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
 
       <CaseTriage current={current} snapshotId={selected} />
 
+      <CaseRoundPlan
+        current={current}
+        snapshotId={selected}
+        onApply={(recommended) => setRoles(recommended)}
+      />
+
       <div className="flex flex-wrap gap-2" role="group" aria-label="Фильтр советников">
         {ADVISOR_ROLES.map((role) => (
           <Button
@@ -182,6 +189,7 @@ export function CaseDiscussion({ current }: { current: ConsiliumCase }) {
         {items.map((round) => (
           <RoundCard
             key={round.id}
+            current={current}
             round={round}
             rolesFilter={filter}
             canSummary={

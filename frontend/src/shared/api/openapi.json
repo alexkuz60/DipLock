@@ -5714,6 +5714,317 @@
         }
       }
     },
+    "/api/v1/consilium/cases/{case_id}/jev-marks/round-plan": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Run Round Plan",
+        "description": "«Быстрый раунд»: подбор ролей и глубины обсуждения по снимку досье.",
+        "operationId": "run_round_plan_api_v1_consilium_cases__case_id__jev_marks_round_plan_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumJevMarkRoundPlanCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumJevMarkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/jev-marks/proposal": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Run Proposal Mark",
+        "description": "Карточка предложения из текста ответа советника (вид шага §7 и поля).",
+        "operationId": "run_proposal_mark_api_v1_consilium_cases__case_id__jev_marks_proposal_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumJevMarkAnswerCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumJevMarkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/jev-marks/source-marks": {
+      "post": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Run Source Marks",
+        "description": "Разметка источников утверждений текста ответа (три источника не смешиваются).",
+        "operationId": "run_source_marks_api_v1_consilium_cases__case_id__jev_marks_source_marks_post",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsiliumJevMarkAnswerCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumJevMarkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/jev-marks": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "List Jev Marks",
+        "description": "История попыток разметки (append-only, новые сверху) с фильтрами.",
+        "operationId": "list_jev_marks_api_v1_consilium_cases__case_id__jev_marks_get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(round_plan|proposal|source_marks)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "subject_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Subject Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumJevMarksPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/consilium/cases/{case_id}/jev-marks/{mark_id}": {
+      "get": {
+        "tags": [
+          "Консилиум"
+        ],
+        "summary": "Get Jev Mark",
+        "description": "Точная строка разметки с типизированными метками и предупреждениями.",
+        "operationId": "get_jev_mark_api_v1_consilium_cases__case_id__jev_marks__mark_id__get",
+        "parameters": [
+          {
+            "name": "case_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Case Id"
+            }
+          },
+          {
+            "name": "mark_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mark Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsiliumJevMarkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/llm-router": {
       "get": {
         "tags": [
@@ -10634,6 +10945,11 @@
             "title": "Triage",
             "default": 0
           },
+          "jev_marks": {
+            "type": "integer",
+            "title": "Jev Marks",
+            "default": 0
+          },
           "recording_ids": {
             "items": {
               "type": "string"
@@ -10889,6 +11205,11 @@
             "title": "Triage",
             "default": 0
           },
+          "jev_marks": {
+            "type": "integer",
+            "title": "Jev Marks",
+            "default": 0
+          },
           "warnings": {
             "items": {
               "type": "string"
@@ -10931,6 +11252,246 @@
         ],
         "title": "ConsiliumEvidencePage",
         "description": "Материалы дела с честным общим числом."
+      },
+      "ConsiliumJevMarkAnswerCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "answer_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Answer Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "answer_id"
+        ],
+        "title": "ConsiliumJevMarkAnswerCreate",
+        "description": "Разметка текста ответа советника (карточка предложения / источники)."
+      },
+      "ConsiliumJevMarkOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "case_id": {
+            "type": "string",
+            "title": "Case Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "round_plan",
+              "proposal",
+              "source_marks"
+            ],
+            "title": "Kind"
+          },
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "snapshot",
+              "answer"
+            ],
+            "title": "Subject Type"
+          },
+          "subject_id": {
+            "type": "string",
+            "title": "Subject Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "questions_version": {
+            "type": "string",
+            "title": "Questions Version"
+          },
+          "probs": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Probs",
+            "description": "Калиброванные вероятности noul по вопросам карты (0…1)"
+          },
+          "present": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Present",
+            "description": "Метки, достигшие порога; подсказка, не вердикт"
+          },
+          "choice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choice",
+            "description": "Ключ choice-вопроса (глубина раунда или вид шага)"
+          },
+          "choice_confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choice Confidence"
+          },
+          "answers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Answers",
+            "description": "Типизированные ответы классификатора (choice/noul) как есть"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "case_id",
+          "kind",
+          "subject_type",
+          "subject_id",
+          "status",
+          "questions_version",
+          "created_at"
+        ],
+        "title": "ConsiliumJevMarkOut",
+        "description": "Метка Jev: advisory-подсказки с явным порогом, не вердикты (§5.3).\n\n``probs`` — калиброванные вероятности ответов ``noul`` по вопросам карты;\n``present`` — метки, достигшие порога ``consilium_jev_verdict_min``;\n``choice`` — ключ ``choice``-вопроса (глубина раунда / вид шага §7).\nОшибка вызова даёт ``status='failed'`` без достроенных меток."
+      },
+      "ConsiliumJevMarkRoundPlanCreate": {
+        "properties": {
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Request Id"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[\\w.-]+$",
+            "title": "Snapshot Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_id",
+          "expected_version",
+          "snapshot_id"
+        ],
+        "title": "ConsiliumJevMarkRoundPlanCreate",
+        "description": "Подбор состава ролей и глубины раунда по снимку досье («быстрый раунд»)."
+      },
+      "ConsiliumJevMarksPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConsiliumJevMarkOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total",
+          "items"
+        ],
+        "title": "ConsiliumJevMarksPage",
+        "description": "Страница попыток разметки: append-only история, честный total."
       },
       "ConsiliumMessageCreate": {
         "properties": {

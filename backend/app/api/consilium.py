@@ -22,6 +22,10 @@ from app.schemas.consilium import (
     ConsiliumEvidenceCreate,
     ConsiliumEvidenceDeletion,
     ConsiliumEvidencePage,
+    ConsiliumJevMarkAnswerCreate,
+    ConsiliumJevMarkOut,
+    ConsiliumJevMarkRoundPlanCreate,
+    ConsiliumJevMarksPage,
     ConsiliumMessageCreate,
     ConsiliumMessageOut,
     ConsiliumMessagesPage,
@@ -40,7 +44,15 @@ from app.schemas.consilium import (
     ConsiliumTriagePage,
 )
 from app.services import recording_store
-from app.services.consilium import dossier, rounds, rounds_store, sources, store, triage
+from app.services.consilium import (
+    dossier,
+    jev_marks,
+    rounds,
+    rounds_store,
+    sources,
+    store,
+    triage,
+)
 
 router = APIRouter(prefix="/consilium", tags=["Консилиум"], route_class=PrivateRoute)
 
@@ -337,3 +349,63 @@ async def get_triage(
     """Точная строка триажа с типизированными решениями классификатора."""
     async with guarded(response):
         return await triage.get_triage(case_id, triage_id)
+
+
+# --- Разметка Jev (§5.3): advisory-метки, только явной кнопкой ---
+
+
+@router.post(
+    "/cases/{case_id}/jev-marks/round-plan",
+    status_code=201, response_model=ConsiliumJevMarkOut,
+)
+async def run_round_plan(
+    case_id: str, payload: ConsiliumJevMarkRoundPlanCreate, response: Response,
+) -> ConsiliumJevMarkOut:
+    """«Быстрый раунд»: подбор ролей и глубины обсуждения по снимку досье."""
+    async with guarded(response):
+        return await jev_marks.run_round_plan(case_id, payload)
+
+
+@router.post(
+    "/cases/{case_id}/jev-marks/proposal",
+    status_code=201, response_model=ConsiliumJevMarkOut,
+)
+async def run_proposal_mark(
+    case_id: str, payload: ConsiliumJevMarkAnswerCreate, response: Response,
+) -> ConsiliumJevMarkOut:
+    """Карточка предложения из текста ответа советника (вид шага §7 и поля)."""
+    async with guarded(response):
+        return await jev_marks.run_proposal_mark(case_id, payload)
+
+
+@router.post(
+    "/cases/{case_id}/jev-marks/source-marks",
+    status_code=201, response_model=ConsiliumJevMarkOut,
+)
+async def run_source_marks(
+    case_id: str, payload: ConsiliumJevMarkAnswerCreate, response: Response,
+) -> ConsiliumJevMarkOut:
+    """Разметка источников утверждений текста ответа (три источника не смешиваются)."""
+    async with guarded(response):
+        return await jev_marks.run_source_marks(case_id, payload)
+
+
+@router.get("/cases/{case_id}/jev-marks", response_model=ConsiliumJevMarksPage)
+async def list_jev_marks(
+    case_id: str, response: Response,
+    kind: str | None = Query(None, pattern=r"^(round_plan|proposal|source_marks)$"),
+    subject_id: str | None = Query(None, max_length=128),
+    limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0),
+) -> ConsiliumJevMarksPage:
+    """История попыток разметки (append-only, новые сверху) с фильтрами."""
+    async with guarded(response):
+        return await jev_marks.list_marks(case_id, kind, subject_id, limit, offset)
+
+
+@router.get("/cases/{case_id}/jev-marks/{mark_id}", response_model=ConsiliumJevMarkOut)
+async def get_jev_mark(
+    case_id: str, mark_id: str, response: Response,
+) -> ConsiliumJevMarkOut:
+    """Точная строка разметки с типизированными метками и предупреждениями."""
+    async with guarded(response):
+        return await jev_marks.get_mark(case_id, mark_id)

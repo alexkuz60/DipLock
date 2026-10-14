@@ -31,6 +31,10 @@ import type {
   ConsiliumTriage,
   ConsiliumTriageCreate,
   ConsiliumTriagePage,
+  ConsiliumJevMark,
+  ConsiliumJevMarkAnswerCreate,
+  ConsiliumJevMarksPage,
+  ConsiliumJevMarkRoundPlanCreate,
 } from './types'
 
 const base = `${API_PREFIX}/consilium`
@@ -101,4 +105,20 @@ export const consiliumApi = {
   /** Запуск триажа решающим классификатором — только явной кнопкой. */
   runTriage: (id: string, payload: ConsiliumTriageCreate) =>
     request<ConsiliumTriage>(`${path(id)}/triage`, json('POST', payload)),
+  /** «Быстрый раунд»: подбор ролей и глубины по снимку — только кнопкой. */
+  runRoundPlan: (id: string, payload: ConsiliumJevMarkRoundPlanCreate) =>
+    request<ConsiliumJevMark>(`${path(id)}/jev-marks/round-plan`, json('POST', payload)),
+  /** Карточка предложения из текста ответа советника — только кнопкой. */
+  runProposalMark: (id: string, payload: ConsiliumJevMarkAnswerCreate) =>
+    request<ConsiliumJevMark>(`${path(id)}/jev-marks/proposal`, json('POST', payload)),
+  /** Разметка источников утверждений текста ответа — только кнопкой. */
+  runSourceMarks: (id: string, payload: ConsiliumJevMarkAnswerCreate) =>
+    request<ConsiliumJevMark>(`${path(id)}/jev-marks/source-marks`, json('POST', payload)),
+  /** История разметки Jev (append-only) с фильтрами по виду и предмету. */
+  jevMarks: (id: string, kind?: string, subjectId?: string, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ limit: '20', offset: '0' })
+    if (kind) params.set('kind', kind)
+    if (subjectId) params.set('subject_id', subjectId)
+    return request<ConsiliumJevMarksPage>(`${path(id)}/jev-marks?${params}`, { signal })
+  },
 }

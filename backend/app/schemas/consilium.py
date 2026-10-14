@@ -272,6 +272,7 @@ class ConsiliumDeletionPreview(ConsiliumContract):
     rounds: int = 0
     answers: int = 0
     triage: int = 0
+    jev_marks: int = 0
     recording_ids: list[str]
     warnings: list[str]
 
@@ -385,6 +386,7 @@ class ConsiliumEvidenceDeletion(ConsiliumContract):
     rounds: int = 0
     answers: int = 0
     triage: int = 0
+    jev_marks: int = 0
     warnings: list[str]
 
 
@@ -455,3 +457,75 @@ class ConsiliumTriagePage(ConsiliumContract):
 
     total: int
     items: list[ConsiliumTriageOut]
+
+
+# --- Разметка Jev (§5.3): advisory-метки решающего классификатора по текстам ---
+
+JevMarkKind = Literal["round_plan", "proposal", "source_marks"]
+JevMarkSubject = Literal["snapshot", "answer"]
+
+
+class ConsiliumJevMarkCreate(ConsiliumContract):
+    """Запуск разметки решающим классификатором (только явной кнопкой)."""
+
+    request_id: Identifier
+    expected_version: int = Field(ge=1)
+
+
+class ConsiliumJevMarkRoundPlanCreate(ConsiliumJevMarkCreate):
+    """Подбор состава ролей и глубины раунда по снимку досье («быстрый раунд»)."""
+
+    snapshot_id: Identifier
+
+
+class ConsiliumJevMarkAnswerCreate(ConsiliumJevMarkCreate):
+    """Разметка текста ответа советника (карточка предложения / источники)."""
+
+    answer_id: Identifier
+
+
+class ConsiliumJevMarkOut(ConsiliumContract):
+    """Метка Jev: advisory-подсказки с явным порогом, не вердикты (§5.3).
+
+    ``probs`` — калиброванные вероятности ответов ``noul`` по вопросам карты;
+    ``present`` — метки, достигшие порога ``consilium_jev_verdict_min``;
+    ``choice`` — ключ ``choice``-вопроса (глубина раунда / вид шага §7).
+    Ошибка вызова даёт ``status='failed'`` без достроенных меток.
+    """
+
+    id: str
+    case_id: str
+    kind: JevMarkKind
+    subject_type: JevMarkSubject
+    subject_id: str
+    status: TriageStatus
+    model: str | None = None
+    questions_version: str
+    probs: dict[str, float] = Field(
+        default_factory=dict,
+        description="Калиброванные вероятности noul по вопросам карты (0…1)",
+    )
+    present: list[str] = Field(
+        default_factory=list,
+        description="Метки, достигшие порога; подсказка, не вердикт",
+    )
+    choice: str | None = Field(
+        default=None,
+        description="Ключ choice-вопроса (глубина раунда или вид шага)",
+    )
+    choice_confidence: float | None = Field(default=None, ge=0, le=1)
+    answers: dict[str, JsonValue] = Field(
+        default_factory=dict,
+        description="Типизированные ответы классификатора (choice/noul) как есть",
+    )
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+    latency_ms: float | None = None
+    created_at: datetime
+
+
+class ConsiliumJevMarksPage(ConsiliumContract):
+    """Страница попыток разметки: append-only история, честный total."""
+
+    total: int
+    items: list[ConsiliumJevMarkOut]

@@ -526,6 +526,35 @@ class ConsiliumTriage(Base):
     created_at = Column(DateTime, nullable=False)
 
 
+class ConsiliumJevMark(Base):
+    """Разметка Jev (§5.3): advisory-метки решающего классификатора по текстам.
+
+    Append-only история попыток: повтор — новая строка. ``present`` — метки,
+    чья калиброванная вероятность достигла порога
+    (``settings.consilium_jev_verdict_min``): подсказки с явным порогом,
+    не вердикты и не оценки ответов советников (запрет §0.3).
+    """
+
+    __tablename__ = "consilium_jev_marks"
+    id = Column(String, primary_key=True)
+    case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)  # round_plan | proposal | source_marks
+    subject_type = Column(String, nullable=False)  # snapshot | answer
+    subject_id = Column(String, nullable=False, index=True)  # snapshot_id или answer_id
+    status = Column(String, nullable=False)  # ok | failed
+    model = Column(String, nullable=True)  # провайдер/модель маршрутного роутера
+    questions_version = Column(String, nullable=False)  # версия карты вопросов
+    probs = Column(JSON, nullable=False)  # калиброванные вероятности noul по вопросам
+    present = Column(JSON, nullable=False)  # метки, достигшие порога (advisory)
+    choice = Column(String, nullable=True)  # ключ choice: глубина раунда / вид шага
+    choice_confidence = Column(Float, nullable=True)  # confidence выбора
+    answers = Column(JSON, nullable=False)  # типизированные ответы ({} при ошибке)
+    warnings = Column(JSON, nullable=False)  # предупреждения дайджеста/разбора
+    error = Column(String, nullable=True)  # ошибка вызова; меток нет — не достраиваем
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
 def _sync_driver_url(url: URL) -> str:
     """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 

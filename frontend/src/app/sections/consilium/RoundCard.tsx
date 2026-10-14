@@ -9,6 +9,9 @@ import { WarnList } from '@/shared/ui/WarnList'
 import { advisorRoles, roundKinds, roundStatuses } from './options'
 
 /** Разделы формата советника: заголовки заданы инструкцией (rounds.ANSWER_FORMAT). */
+import type { ConsiliumCase } from '@/shared/api/types'
+import { AnswerJevMarks } from './AnswerJevMarks'
+
 const SECTION_TITLES: Record<string, 'explanations' | 'question' | 'next'> = {
   'Возможные объяснения': 'explanations',
   'Вопрос добровольцу': 'question',
@@ -42,12 +45,14 @@ function statusOf(status: string): { label: string; tone: StatusPillTone } {
 }
 
 function AnswerCard({
+  current,
   answer,
   attempts,
   snapshotId,
   onRetry,
   retrying,
 }: {
+  current: ConsiliumCase
   answer: ConsiliumAnswer
   attempts: ConsiliumAnswer[]
   snapshotId: string
@@ -159,11 +164,13 @@ function AnswerCard({
           </div>
         )}
       </div>
+      {answer.status === 'ok' && <AnswerJevMarks current={current} answer={answer} />}
     </article>
   )
 }
 
 export function RoundCard({
+  current,
   round,
   rolesFilter,
   canSummary,
@@ -173,6 +180,7 @@ export function RoundCard({
   onSummary,
   onRetry,
 }: {
+  current: ConsiliumCase
   round: ConsiliumRound
   rolesFilter: readonly string[]
   canSummary: boolean
@@ -231,6 +239,7 @@ export function RoundCard({
           return (
             <AnswerCard
               key={`${role}-${latest.id}`}
+              current={current}
               answer={latest}
               attempts={attempts}
               snapshotId={round.snapshot_id}

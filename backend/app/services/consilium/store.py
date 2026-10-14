@@ -24,6 +24,8 @@ from app.schemas.consilium import (
     ConsiliumContract,
     ConsiliumDeletionPreview,
     ConsiliumEvidenceCreate,
+    ConsiliumJevMarkAnswerCreate,
+    ConsiliumJevMarkRoundPlanCreate,
     ConsiliumMessageCreate,
     ConsiliumMessageOut,
     ConsiliumMessagesPage,
@@ -39,7 +41,8 @@ type WriteRequest = (
     | ConsiliumContextUpdate | ConsiliumMessageCreate | ConsiliumMessageUpdate
     | ConsiliumEvidenceCreate | ConsiliumSnapshotCreate
     | ConsiliumRoundCreate | ConsiliumRoundAction | ConsiliumAnswerRetry
-    | ConsiliumTriageCreate
+    | ConsiliumTriageCreate | ConsiliumJevMarkRoundPlanCreate
+    | ConsiliumJevMarkAnswerCreate
 )
 
 
@@ -294,10 +297,13 @@ async def deletion_preview(case_id: str) -> ConsiliumDeletionPreview:
             "triage": int(await session.scalar(select(func.count()).select_from(
                 db.ConsiliumTriage,
             ).where(db.ConsiliumTriage.case_id == case_id)) or 0),
+            "jev_marks": int(await session.scalar(select(func.count()).select_from(
+                db.ConsiliumJevMark,
+            ).where(db.ConsiliumJevMark.case_id == case_id)) or 0),
             "recording_ids": row.recording_ids,
             "warnings": [
                 "ЭЭГ-записи не удаляются. Все ревизии ручной истории, ответы советников, "
-                "результаты триажа и снимки будут удалены.",
+                "результаты триажа и разметки Jev, и снимки будут удалены.",
             ],
         })
 
@@ -310,7 +316,7 @@ async def delete_case(case_id: str, expected_version: int) -> None:
         await _bump(session, row, expected_version, require_open=False)
         for model in (
             db.ConsiliumRequest, db.ConsiliumEntry, db.ConsiliumTriage,
-            db.ConsiliumAnswer, db.ConsiliumRound,
+            db.ConsiliumJevMark, db.ConsiliumAnswer, db.ConsiliumRound,
             db.ConsiliumSnapshotRecord, db.ConsiliumEvidenceRecord,
         ):
             await session.execute(delete(model).where(model.case_id == case_id))

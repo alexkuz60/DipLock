@@ -2202,6 +2202,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/consilium/cases/{case_id}/jev-marks/round-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Round Plan
+         * @description «Быстрый раунд»: подбор ролей и глубины обсуждения по снимку досье.
+         */
+        post: operations["run_round_plan_api_v1_consilium_cases__case_id__jev_marks_round_plan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/jev-marks/proposal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Proposal Mark
+         * @description Карточка предложения из текста ответа советника (вид шага §7 и поля).
+         */
+        post: operations["run_proposal_mark_api_v1_consilium_cases__case_id__jev_marks_proposal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/jev-marks/source-marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Source Marks
+         * @description Разметка источников утверждений текста ответа (три источника не смешиваются).
+         */
+        post: operations["run_source_marks_api_v1_consilium_cases__case_id__jev_marks_source_marks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/jev-marks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jev Marks
+         * @description История попыток разметки (append-only, новые сверху) с фильтрами.
+         */
+        get: operations["list_jev_marks_api_v1_consilium_cases__case_id__jev_marks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/consilium/cases/{case_id}/jev-marks/{mark_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Jev Mark
+         * @description Точная строка разметки с типизированными метками и предупреждениями.
+         */
+        get: operations["get_jev_mark_api_v1_consilium_cases__case_id__jev_marks__mark_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router": {
         parameters: {
             query?: never;
@@ -4964,6 +5064,11 @@ export interface components {
              * @default 0
              */
             triage: number;
+            /**
+             * Jev Marks
+             * @default 0
+             */
+            jev_marks: number;
             /** Recording Ids */
             recording_ids: string[];
             /** Warnings */
@@ -5074,6 +5179,11 @@ export interface components {
              * @default 0
              */
             triage: number;
+            /**
+             * Jev Marks
+             * @default 0
+             */
+            jev_marks: number;
             /** Warnings */
             warnings: string[];
         };
@@ -5086,6 +5196,113 @@ export interface components {
             total: number;
             /** Items */
             items: components["schemas"]["ConsiliumEvidence"][];
+        };
+        /**
+         * ConsiliumJevMarkAnswerCreate
+         * @description Разметка текста ответа советника (карточка предложения / источники).
+         */
+        ConsiliumJevMarkAnswerCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Answer Id */
+            answer_id: string;
+        };
+        /**
+         * ConsiliumJevMarkOut
+         * @description Метка Jev: advisory-подсказки с явным порогом, не вердикты (§5.3).
+         *
+         *     ``probs`` — калиброванные вероятности ответов ``noul`` по вопросам карты;
+         *     ``present`` — метки, достигшие порога ``consilium_jev_verdict_min``;
+         *     ``choice`` — ключ ``choice``-вопроса (глубина раунда / вид шага §7).
+         *     Ошибка вызова даёт ``status='failed'`` без достроенных меток.
+         */
+        ConsiliumJevMarkOut: {
+            /** Id */
+            id: string;
+            /** Case Id */
+            case_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "round_plan" | "proposal" | "source_marks";
+            /**
+             * Subject Type
+             * @enum {string}
+             */
+            subject_type: "snapshot" | "answer";
+            /** Subject Id */
+            subject_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "failed";
+            /** Model */
+            model?: string | null;
+            /** Questions Version */
+            questions_version: string;
+            /**
+             * Probs
+             * @description Калиброванные вероятности noul по вопросам карты (0…1)
+             */
+            probs?: {
+                [key: string]: number;
+            };
+            /**
+             * Present
+             * @description Метки, достигшие порога; подсказка, не вердикт
+             */
+            present?: string[];
+            /**
+             * Choice
+             * @description Ключ choice-вопроса (глубина раунда или вид шага)
+             */
+            choice?: string | null;
+            /** Choice Confidence */
+            choice_confidence?: number | null;
+            /**
+             * Answers
+             * @description Типизированные ответы классификатора (choice/noul) как есть
+             */
+            answers?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Warnings */
+            warnings?: string[];
+            /** Error */
+            error?: string | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ConsiliumJevMarkRoundPlanCreate
+         * @description Подбор состава ролей и глубины раунда по снимку досье («быстрый раунд»).
+         */
+        ConsiliumJevMarkRoundPlanCreate: {
+            /** Request Id */
+            request_id: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Snapshot Id */
+            snapshot_id: string;
+        };
+        /**
+         * ConsiliumJevMarksPage
+         * @description Страница попыток разметки: append-only история, честный total.
+         */
+        ConsiliumJevMarksPage: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: components["schemas"]["ConsiliumJevMarkOut"][];
         };
         /**
          * ConsiliumMessageCreate
@@ -12803,6 +13020,179 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConsiliumTriageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_round_plan_api_v1_consilium_cases__case_id__jev_marks_round_plan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumJevMarkRoundPlanCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumJevMarkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_proposal_mark_api_v1_consilium_cases__case_id__jev_marks_proposal_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumJevMarkAnswerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumJevMarkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_source_marks_api_v1_consilium_cases__case_id__jev_marks_source_marks_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsiliumJevMarkAnswerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumJevMarkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jev_marks_api_v1_consilium_cases__case_id__jev_marks_get: {
+        parameters: {
+            query?: {
+                kind?: string | null;
+                subject_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumJevMarksPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_jev_mark_api_v1_consilium_cases__case_id__jev_marks__mark_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+                mark_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumJevMarkOut"];
                 };
             };
             /** @description Validation Error */

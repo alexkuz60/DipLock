@@ -28,6 +28,37 @@ export const roundKinds = [
   { value: 'summary', label: 'Итог консилиума' },
 ] as const
 
+/** Глубина обсуждения в подсказке Jev (§5.3): от первых ответов до итога. */
+export const roundDepths = [
+  { value: 'initial_only', label: 'только первые ответы' },
+  { value: 'with_remarks', label: 'ответы и замечания коллег' },
+  { value: 'with_summary', label: 'ответы, замечания и итог' },
+] as const
+
+/** Виды шага предложения (§7): четыре вида и «предложения нет». */
+export const proposalStepKinds = [
+  { value: 'ask_volunteer', label: 'спросить добровольца' },
+  { value: 'clarify_observation', label: 'уточнить условия или наблюдение' },
+  { value: 'run_probe', label: 'провести пробу' },
+  { value: 'run_calculation', label: 'выполнить расчёт' },
+  { value: 'no_proposal', label: 'конкретного предложения нет' },
+] as const
+
+/** Поля карточки предложения (§7): основание, риски, способ проверки. */
+export const proposalFields = [
+  { value: 'has_proposal', label: 'предложение шага' },
+  { value: 'has_basis', label: 'основание' },
+  { value: 'has_risks', label: 'риски и ограничения' },
+  { value: 'has_verification', label: 'способ проверки' },
+] as const
+
+/** Три источника утверждений (стратегия §2): не смешиваются, только подсказка. */
+export const claimSources = [
+  { value: 'uses_measurements', label: 'измерения и расчёты' },
+  { value: 'uses_volunteer_report', label: 'рассказ добровольца' },
+  { value: 'uses_observations', label: 'наблюдения исследователя' },
+] as const
+
 export const roundStatuses = [
   { value: 'running', label: 'Выполняется', tone: 'accent' },
   { value: 'done', label: 'Готов', tone: 'ok' },
