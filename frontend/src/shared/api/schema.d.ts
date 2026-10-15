@@ -594,7 +594,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/recordings/{recording_id}/dipoles/batch": {
+    "/api/v1/recordings/{recording_id}/dipole_batch": {
         parameters: {
             query?: never;
             header?: never;
@@ -614,7 +614,7 @@ export interface paths {
          *     поддиапазонам (С2). Ядро перебора (свинцовое поле + обращённая `GᵀG`)
          *     строится один раз на прогон и переиспользуется всеми полосами.
          */
-        post: operations["create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post"];
+        post: operations["create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4061,8 +4061,8 @@ export interface components {
              */
             tfr_baseline_end_ms: number;
         };
-        /** Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post */
-        Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post: {
+        /** Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post */
+        Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post: {
             /**
              * Bands
              * @description Набор полос через запятую: именованные ключи (alpha,beta,…) и/или свои диапазоны «от-до» в Гц (например 2.5-4); пусто — 400
@@ -11029,10 +11029,123 @@ export interface components {
              */
             q75_power_uv2?: number | null;
             /**
+             * Band Power Max Uv2
+             * @description «Полка» (B4, С3): максимум мощности полосы по эпохам сессии, мкВ²; нормировочная база X % КД и долей разведочного прохода; None — не измерена
+             */
+            band_power_max_uv2?: number | null;
+            /**
+             * Psd Peak Uv2 Hz
+             * @description Максимум PSD внутри полосы, мкВ²/Гц (B4); None — не измерен
+             */
+            psd_peak_uv2_hz?: number | null;
+            /**
+             * Psd Peak Hz
+             * @description Частота максимума PSD внутри полосы, Гц (B4) — вход для выбора узких поддиапазонов (С3); None — не измерена
+             */
+            psd_peak_hz?: number | null;
+            /**
              * Topomap Url
              * @description URL топокарты диапазона (PNG, ETag); None — не построена
              */
             topomap_url?: string | null;
+        };
+        /**
+         * SpectrumExploreLineOut
+         * @description Строка разведочного списка частот: мощность и плотность одной частоты (С3).
+         *
+         *     Одна строка — один бин частотной сетки PSD. Амплитудный диапазон частоты —
+         *     разброс её мощности **по эпохам сессии** (min / квартили / макс), в долях от
+         *     «полки» своей полосы (`SpectrumBandOut.band_power_max_uv2`, базис С0) — так
+         *     δ и γ впервые становятся сравнимыми. Мощность отдельной частоты — PSD × df
+         *     (прямоугольник бина), а не интеграл: у одного бина нет площади под кривой.
+         */
+        SpectrumExploreLineOut: {
+            /**
+             * Freq Hz
+             * @description Частота бина, Гц
+             */
+            freq_hz: number;
+            /**
+             * Band Key
+             * @description Ключ ритма `freq_bands`, которому принадлежит частота (полуинтервал [lo, hi))
+             */
+            band_key: string;
+            /**
+             * Psd Uv2 Hz
+             * @description Плотность частоты (среднее по каналам и эпохам), мкВ²/Гц
+             */
+            psd_uv2_hz: number;
+            /**
+             * Power Uv2
+             * @description Мощность бина (PSD × df), мкВ²; None — df не измерен
+             */
+            power_uv2?: number | null;
+            /**
+             * Psd Share
+             * @description Доля от пика PSD своей полосы (`psd_peak_uv2_hz`), 0…1; None — не измерена
+             */
+            psd_share?: number | null;
+            /**
+             * Power Share
+             * @description Доля мощности бина от «полки» своей полосы (`band_power_max_uv2`); None — не измерена
+             */
+            power_share?: number | null;
+            /**
+             * Amp Min Share
+             * @description Минимум мощности частоты по эпохам, доля от «полки» своей полосы
+             */
+            amp_min_share?: number | null;
+            /**
+             * Amp Q25 Share
+             * @description 25-й перцентиль мощности частоты по эпохам, доля от «полки» своей полосы
+             */
+            amp_q25_share?: number | null;
+            /**
+             * Amp Median Share
+             * @description Медиана мощности частоты по эпохам, доля от «полки» своей полосы
+             */
+            amp_median_share?: number | null;
+            /**
+             * Amp Q75 Share
+             * @description 75-й перцентиль мощности частоты по эпохам, доля от «полки» своей полосы
+             */
+            amp_q75_share?: number | null;
+            /**
+             * Amp Max Share
+             * @description Максимум мощности частоты по эпохам, доля от «полки» своей полосы
+             */
+            amp_max_share?: number | null;
+        };
+        /**
+         * SpectrumExploreOut
+         * @description Разведочный спектральный проход (С3) — вход для выбора полос С1.
+         *
+         *     Список частот с мощностью, плотностью и амплитудными диапазонами по эпохам
+         *     **в нормированных единицах** (концепция §6): по нему исследователь выбирает
+         *     узкие поддиапазоны пакета. Выбор полос за числами не стоит — проход только
+         *     показывает измерения (`docs/rules/dipoles.md`).
+         */
+        SpectrumExploreOut: {
+            /**
+             * Df Hz
+             * @description Ширина бина частотной сетки, Гц (мощность = PSD × df)
+             */
+            df_hz: number;
+            /**
+             * Power Basis
+             * @description Базис нормировки мощности и амплитуд (С0): доля от «полки» своей полосы
+             */
+            power_basis: string;
+            /**
+             * Psd Basis
+             * @description Базис нормировки плотности (С0): доля от пика PSD своей полосы
+             */
+            psd_basis: string;
+            /**
+             * Lines
+             * @description Строки — по возрастанию частоты (сетка PSD)
+             */
+            lines?: components["schemas"]["SpectrumExploreLineOut"][];
         };
         /**
          * SpectrumPeakOut
@@ -11118,6 +11231,8 @@ export interface components {
             psd_mean_uv2: number[];
             /** Bands */
             bands?: components["schemas"]["SpectrumBandOut"][];
+            /** @description Разведочный спектральный проход (С3): список частот с нормированными величинами и амплитудными диапазонами по эпохам; None — результат вычислен прошлой версией кода без прохода */
+            explore?: components["schemas"]["SpectrumExploreOut"] | null;
             /**
              * Iaf Hz
              * @description Индивидуальная пиковая α-частота (IAF), Гц (N16); None — мало бинов в полосе α
@@ -12236,7 +12351,7 @@ export interface operations {
             };
         };
     };
-    create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post: {
+    create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -12247,7 +12362,7 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/x-www-form-urlencoded": components["schemas"]["Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post"];
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post"];
             };
         };
         responses: {

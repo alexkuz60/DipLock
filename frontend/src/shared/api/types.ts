@@ -172,6 +172,10 @@ export type MainsResponse = Schemas['MainsOut']
 
 export type SpectrumBandOut = Schemas['SpectrumBandOut']
 
+export type SpectrumExploreLineOut = Schemas['SpectrumExploreLineOut']
+
+export type SpectrumExploreOut = Schemas['SpectrumExploreOut']
+
 export type SpectrumPeakOut = Schemas['SpectrumPeakOut']
 
 export type SpectrumResult = Schemas['SpectrumResult']

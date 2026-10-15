@@ -34,17 +34,21 @@ import { IconButton } from '@/shared/ui/IconButton'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { BandTopomaps } from './BandTopomaps'
+import { ExploreTable } from './ExploreTable'
 import { FftHistogram } from './FftHistogram'
 
 const TITLES = {
   topomap: 'Топокарты ритмов',
   fft: 'FFT-гистограмма по диапазонам',
+  explore: 'Разведочный спектральный проход',
 } as const
 
 const HINTS = {
   topomap:
     'Распределение мощности ритма по скальпу: картинку строит сервер (PNG), вне круга головы она прозрачна. Светлее — меньше мощность. Полоса фильтра берётся из формы панели «Расчёт диполей».',
   fft: 'Средняя мощность каждого ритма плюс PSD по частотам: по ним видно, на каком ритме сосредоточена энергия записи. Окно частот сужает график (кнопки ритмов или поля «от/до») — это просмотр уже посчитанных чисел, а не новый расчёт. Полоса самого расчёта задаётся фильтром в панели «Расчёт диполей».',
+  explore:
+    'Список отдельных частот с мощностью, плотностью и амплитудным диапазоном по эпохам в долях от «полки» своей полосы — вход для выбора узких поддиапазонов «Пакета поддиапазонов». Таблица показывает измерения: полосы выбирает исследователь, а не таблица.',
 } as const
 
 export function DipolesDrawer() {
@@ -145,6 +149,17 @@ export function DipolesDrawer() {
           ) : null}
           {view === 'topomap' ? (
             <BandTopomaps spectrum={spectrum} query={spectrumQueryOf(spectrum)} />
+          ) : view === 'explore' ? (
+            spectrum.explore ? (
+              <ExploreTable explore={spectrum.explore} />
+            ) : (
+              // Результат задачи мог быть записан прошлой версией кода (без
+              // `explore`) — честное «не входит», а не пустая таблица
+              <p className="text-sm text-fg-2" data-testid="explore-missing">
+                Разведочный проход не входит в этот расчёт: пересчитайте спектр —
+                результат посчитан прошлой версией кода.
+              </p>
+            )
           ) : (
             <FftHistogram
               spectrum={spectrum}

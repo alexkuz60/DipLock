@@ -234,4 +234,24 @@ describe('выдвижная панель раздела «Диполи»', () =
     ).toBeInTheDocument()
     expect(screen.getByTestId('fft-histogram')).toBeInTheDocument()
   })
+
+  it('вид «Разведочный спектр» показывает таблицу частот из результата', () => {
+    useDipoleCalc.setState({ view: 'explore', spectrum: spectrumResultFixture() })
+    renderWithProviders(<DipolesDrawer />)
+
+    expect(screen.getByTestId('explore-table')).toBeInTheDocument()
+    expect(screen.getAllByTestId('explore-row')).toHaveLength(7)
+  })
+
+  it('вид «Разведочный спектр» честно говорит о результате без прохода', () => {
+    // Файл задачи мог быть записан прошлой версией кода (без `explore`)
+    useDipoleCalc.setState({
+      view: 'explore',
+      spectrum: spectrumResultFixture({ explore: null }),
+    })
+    renderWithProviders(<DipolesDrawer />)
+
+    expect(screen.getByTestId('explore-missing')).toBeInTheDocument()
+    expect(screen.queryByTestId('explore-table')).toBeNull()
+  })
 })

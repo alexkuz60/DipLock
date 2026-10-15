@@ -1027,6 +1027,24 @@ class SpectrumBandOut(BaseModel):
     q75_power_uv2: float | None = Field(
         default=None, description="75-й перцентиль мощности по эпохам, мкВ²"
     )
+    band_power_max_uv2: float | None = Field(
+        default=None,
+        description=(
+            "«Полка» (B4, С3): максимум мощности полосы по эпохам сессии, мкВ²; "
+            "нормировочная база X % КД и долей разведочного прохода; None — не измерена"
+        ),
+    )
+    psd_peak_uv2_hz: float | None = Field(
+        default=None,
+        description="Максимум PSD внутри полосы, мкВ²/Гц (B4); None — не измерен",
+    )
+    psd_peak_hz: float | None = Field(
+        default=None,
+        description=(
+            "Частота максимума PSD внутри полосы, Гц (B4) — вход для выбора "
+            "узких поддиапазонов (С3); None — не измерена"
+        ),
+    )
     topomap_url: str | None = Field(
         default=None, description="URL топокарты диапазона (PNG, ETag); None — не построена"
     )
@@ -1042,6 +1060,83 @@ class SpectrumPeakOut(BaseModel):
     center_hz: float = Field(description="Центровая частота пика, Гц")
     amplitude_db: float = Field(description="Высота над фоном, дБ")
     bandwidth_hz: float = Field(description="Ширина пика, Гц")
+
+
+# --- Разведочный спектральный проход (С3, B4) ---
+
+
+class SpectrumExploreLineOut(BaseModel):
+    """Строка разведочного списка частот: мощность и плотность одной частоты (С3).
+
+    Одна строка — один бин частотной сетки PSD. Амплитудный диапазон частоты —
+    разброс её мощности **по эпохам сессии** (min / квартили / макс), в долях от
+    «полки» своей полосы (`SpectrumBandOut.band_power_max_uv2`, базис С0) — так
+    δ и γ впервые становятся сравнимыми. Мощность отдельной частоты — PSD × df
+    (прямоугольник бина), а не интеграл: у одного бина нет площади под кривой.
+    """
+
+    freq_hz: float = Field(description="Частота бина, Гц")
+    band_key: str = Field(
+        description="Ключ ритма `freq_bands`, которому принадлежит частота (полуинтервал [lo, hi))",
+    )
+    psd_uv2_hz: float = Field(
+        description="Плотность частоты (среднее по каналам и эпохам), мкВ²/Гц",
+    )
+    power_uv2: float | None = Field(
+        default=None, description="Мощность бина (PSD × df), мкВ²; None — df не измерен",
+    )
+    psd_share: float | None = Field(
+        default=None,
+        description="Доля от пика PSD своей полосы (`psd_peak_uv2_hz`), 0…1; None — не измерена",
+    )
+    power_share: float | None = Field(
+        default=None,
+        description=(
+            "Доля мощности бина от «полки» своей полосы "
+            "(`band_power_max_uv2`); None — не измерена"
+        ),
+    )
+    amp_min_share: float | None = Field(
+        default=None,
+        description="Минимум мощности частоты по эпохам, доля от «полки» своей полосы",
+    )
+    amp_q25_share: float | None = Field(
+        default=None,
+        description="25-й перцентиль мощности частоты по эпохам, доля от «полки» своей полосы",
+    )
+    amp_median_share: float | None = Field(
+        default=None,
+        description="Медиана мощности частоты по эпохам, доля от «полки» своей полосы",
+    )
+    amp_q75_share: float | None = Field(
+        default=None,
+        description="75-й перцентиль мощности частоты по эпохам, доля от «полки» своей полосы",
+    )
+    amp_max_share: float | None = Field(
+        default=None,
+        description="Максимум мощности частоты по эпохам, доля от «полки» своей полосы",
+    )
+
+
+class SpectrumExploreOut(BaseModel):
+    """Разведочный спектральный проход (С3) — вход для выбора полос С1.
+
+    Список частот с мощностью, плотностью и амплитудными диапазонами по эпохам
+    **в нормированных единицах** (концепция §6): по нему исследователь выбирает
+    узкие поддиапазоны пакета. Выбор полос за числами не стоит — проход только
+    показывает измерения (`docs/rules/dipoles.md`).
+    """
+
+    df_hz: float = Field(description="Ширина бина частотной сетки, Гц (мощность = PSD × df)")
+    power_basis: str = Field(
+        description="Базис нормировки мощности и амплитуд (С0): доля от «полки» своей полосы",
+    )
+    psd_basis: str = Field(
+        description="Базис нормировки плотности (С0): доля от пика PSD своей полосы",
+    )
+    lines: list[SpectrumExploreLineOut] = Field(
+        default_factory=list, description="Строки — по возрастанию частоты (сетка PSD)",
+    )
 
 
 class SpectrumResult(BaseModel):
@@ -1074,6 +1169,14 @@ class SpectrumResult(BaseModel):
     freqs: list[float] = Field(description="Частоты PSD, Гц")
     psd_mean_uv2: list[float] = Field(description="PSD, усреднённый по каналам, мкВ²/Гц")
     bands: list[SpectrumBandOut] = Field(default_factory=list)
+    explore: SpectrumExploreOut | None = Field(
+        default=None,
+        description=(
+            "Разведочный спектральный проход (С3): список частот с нормированными "
+            "величинами и амплитудными диапазонами по эпохам; None — результат "
+            "вычислен прошлой версией кода без прохода"
+        ),
+    )
     iaf_hz: float | None = Field(
         default=None,
         description="Индивидуальная пиковая α-частота (IAF), Гц (N16); None — мало бинов в полосе α",

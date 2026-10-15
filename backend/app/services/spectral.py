@@ -38,7 +38,15 @@
   среднему спектру и отдаются вместе с кривой фона ``aperiodic_fit_uv2`` —
   «альфа-пик 10.2 Гц на фоне наклона» информативнее голого максимума, потому
   что на «розовом» фоне пики смещаются. Отказ фита не валит задачу: поля
-  становятся ``null``, а текст — в ``warnings``.
+  становятся ``null``, а текст — в ``warnings``;
+ * **разведочный спектральный проход** (С3, B4): список отдельных частот с
+   мощностью (PSD × df), плотностью и амплитудными диапазонами по эпохам
+   (min/квартили/макс) в долях от «полки» своей полосы — вход для выбора узких
+   поддиапазонов пакета С1. Нормировка — только внутри своего ритма (базис С0,
+   константы ``EXPLORE_POWER_BASIS``/``EXPLORE_PSD_BASIS``): δ и γ сравнимы
+   только как доли от своих максимумов. Выбор полос за числами не стоит
+   (правило `docs/rules/dipoles.md`) — проход только показывает измерения.
+
 
 Топокарта
 ---------
@@ -76,7 +84,7 @@ import matplotlib
 import mne
 import numpy as np
 
-from app.core.config import Settings
+from app.core.config import EXPLORE_POWER_BASIS, EXPLORE_PSD_BASIS, Settings
 from app.services import journal
 from app.services.cache_store import cache_clear, cache_path, cache_write
 from app.services.edf_loader import _MONTAGE_NAMES
@@ -361,6 +369,112 @@ def _individual_alpha_hz(
     return float(band_freqs[peak] + shift * df)
 
 
+def _band_key_of_freq(freq: float, bands: dict[str, tuple]) -> str | None:
+    """Ключ ритма `freq_bands`, которому принадлежит частота (С3).
+
+    Полуинтервал ``[lo, hi)``: граница ритмов (2 Гц между δ и δ/θ) принадлежит
+    верхнему ритму, иначе строка прохода нормировалась бы на «чужую» полку.
+    Верхняя граница самого верхнего ритма принадлежит ему. ``None`` — частота
+    вне ритмов (дыра в пользовательской сетке): строка остаётся в списке без
+    нормировки — «не измерено», а не выдуманный ключ.
+    """
+    names = list(bands)
+    for index, name in enumerate(names):
+        lo, hi = bands[name]
+        if lo <= freq < hi:
+            return name
+        # Верхняя граница самого верхнего ритма включается (запас 1e-9 — на
+        # округление сетки), но частоты выше ритмов сюда не попадают.
+        if index == len(names) - 1 and lo <= freq <= hi + 1e-9:
+            return name
+    return None
+
+
+def _band_psd_peaks(
+    freqs: np.ndarray, psd_ch_mean: np.ndarray, bands: dict[str, tuple],
+) -> dict[str, tuple[float | None, float | None]]:
+    """Пик PSD каждого ритма (B4 «пик по частоте»): ``(частота, значение)``.
+
+    Голый argmax по бинам полосы, без параболы (как у IAF): «пик по частоте» —
+    нормировочная база плотности и ориентир выбора узких поддиапазонов (С3),
+    а не уточнённая физиологическая частота. Ритм без бинов на оси —
+    ``(None, None)`` («не измерено»).
+    """
+    peaks: dict[str, tuple[float | None, float | None]] = {}
+    for name, (fmin, fmax) in bands.items():
+        mask = (freqs >= fmin) & (freqs <= fmax)
+        if not np.any(mask):
+            peaks[name] = (None, None)
+            continue
+        band_freqs = freqs[mask]
+        band_psd = psd_ch_mean[mask]
+        index = int(np.argmax(band_psd))
+        peaks[name] = (float(band_freqs[index]), float(band_psd[index]))
+    return peaks
+
+
+def _explore_pass(
+    freqs: np.ndarray,
+    psd: np.ndarray,
+    psd_ch_mean: np.ndarray,
+    bands: dict[str, tuple],
+    band_max: dict[str, float | None],
+    psd_peaks: dict[str, tuple[float | None, float | None]],
+    df: float,
+) -> dict[str, Any]:
+    """Разведочный спектральный проход (С3): список частот в нормированных единицах.
+
+    Одна строка — один бин сетки PSD. Поля (B4/`SpectrumExploreLineOut`):
+
+    * мощность бина — ``PSD × df`` (прямоугольник: у одного бина нет площади
+      под кривой), плотность — среднее по каналам и эпохам;
+    * **амплитудный диапазон частоты** — разброс её мощности по эпохам сессии
+      (min/квартили/макс) в долях от «полки» своей полосы (`band_max`,
+      ``EXPLORE_POWER_BASIS``); доли мощности — от той же «полки», доли
+      плотности — от пика PSD своей полосы (`psd_peaks`, ``EXPLORE_PSD_BASIS``).
+
+    Без базы нормировки (ритм вне оси, нулевая «полка») доли — ``None``, а не
+    ноль: «не измерено» честнее выдуманного значения (правило B4).
+    """
+    def share(value: float, base: float | None) -> float | None:
+        return float(value / base) if base else None
+
+    lines: list[dict[str, Any]] = []
+    for index, freq in enumerate(freqs):
+        band_key = _band_key_of_freq(float(freq), bands)
+        psd_value = float(psd_ch_mean[index])
+        power_value = psd_value * df
+        power_base = band_max.get(band_key) if band_key else None
+        psd_base = psd_peaks.get(band_key, (None, None))[1] if band_key else None
+        series = np.mean(psd[:, :, index] * df, axis=-1) if psd.size else np.empty(0)
+        if series.size:
+            amp_min, amp_q25, amp_med, amp_q75, amp_max = np.percentile(
+                series, [0, 25, 50, 75, 100],
+            )
+        else:
+            amp_min = amp_q25 = amp_med = amp_q75 = amp_max = None
+        lines.append({
+            "freq_hz": float(freq),
+            "band_key": band_key,
+            "psd_uv2_hz": psd_value,
+            "power_uv2": power_value,
+            "psd_share": share(psd_value, psd_base),
+            "power_share": share(power_value, power_base),
+            "amp_min_share": share(float(amp_min), power_base) if amp_min is not None else None,
+            "amp_q25_share": share(float(amp_q25), power_base) if amp_q25 is not None else None,
+            "amp_median_share": share(float(amp_med), power_base) if amp_med is not None else None,
+            "amp_q75_share": share(float(amp_q75), power_base) if amp_q75 is not None else None,
+            "amp_max_share": share(float(amp_max), power_base) if amp_max is not None else None,
+        })
+    return {
+        "df_hz": df,
+        "power_basis": EXPLORE_POWER_BASIS,
+        "psd_basis": EXPLORE_PSD_BASIS,
+        "lines": lines,
+    }
+
+
+
 def _channel_band_power(
     freqs: np.ndarray, psd_mean: np.ndarray, channels: list[str], fmin: float, fmax: float,
 ) -> dict[str, float]:
@@ -607,10 +721,14 @@ def compute_spectrum(
     # в `_compute_psd`, поэтому разброс — почти бесплатный).
     df = float(freqs[1] - freqs[0]) if freqs.size > 1 else 1.0
     epoch_stats: dict[str, tuple[float, float, float] | None] = {}
+    # «Полка» полосы (B4, С3): максимум мощности полосы по эпохам сессии —
+    # нормировочная база X % КД и долей разведочного прохода.
+    band_maxima: dict[str, float | None] = {}
     for band_name, (fmin, fmax) in cfg.freq_bands.items():
         mask = (freqs >= fmin) & (freqs <= fmax)
         if not mask.any():
             epoch_stats[band_name] = None
+            band_maxima[band_name] = None
             continue
         series = np.mean(_integrate_band(freqs[mask], psd[:, :, mask], df), axis=-1)
         epoch_stats[band_name] = (
@@ -618,6 +736,17 @@ def compute_spectrum(
             float(np.percentile(series, 25)),
             float(np.percentile(series, 75)),
         )
+        band_maxima[band_name] = float(np.max(series))
+    # С3 — разведочный спектральный проход: пик PSD каждого ритма (B4) и список
+    # частот в нормированных единицах. Считается на уже готовом кубе PSD —
+    # отдельного чтения записи не требует (вход выбора полос пакета С1).
+    psd_peaks = _band_psd_peaks(freqs, psd_ch_mean, cfg.freq_bands)
+    with journal.step("spectrum", "explore", params_key=signature, epochs=len(epochs)) as entry:
+        explore = _explore_pass(
+            freqs, psd, psd_ch_mean, cfg.freq_bands, band_maxima, psd_peaks, df,
+        )
+        entry.note = f"lines={len(explore['lines'])}"
+
     # Полная мощность спектра — интеграл среднего PSD: знаменатель relative power.
     total_power = float(np.trapezoid(psd_ch_mean, x=freqs)) if freqs.size >= 2 else 0.0
     alpha_range = cfg.freq_bands.get("alpha")
@@ -689,6 +818,10 @@ def compute_spectrum(
                 "median_power_uv2": stats[0] if stats else None,
                 "q25_power_uv2": stats[1] if stats else None,
                 "q75_power_uv2": stats[2] if stats else None,
+                # B4 (С3): два максимума полосы — «полка» по эпохам и пик по частоте
+                "band_power_max_uv2": band_maxima[name],
+                "psd_peak_uv2_hz": psd_peaks[name][1],
+                "psd_peak_hz": psd_peaks[name][0],
                 "topomap_url": url,
             })
         entry.bytes_out = written or None
@@ -717,6 +850,7 @@ def compute_spectrum(
         "freqs": [float(value) for value in freqs],
         "psd_mean_uv2": [float(value) for value in psd_ch_mean],
         "bands": bands_out,
+        "explore": explore,
         "iaf_hz": iaf_hz,
         "theta_beta_ratio": theta_beta_ratio,
         "theta_alpha_beta_ratio": theta_alpha_beta_ratio,

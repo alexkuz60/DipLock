@@ -33,7 +33,7 @@ import type {
 } from '@/shared/api/types'
 
 /** Что открыто в выдвижной панели раздела: одна панель за раз. */
-export type CalcView = 'none' | 'topomap' | 'fft'
+export type CalcView = 'none' | 'topomap' | 'fft' | 'explore'
 
 /**
  * Кадр воспроизведения траектории (срез 3.7). Хранится в сторе, потому что

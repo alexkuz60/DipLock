@@ -21,7 +21,11 @@
  * сужении окна график «подтягивался» бы к максимуму внутри окна, и пики меняли
  * бы высоту на глазах — сравнение с полным спектром стало бы ложным.
  */
-import type { SpectrumBandOut, SpectrumResult } from '@/shared/api/types'
+import type {
+  SpectrumBandOut,
+  SpectrumExploreLineOut,
+  SpectrumResult,
+} from '@/shared/api/types'
 
 /** Окно частот графика, Гц: [нижняя, верхняя] — обе внутри измеренного диапазона. */
 export type FreqWindow = [number, number]
@@ -118,6 +122,39 @@ export function spectrumQueryOf(result: SpectrumResult): SpectrumQuery {
 export function formatPower(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—'
   return value.toFixed(2)
+}
+
+/** Доля (С3) для таблицы прохода: «—» вместо нуля там, где не измерена. */
+export function formatShare(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—'
+  return value.toFixed(3)
+}
+
+/** Порядок строк разведочного прохода (С3) — параметр просмотра, не расчёта. */
+export type ExploreOrder = 'freq' | 'power'
+
+/**
+ * Сортировка строк разведочного прохода (С3): `freq` — по возрастанию частоты
+ * (сетка PSD), `power` — по доле мощности бина от «полки» своей полосы,
+ * сильные частоты сверху. Неизмеренные доли — в конец, при равенстве — по
+ * частоте: порядок стабилен, таблица не «прыгает» между перерисовками.
+ */
+export function sortedExploreLines(
+  lines: SpectrumExploreLineOut[],
+  order: ExploreOrder,
+): SpectrumExploreLineOut[] {
+  const copy = [...lines]
+  if (order === 'freq') {
+    return copy.sort((a, b) => a.freq_hz - b.freq_hz)
+  }
+  return copy.sort((a, b) => {
+    const pa = a.power_share
+    const pb = b.power_share
+    if (pa == null && pb == null) return a.freq_hz - b.freq_hz
+    if (pa == null) return 1
+    if (pb == null) return -1
+    return pb - pa || a.freq_hz - b.freq_hz
+  })
 }
 
 export type BandBar = {

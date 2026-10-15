@@ -145,7 +145,7 @@
 | 12 | `POST /recordings/{id}/evoked` | ERP-усреднение по событиям (шаг 2.7: стимул → эпоха → усреднение) |
 | 13 | `GET /recordings/{id}/evoked/{job_id}` | результат ERP: усреднённая волна [канал][время] + `n_used`/`n_total` |
 | 14 | `POST /recordings/{id}/spectrum` | спектр δ…γ (Welch или multitaper PSD, `psd_method`; 1/f + пики specparam) |
-| 15 | `GET /recordings/{id}/spectrum/{job_id}` | результат спектра |
+| 15 | `GET /recordings/{id}/spectrum/{job_id}` | результат спектра (С3: `explore` — разведочный список частот с нормированными величинами) |
 | 16 | `GET /recordings/{id}/spectrum/topomap/{band}.png` | топокарта диапазона (PNG, ETag) |
 | 17 | `POST /compare` | **дифференциальный анализ двух записей** (B9, задача «Сравнение»): шлюз пары (разные записи, одинаковый sfreq, ≥1 общий канал — 400), затем задача `kind=compare` (пара — не запись, поэтому не в `RECORDING_JOB_KINDS`); опциональные поля `tfr_*` включают событийную ветку TFR/ERDS (шлюз «событие в обеих записях» — 400 с перечнем) |
 | 18 | `GET /compare/{job_id}` | результат сравнения (`CompareResult`): дельты по полосам (B − A), кластерный тест MNE, ссылки на карты разности; 404 — чужой/неизвестный job, 409 — идёт/упал |

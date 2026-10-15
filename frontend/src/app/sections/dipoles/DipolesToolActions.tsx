@@ -42,6 +42,7 @@ import {
   Play,
   Share2,
   Square,
+  Table2,
 } from 'lucide-react'
 import {
   calcJobSummary,
@@ -432,6 +433,13 @@ export function DipolesToolHeaderActions() {
         tooltip="Выдвижная панель: средняя мощность ритмов и PSD по частотам"
         active={view === 'fft'}
         onClick={() => toggleView('fft')}
+      />
+      <IconButton
+        icon={<Table2 className="size-5" />}
+        label="Разведочный спектр"
+        tooltip="Выдвижная панель: список отдельных частот — вход для выбора полос пакета (С3)"
+        active={view === 'explore'}
+        onClick={() => toggleView('explore')}
       />
 
       {result ? (

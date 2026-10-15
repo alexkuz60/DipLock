@@ -15,6 +15,13 @@ _REPO_DIR = _BACKEND_DIR.parent
 KD_MOMENT_BASIS = "share_of_band_max"  # доля от максимума момента своего поддиапазона
 KD_GOF_BASIS = "absolute"  # GOF — доля объяснённой дисперсии (0…1), своя у каждого метода
 
+# С3 — разведочный спектральный проход (`services/spectral.py`, `explore`):
+# нормированные величины списка частот. Базисы — обязательная часть контракта
+# (правило 2 `docs/data-blocks.md`: «у каждого порога есть базис нормировки»):
+# числа разных ритмов сравнимы только как доли от максимумов **своей** полосы.
+EXPLORE_POWER_BASIS = "share_of_band_power_max"  # доля от «полки» своей полосы (B4)
+EXPLORE_PSD_BASIS = "share_of_band_psd_peak"  # доля от пика PSD своей полосы (B4)
+
 
 class Settings(BaseSettings):
     # FastAPI

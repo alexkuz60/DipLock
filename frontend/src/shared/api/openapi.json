@@ -23211,6 +23211,42 @@
             "title": "Q75 Power Uv2",
             "description": "75-й перцентиль мощности по эпохам, мкВ²"
           },
+          "band_power_max_uv2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Band Power Max Uv2",
+            "description": "«Полка» (B4, С3): максимум мощности полосы по эпохам сессии, мкВ²; нормировочная база X % КД и долей разведочного прохода; None — не измерена"
+          },
+          "psd_peak_uv2_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psd Peak Uv2 Hz",
+            "description": "Максимум PSD внутри полосы, мкВ²/Гц (B4); None — не измерен"
+          },
+          "psd_peak_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psd Peak Hz",
+            "description": "Частота максимума PSD внутри полосы, Гц (B4) — вход для выбора узких поддиапазонов (С3); None — не измерена"
+          },
           "topomap_url": {
             "anyOf": [
               {
@@ -23232,6 +23268,164 @@
         ],
         "title": "SpectrumBandOut",
         "description": "Мощность одного ритма (δ…γ) с ссылкой на топокарту.\n\nМощность — **интеграл PSD по диапазону, мкВ²** (N15): физически сравнимая\nвеличина между диапазонами разной ширины (среднее PSD, мкВ²/Гц, таким не\nявляется). Топокарта диапазона строится тем же интегралом по каналам."
+      },
+      "SpectrumExploreLineOut": {
+        "properties": {
+          "freq_hz": {
+            "type": "number",
+            "title": "Freq Hz",
+            "description": "Частота бина, Гц"
+          },
+          "band_key": {
+            "type": "string",
+            "title": "Band Key",
+            "description": "Ключ ритма `freq_bands`, которому принадлежит частота (полуинтервал [lo, hi))"
+          },
+          "psd_uv2_hz": {
+            "type": "number",
+            "title": "Psd Uv2 Hz",
+            "description": "Плотность частоты (среднее по каналам и эпохам), мкВ²/Гц"
+          },
+          "power_uv2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Uv2",
+            "description": "Мощность бина (PSD × df), мкВ²; None — df не измерен"
+          },
+          "psd_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Psd Share",
+            "description": "Доля от пика PSD своей полосы (`psd_peak_uv2_hz`), 0…1; None — не измерена"
+          },
+          "power_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Power Share",
+            "description": "Доля мощности бина от «полки» своей полосы (`band_power_max_uv2`); None — не измерена"
+          },
+          "amp_min_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amp Min Share",
+            "description": "Минимум мощности частоты по эпохам, доля от «полки» своей полосы"
+          },
+          "amp_q25_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amp Q25 Share",
+            "description": "25-й перцентиль мощности частоты по эпохам, доля от «полки» своей полосы"
+          },
+          "amp_median_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amp Median Share",
+            "description": "Медиана мощности частоты по эпохам, доля от «полки» своей полосы"
+          },
+          "amp_q75_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amp Q75 Share",
+            "description": "75-й перцентиль мощности частоты по эпохам, доля от «полки» своей полосы"
+          },
+          "amp_max_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amp Max Share",
+            "description": "Максимум мощности частоты по эпохам, доля от «полки» своей полосы"
+          }
+        },
+        "type": "object",
+        "required": [
+          "freq_hz",
+          "band_key",
+          "psd_uv2_hz"
+        ],
+        "title": "SpectrumExploreLineOut",
+        "description": "Строка разведочного списка частот: мощность и плотность одной частоты (С3).\n\nОдна строка — один бин частотной сетки PSD. Амплитудный диапазон частоты —\nразброс её мощности **по эпохам сессии** (min / квартили / макс), в долях от\n«полки» своей полосы (`SpectrumBandOut.band_power_max_uv2`, базис С0) — так\nδ и γ впервые становятся сравнимыми. Мощность отдельной частоты — PSD × df\n(прямоугольник бина), а не интеграл: у одного бина нет площади под кривой."
+      },
+      "SpectrumExploreOut": {
+        "properties": {
+          "df_hz": {
+            "type": "number",
+            "title": "Df Hz",
+            "description": "Ширина бина частотной сетки, Гц (мощность = PSD × df)"
+          },
+          "power_basis": {
+            "type": "string",
+            "title": "Power Basis",
+            "description": "Базис нормировки мощности и амплитуд (С0): доля от «полки» своей полосы"
+          },
+          "psd_basis": {
+            "type": "string",
+            "title": "Psd Basis",
+            "description": "Базис нормировки плотности (С0): доля от пика PSD своей полосы"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/SpectrumExploreLineOut"
+            },
+            "type": "array",
+            "title": "Lines",
+            "description": "Строки — по возрастанию частоты (сетка PSD)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "df_hz",
+          "power_basis",
+          "psd_basis"
+        ],
+        "title": "SpectrumExploreOut",
+        "description": "Разведочный спектральный проход (С3) — вход для выбора полос С1.\n\nСписок частот с мощностью, плотностью и амплитудными диапазонами по эпохам\n**в нормированных единицах** (концепция §6): по нему исследователь выбирает\nузкие поддиапазоны пакета. Выбор полос за числами не стоит — проход только\nпоказывает измерения (`docs/rules/dipoles.md`)."
       },
       "SpectrumPeakOut": {
         "properties": {
@@ -23354,6 +23548,17 @@
             },
             "type": "array",
             "title": "Bands"
+          },
+          "explore": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpectrumExploreOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Разведочный спектральный проход (С3): список частот с нормированными величинами и амплитудными диапазонами по эпохам; None — результат вычислен прошлой версией кода без прохода"
           },
           "iaf_hz": {
             "anyOf": [

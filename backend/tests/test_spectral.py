@@ -462,3 +462,133 @@ def test_topomap_etag_depends_on_psd_method(client, tmp_path):
         headers={"If-None-Match": multitaper.headers["etag"]},
     )
     assert again.status_code == 304
+
+
+# --- С3: разведочный спектральный проход ---
+
+
+def test_explore_pass_normalizes_by_band_bases():
+    """С3: строки частот в долях от «полки» и пика плотности своей полосы.
+
+    Точный расчёт на кубе 2 эпохи × 1 канал × 3 частоты: мощность бина —
+    PSD × df, амплитудный диапазон частоты — min/квартили/макс по эпохам,
+    всё — в долях от «полки» полосы (11 мкВ² у верхней эпохи).
+    """
+    from app.core.config import EXPLORE_POWER_BASIS, EXPLORE_PSD_BASIS
+    from app.services.spectral import _explore_pass
+
+    freqs = np.array([9.0, 10.0, 11.0])
+    psd = np.array([[[2.0, 4.0, 1.0]], [[4.0, 8.0, 2.0]]])  # (2 эпохи, 1 канал, 3 частоты)
+    psd_ch_mean = np.array([3.0, 6.0, 1.5])
+    bands = {"alpha": (8.0, 16.0)}
+    band_max = {"alpha": 11.0}  # трапеция полосы: эпоха 0 → 5.5, эпоха 1 → 11
+    psd_peaks = {"alpha": (10.0, 6.0)}
+
+    explore = _explore_pass(freqs, psd, psd_ch_mean, bands, band_max, psd_peaks, df=1.0)
+
+    assert explore["df_hz"] == 1.0
+    assert explore["power_basis"] == EXPLORE_POWER_BASIS
+    assert explore["psd_basis"] == EXPLORE_PSD_BASIS
+    lines = explore["lines"]
+    assert [line["freq_hz"] for line in lines] == [9.0, 10.0, 11.0]
+    peak_line = lines[1]
+    assert peak_line["band_key"] == "alpha"
+    assert peak_line["psd_uv2_hz"] == 6.0
+    assert peak_line["power_uv2"] == 6.0
+    assert peak_line["psd_share"] == pytest.approx(1.0)  # пик плотности своей полосы
+    assert peak_line["power_share"] == pytest.approx(6.0 / 11.0)
+    # Амплитудный диапазон частоты по эпохам: 4 и 8 мкВ² → доли от «полки» 11
+    assert peak_line["amp_min_share"] == pytest.approx(4.0 / 11.0)
+    assert peak_line["amp_median_share"] == pytest.approx(6.0 / 11.0)
+    assert peak_line["amp_max_share"] == pytest.approx(8.0 / 11.0)
+
+
+def test_explore_shares_are_none_without_base():
+    """С3: без базы нормировки (нулевая «полка») доли — None, а не ноль."""
+    from app.services.spectral import _explore_pass
+
+    freqs = np.array([10.0])
+    psd = np.zeros((2, 1, 1))
+    explore = _explore_pass(
+        freqs, psd, np.zeros(1), {"alpha": (8.0, 16.0)},
+        {"alpha": 0.0}, {"alpha": (10.0, 0.0)}, df=1.0,
+    )
+
+    line = explore["lines"][0]
+    assert line["psd_uv2_hz"] == 0.0
+    assert line["power_uv2"] == 0.0
+    for key in ("psd_share", "power_share", "amp_min_share", "amp_median_share", "amp_max_share"):
+        assert line[key] is None, key
+
+
+def test_band_key_of_freq_boundary_belongs_to_upper_rhythm():
+    """С3: граница ритмов (2 Гц) принадлежит верхнему ритму — нормировка «своя»."""
+    from app.services.spectral import _band_key_of_freq
+
+    assert _band_key_of_freq(0.5, settings.freq_bands) == "delta"
+    assert _band_key_of_freq(2.0, settings.freq_bands) == "delta_theta"
+    assert _band_key_of_freq(8.0, settings.freq_bands) == "alpha"
+    assert _band_key_of_freq(128.0, settings.freq_bands) == "high_gamma"
+    assert _band_key_of_freq(200.0, settings.freq_bands) is None
+
+
+def test_compute_spectrum_exploratory_pass_lists_frequencies(tmp_path):
+    """С3: разведочный проход приходит с результатом спектра — частоты сравнимы.
+
+    Альфа 10 Гц: строка пика несёт долю 1.0 своей полосы, поле `psd_peak_hz`
+    полосы alpha указывает на пик, амплитудные диапазоны упорядочены, а ритм
+    вне полосы фильтра (γ-high при 1–40 Гц) честно не измерен.
+    """
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+
+    result = compute_spectrum(
+        recording, settings,
+        SpectrumParams(filter_band=(1, 40), epoch_length_ms=1000.0),
+    )
+
+    explore = result["explore"]
+    assert explore is not None
+    assert len(explore["lines"]) == len(result["freqs"])
+    assert [line["freq_hz"] for line in explore["lines"]] == sorted(
+        [line["freq_hz"] for line in explore["lines"]],
+    )
+
+    alpha_line = min(explore["lines"], key=lambda line: abs(line["freq_hz"] - 10.0))
+    assert alpha_line["band_key"] == "alpha"
+    assert alpha_line["psd_share"] == pytest.approx(1.0)
+    for line in explore["lines"]:
+        assert line["band_key"] is not None  # сетка δ…γ тайлинг без дыр
+        ordered = [
+            line["amp_min_share"], line["amp_q25_share"], line["amp_median_share"],
+            line["amp_q75_share"], line["amp_max_share"],
+        ]
+        values = [value for value in ordered if value is not None]
+        assert values == sorted(values)
+        assert all(value >= 0.0 for value in values)
+
+    bands = {band["name"]: band for band in result["bands"]}
+    alpha = bands["alpha"]
+    # Пик по частоте (B4) — тот же бин, что строка прохода с долей 1.0
+    # (сетка Welch при эпохе 251 отсчёт — df = 250/251, бин рядом с 10 Гц)
+    assert alpha["psd_peak_hz"] == pytest.approx(10.0, abs=0.5)
+    assert alpha["psd_peak_hz"] == alpha_line["freq_hz"]
+    assert alpha["psd_peak_uv2_hz"] == pytest.approx(max(result["psd_mean_uv2"]))
+    assert alpha["band_power_max_uv2"] is not None
+    assert alpha["band_power_max_uv2"] >= alpha["median_power_uv2"]
+    # γ-high вне полосы фильтра (1–40): пик и «полка» — честные None
+    assert bands["high_gamma"]["psd_peak_hz"] is None
+    assert bands["high_gamma"]["psd_peak_uv2_hz"] is None
+    assert bands["high_gamma"]["band_power_max_uv2"] is None
+
+
+def test_spectrum_result_accepts_old_jobs_without_explore():
+    """С3: результат прошлой версии кода (без `explore`) валиден — поле None."""
+    from app.schemas.analysis import SpectrumResult
+
+    result = SpectrumResult(
+        recording_id="rec", channels=["Cz"], sfreq=250.0, epoch_length_ms=1000.0,
+        n_epochs=2, n_fft=256, freqs=[1.0, 2.0], psd_mean_uv2=[1.0, 2.0],
+        topomap_version="sig",
+    )
+
+    assert result.explore is None

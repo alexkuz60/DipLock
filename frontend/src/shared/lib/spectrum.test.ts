@@ -7,13 +7,18 @@
  * «схлопывает» слабые ритмы в прямую линию.
  */
 import { describe, expect, it } from 'vitest'
-import type { SpectrumBandOut, SpectrumResult } from '@/shared/api/types'
+import type {
+  SpectrumBandOut,
+  SpectrumExploreLineOut,
+  SpectrumResult,
+} from '@/shared/api/types'
 import {
   bandInFreqWindow,
   bandLabel,
   bandRangeLabel,
   clampFreqWindow,
   formatPower,
+  formatShare,
   freqRange,
   freqWindowLabel,
   histogramBars,
@@ -22,6 +27,7 @@ import {
   psdScale,
   psdX,
   rangeSummary,
+  sortedExploreLines,
   spectrumMetrics,
   spectrumQueryOf,
   spectrumQueryString,
@@ -334,4 +340,52 @@ test('psdX ставит маркер пика в ту же точку шкалы
   // Края шкалы: 1 Гц — у левого края, 40 Гц — у правого
   expect(psdX(1, 1, 40, 520, 2)).toBeCloseTo(2, 6)
   expect(psdX(40, 1, 40, 520, 2)).toBeCloseTo(518, 6)
+})
+
+describe('разведочный спектральный проход (С3)', () => {
+  function line(
+    freq_hz: number,
+    power_share: number | null,
+    overrides: Partial<SpectrumExploreLineOut> = {},
+  ): SpectrumExploreLineOut {
+    return {
+      freq_hz,
+      band_key: 'alpha',
+      psd_uv2_hz: 1,
+      power_uv2: 1,
+      psd_share: 1,
+      power_share,
+      amp_min_share: null,
+      amp_q25_share: null,
+      amp_median_share: null,
+      amp_q75_share: null,
+      amp_max_share: null,
+      ...overrides,
+    }
+  }
+
+  it('formatShare показывает «—» вместо нуля там, где доля не измерена', () => {
+    expect(formatShare(null)).toBe('—')
+    expect(formatShare(undefined)).toBe('—')
+    expect(formatShare(Number.NaN)).toBe('—')
+    expect(formatShare(0.5)).toBe('0.500')
+  })
+
+  it('«по частоте» — по возрастанию частоты', () => {
+    const lines = [line(10, 0.5), line(1, 0.1), line(4, null)]
+    expect(sortedExploreLines(lines, 'freq').map((item) => item.freq_hz)).toEqual([1, 4, 10])
+  })
+
+  it('«по мощности» — сильные частоты сверху, неизмеренные — в конец', () => {
+    const lines = [line(1, 0.1), line(4, null), line(10, 0.62), line(8, 0.31), line(6, null)]
+    const order = sortedExploreLines(lines, 'power')
+    expect(order.map((item) => item.freq_hz)).toEqual([10, 8, 1, 4, 6])
+  })
+
+  it('не мутирует входной список и держит порядок стабильным при равенстве долей', () => {
+    const lines = [line(8, 0.3), line(10, 0.3)]
+    const order = sortedExploreLines(lines, 'power')
+    expect(order.map((item) => item.freq_hz)).toEqual([8, 10])
+    expect(lines.map((item) => item.freq_hz)).toEqual([8, 10])
+  })
 })
