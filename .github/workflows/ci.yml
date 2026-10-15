@@ -33,8 +33,10 @@ jobs:
         run: ruff check app tests scripts alembic
       - name: mypy (типы)
         run: mypy app alembic
-      - name: pytest (без integration)
-        run: python -m pytest -q -m "not integration"
+      - name: pytest + покрытие (без integration)
+        # pytest-cov (Шаг 2, 15.10.2026): отчёт в логе — карта пустых мест,
+        # правила — docs/rules/tests.md
+        run: python -m pytest -q -m "not integration" --cov=app --cov-report=term-missing:skip-covered --cov-report=xml
 
   frontend:
     name: frontend (eslint + tsc + vitest + build)
@@ -61,7 +63,9 @@ jobs:
         run: npm run lint
       - name: tsc --noEmit
         run: npm run typecheck
-      - name: Vitest
-        run: npm run test
+      - name: Vitest + покрытие
+        # vitest-coverage v8 (Шаг 2, 15.10.2026): отчёт в логе, HTML — в
+        # frontend/coverage (не коммитится); карта пустых мест — docs/rules/tests.md
+        run: npm run test:coverage
       - name: Сборка UI (в backend/app/static/ui)
         run: npm run build

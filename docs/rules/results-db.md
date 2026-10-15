@@ -67,6 +67,32 @@
 честная пустая страница; `analyses`/`dipole_points`/`report_*` read-API сессий
 не читает — ими владеет групповой анализ (ниже).
 
+## Read-API новой схемы (4.7, окончание, 15.10.2026)
+
+Чтение таблиц write-API 4.4 (`recordings`/`analyses`/`dipole_points`) — роуты
+№80–83 (`docs/rules/api-jobs.md`), работа в тех же сервисах, что пишут строки
+(`recording_store.list_recordings` / `results_store.list_analyses` /
+`get_analysis_detail` / `list_analysis_points`):
+
+* **`GET /recordings`** — страница записей с счётчиками детей (сессии/прогоны/
+  отчёты — тремя групповыми запросами, не N+1); «новые сверху», `total` до
+  пагинации. **Кандидаты группового анализа** (пара и группа) переехали сюда с
+  legacy `GET /sessions` (фронт отбирает записи с детьми + текущую открытую —
+  `candidates.ts`); зеркало `recordings` переживает реестр в памяти.
+* **`GET /analyses`** — страница прогонов пакета с паспортом записи (join
+  `recordings`: `filename`/`patient_alias`) и счётчиками полос/точек; фильтры
+  `recording_id`/`kind`;
+* **`GET /analyses/{id}`** — паспорт + полосы `analysis_bands` (`state`
+  ok/empty, `moment_max_nam` — базис КД); 404 — не найден;
+* **`GET /analyses/{id}/points`** — точки `dipole_points` (фильтр `band_key`,
+  пагинация «полоса → эпоха»), `kd_basis` + честный `kd_passed=None` «не
+  оценено» (§8.4 п.5); 404 — нет прогона.
+
+Инварианты read те же: 404 на неизвестный объект (не пустой список), `total`
+до пагинации, `None` — «не измерено», а не 0. Read-API сессий (№5–8) помечен
+**DEPRECATED** (OpenAPI `deprecated: true`): его читают только внутренние
+связки (`dipoles.csv`, материалы Консилиума) и старые клиенты.
+
 ## Групповой анализ: персист прогонов (остаток 4.7, 03.10.2026)
 
 `services/group_analysis.py` — единственный писатель двух таблиц (роуты
@@ -98,7 +124,9 @@
   `tests/test_recording_store.py` (upsert/каскад/сироты), `tests/test_results_store.py`
   (шаг ②), `tests/test_report_store.py` (шаг ③, КД, полный счёт), `DELETE` — в
   `tests/test_recordings.py`, read-API — `tests/test_results_read.py`
-  (страница/паспорт/эпохи/диполи, 404, фильтры, честные `None`),
+  (страница/паспорт/эпохи/диполи, 404, фильтры, честные `None`) и
+  `tests/test_analyses_read.py` (новая схема: записи/прогоны/точки, счётчики,
+  deprecated legacy),
   групповой анализ — `tests/test_group_analysis.py` (агрегат, фильтры,
   история/каскад, шлюзы №52–55).
 - Лимиты: write-API — best-effort (ошибка не меняет статус задачи, правило 13

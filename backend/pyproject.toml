@@ -79,3 +79,13 @@ implicit_reexport = true
 # Ослабление точечное и описано правилом — docs/rules/api-jobs.md.
 module = ["app.api.routes"]
 warn_return_any = false
+
+# Покрытие тестами (Шаг 2, 15.10.2026): `pytest --cov=app` (запуск — CI и
+# docs/rules/tests.md); «карта пустых мест» — там же.
+[tool.coverage.run]
+source = ["app"]
+
+[tool.coverage.report]
+# Строки-пропуски видны сразу: отчёт = карта дыр, а не только процент.
+show_missing = true
+skip_empty = true

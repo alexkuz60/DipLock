@@ -74,7 +74,7 @@ describe('режим «Группа (N>2)»', () => {
     const runButton = screen.getByTestId('group-run-aggregate')
     expect(runButton).toBeDisabled()
 
-    // Кандидаты приходят из GET /sessions (две записи в фикстуре)
+    // Кандидаты приходят из GET /recordings (две записи с результатами в фикстуре)
     const checkboxes = await screen.findAllByRole('checkbox')
     fireEvent.click(checkboxes[0])
     expect(screen.getByTestId('group-members-count')).toHaveTextContent('1 из')

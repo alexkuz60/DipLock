@@ -233,6 +233,24 @@ export type SessionSummary = Schemas['SessionSummaryOut']
 /** Страница списка сессий (`GET /sessions`) */
 export type SessionsPage = Schemas['SessionsPageOut']
 
+/** Строка списка записей (`GET /recordings`, 4.7-окончание) — кандидат пары/группы */
+export type RecordingSummary = Schemas['RecordingSummaryOut']
+
+/** Страница списка записей (`GET /recordings`) */
+export type RecordingsPage = Schemas['RecordingsPageOut']
+
+/** Строка списка прогонов пакета диполей (`GET /analyses`) */
+export type AnalysisSummary = Schemas['AnalysisSummaryOut']
+
+/** Паспорт прогона пакета (`GET /analyses/{id}`) + полосы `analysis_bands` */
+export type AnalysisDetail = Schemas['AnalysisDetailOut']
+
+/** Точка пакета диполей (`GET /analyses/{id}/points`: `dipole_points`) */
+export type DipolePoint = Schemas['DipolePointOut']
+
+/** Страница прогонов пакета (`GET /analyses`) */
+export type AnalysesPage = Schemas['AnalysesPageOut']
+
 export type PipelineInfo = Schemas['PipelineInfo']
 
 export type SurfaceRef = Schemas['SurfaceRef']

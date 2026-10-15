@@ -14,6 +14,8 @@ export default tseslint.config(
       '../backend/app/static/ui',
       // Генерируемые файлы (4.2): openapi-typescript, не правится руками
       'src/shared/api/schema.d.ts',
+      // Отчёт vitest-coverage (npm run test:coverage) — генерируемый HTML/JS
+      'coverage',
     ],
   },
   {

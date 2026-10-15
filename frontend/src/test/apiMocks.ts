@@ -26,7 +26,7 @@ import {
   reportHtmlOutFixture,
   reportResultFixture,
   bundleResultFixture,
-  sessionsFixture,
+  recordingsFixture,
   spectrogramResultFixture,
   spectrumResultFixture,
 } from './fixtures'
@@ -55,9 +55,9 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  RecordingSummary,
   ReportHtmlOut,
   ReportResult,
-  SessionSummary,
   SpectrogramResult,
   SpectrumResult,
 } from '@/shared/api/types'
@@ -186,8 +186,8 @@ export type MockApiOptions = {
   groupRuns?: GroupAnalysisSummary[]
   /** Деталь прогона (`GET /group/analyses/{id}`) */
   groupRunDetail?: { run: GroupAnalysisSummary; aggregate: GroupAggregateOut }
-  /** Строки `GET /sessions` — кандидаты выбора пары */
-  sessions?: { total: number; items: SessionSummary[] }
+  /** Строки `GET /recordings` — кандидаты выбора пары/группы (новая схема) */
+  recordings?: { total: number; items: RecordingSummary[] }
   /** АЧХ фильтра (`GET /filter-response`, шаг 2.5) */
   filterResponse?: FilterResponse
   /** Сигнал сетевого фона (`GET /recordings/{id}/mains`) */
@@ -457,8 +457,9 @@ export function mockApiFetch(options: MockApiOptions = {}) {
       const items = options.groupRuns ?? []
       return jsonResponse({ total: items.length, items })
     }
-    if (url.includes('/sessions')) {
-      return jsonResponse(options.sessions ?? sessionsFixture)
+    if (method === 'GET' && /\/recordings(\?|$)/.test(url)) {
+      // Список записей (`GET /recordings`) — кандидаты пары/группы (4.7-окончание)
+      return jsonResponse(options.recordings ?? recordingsFixture)
     }
     if (url.includes('/jobs?')) {
       // История задач (для подтверждения перезапуска): по умолчанию пусто

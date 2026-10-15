@@ -17,3 +17,5 @@ greenlet>=3.0.0
 # конфигурация — backend/pyproject.toml, правила — docs/rules/tests.md.
 ruff>=0.9.0
 mypy>=1.13.0
+# Покрытие тестами (Шаг 2, 15.10.2026): карта пустых мест — docs/rules/tests.md.
+pytest-cov>=5.0.0

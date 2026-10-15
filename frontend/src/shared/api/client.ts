@@ -5,6 +5,8 @@
  * (same-origin, CORS не нужен). В собранном виде UI раздаёт сам FastAPI.
  */
 import type {
+  AnalysesPage,
+  AnalysisDetail,
   AnalyzeResponse,
   AudioBakeStart,
   AudioBakeStatus,
@@ -16,6 +18,7 @@ import type {
   BundleResult,
   CompareResult,
   ContourSlice,
+  DipolePoint,
   DipoleRefineResult,
   DipoleScanResult,
   EloretaResult,
@@ -35,6 +38,7 @@ import type {
   MetaResponse,
   PreprocessResult,
   RecordingMeta,
+  RecordingsPage,
   ReportHtmlOut,
   ReportResult,
   ServerRestart,
@@ -306,9 +310,11 @@ export const api = {
     request<JobCreated>(`${API_PREFIX}/jobs`, { method: 'POST', body: form, signal }),
 
   /**
-   * Страница сессий (read-API 4.7): кандидаты записей для сравнения — у каждой
-   * строки `recording_id` + `filename`. Листинга записей в API нет
-   * (осознанно, `docs/rules/api-jobs.md`), санкционированный вход — сессии.
+   * Страница сессий (read-API 4.7).
+   *
+   * @deprecated legacy-ветка (`sessions`/`epochs`/`dipoles`): кандидаты
+   * группового анализа читают новую схему — `recordings` / `analyses` (4.7,
+   * окончание). Метод остаётся для старых потребителей.
    */
   sessions: (query?: { limit?: number; recording_id?: string }, signal?: AbortSignal) => {
     const params = new URLSearchParams()
@@ -317,6 +323,69 @@ export const api = {
     const search = params.toString()
     return request<SessionsPage>(
       `${API_PREFIX}/sessions${search ? `?${search}` : ''}`,
+      { signal },
+    )
+  },
+
+  /**
+   * Страница записей БД (read-API 4.7, окончание): паспорт + счётчики детей
+   * (сессии/прогоны/отчёты) — кандидаты выбора пары и группы. Зеркало `recordings`
+   * переживает рестарт, поэтому список честен и без реестра в памяти.
+   */
+  recordings: (
+    query?: { limit?: number; offset?: number },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams()
+    if (query?.limit) params.set('limit', String(query.limit))
+    if (query?.offset) params.set('offset', String(query.offset))
+    const search = params.toString()
+    return request<RecordingsPage>(
+      `${API_PREFIX}/recordings${search ? `?${search}` : ''}`,
+      { signal },
+    )
+  },
+
+  /**
+   * Прогоны пакета диполей (`GET /analyses`, read-API 4.7, окончание):
+   * фильтры `recording_id`/`kind`, пагинация, счётчики полос/точек.
+   */
+  analyses: (
+    query?: { recording_id?: string; kind?: string; limit?: number; offset?: number },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams()
+    if (query?.recording_id) params.set('recording_id', query.recording_id)
+    if (query?.kind) params.set('kind', query.kind)
+    if (query?.limit) params.set('limit', String(query.limit))
+    if (query?.offset) params.set('offset', String(query.offset))
+    const search = params.toString()
+    return request<AnalysesPage>(
+      `${API_PREFIX}/analyses${search ? `?${search}` : ''}`,
+      { signal },
+    )
+  },
+
+  /** Паспорт прогона пакета (`GET /analyses/{id}`) + полосы; 404 — нет прогона. */
+  analysis: (analysisId: number, signal?: AbortSignal) =>
+    request<AnalysisDetail>(`${API_PREFIX}/analyses/${analysisId}`, { signal }),
+
+  /**
+   * Точки пакета (`GET /analyses/{id}/points`): «эпоха × поддиапазон»,
+   * фильтр `band_key`, пагинация; 404 — нет прогона.
+   */
+  analysisPoints: (
+    analysisId: number,
+    query?: { band_key?: string; limit?: number; offset?: number },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams()
+    if (query?.band_key) params.set('band_key', query.band_key)
+    if (query?.limit) params.set('limit', String(query.limit))
+    if (query?.offset) params.set('offset', String(query.offset))
+    const search = params.toString()
+    return request<DipolePoint[]>(
+      `${API_PREFIX}/analyses/${analysisId}/points${search ? `?${search}` : ''}`,
       { signal },
     )
   },

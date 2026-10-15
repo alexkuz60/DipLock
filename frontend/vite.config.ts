@@ -38,5 +38,19 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./vitest.setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // Верхняя граница «зависших» тестов, а не норма: под нагрузкой
+    // vitest-coverage тяжёлые тесты UI укладывались в 5 с впритык (флейки
+    // таймаута, 15.10.2026) — 15 с ловят именно зависание.
+    testTimeout: 15_000,
+    hookTimeout: 15_000,
+    // Покрытие (Шаг 2, 15.10.2026): `npm run test:coverage` — карта пустых
+    // мест в docs/rules/tests.md; v8-провайдер без инструментации исходников.
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: ['**/*.test.*', '**/*.spec.*', 'src/test/**', 'src/vite-env.d.ts'],
+      reporter: ['text', 'html'],
+      reportsDirectory: './coverage',
+    },
   },
 })

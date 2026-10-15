@@ -8,8 +8,8 @@
  * историю (`POST /group/analyses`), история читается кнопкой «Обновить» и
  * кликом по строке (свежий пересчёт на сервере, не кэш).
  *
- * Кандидаты участников — те же, что у пары: уникальные `recording_id` строк
- * `GET /sessions` (`candidates.ts`), плюс текущая открытая запись.
+ * Кандидаты участников — те же, что у пары: строки `GET /recordings`
+ * с результатами (`candidates.ts`), плюс текущая открытая запись.
  */
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/shared/api/client'
@@ -27,13 +27,13 @@ import { TextField } from '@/shared/ui/TextField'
 import { compareCandidates } from './candidates'
 
 export function GroupRunPanel() {
-  const sessions = useQuery({
-    queryKey: ['sessions', 200],
-    queryFn: ({ signal }) => api.sessions({ limit: 200 }, signal),
+  const recordings = useQuery({
+    queryKey: ['recordings', 200],
+    queryFn: ({ signal }) => api.recordings({ limit: 200 }, signal),
   })
   const meta = useQuery({ queryKey: ['meta'], queryFn: ({ signal }) => api.meta(signal) })
   const current = useEdfRecording((state) => state.recording)
-  const candidates = compareCandidates(sessions.data?.items ?? [], current)
+  const candidates = compareCandidates(recordings.data?.items ?? [], current)
 
   const recordingIds = useGroupRun((state) => state.recordingIds)
   const toggleRecording = useGroupRun((state) => state.toggleRecording)
@@ -67,7 +67,7 @@ export function GroupRunPanel() {
     <>
       <Panel
         title="Участники группы"
-        hint="Записи с результатами пакета автоотчёта (GET /sessions → уникальные записи). Порядок выбора — порядок колонок тепловой карты. Расчёт читает последний прогон каждой записи."
+        hint="Записи с результатами (GET /recordings → кандидаты новой схемы). Порядок выбора — порядок колонок тепловой карты. Расчёт читает последний прогон пакета каждой записи (запись без пакета — предупреждение в агрегате)."
       >
         <div className="space-y-1.5" data-testid="group-members">
           {candidates.map((candidate) => (

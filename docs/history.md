@@ -3,6 +3,52 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 15.10.2026 — Закрыто: Шаг 2 плана сводного аудита (read-API 4.7 + покрытие)
+
+Дословно из `todo.md` (раздел «Шаг 2. Данные: read-API 4.7 (ближайший срез)»):
+
+* **Read-API 4.7**: чтение `recordings`/`analyses`/`dipole_points`; кандидаты группового
+  анализа — из новой схемы (сейчас legacy `/sessions`); legacy-ветку пометить deprecated.
+* **Покрытие тестов**: `pytest-cov` + vitest-coverage в CI → карта пустых мест
+  (подозрение: `audio_render`, `group_reports`, `compare`, `report`).
+
+Выполнено:
+
+* **Read-API новой схемы** (роуты №80–83, `docs/rules/api-jobs.md`): `GET /recordings`
+  (страница строк `recordings` с счётчиками детей — сессии/прогоны/отчёты; кандидаты
+  пары/группы вместо legacy `GET /sessions`), `GET /analyses` (прогоны пакета с
+  паспортом записи и счётчиками полос/точек), `GET /analyses/{id}` (паспорт +
+  `analysis_bands`), `GET /analyses/{id}/points` (`dipole_points`, фильтр `band_key`,
+  честный `kd_passed=None`). Работа — в владельцах строк (`recording_store.list_recordings`,
+  `results_store.list_analyses`/`get_analysis_detail`/`list_analysis_points`);
+  инварианты read сохранены (404 на неизвестный объект, `total` до пагинации, `None` —
+  «не измерено»). Контракт: схемы `RecordingSummaryOut`/`AnalysesPageOut`/
+  `AnalysisDetailOut`/`DipolePointOut`/`KdBasisOut`, OpenAPI → `gen:api`.
+* **Legacy-ветка `/sessions*` (№5–8) помечена deprecated** (OpenAPI `deprecated: true`,
+  Swagger перечёркивает): остаётся для внутренних связок (`dipoles.csv`, материалы
+  Консилиума) и старых клиентов.
+* **Кандидаты группового анализа — из новой схемы**: `candidates.ts` читает строки
+  `GET /recordings` (записи с результатами + текущая открытая), панели
+  `GroupPanel`/`GroupRunPanel`/`GroupSection`, фикстуры и моки переехали с
+  `sessionsFixture` на `recordingsFixture`.
+* **Покрытие**: `pytest-cov` (backend, `[tool.coverage.*]` в `pyproject.toml`) и
+  `@vitest/coverage-v8` (frontend, `coverage` в `vite.config.ts`) в CI
+  (`pytest --cov`, `npm run test:coverage`); **карта пустых мест** —
+  `docs/rules/tests.md`. Подозрения плана (`audio_render`, `group_reports`,
+  `compare`, `report`) **не подтвердились** — 86–95 %; реальные дыры: CRUD-ветки
+  хранилищ Консилиума (42–58 %), `analysis_pipeline` (46 %, мокается в тестах),
+  `main.py`/`api/llm_router.py` (69–73 %), research-выдачи `results_store` (75 %),
+  UI-фланги (`main.tsx`, `Stubs.tsx`, экраны Консилиума). Трогаемые Шагом 3 модули
+  (`dipole_scanner` 91 %, `spectral` 92 %, `roi` 100 %) покрыты достаточно.
+* Тесты: pytest +6 (`tests/test_analyses_read.py`), Vitest +1 (`GroupSection` —
+  запись без результатов не кандидат); `testTimeout` Vitest поднят до 15 с
+  (верхняя граница зависаний: тяжёлые тесты UI упирались в 5 с под нагрузкой
+  покрытия). Итог: pytest **1065** (1045 без `integration`), Vitest **1230**.
+* Документация: `api-jobs.md` (инвентарь №80–83, deprecated №5–8, «Чего в API нет» —
+  листинг записей теперь есть), `results-db.md` (секция «Read-API новой схемы»),
+  `group-analysis.md`/`compare.md` (кандидаты), `tests.md` (покрытие + карта),
+  `frontend/README.md`.
+
 ## 15.10.2026 — Закрыто: гигиена и честность (Шаг 1 плана сводного аудита)
 
 Сводный итог четырёх аудитов (Qwen, Kimi, GLM, Deepseek от 15.10.2026) —

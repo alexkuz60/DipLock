@@ -36,7 +36,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Список записей (read-API 4.7, окончание)
+         * @description Страница записей БД с счётчиками детей — кандидаты группового анализа.
+         *
+         *     Зеркало ``recordings`` переживает реестр в памяти: список честен и после
+         *     рестарта. ``total`` — до ``limit/offset``; счётчики (сессии/прогоны/отчёты) —
+         *     тремя групповыми запросами на страницу. Работа —
+         *     ``recording_store.list_recordings`` (тот же модуль, что пишет строки).
+         */
+        get: operations["list_recordings_api_v1_recordings_get"];
         put?: never;
         /**
          * Загрузить EDF для просмотра (без обработки)
@@ -95,11 +104,14 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Список сессий (read-API 4.7)
+         * Список сессий (read-API 4.7, DEPRECATED)
+         * @deprecated
          * @description Страница сессий с агрегатами детей (эпохи/диполи) — вход Фазы 5.
          *
-         *     ``total`` считается до ``limit/offset``; работа — в
-         *     ``results_store.list_sessions`` (тот же модуль, что пишет строки).
+         *     **DEPRECATED**: чтение новой схемы — ``GET /recordings``/``GET /analyses``
+         *     (кандидаты группового анализа переехали туда, 4.7-окончание). ``total``
+         *     считается до ``limit/offset``; работа — в ``results_store.list_sessions``
+         *     (тот же модуль, что пишет строки).
          */
         get: operations["list_sessions_api_v1_sessions_get"];
         put?: never;
@@ -118,8 +130,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Паспорт сессии
+         * Паспорт сессии (DEPRECATED)
+         * @deprecated
          * @description Сессия с числом эпох/диполей и ключами мощностей; 404 — не найдена.
+         *
+         *     **DEPRECATED**: чтение новой схемы — ``GET /analyses/{id}`` (4.7-окончание).
          */
         get: operations["get_session_api_v1_sessions__session_id__get"];
         put?: never;
@@ -138,8 +153,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Эпохи сессии
+         * Эпохи сессии (DEPRECATED)
+         * @deprecated
          * @description Сетка эпох с мощностями полос (честные None — «не измерено»); 404 — нет сессии.
+         *
+         *     **DEPRECATED**: таблицы ``sessions``/``epochs`` — legacy-ветка (4.7-окончание).
          */
         get: operations["get_session_epochs_api_v1_sessions__session_id__epochs_get"];
         put?: never;
@@ -158,8 +176,11 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Диполи сессии
+         * Диполи сессии (DEPRECATED)
+         * @deprecated
          * @description Строки диполей для агрегатов Фазы 5 (ROI/полоса); 404 — нет сессии.
+         *
+         *     **DEPRECATED**: точки пакета читает ``GET /analyses/{id}/points`` (4.7-окончание).
          */
         get: operations["get_session_dipoles_api_v1_sessions__session_id__dipoles_get"];
         put?: never;
@@ -1766,6 +1787,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/analyses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Список прогонов пакета диполей (read-API 4.7, окончание)
+         * @description Страница прогонов ``analyses`` с паспортом записи и счётчиками детей.
+         *
+         *     Новая схема (write-API 4.4, шаг ③) вместо legacy ``GET /sessions``:
+         *     ``total`` — до ``limit/offset``, счётчики — полосы/точки пакета. Работа —
+         *     ``results_store.list_analyses``.
+         */
+        get: operations["list_analyses_api_v1_analyses_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analyses/{analysis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Паспорт прогона пакета диполей
+         * @description Прогон с полосами ``analysis_bands`` и счётчиками; 404 — не найден.
+         */
+        get: operations["get_analysis_api_v1_analyses__analysis_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analyses/{analysis_id}/points": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Точки пакета диполей (dipole_points)
+         * @description Точки «эпоха × поддиапазон» прогона; 404 — нет прогона (не пустой список).
+         *
+         *     Вердикт КД — честный ``None`` («не оценено»), пока методика не задала
+         *     пороги (§8.4 п.5 `docs/rules/results-db.md`). Работа —
+         *     ``results_store.list_analysis_points``.
+         */
+        get: operations["get_analysis_points_api_v1_analyses__analysis_id__points_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/consilium/cases": {
         parameters: {
             query?: never;
@@ -2711,6 +2800,167 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AnalysesPageOut
+         * @description Страница прогонов пакета: ``total`` честный (считается до limit/offset).
+         */
+        AnalysesPageOut: {
+            /**
+             * Total
+             * @description Всего строк под фильтрами
+             */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Items */
+            items?: components["schemas"]["AnalysisSummaryOut"][];
+        };
+        /**
+         * AnalysisBandOut
+         * @description Полоса пакета прогона (``GET /analyses/{id}``: ``analysis_bands``).
+         */
+        AnalysisBandOut: {
+            /** Band Key */
+            band_key?: string | null;
+            /** Band Hz Lo */
+            band_hz_lo?: number | null;
+            /** Band Hz Hi */
+            band_hz_hi?: number | null;
+            /**
+             * State
+             * @description ok | empty (по числу точек)
+             */
+            state?: string | null;
+            /** N Points */
+            n_points?: number | null;
+            /**
+             * N Kd Passed
+             * @description Прошло КД; None — вердикт не оценивался (§8.4 п.5)
+             */
+            n_kd_passed?: number | null;
+            /** N Errors */
+            n_errors?: number | null;
+            /**
+             * Moment Max Nam
+             * @description Максимум момента внутри полосы (базис КД)
+             */
+            moment_max_nam?: number | null;
+        };
+        /**
+         * AnalysisDetailOut
+         * @description Паспорт прогона (``GET /analyses/{id}``) + полосы пакета.
+         */
+        AnalysisDetailOut: {
+            /** Id */
+            id: number;
+            /** Recording Id */
+            recording_id?: string | null;
+            /** Filename */
+            filename?: string | null;
+            /** Patient Alias */
+            patient_alias?: string | null;
+            /**
+             * Kind
+             * @description fast_grid | bem_fit | refine
+             */
+            kind?: string | null;
+            /**
+             * Params Sig
+             * @description Отпечаток прогона (sha256 параметров + сетки + полос)
+             */
+            params_sig?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /** Epoch Length Ms */
+            epoch_length_ms?: number | null;
+            /** Grid Mm */
+            grid_mm?: number | null;
+            /** N Epochs Total */
+            n_epochs_total?: number | null;
+            /** N Epochs Used */
+            n_epochs_used?: number | null;
+            /**
+             * N Bands
+             * @description Строк analysis_bands
+             */
+            n_bands: number;
+            /**
+             * N Points
+             * @description Строк dipole_points
+             */
+            n_points: number;
+            /**
+             * Reference
+             * @description Референс прогона
+             */
+            reference?: string | null;
+            /**
+             * Channels
+             * @description Каналы записи на момент прогона
+             */
+            channels?: string[] | null;
+            /** Sfreq */
+            sfreq?: number | null;
+            /**
+             * Warnings
+             * @description Предупреждения прогона (§8.4.1: ничего не теряется)
+             */
+            warnings?: string[] | null;
+            /** Duration Sec Calc */
+            duration_sec_calc?: number | null;
+            /** Bands */
+            bands?: components["schemas"]["AnalysisBandOut"][];
+        };
+        /**
+         * AnalysisSummaryOut
+         * @description Строка списка прогонов пакета (``GET /analyses``, 4.7, окончание).
+         */
+        AnalysisSummaryOut: {
+            /** Id */
+            id: number;
+            /** Recording Id */
+            recording_id?: string | null;
+            /** Filename */
+            filename?: string | null;
+            /** Patient Alias */
+            patient_alias?: string | null;
+            /**
+             * Kind
+             * @description fast_grid | bem_fit | refine
+             */
+            kind?: string | null;
+            /**
+             * Params Sig
+             * @description Отпечаток прогона (sha256 параметров + сетки + полос)
+             */
+            params_sig?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /** Epoch Length Ms */
+            epoch_length_ms?: number | null;
+            /** Grid Mm */
+            grid_mm?: number | null;
+            /** N Epochs Total */
+            n_epochs_total?: number | null;
+            /** N Epochs Used */
+            n_epochs_used?: number | null;
+            /**
+             * N Bands
+             * @description Строк analysis_bands
+             */
+            n_bands: number;
+            /**
+             * N Points
+             * @description Строк dipole_points
+             */
+            n_points: number;
+        };
         /**
          * AnalyzeResponse
          * @description POST /api/v1/analyze (и результат job) — итог полного пайплайна.
@@ -6718,6 +6968,71 @@ export interface components {
             method?: string | null;
         };
         /**
+         * DipolePointOut
+         * @description Точка пакета диполей (``GET /analyses/{id}/points``: ``dipole_points``).
+         *
+         *     Одна строка = «эпоха × поддиапазон» (UNIQUE у write-API 4.4, шаг ③).
+         *     Координаты — списки ``[x, y, z]``; ``None`` — честное «не считалось».
+         */
+        DipolePointOut: {
+            /** Analysis Id */
+            analysis_id: number;
+            /** Band Key */
+            band_key?: string | null;
+            /** Band Hz Lo */
+            band_hz_lo?: number | null;
+            /** Band Hz Hi */
+            band_hz_hi?: number | null;
+            /** Epoch Index */
+            epoch_index?: number | null;
+            /**
+             * Peak Time Ms
+             * @description Пик момента внутри эпохи, мс
+             */
+            peak_time_ms?: number | null;
+            /**
+             * Head Coords
+             * @description [x, y, z] в системе головы, мм
+             */
+            head_coords?: number[] | null;
+            /**
+             * Mni Coords
+             * @description [x, y, z] MNI, мм; None — наводки не было
+             */
+            mni_coords?: number[] | null;
+            /**
+             * Moment Dir
+             * @description Единичное направление момента
+             */
+            moment_dir?: number[] | null;
+            /** Amplitude Nam */
+            amplitude_nam?: number | null;
+            /** Gof */
+            gof?: number | null;
+            /** Anatomical Structure */
+            anatomical_structure?: string | null;
+            /** Brodmann Area */
+            brodmann_area?: string | null;
+            /**
+             * Method
+             * @description fast_grid | bem_fit
+             */
+            method?: string | null;
+            /**
+             * Kd Passed
+             * @description 1/0; None — «не оценено», пороги методики не заданы
+             */
+            kd_passed?: number | null;
+            kd_basis?: components["schemas"]["KdBasisOut"] | null;
+            /**
+             * Refined
+             * @description След точного уточнения (свободный JSON; сейчас не заполняется)
+             */
+            refined?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
          * DipoleRefineResult
          * @description Результат точного уточнения одной эпохи (``kind=dipole_refine``, F19).
          *
@@ -7992,6 +8307,27 @@ export interface components {
         };
         JsonValue: unknown;
         /**
+         * KdBasisOut
+         * @description Базис вердикта КД (§2.2 ``data-blocks``): максимум момента — в своей полосе.
+         */
+        KdBasisOut: {
+            /**
+             * Moment Share X
+             * @description Порог «доля от максимума поддиапазона»; None — не задан
+             */
+            moment_share_x?: number | null;
+            /**
+             * Gof Min
+             * @description Порог GOF; None — не задан
+             */
+            gof_min?: number | null;
+            /**
+             * Moment Max Nam
+             * @description Максимум момента полосы, нА·м
+             */
+            moment_max_nam?: number | null;
+        };
+        /**
          * LlmChatProbeModelOut
          * @description Итог пробы советника для одной модели списка провайдера (перебор).
          */
@@ -9165,6 +9501,67 @@ export interface components {
             layout: "channel-major";
         };
         /**
+         * RecordingSummaryOut
+         * @description Строка списка записей (``GET /recordings``, 4.7, окончание).
+         *
+         *     Зеркало таблицы ``recordings`` (4.4, шаг ①) с счётчиками дочерних строк —
+         *     кандидаты группового анализа вместо legacy ``GET /sessions``. Зеркало
+         *     переживает реестр в памяти, поэтому список честен и после рестарта.
+         */
+        RecordingSummaryOut: {
+            /** Recording Id */
+            recording_id: string;
+            /** Filename */
+            filename?: string | null;
+            /**
+             * Patient Alias
+             * @description Псевдоним пациента (PHI в БД не хранится, §8.4.3)
+             */
+            patient_alias?: string | null;
+            /** N Channels */
+            n_channels?: number | null;
+            /** Sfreq */
+            sfreq?: number | null;
+            /** Duration Sec */
+            duration_sec?: number | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Accessed At */
+            accessed_at?: string | null;
+            /**
+             * N Sessions
+             * @description Строк sessions (задачи UI + legacy)
+             */
+            n_sessions: number;
+            /**
+             * N Analyses
+             * @description Прогонов пакета диполей (analyses)
+             */
+            n_analyses: number;
+            /**
+             * N Report Runs
+             * @description Прогонов автоотчёта (report_runs)
+             */
+            n_report_runs: number;
+        };
+        /**
+         * RecordingsPageOut
+         * @description Страница записей: ``total`` честный (считается до limit/offset).
+         */
+        RecordingsPageOut: {
+            /**
+             * Total
+             * @description Всего строк recordings
+             */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Items */
+            items?: components["schemas"]["RecordingSummaryOut"][];
+        };
+        /**
          * ReportBandSummaryOut
          * @description Агрегаты одной полосы пакета в части 2 отчёта.
          */
@@ -10277,6 +10674,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnalyzeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recordings_api_v1_recordings_get: {
+        parameters: {
+            query?: {
+                /** @description Размер страницы */
+                limit?: number;
+                /** @description Смещение (новые сверху) */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingsPageOut"];
                 };
             };
             /** @description Validation Error */
@@ -12815,6 +13246,113 @@ export interface operations {
                 };
                 content: {
                     "audio/wav": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_analyses_api_v1_analyses_get: {
+        parameters: {
+            query?: {
+                /** @description Только прогоны этой записи (каскад TTL) */
+                recording_id?: string | null;
+                /** @description Вид прогона: fast_grid | bem_fit | refine */
+                kind?: string | null;
+                /** @description Размер страницы */
+                limit?: number;
+                /** @description Смещение (новые сверху) */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysesPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_analysis_api_v1_analyses__analysis_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_analysis_points_api_v1_analyses__analysis_id__points_get: {
+        parameters: {
+            query?: {
+                /** @description Фильтр по полосе пакета (band_key) */
+                band_key?: string | null;
+                /** @description Размер страницы */
+                limit?: number;
+                /** @description Смещение (полоса → эпоха) */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DipolePointOut"][];
                 };
             };
             /** @description Validation Error */

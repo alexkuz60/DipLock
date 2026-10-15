@@ -3,9 +3,9 @@
  *
  * Панель, как и в остальных разделах, **ничего не запускает** (правило
  * `docs/ui.md`): параметры складываются в стор, расчёт стартует только кнопкой
- * «Сравнить» в тулс-хедере. Кандидаты записей — строки `GET /sessions`
- * (санкционированный вход: листинга записей в API нет), плюс текущая открытая
- * запись, даже если у неё ещё нет сессий. Параметры спектра (фильтр, notch,
+ * «Сравнить» в тулс-хедере. Кандидаты записей — строки `GET /recordings`
+ * (read-API 4.7, окончание), плюс текущая открытая запись, даже если у неё
+ * ещё нет результатов. Параметры спектра (фильтр, notch,
  * референс, длина эпохи) — форма EDF: здесь показаны для сверки, правятся в EDF.
  */
 import { useQuery } from '@tanstack/react-query'
@@ -25,12 +25,12 @@ import { GroupRunPanel } from './GroupRunPanel'
 export function GroupPanel() {
   const mode = useGroupRun((state) => state.mode)
   const setMode = useGroupRun((state) => state.setMode)
-  const sessions = useQuery({
-    queryKey: ['sessions', 200],
-    queryFn: ({ signal }) => api.sessions({ limit: 200 }, signal),
+  const recordings = useQuery({
+    queryKey: ['recordings', 200],
+    queryFn: ({ signal }) => api.recordings({ limit: 200 }, signal),
   })
   const current = useEdfRecording((state) => state.recording)
-  const candidates = compareCandidates(sessions.data?.items ?? [], current)
+  const candidates = compareCandidates(recordings.data?.items ?? [], current)
 
   const recordingIdA = useGroupCompare((state) => state.recordingIdA)
   const recordingIdB = useGroupCompare((state) => state.recordingIdB)
@@ -72,7 +72,7 @@ export function GroupPanel() {
         <>
       <Panel
         title="Пара записей"
-        hint="Дифференциальный анализ (B9): обе стороны обрабатываются одинаково (фильтр, notch, референс и длина эпохи — форма EDF), дельты считаются как B − A. Кандидаты — записи с результатами (GET /sessions) и текущая открытая запись."
+        hint="Дифференциальный анализ (B9): обе стороны обрабатываются одинаково (фильтр, notch, референс и длина эпохи — форма EDF), дельты считаются как B − A. Кандидаты — записи с результатами (GET /recordings) и текущая открытая запись."
       >
         <SelectField
           label="Запись A"

@@ -27,9 +27,10 @@ cd backend && venv/bin/mypy app alembic                      # типы (check_u
 телам: `check_untyped_defs = true`. Ожидаемое состояние — **0 ошибок**; «подавить» их допустимо
 только точечно и с пояснением (`cast` для `nib.load`, `# noqa` для `hashlib.sha1` в ключе RAM-кэша).
 
-CI — `.github/workflows/ci.yml`: job `backend` (`ruff` → `mypy` → `pytest -m "not integration"`) и
+CI — `.github/workflows/ci.yml`: job `backend` (`ruff` → `mypy` →
+`pytest -m "not integration"` **с pytest-cov**) и
 job `frontend` (`npm run lint` → `gen:api` + `git diff --exit-code` (свежесть `schema.d.ts`, 4.2) →
-`typecheck` → `test` → `build`). Локально те же команды, поэтому
+`typecheck` → `test:coverage` (vitest-coverage v8) → `build`). Локально те же команды, поэтому
 «зелёный CI» проверяется без пуша. Инструменты лежат в `backend/requirements-dev.txt`.
 
 **Правило (зависимости):** всё, что приложение импортирует на старте (`app/models/db.py`
@@ -42,9 +43,53 @@ job `frontend` (`npm run lint` → `gen:api` + `git diff --exit-code` (свеж�
 линтер/типы/тесты, потом правки, и после каждого шага прогон заново. Именно так поймано то, что
 автофикс ruff удаляет импорты-реэкспорты: потребителя в тесте видно только по запуску тестов.
 
+## Покрытие: pytest-cov + vitest-coverage (Шаг 2, 15.10.2026)
+
+```bash
+cd backend && venv/bin/python -m pytest -m "not integration" \
+    --cov=app --cov-report=term-missing:skip-covered      # карта дыр по строкам
+cd frontend && npm run test:coverage                      # v8, текст + HTML в frontend/coverage
+```
+
+Конфиги — `[tool.coverage.*]` `backend/pyproject.toml` и `coverage` в
+`frontend/vite.config.ts`; `frontend/coverage/` и `coverage.xml` не коммитятся
+(`.gitignore`). Покрытие — **множитель**: оно не догма и не порог (порогов нет
+осознанно — процент не цель), а карта того, куда тесты не заглядывают.
+
+**Карта пустых мест (срез 15.10.2026: backend 90 %, UI 89,7 % строк).**
+Подозрения плана («`audio_render`, `group_reports`, `compare`, `report`») **не
+подтвердились** — все на 86–95 % (их закрыли срезы Нейромузыки/отчётов).
+Настоящие дыры:
+
+| Где | Сколько | Что именно |
+|---|---|---|
+| `services/consilium/*` (store, chat_store, dossier, library, rounds_store, triage) | 42–58 % | CRUD хранилищ Консилиума: тесты идут через тонкие сценарии, ветки правок/архива/счётчиков не задеты |
+| `services/analysis_pipeline.py` | 46 % | оркестратор legacy `/analyze` — в тестах подменяется заготовкой (контракт API проверяется, тело пайплайна — нет) |
+| `main.py` / `api/llm_router.py` | 69–73 % | lifespan, раздача статики, роуты ручной настройки роутера |
+| `services/results_store.py` | 75 % | research-выдачи Консилиума (`list_research_sources` и др.) |
+| UI: `main.tsx`, `Stubs.tsx`, `consilium/CaseHistory|CaseWorkspace|CaseMaterials` | 0–80 % | точка входа (рендерится только в браузере), заглушки ЕмоЛаб/Нейроаудио, экраны истории/рабочего стола Консилиума |
+
+Вердикт: **множитель перед Шагом 3 выполнен** — `dipole_scanner` 91 %,
+`spectral` 92 %, `roi` 100 %, `atlas_contours` 93 %, `report` 95 %:
+трогаемые Шагом 3 модули
+покрыты достаточно, чтобы регрессия была видна; дыры — на флангах
+(Консилиум, legacy-оркестратор), которые Шаг 3 не трогает.
+
 ## Тесты
 
 Фреймворки: **pytest** (`backend/tests/`, конфиг `backend/pytest.ini`) и **Vitest** (`frontend/src/**/*.test.tsx`).
+
+**Read-API новой схемы и покрытие (Шаг 2, 15.10.2026).** pytest +6
+(`test_analyses_read`): страница записей с счётчиками детей (честные нули без
+результатов), страница прогонов `analyses` с фильтрами/счётчиками полос и
+точек, паспорт с `analysis_bands` (базис КД, `n_kd_passed=None`), точки
+`dipole_points` (фильтр `band_key`, честный `kd_passed=None`), 404 на
+неизвестный прогон, `deprecated: true` у legacy `/sessions*` в OpenAPI. Сид —
+через write-API, как прод. Vitest +1 (`GroupSection`): запись без результатов
+не попадает в кандидаты (кандидаты пары/группы — из `GET /recordings`,
+фикстуры/моки переехали с `sessionsFixture`). Сюда же pytest-cov +
+vitest-coverage (секция «Покрытие» выше). Итог: pytest **1065** (1045 без
+`integration`), Vitest **1230**.
 
 **Консилиум: боковая консультация и левый сайдбар (срез 0015, 14.10.2026).**
 pytest +15 (`test_consilium_chat`): переписка append-only (текст ответа пишется в

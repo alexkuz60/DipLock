@@ -7,6 +7,7 @@ cd frontend
 npm install
 npm run dev        # http://localhost:5173 (проксирует /api на :8000)
 npm run test       # Vitest (jsdom)
+npm run test:coverage # Vitest + покрытие v8 (карта: docs/rules/tests.md, HTML в ./coverage)
 npm run typecheck  # tsc --noEmit
 npm run lint       # ESLint
 npm run build      # сборка в ../backend/app/static/ui (раздаётся FastAPI по /ui/)

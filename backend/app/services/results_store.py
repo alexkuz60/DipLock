@@ -44,6 +44,7 @@ from app.models.db import (
     Dipole,
     DipolePoint,
     EpochRecord,
+    RecordingRecord,
     ReportBandSummary,
     ReportDynamics,
     ReportNameCount,
@@ -683,9 +684,193 @@ def _dipole_mni(row: Dipole) -> list[float] | None:
     return [float(row.mni_x), float(row.mni_y), float(row.mni_z)]
 
 
+# ---------- read-API новой схемы (4.7, окончание): записи/прогоны/точки -------
+
+
+def _analysis_summary(
+    row: Analysis, filename: str | None, patient_alias: str | None,
+    counts: tuple[int, int],
+) -> dict[str, Any]:
+    """Строка списка/паспорта прогона: поля строки + паспорт записи + счётчики."""
+    n_bands, n_points = counts
+    return {
+        "id": row.id,
+        "recording_id": row.recording_id,
+        "filename": filename,
+        "patient_alias": patient_alias,
+        "kind": row.kind,
+        "params_sig": row.params_sig,
+        "created_at": row.created_at,
+        "job_id": row.job_id,
+        "epoch_length_ms": row.epoch_length_ms,
+        "grid_mm": row.grid_mm,
+        "n_epochs_total": row.n_epochs_total,
+        "n_epochs_used": row.n_epochs_used,
+        "n_bands": n_bands,
+        "n_points": n_points,
+    }
+
+
+async def _analysis_children_counts(
+    session: Any, ids: list[int],
+) -> dict[int, tuple[int, int]]:
+    """``analysis_id → (полосы, точки)`` — два групповых запроса на страницу."""
+    if not ids:
+        return {}
+    band_rows = await session.execute(
+        select(AnalysisBand.analysis_id, func.count())
+        .where(AnalysisBand.analysis_id.in_(ids))
+        .group_by(AnalysisBand.analysis_id)
+    )
+    point_rows = await session.execute(
+        select(DipolePoint.analysis_id, func.count())
+        .where(DipolePoint.analysis_id.in_(ids))
+        .group_by(DipolePoint.analysis_id)
+    )
+    counts: dict[int, tuple[int, int]] = {
+        int(row_id): (int(n_rows), 0) for row_id, n_rows in band_rows.all()
+    }
+    for row_id, n_rows in point_rows.all():
+        n_bands, _ = counts.get(int(row_id), (0, 0))
+        counts[int(row_id)] = (n_bands, int(n_rows))
+    return counts
+
+
+async def _analysis_with_recording(
+    session: Any, analysis_id: int,
+) -> tuple[Analysis, str | None, str | None] | None:
+    """Прогон с паспортом записи (join ``recordings``); ``None`` — прогона нет."""
+    row = (
+        await session.execute(
+            select(Analysis, RecordingRecord.filename, RecordingRecord.patient_alias)
+            .join(
+                RecordingRecord,
+                RecordingRecord.recording_id == Analysis.recording_id,
+                isouter=True,
+            )
+            .where(Analysis.id == analysis_id)
+        )
+    ).first()
+    if row is None:
+        return None
+    analysis, filename, patient_alias = row
+    return analysis, filename, patient_alias
+
+
 def _row_payload(row: Any, names: tuple[str, ...]) -> dict[str, Any]:
     """Поля результата как есть; NULL и версии прошлого не достраиваются."""
     return {name: getattr(row, name) for name in names}
+
+
+async def list_analyses(
+    *,
+    recording_id: str | None = None,
+    kind: str | None = None,
+    limit: int,
+    offset: int,
+) -> tuple[int, list[dict[str, Any]]]:
+    """Страница прогонов пакета диполей: ``(total, строки под AnalysisSummaryOut)``.
+
+    Read-API 4.7 (окончание): читает ``analyses`` новой схемы (write-API шаг ③) —
+    вход кандидатов группового анализа вместо legacy ``GET /sessions``. Паспорт
+    записи (``filename``/``patient_alias``) — join ``recordings``; ``total`` — до
+    ``limit/offset``, сортировка «новые сверху»; счётчики детей (полосы/точки) —
+    двумя групповыми запросами на страницу, не N+1.
+    """
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        conditions: list[Any] = []
+        if recording_id is not None:
+            conditions.append(Analysis.recording_id == recording_id)
+        if kind is not None:
+            conditions.append(Analysis.kind == kind)
+        total = int(
+            (await session.execute(
+                select(func.count()).select_from(Analysis).where(*conditions)
+            )).scalar() or 0
+        )
+        rows: list[Any] = list((await session.execute(
+            select(Analysis, RecordingRecord.filename, RecordingRecord.patient_alias)
+            .join(
+                RecordingRecord,
+                RecordingRecord.recording_id == Analysis.recording_id,
+                isouter=True,
+            )
+            .where(*conditions)
+            .order_by(Analysis.created_at.desc(), Analysis.id.desc())
+            .limit(limit)
+            .offset(offset)
+        )).all())
+        counts = await _analysis_children_counts(
+            session, [int(analysis.id) for analysis, _, _ in rows],
+        )
+        return total, [
+            _analysis_summary(
+                analysis, filename, patient_alias,
+                counts.get(int(analysis.id), (0, 0)),
+            )
+            for analysis, filename, patient_alias in rows
+        ]
+
+
+async def get_analysis_detail(analysis_id: int) -> dict[str, Any] | None:
+    """Паспорт прогона + полосы ``analysis_bands`` + счётчики; ``None`` — нет."""
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        found = await _analysis_with_recording(session, analysis_id)
+        if found is None:
+            return None
+        analysis, filename, patient_alias = found
+        counts = await _analysis_children_counts(session, [int(analysis.id)])
+        detail = _analysis_summary(
+            analysis, filename, patient_alias, counts.get(int(analysis.id), (0, 0)),
+        )
+        detail.update(_row_payload(analysis, (
+            "reference", "channels", "sfreq", "warnings", "duration_sec_calc",
+        )))
+        bands = (await session.scalars(select(AnalysisBand).where(
+            AnalysisBand.analysis_id == analysis_id,
+        ).order_by(AnalysisBand.id))).all()
+        detail["bands"] = [_row_payload(band, (
+            "band_key", "band_hz_lo", "band_hz_hi", "state", "n_points",
+            "n_kd_passed", "n_errors", "moment_max_nam",
+        )) for band in bands]
+        return detail
+
+
+def _point_payload(row: DipolePoint) -> dict[str, Any]:
+    """Строка ``dipole_points`` под ``DipolePointOut``; NULL не достраивается."""
+    return _row_payload(row, (
+        "analysis_id", "band_key", "band_hz_lo", "band_hz_hi", "epoch_index",
+        "peak_time_ms", "head_coords", "mni_coords", "moment_dir", "amplitude_nam",
+        "gof", "anatomical_structure", "brodmann_area", "method", "kd_passed",
+        "kd_basis", "refined",
+    ))
+
+
+async def list_analysis_points(
+    analysis_id: int, *,
+    band_key: str | None = None,
+    limit: int,
+    offset: int,
+) -> list[dict[str, Any]] | None:
+    """Точки пакета ``dipole_points`` (фильтр ``band_key``); ``None`` — нет прогона.
+
+    Порядок — «полоса → эпоха» (как в пакете); пагинация общая: строка
+    ``dipole_points`` уже несёт ``epoch_index``. Вердикт КД — честный ``None``
+    («не оценено», пока методика не задала пороги — §8.4 п.5).
+    """
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        if await _analysis_with_recording(session, analysis_id) is None:
+            return None
+        conditions = [DipolePoint.analysis_id == analysis_id]
+        if band_key is not None:
+            conditions.append(DipolePoint.band_key == band_key)
+        rows = (await session.scalars(select(DipolePoint).where(*conditions).order_by(
+            DipolePoint.band_key, DipolePoint.epoch_index, DipolePoint.id,
+        ).limit(limit).offset(offset))).all()
+        return [_point_payload(row) for row in rows]
 
 
 async def list_research_sources(recording_ids: list[str]) -> list[dict[str, Any]]:

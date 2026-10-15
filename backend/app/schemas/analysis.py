@@ -1868,3 +1868,144 @@ class SessionsPageOut(BaseModel):
     offset: int
     items: list[SessionSummaryOut] = Field(default_factory=list)
 
+
+# ---------- read-API новой схемы (4.7, окончание): записи/прогоны/точки ----------
+
+
+class RecordingSummaryOut(BaseModel):
+    """Строка списка записей (``GET /recordings``, 4.7, окончание).
+
+    Зеркало таблицы ``recordings`` (4.4, шаг ①) с счётчиками дочерних строк —
+    кандидаты группового анализа вместо legacy ``GET /sessions``. Зеркало
+    переживает реестр в памяти, поэтому список честен и после рестарта.
+    """
+
+    recording_id: str
+    filename: str | None = None
+    patient_alias: str | None = Field(
+        default=None, description="Псевдоним пациента (PHI в БД не хранится, §8.4.3)",
+    )
+    n_channels: int | None = None
+    sfreq: float | None = None
+    duration_sec: float | None = None
+    created_at: datetime | None = None
+    accessed_at: datetime | None = None
+    n_sessions: int = Field(description="Строк sessions (задачи UI + legacy)")
+    n_analyses: int = Field(description="Прогонов пакета диполей (analyses)")
+    n_report_runs: int = Field(description="Прогонов автоотчёта (report_runs)")
+
+
+class RecordingsPageOut(BaseModel):
+    """Страница записей: ``total`` честный (считается до limit/offset)."""
+
+    total: int = Field(description="Всего строк recordings")
+    limit: int
+    offset: int
+    items: list[RecordingSummaryOut] = Field(default_factory=list)
+
+
+class AnalysisBandOut(BaseModel):
+    """Полоса пакета прогона (``GET /analyses/{id}``: ``analysis_bands``)."""
+
+    band_key: str | None = None
+    band_hz_lo: float | None = None
+    band_hz_hi: float | None = None
+    state: str | None = Field(default=None, description="ok | empty (по числу точек)")
+    n_points: int | None = None
+    n_kd_passed: int | None = Field(
+        default=None, description="Прошло КД; None — вердикт не оценивался (§8.4 п.5)",
+    )
+    n_errors: int | None = None
+    moment_max_nam: float | None = Field(
+        default=None, description="Максимум момента внутри полосы (базис КД)",
+    )
+
+
+class KdBasisOut(BaseModel):
+    """Базис вердикта КД (§2.2 ``data-blocks``): максимум момента — в своей полосе."""
+
+    moment_share_x: float | None = Field(
+        default=None, description="Порог «доля от максимума поддиапазона»; None — не задан",
+    )
+    gof_min: float | None = Field(default=None, description="Порог GOF; None — не задан")
+    moment_max_nam: float | None = Field(
+        default=None, description="Максимум момента полосы, нА·м",
+    )
+
+
+class DipolePointOut(BaseModel):
+    """Точка пакета диполей (``GET /analyses/{id}/points``: ``dipole_points``).
+
+    Одна строка = «эпоха × поддиапазон» (UNIQUE у write-API 4.4, шаг ③).
+    Координаты — списки ``[x, y, z]``; ``None`` — честное «не считалось».
+    """
+
+    analysis_id: int
+    band_key: str | None = None
+    band_hz_lo: float | None = None
+    band_hz_hi: float | None = None
+    epoch_index: int | None = None
+    peak_time_ms: float | None = Field(default=None, description="Пик момента внутри эпохи, мс")
+    head_coords: list[float] | None = Field(default=None, description="[x, y, z] в системе головы, мм")
+    mni_coords: list[float] | None = Field(
+        default=None, description="[x, y, z] MNI, мм; None — наводки не было",
+    )
+    moment_dir: list[float] | None = Field(default=None, description="Единичное направление момента")
+    amplitude_nam: float | None = None
+    gof: float | None = None
+    anatomical_structure: str | None = None
+    brodmann_area: str | None = None
+    method: str | None = Field(default=None, description="fast_grid | bem_fit")
+    kd_passed: int | None = Field(
+        default=None, description="1/0; None — «не оценено», пороги методики не заданы",
+    )
+    kd_basis: KdBasisOut | None = None
+    refined: dict[str, Any] | None = Field(
+        default=None, description="След точного уточнения (свободный JSON; сейчас не заполняется)",
+    )
+
+
+class AnalysisSummaryOut(BaseModel):
+    """Строка списка прогонов пакета (``GET /analyses``, 4.7, окончание)."""
+
+    id: int
+    recording_id: str | None = None
+    filename: str | None = None
+    patient_alias: str | None = None
+    kind: str | None = Field(default=None, description="fast_grid | bem_fit | refine")
+    params_sig: str | None = Field(
+        default=None, description="Отпечаток прогона (sha256 параметров + сетки + полос)",
+    )
+    created_at: datetime | None = None
+    job_id: str | None = None
+    epoch_length_ms: float | None = None
+    grid_mm: float | None = None
+    n_epochs_total: int | None = None
+    n_epochs_used: int | None = None
+    n_bands: int = Field(description="Строк analysis_bands")
+    n_points: int = Field(description="Строк dipole_points")
+
+
+class AnalysisDetailOut(AnalysisSummaryOut):
+    """Паспорт прогона (``GET /analyses/{id}``) + полосы пакета."""
+
+    reference: str | None = Field(default=None, description="Референс прогона")
+    channels: list[str] | None = Field(
+        default=None, description="Каналы записи на момент прогона",
+    )
+    sfreq: float | None = None
+    warnings: list[str] | None = Field(
+        default=None, description="Предупреждения прогона (§8.4.1: ничего не теряется)",
+    )
+    duration_sec_calc: float | None = None
+    bands: list[AnalysisBandOut] = Field(default_factory=list)
+
+
+class AnalysesPageOut(BaseModel):
+    """Страница прогонов пакета: ``total`` честный (считается до limit/offset)."""
+
+    total: int = Field(description="Всего строк под фильтрами")
+    limit: int
+    offset: int
+    items: list[AnalysisSummaryOut] = Field(default_factory=list)
+

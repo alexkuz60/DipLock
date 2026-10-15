@@ -25,12 +25,12 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  RecordingSummary,
   ReportBandSummary,
   ReportHtmlOut,
   ReportResult,
   RoiAggregate,
   RoiBandCell,
-  SessionSummary,
   SpectrogramResult,
   SpectrumBandOut,
   SpectrumResult,
@@ -908,24 +908,30 @@ export function reportHtmlOutFixture(overrides: Partial<ReportHtmlOut> = {}): Re
   }
 }
 
-/** Строки `GET /sessions` для выбора пары сравнения (две записи, по 2 сессии). */
-export const sessionsFixture: { total: number; items: SessionSummary[] } = {
+/**
+ * Строки `GET /recordings` для выбора пары/группы (новая схема, 4.7-окончание):
+ * две записи с результатами и одна без них (в кандидаты не попадает).
+ */
+export const recordingsFixture: { total: number; items: RecordingSummary[] } = {
   total: 3,
   items: [
     {
-      id: 'sess-1', recording_id: 'rec-rest', kind: 'preprocess', filename: 'rest.edf',
-      n_channels: 10, sfreq: 250, duration_sec: 120, epoch_length_ms: 2000,
-      n_epochs: 60, n_epochs_rejected: 2, n_dipoles: 0, created_at: '2026-10-01T10:00:00',
+      recording_id: 'rec-rest', filename: 'rest.edf', patient_alias: 'Patient-aaa111',
+      n_channels: 10, sfreq: 250, duration_sec: 120,
+      created_at: '2026-10-01T10:00:00', accessed_at: '2026-10-01T10:05:00',
+      n_sessions: 2, n_analyses: 1, n_report_runs: 1,
     },
     {
-      id: 'sess-2', recording_id: 'rec-rest', kind: 'spectrum', filename: 'rest.edf',
-      n_channels: 10, sfreq: 250, duration_sec: 120, epoch_length_ms: 2000,
-      n_epochs: 60, n_epochs_rejected: 2, n_dipoles: 0, created_at: '2026-10-01T10:05:00',
+      recording_id: 'rec-task', filename: 'task.edf', patient_alias: 'Patient-bbb222',
+      n_channels: 10, sfreq: 250, duration_sec: 120,
+      created_at: '2026-10-01T11:00:00', accessed_at: '2026-10-01T11:00:00',
+      n_sessions: 1, n_analyses: 0, n_report_runs: 0,
     },
     {
-      id: 'sess-3', recording_id: 'rec-task', kind: 'preprocess', filename: 'task.edf',
-      n_channels: 10, sfreq: 250, duration_sec: 120, epoch_length_ms: 2000,
-      n_epochs: 60, n_epochs_rejected: 4, n_dipoles: 0, created_at: '2026-10-01T11:00:00',
+      recording_id: 'rec-empty', filename: 'empty.edf', patient_alias: null,
+      n_channels: 10, sfreq: 250, duration_sec: 60,
+      created_at: '2026-10-01T12:00:00', accessed_at: '2026-10-01T12:00:00',
+      n_sessions: 0, n_analyses: 0, n_report_runs: 0,
     },
   ],
 }

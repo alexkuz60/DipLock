@@ -23,7 +23,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, delete, select
+from sqlalchemy import Select, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -179,3 +179,67 @@ async def list_research_recordings() -> list[dict[str, Any]]:
             "id": str(row.recording_id), "filename": row.filename,
             "sfreq": row.sfreq, "duration_sec": row.duration_sec,
         } for row in rows]
+
+
+async def _children_counts(
+    session: AsyncSession, ids: list[str],
+) -> dict[str, tuple[int, int, int]]:
+    """``recording_id → (сессии, прогоны, отчёты)`` — три групповых запроса на страницу."""
+    if not ids:
+        return {}
+    counts: dict[str, tuple[int, int, int]] = {}
+    for model, slot in (
+        (Session, 0), (Analysis, 1), (ReportRun, 2),
+    ):
+        rows: Any = await session.execute(
+            select(model.recording_id, func.count())
+            .where(model.recording_id.in_(ids))
+            .group_by(model.recording_id)
+        )
+        for row_id, n_rows in rows.all():
+            bucket = list(counts.get(str(row_id), (0, 0, 0)))
+            bucket[slot] = int(n_rows)
+            counts[str(row_id)] = (bucket[0], bucket[1], bucket[2])
+    return counts
+
+
+async def list_recordings(*, limit: int, offset: int) -> tuple[int, list[dict[str, Any]]]:
+    """Страница записей БД с счётчиками детей: ``(total, строки под RecordingSummaryOut)``.
+
+    Read-API 4.7 (окончание): зеркало ``recordings`` переживает реестр в памяти,
+    поэтому страница честна и после рестарта процесса. ``total`` считается до
+    ``limit/offset``, сортировка — «новые сверху»; счётчики дочерних строк
+    (``sessions``/``analyses``/``report_runs``) — тремя групповыми запросами на
+    страницу, не N+1 (паттерн ``results_store._children_counts``).
+    """
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        total = int((await session.execute(
+            select(func.count()).select_from(RecordingRecord)
+        )).scalar() or 0)
+        rows = list((await session.scalars(
+            select(RecordingRecord)
+            .order_by(RecordingRecord.created_at.desc(), RecordingRecord.recording_id)
+            .limit(limit)
+            .offset(offset)
+        )).all())
+        counts = await _children_counts(session, [str(row.recording_id) for row in rows])
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            n_sessions, n_analyses, n_report_runs = counts.get(
+                str(row.recording_id), (0, 0, 0),
+            )
+            items.append({
+                "recording_id": str(row.recording_id),
+                "filename": row.filename,
+                "patient_alias": row.patient_alias,
+                "n_channels": row.n_channels,
+                "sfreq": row.sfreq,
+                "duration_sec": row.duration_sec,
+                "created_at": row.created_at,
+                "accessed_at": row.accessed_at,
+                "n_sessions": n_sessions,
+                "n_analyses": n_analyses,
+                "n_report_runs": n_report_runs,
+            })
+        return total, items

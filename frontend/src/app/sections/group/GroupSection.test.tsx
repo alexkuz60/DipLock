@@ -1,7 +1,8 @@
 /**
  * Тесты раздела «Групповой анализ» → режим «Сравнение двух записей» (B9):
- * кандидаты пары из сессий (дедуп), запуск **только кнопкой**, валидация
- * пары, показ результата (таблица дельт, значимый кластер, каветы).
+ * кандидаты пары из записей новой схемы (дедуп, без результатов — мимо),
+ * запуск **только кнопкой**, валидация пары, показ результата (таблица дельт,
+ * значимый кластер, каветы).
  *
  * Задача `kind=compare`: мок отвечает 202 → поллинг `/jobs` succeeded →
  * результат `GET /compare/{id}`.
@@ -15,7 +16,11 @@ import { GroupSection } from './GroupSection'
 import { GroupToolActions } from './GroupToolActions'
 import { useGroupCompare } from '@/shared/state/groupCompare'
 import { mockApiFetch } from '@/test/apiMocks'
-import { compareResultFixture, compareErdsFixture, sessionsFixture } from '@/test/fixtures'
+import {
+  compareResultFixture,
+  compareErdsFixture,
+  recordingsFixture,
+} from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 
 function renderGroup() {
@@ -29,8 +34,8 @@ function renderGroup() {
 }
 
 describe('кандидаты пары сравнения', () => {
-  it('дедуплицирует сессии по recording_id и добавляет текущую запись', () => {
-    const candidates = compareCandidates(sessionsFixture.items, {
+  it('отбирает записи с результатами и добавляет текущую запись', () => {
+    const candidates = compareCandidates(recordingsFixture.items, {
       recording_id: 'rec-live',
       filename: 'live.edf',
     })
@@ -38,7 +43,12 @@ describe('кандидаты пары сравнения', () => {
     expect(candidates[0].label).toBe('rest.edf')
   })
 
-  it('без сессий и без открытой записи список пуст', () => {
+  it('запись без результатов в кандидаты не попадает', () => {
+    const onlyEmpty = recordingsFixture.items.filter((row) => row.recording_id === 'rec-empty')
+    expect(compareCandidates(onlyEmpty, null)).toEqual([])
+  })
+
+  it('без записей и без открытой записи список пуст', () => {
     expect(compareCandidates([], null)).toEqual([])
   })
 })

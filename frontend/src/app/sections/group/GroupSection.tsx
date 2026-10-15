@@ -438,8 +438,8 @@ export function GroupSection() {
   const result = useGroupCompare((state) => state.result)
   const error = useGroupCompare((state) => state.error)
   const job = useGroupCompare((state) => state.job)
-  // Сессии — только для подсказки пустого состояния (кандидаты рисуют панель)
-  useQuery({ queryKey: ['sessions', 200], queryFn: ({ signal }) => api.sessions({ limit: 200 }, signal) })
+  // Записи — только для подсказки пустого состояния (кандидаты рисуют панель)
+  useQuery({ queryKey: ['recordings', 200], queryFn: ({ signal }) => api.recordings({ limit: 200 }, signal) })
 
   // Режим «Группа (N>2)» — свой результат, свои правила чтения чисел
   if (mode === 'group') {

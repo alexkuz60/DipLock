@@ -69,6 +69,9 @@ from app.api.recording_jobs import (
 from app.api.uploads import safe_edf_name, save_upload
 from app.core.config import settings
 from app.schemas.analysis import (
+    AnalysesPageOut,
+    AnalysisDetailOut,
+    AnalysisSummaryOut,
     AnalyzeResponse,
     ArtifactThresholds,
     BrodmannAreaOut,
@@ -80,6 +83,7 @@ from app.schemas.analysis import (
     ContoursOut,
     ContoursRef,
     DipoleOut,
+    DipolePointOut,
     DipoleRefineResult,
     DipoleScanResult,
     EloretaResult,
@@ -97,6 +101,8 @@ from app.schemas.analysis import (
     PreprocessStage,
     RecordingMeta,
     RecordingSignalsHeader,
+    RecordingsPageOut,
+    RecordingSummaryOut,
     ReportHtmlOut,
     ReportResult,
     RunManifestOut,
@@ -388,11 +394,17 @@ async def delete_recording(recording_id: str) -> Response:
 
 
 # ---------- read-API сессий (4.7): чтение строк результатов -----------------
+# DEPRECATED (4.7, окончание): схема ``sessions``/``epochs``/``dipoles`` —
+# legacy-ветка, новые потребители (кандидаты группового анализа) читают новую
+# схему ``recordings``/``analyses``/``dipole_points`` (блок «read-API новой
+# схемы» в конце файла). Роуты остаются для внутренних связок (CSV-экспорт,
+# материалы Консилиума) и старых клиентов.
 
 
 @router.get(
     "/sessions", response_model=SessionsPageOut,
-    summary="Список сессий (read-API 4.7)",
+    summary="Список сессий (read-API 4.7, DEPRECATED)",
+    deprecated=True,
 )
 async def list_sessions(
     recording_id: str | None = Query(
@@ -407,8 +419,10 @@ async def list_sessions(
 ) -> SessionsPageOut:
     """Страница сессий с агрегатами детей (эпохи/диполи) — вход Фазы 5.
 
-    ``total`` считается до ``limit/offset``; работа — в
-    ``results_store.list_sessions`` (тот же модуль, что пишет строки).
+    **DEPRECATED**: чтение новой схемы — ``GET /recordings``/``GET /analyses``
+    (кандидаты группового анализа переехали туда, 4.7-окончание). ``total``
+    считается до ``limit/offset``; работа — в ``results_store.list_sessions``
+    (тот же модуль, что пишет строки).
     """
     total, items = await results_store.list_sessions(
         recording_id=recording_id, kind=kind, limit=limit, offset=offset,
@@ -421,10 +435,14 @@ async def list_sessions(
 
 @router.get(
     "/sessions/{session_id}", response_model=SessionDetailOut,
-    summary="Паспорт сессии",
+    summary="Паспорт сессии (DEPRECATED)",
+    deprecated=True,
 )
 async def get_session(session_id: str) -> SessionDetailOut:
-    """Сессия с числом эпох/диполей и ключами мощностей; 404 — не найдена."""
+    """Сессия с числом эпох/диполей и ключами мощностей; 404 — не найдена.
+
+    **DEPRECATED**: чтение новой схемы — ``GET /analyses/{id}`` (4.7-окончание).
+    """
     detail = await results_store.get_session_detail(session_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Сессия {session_id} не найдена")
@@ -433,14 +451,18 @@ async def get_session(session_id: str) -> SessionDetailOut:
 
 @router.get(
     "/sessions/{session_id}/epochs", response_model=list[EpochOut],
-    summary="Эпохи сессии",
+    summary="Эпохи сессии (DEPRECATED)",
+    deprecated=True,
 )
 async def get_session_epochs(
     session_id: str,
     limit: int = Query(default=500, ge=1, le=5000, description="Размер страницы"),
     offset: int = Query(default=0, ge=0, description="Смещение (по epoch_index)"),
 ) -> list[EpochOut]:
-    """Сетка эпох с мощностями полос (честные None — «не измерено»); 404 — нет сессии."""
+    """Сетка эпох с мощностями полос (честные None — «не измерено»); 404 — нет сессии.
+
+    **DEPRECATED**: таблицы ``sessions``/``epochs`` — legacy-ветка (4.7-окончание).
+    """
     rows = await results_store.list_session_epochs(
         session_id, limit=limit, offset=offset,
     )
@@ -451,7 +473,8 @@ async def get_session_epochs(
 
 @router.get(
     "/sessions/{session_id}/dipoles", response_model=list[DipoleOut],
-    summary="Диполи сессии",
+    summary="Диполи сессии (DEPRECATED)",
+    deprecated=True,
 )
 async def get_session_dipoles(
     session_id: str,
@@ -461,7 +484,10 @@ async def get_session_dipoles(
     limit: int = Query(default=500, ge=1, le=5000, description="Размер страницы"),
     offset: int = Query(default=0, ge=0, description="Смещение (по эпохам)"),
 ) -> list[DipoleOut]:
-    """Строки диполей для агрегатов Фазы 5 (ROI/полоса); 404 — нет сессии."""
+    """Строки диполей для агрегатов Фазы 5 (ROI/полоса); 404 — нет сессии.
+
+    **DEPRECATED**: точки пакета читает ``GET /analyses/{id}/points`` (4.7-окончание).
+    """
     rows = await results_store.list_session_dipoles(
         session_id, freq_band=freq_band, limit=limit, offset=offset,
     )
@@ -2752,4 +2778,101 @@ async def audio_ir_wav(
         media_type="audio/wav",
         cache_control=CACHE_PUBLIC_DAY,
     )
+
+
+# --- read-API новой схемы (4.7, окончание): записи/прогоны/точки ----------------
+# Таблицы write-API 4.4 (``recordings``/``analyses``/``dipole_points``) читаются
+# здесь; кандидаты группового анализа набираются из ``GET /recordings`` вместо
+# legacy ``GET /sessions`` (deprecated, блок «read-API сессий»). Работа — в тех
+# же сервисах, что пишут строки (``recording_store``/``results_store``); порядок
+# в файле = №80–83 инвентаря ``docs/rules/api-jobs.md``.
+
+
+@router.get(
+    "/recordings", response_model=RecordingsPageOut,
+    summary="Список записей (read-API 4.7, окончание)",
+)
+async def list_recordings(
+    limit: int = Query(default=50, ge=1, le=500, description="Размер страницы"),
+    offset: int = Query(default=0, ge=0, description="Смещение (новые сверху)"),
+) -> RecordingsPageOut:
+    """Страница записей БД с счётчиками детей — кандидаты группового анализа.
+
+    Зеркало ``recordings`` переживает реестр в памяти: список честен и после
+    рестарта. ``total`` — до ``limit/offset``; счётчики (сессии/прогоны/отчёты) —
+    тремя групповыми запросами на страницу. Работа —
+    ``recording_store.list_recordings`` (тот же модуль, что пишет строки).
+    """
+    total, items = await recording_store.list_recordings(limit=limit, offset=offset)
+    return RecordingsPageOut(
+        total=total, limit=limit, offset=offset,
+        items=[RecordingSummaryOut(**item) for item in items],
+    )
+
+
+@router.get(
+    "/analyses", response_model=AnalysesPageOut,
+    summary="Список прогонов пакета диполей (read-API 4.7, окончание)",
+)
+async def list_analyses(
+    recording_id: str | None = Query(
+        default=None, description="Только прогоны этой записи (каскад TTL)",
+    ),
+    kind: str | None = Query(
+        default=None, description="Вид прогона: fast_grid | bem_fit | refine",
+    ),
+    limit: int = Query(default=50, ge=1, le=500, description="Размер страницы"),
+    offset: int = Query(default=0, ge=0, description="Смещение (новые сверху)"),
+) -> AnalysesPageOut:
+    """Страница прогонов ``analyses`` с паспортом записи и счётчиками детей.
+
+    Новая схема (write-API 4.4, шаг ③) вместо legacy ``GET /sessions``:
+    ``total`` — до ``limit/offset``, счётчики — полосы/точки пакета. Работа —
+    ``results_store.list_analyses``.
+    """
+    total, items = await results_store.list_analyses(
+        recording_id=recording_id, kind=kind, limit=limit, offset=offset,
+    )
+    return AnalysesPageOut(
+        total=total, limit=limit, offset=offset,
+        items=[AnalysisSummaryOut(**item) for item in items],
+    )
+
+
+@router.get(
+    "/analyses/{analysis_id}", response_model=AnalysisDetailOut,
+    summary="Паспорт прогона пакета диполей",
+)
+async def get_analysis(analysis_id: int) -> AnalysisDetailOut:
+    """Прогон с полосами ``analysis_bands`` и счётчиками; 404 — не найден."""
+    detail = await results_store.get_analysis_detail(analysis_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Прогон {analysis_id} не найден")
+    return AnalysisDetailOut(**detail)
+
+
+@router.get(
+    "/analyses/{analysis_id}/points", response_model=list[DipolePointOut],
+    summary="Точки пакета диполей (dipole_points)",
+)
+async def get_analysis_points(
+    analysis_id: int,
+    band_key: str | None = Query(
+        default=None, description="Фильтр по полосе пакета (band_key)",
+    ),
+    limit: int = Query(default=500, ge=1, le=5000, description="Размер страницы"),
+    offset: int = Query(default=0, ge=0, description="Смещение (полоса → эпоха)"),
+) -> list[DipolePointOut]:
+    """Точки «эпоха × поддиапазон» прогона; 404 — нет прогона (не пустой список).
+
+    Вердикт КД — честный ``None`` («не оценено»), пока методика не задала
+    пороги (§8.4 п.5 `docs/rules/results-db.md`). Работа —
+    ``results_store.list_analysis_points``.
+    """
+    rows = await results_store.list_analysis_points(
+        analysis_id, band_key=band_key, limit=limit, offset=offset,
+    )
+    if rows is None:
+        raise HTTPException(status_code=404, detail=f"Прогон {analysis_id} не найден")
+    return [DipolePointOut(**row) for row in rows]
 

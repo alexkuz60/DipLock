@@ -30,6 +30,8 @@ htmlcov/
 coverage.xml
 *.cover
 *.py,cover
+# Отчёт vitest-coverage (npm run test:coverage, Шаг 2)
+frontend/coverage/
 
 # --- Virtual environments ---
 venv/
