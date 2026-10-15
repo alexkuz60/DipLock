@@ -300,6 +300,19 @@ class Settings(BaseSettings):
     kd_moment_share: float | None = Field(default=None)
     kd_gof_min: float | None = Field(default=None)
 
+    # С1 — прогон по набору поддиапазонов (пакет полос): максимум полос одного
+    # прогона (защита формы и времени задачи) и максимум записей серии С8.
+    dipole_batch_max_bands: int = Field(default=8)
+    archive_batch_max_recordings: int = Field(default=50)
+
+    # С2 — кластеры диполей прогона (B8): размер вокселя в нормированных
+    # единицах (доля от диаметра области поиска — `dipole_clusters
+    # .SEARCH_DIAMETER_MM`) и минимум точек кластера. Паспорт параметров
+    # (доля + мм + базис) входит в результат прогона: смена сетки меняет
+    # кластеры, числа без базиса не подписываем.
+    cluster_voxel_norm: float = Field(default=0.1)
+    cluster_min_points: int = Field(default=4)
+
     # Артефакты
     z_score_threshold: float = 5.0
     # Окно скользящих медианы/MAD для z-score (с): «норма» считается локально по

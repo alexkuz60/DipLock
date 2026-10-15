@@ -466,6 +466,26 @@ def _electrode_matrix(
     return used, matrix, [index[name] for name in used]
 
 
+def shared_scan_kernel(channels: Sequence[str], grid_mm: float) -> Any:
+    """Ядро перебора сетки для пакета поддиапазонов (С1): строится **один раз**.
+
+    Свинцовое поле `G` (forward) и обращённая с ridge `GᵀG` (inverse-ядро МНК)
+    не зависят от полосы фильтра — пакет (`services/dipole_batch.py`) строит их
+    один раз на прогон и переиспользовает для всех полос (``compute_dipole_scan(
+    kernel=…)``), вместо N одинаковых построений. Кэш `_scan_kernel` это и так
+    дедуплицировал по монтажу/шагу — здесь переиспользование становится явным
+    и проверяемым тестом пакета.
+    """
+    positions = channel_positions(list(channels))
+    _used, positions_m, _index = _electrode_matrix(channels, positions)
+    return _scan_kernel(
+        np.ascontiguousarray(positions_m, dtype=float).tobytes(),
+        positions_m.shape,
+        grid_mm,
+        MIN_SENSOR_DISTANCE_MM / 1000.0,
+    )
+
+
 def compute_dipole_scan(
     recording: Recording,
     cfg: Settings,
@@ -473,6 +493,7 @@ def compute_dipole_scan(
     progress: Any = None,
     *,
     artifact_annotations: mne.Annotations | None = None,
+    kernel: Any = None,
 ) -> dict[str, Any]:
     """Быстрый расчёт диполей по эпохам: одна точка на эпоху (пик GFP).
 
@@ -483,6 +504,10 @@ def compute_dipole_scan(
     ``artifact_annotations`` — ``BAD_``-зоны стадий препроцессинга для нарезки
     пакета автоотчёта (см. ``_prepare_epochs``); отдельная задача UI «Диполи»
     передаёт ``None`` и нарезает как раньше.
+
+    ``kernel`` — предрасчитанное ядро сетки пакета (``shared_scan_kernel``,
+    С1): пакет полос строит его один раз; ``None`` — построить/взять из кэша
+    как раньше.
     """
     report = progress or (lambda *args, **kwargs: None)
     started = time.perf_counter()
@@ -535,12 +560,14 @@ def compute_dipole_scan(
     # N20: свинцовое поле и (GᵀG)⁻¹ не зависят от эпохи — ядро сетки
     # строится один раз на запись (и кэшируется между задачами с тем же
     # монтажом и шагом), в цикле остаётся только МНК по готовым матрицам.
-    kernel = _scan_kernel(
-        np.ascontiguousarray(positions_m, dtype=float).tobytes(),
-        positions_m.shape,
-        params.grid_mm,
-        MIN_SENSOR_DISTANCE_MM / 1000.0,
-    )
+    # Пакет поддиапазонов (С1) передаёт готовое ядро (`shared_scan_kernel`).
+    if kernel is None:
+        kernel = _scan_kernel(
+            np.ascontiguousarray(positions_m, dtype=float).tobytes(),
+            positions_m.shape,
+            params.grid_mm,
+            MIN_SENSOR_DISTANCE_MM / 1000.0,
+        )
     localize_ms = 0.0
     # RIV (2.6/N23): отбеливатель по in-band ковариации шума — один на запись
     # (полоса у всех эпох одна). `None` — данных мало, RIV остаётся пустым.

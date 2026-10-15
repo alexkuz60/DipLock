@@ -8,6 +8,7 @@ import type {
   AnalysesPage,
   AnalysisDetail,
   AnalyzeResponse,
+  ArchiveBatchResult,
   AudioBakeStart,
   AudioBakeStatus,
   AudioEmo,
@@ -18,6 +19,7 @@ import type {
   BundleResult,
   CompareResult,
   ContourSlice,
+  DipoleBatchResult,
   DipolePoint,
   DipoleRefineResult,
   DipoleScanResult,
@@ -133,6 +135,7 @@ export type RecordingJobKind =
   | 'report'
   | 'bundle'
   | 'eloreta'
+  | 'dipole_batch'
 
 /**
  * Пара запросов «запустить задачу / прочитать результат» (A10).
@@ -576,6 +579,26 @@ export const api = {
    * Точный профиль (`mne.fit_dipole`) — отдельный срез, здесь `method: 'fast_grid'`.
    */
   dipoles: recordingJob<DipoleScanResult>('dipoles'),
+
+  /**
+   * Прогон по набору поддиапазонов (С1/С2): набор результатов одной сессии
+   * (полосы + сопоставление нормированных величин + кластеры). Форма — `bands`
+   * (ключи/диапазоны через запятую) и параметры расчёта; ядро перебора
+   * переиспользуется всеми полосами (п.9 `docs/rules/dipoles.md`).
+   */
+  dipoleBatch: recordingJob<DipoleBatchResult>('dipole_batch'),
+
+  /**
+   * Пакетная обработка архива (С8): серия прогонов пакета по каталогу записей.
+   * Задача принадлежит серии (не записи): результат — отчёт
+   * «обработано/ошибки/дубли» на своём адресе.
+   */
+  archiveBatch: {
+    start: (form: FormData, signal?: AbortSignal) =>
+      request<JobCreated>(`${API_PREFIX}/archive/batches`, { method: 'POST', body: form, signal }),
+    result: (jobId: string, signal?: AbortSignal) =>
+      request<ArchiveBatchResult>(`${API_PREFIX}/archive/batches/${jobId}`, { signal }),
+  },
 
   /** Точное уточнение одной эпохи (F19): BEM fit_dipole в окне пика GFP. */
   dipoleRefine: recordingJob<DipoleRefineResult>('dipole_refine'),

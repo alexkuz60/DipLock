@@ -24,7 +24,9 @@ from fastapi import HTTPException
 from app.core.config import settings
 from app.schemas.analysis import JobCreated, JobStatus
 from app.services import results_store
+from app.services.archive_batch import ArchiveBatchParams, run_archive_batch
 from app.services.compare import CompareParams, run_compare
+from app.services.dipole_batch import DipoleBatchParams, run_dipole_batch
 from app.services.dipole_scanner import (
     DipoleRefineParams,
     DipoleScanParams,
@@ -46,7 +48,7 @@ logger = logging.getLogger(__name__)
 # Виды задач, чей результат лежит рядом с записью, а не в `/jobs/{id}/result`
 RECORDING_JOB_KINDS: tuple[str, ...] = (
     "preprocess", "spectrum", "dipoles", "spectrogram", "dipole_refine", "evoked",
-    "report", "bundle", "eloreta",
+    "report", "bundle", "eloreta", "dipole_batch",
 )
 
 
@@ -111,6 +113,31 @@ def worker_dipole_scan(
     return compute_dipole_scan(recording, settings, params, progress)
 
 
+def worker_dipole_batch(
+    progress: ProgressCallback, recording: Recording, params: DipoleBatchParams,
+) -> dict[str, Any]:
+    """Воркер пакета поддиапазонов (поток, С1): прогон по набору полос.
+
+    Дисковых кэшей записи не создаёт (как ``dipoles``) — в ``_drop_signal_cache``
+    чистить нечего; результат пишет write-API (``results_store`` →
+    ``analyses``/``dipole_points``).
+    """
+    return run_dipole_batch(recording, settings, params, progress)
+
+
+async def worker_archive_batch(
+    progress: ProgressCallback, params: ArchiveBatchParams,
+) -> dict[str, Any]:
+    """Воркер серии архива (event-loop, С8): прогон пакета по каждой записи.
+
+    ``async def`` исполняется прямо в event-loop (правило ``job_manager``):
+    расчёт записи уходит в поток, запись в БД — после каждой записи. Задача
+    принадлежит **серии** (не одной записи), поэтому её результат живёт на
+    ``/archive/batches/{job_id}``.
+    """
+    return await run_archive_batch(settings, params, progress)
+
+
 def worker_dipole_refine(
     progress: ProgressCallback, recording: Recording, params: DipoleRefineParams,
 ) -> dict[str, Any]:
@@ -143,16 +170,18 @@ def worker_bundle(
     return run_bundle(recording, settings, params, progress)
 
 
-WORKERS: dict[str, Callable[..., dict[str, Any]]] = {
+WORKERS: dict[str, Callable[..., Any]] = {
     "dipole_refine": worker_dipole_refine,
     "eloreta": worker_eloreta,
     "preprocess": worker_preprocess,
     "spectrum": worker_spectrum,
     "spectrogram": worker_spectrogram,
     "dipoles": worker_dipole_scan,
+    "dipole_batch": worker_dipole_batch,
     "evoked": worker_evoked,
     "report": worker_report,
     "bundle": worker_bundle,
+    "archive_batch": worker_archive_batch,
 }
 
 
@@ -222,6 +251,33 @@ def submit_compare_job(
     )
 
 
+def submit_archive_batch_job(params: ArchiveBatchParams) -> JobCreated:
+    """202 для серии архива (С8): результат — ``GET /archive/batches/{job_id}``.
+
+    Задача принадлежит **серии** записей (не одной), поэтому не входит в
+    ``RECORDING_JOB_KINDS``: её отчёт «обработано/ошибки/дубли» отдаёт адрес
+    ``ArchiveBatchResult``, а строки БД пишет сам воркер после каждой записи
+    (write-API ``results_store``).
+    """
+    job = job_manager.submit(
+        "archive_batch", "Серия: пакетная обработка архива",
+        WORKERS["archive_batch"], params,
+        meta={
+            "recording_ids": list(params.recording_ids),
+            "params_sig": repr(params.batch),
+        },
+    )
+    logger.info("Создана задача archive_batch %s (%d записей)",
+                job.job_id, len(params.recording_ids))
+    prefix = settings.api_prefix
+    return JobCreated(
+        job_id=job.job_id,
+        status=job.status,
+        poll_url=f"{prefix}/jobs/{job.job_id}",
+        result_url=f"{prefix}/archive/batches/{job.job_id}",
+    )
+
+
 def job_status(job: Any) -> JobStatus:
     """``JobStatus`` из задачи; ``result_url`` заполняется только для успешных.
 
@@ -236,6 +292,8 @@ def job_status(job: Any) -> JobStatus:
     if job.status == "succeeded":
         if job.kind == "compare":
             result_url = f"{prefix}/compare/{job.job_id}"
+        elif job.kind == "archive_batch":
+            result_url = f"{prefix}/archive/batches/{job.job_id}"
         else:
             recording_id = job.meta.get("recording_id")
             if recording_id and job.kind in RECORDING_JOB_KINDS:
@@ -301,6 +359,21 @@ def compare_job_result(job_id: str) -> Any:
     if job is None or job.kind != "compare":
         raise HTTPException(
             status_code=404, detail=f"Задача сравнения {job_id} не найдена",
+        )
+    _require_finished(job)
+    return job
+
+
+def archive_batch_job_result(job_id: str) -> Any:
+    """Задача серии архива (С8); 404/409 — как у задач записи.
+
+    Адрес контракта ``ArchiveBatchResult``: чужой вид задачи на
+    ``/archive/batches/{id}`` — 404, как у ``/compare/{id}``.
+    """
+    job = job_manager.get(job_id)
+    if job is None or job.kind != "archive_batch":
+        raise HTTPException(
+            status_code=404, detail=f"Задача серии {job_id} не найдена",
         )
     _require_finished(job)
     return job

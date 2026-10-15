@@ -435,6 +435,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/archive/batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Пакетная обработка архива: серия прогонов по каталогу записей (С8)
+         * @description Серия прогонов пакета (С1) по каталогу + отчёт «обработано/ошибки/дубли».
+         *
+         *     Расчёты идут **по снимку параметров** (один на серию), запись в БД — после
+         *     каждой записи; дубли содержимого (sha256) считаются один раз, остальные
+         *     честно попадают в «дубли» отчёта. Одна упавшая запись не валит серию.
+         */
+        post: operations["create_archive_batch_job_api_v1_archive_batches_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/archive/batches/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Отчёт пакетной обработки архива (обработано/ошибки/дубли)
+         * @description Построчный отчёт серии. 409 — задача идёт или упала.
+         */
+        get: operations["get_archive_batch_result_api_v1_archive_batches__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/compare/{job_id}/report": {
         parameters: {
             query?: never;
@@ -542,6 +586,53 @@ export interface paths {
          * @description Точки диполей (MNI, момент, амплитуда, GOF). 409 — задача идёт или упала.
          */
         get: operations["get_dipole_scan_result_api_v1_recordings__recording_id__dipoles__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/dipoles/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Прогон по набору поддиапазонов (пакет полос, С1/С2)
+         * @description Пакет поддиапазонов (С1): несколько расчётов одной сессии и их сопоставление.
+         *
+         *     Набор результатов вместо одного результата: полосы со своими точками
+         *     («эпоха × поддиапазон + момент пика GFP своей полосы»), сопоставление по
+         *     **нормированным** величинам (GOF между полосами не сравним — принцип 3
+         *     ``docs/rules/dipoles.md``) и кластеры диполей с устойчивостью по
+         *     поддиапазонам (С2). Ядро перебора (свинцовое поле + обращённая `GᵀG`)
+         *     строится один раз на прогон и переиспользуется всеми полосами.
+         */
+        post: operations["create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/dipole_batch/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Результат прогона по набору поддиапазонов
+         * @description Набор результатов пакета: полосы, сопоставление, кластеры. 409 — задача идёт/упала.
+         */
+        get: operations["get_dipole_batch_result_api_v1_recordings__recording_id__dipole_batch__job_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3046,6 +3137,100 @@ export interface components {
             pipeline: components["schemas"]["PipelineInfo"];
         };
         /**
+         * ArchiveBatchItemOut
+         * @description Строка отчёта серии: одна запись каталога.
+         */
+        ArchiveBatchItemOut: {
+            /** Recording Id */
+            recording_id: string;
+            /** Filename */
+            filename: string;
+            /**
+             * State
+             * @description processed — посчитана; error — ошибка; duplicate — дубль содержимого
+             */
+            state: string;
+            /**
+             * Duplicate Of
+             * @description Какой записью уже посчитано это содержимое (sha256); None — не дубль
+             */
+            duplicate_of?: string | null;
+            /**
+             * N Points
+             * @description Точек по всем полосам
+             */
+            n_points?: number | null;
+            /**
+             * N Kd Passed
+             * @description Прошедших КД; None — вердикт не считался
+             */
+            n_kd_passed?: number | null;
+            /**
+             * N Bands Ok
+             * @description Полос без ошибок
+             */
+            n_bands_ok?: number | null;
+            /**
+             * Duration Sec
+             * @default 0
+             */
+            duration_sec: number;
+            /**
+             * Error
+             * @description Текст ошибки записи; None — не было
+             */
+            error?: string | null;
+        };
+        /**
+         * ArchiveBatchResult
+         * @description Отчёт пакетной обработки архива (``kind=archive_batch``, С8).
+         *
+         *     Серия прогонов пакета (С1) по каталогу записей: расчёты по **снимку
+         *     параметров** (``params_sig``), запись в БД после каждой записи и построчный
+         *     отчёт «обработано / ошибки / дубли». Одна упавшая запись не валит серию.
+         */
+        ArchiveBatchResult: {
+            /**
+             * Pipeline
+             * @description Чем посчитана серия: `dipole_batch`
+             */
+            pipeline: string;
+            /**
+             * Params Sig
+             * @description Отпечаток снимка параметров серии
+             */
+            params_sig: string;
+            /**
+             * Requested
+             * @description Записи серии в порядке обхода
+             */
+            requested: string[];
+            /** Items */
+            items?: components["schemas"]["ArchiveBatchItemOut"][];
+            summary: components["schemas"]["ArchiveBatchSummaryOut"];
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Duration Sec Calc
+             * @default 0
+             */
+            duration_sec_calc: number;
+        };
+        /**
+         * ArchiveBatchSummaryOut
+         * @description Итог серии: «обработано / ошибки / дубли» (``concept.md`` §6 С8).
+         */
+        ArchiveBatchSummaryOut: {
+            /** Total */
+            total: number;
+            /** Processed */
+            processed: number;
+            /** Errors */
+            errors: number;
+            /** Duplicates */
+            duplicates: number;
+        };
+        /**
          * ArtifactThresholds
          * @description Активные пороги детекции артефактов и reject-фильтра.
          */
@@ -3722,6 +3907,59 @@ export interface components {
              */
             pp_threshold_uv: number;
         };
+        /** Body_create_archive_batch_job_api_v1_archive_batches_post */
+        Body_create_archive_batch_job_api_v1_archive_batches_post: {
+            /**
+             * Recording Ids
+             * @description Записи серии через запятую; пусто — весь каталог реестра (лимит — archive_batch_max_recordings)
+             * @default
+             */
+            recording_ids: string;
+            /**
+             * Bands
+             * @description Набор полос через запятую (как в пакете поддиапазонов): ключи и/или свои диапазоны «от-до» в Гц; пусто — 400
+             * @default
+             */
+            bands: string;
+            /**
+             * Notch Hz
+             * @description Сетевой фильтр 50/60 Гц
+             */
+            notch_hz?: number | null;
+            /**
+             * Reference
+             * @description average | custom
+             * @default average
+             */
+            reference: string;
+            /**
+             * Reference Channels
+             * @description Каналы референса через запятую
+             */
+            reference_channels?: string | null;
+            /**
+             * Epoch Length Ms
+             * @description Длина эпохи — одна на серию (п.7)
+             * @default 1000
+             */
+            epoch_length_ms: number;
+            /**
+             * Grid Mm
+             * @description Шаг объёмной сетки поиска, мм
+             * @default 7
+             */
+            grid_mm: number;
+            /**
+             * Cluster Voxel Norm
+             * @description Кластеризация (С2): доля от диаметра области поиска
+             */
+            cluster_voxel_norm?: number | null;
+            /**
+             * Cluster Min Points
+             * @description Минимум точек в кластере
+             */
+            cluster_min_points?: number | null;
+        };
         /** Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post */
         Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post: {
             /**
@@ -3822,6 +4060,53 @@ export interface components {
              * @default -100
              */
             tfr_baseline_end_ms: number;
+        };
+        /** Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post */
+        Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post: {
+            /**
+             * Bands
+             * @description Набор полос через запятую: именованные ключи (alpha,beta,…) и/или свои диапазоны «от-до» в Гц (например 2.5-4); пусто — 400
+             * @default
+             */
+            bands: string;
+            /**
+             * Notch Hz
+             * @description Сетевой фильтр 50/60 Гц
+             */
+            notch_hz?: number | null;
+            /**
+             * Reference
+             * @description average | custom
+             * @default average
+             */
+            reference: string;
+            /**
+             * Reference Channels
+             * @description Каналы референса через запятую
+             */
+            reference_channels?: string | null;
+            /**
+             * Epoch Length Ms
+             * @description Длина эпохи — одна на весь прогон (п.7)
+             * @default 1000
+             */
+            epoch_length_ms: number;
+            /**
+             * Grid Mm
+             * @description Шаг объёмной сетки поиска, мм
+             * @default 7
+             */
+            grid_mm: number;
+            /**
+             * Cluster Voxel Norm
+             * @description Кластеризация (С2): размер вокселя как доля от диаметра области поиска (0.02…0.5; пусто — дефолт сервера)
+             */
+            cluster_voxel_norm?: number | null;
+            /**
+             * Cluster Min Points
+             * @description Минимум точек в кластере (пусто — дефолт сервера)
+             */
+            cluster_min_points?: number | null;
         };
         /** Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post */
         Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post: {
@@ -4761,6 +5046,44 @@ export interface components {
              * @description Зона отменена (чистка в ней не применена)
              */
             excluded: boolean;
+        };
+        /**
+         * ClusterParamsOut
+         * @description Паспорт кластеризации (С2): параметры в нормированных единицах + базис.
+         */
+        ClusterParamsOut: {
+            /**
+             * Voxel Norm
+             * @description Размер вокселя как доля от диаметра области поиска (нормированные единицы)
+             */
+            voxel_norm: number;
+            /**
+             * Voxel Mm
+             * @description Тот же размер в мм (производная величина)
+             */
+            voxel_mm: number;
+            /** Min Points */
+            min_points: number;
+            /**
+             * Connectivity
+             * @description Связность сетки (26)
+             */
+            connectivity: number;
+            /**
+             * Basis
+             * @description Базис нормировки: share_of_search_sphere_diameter
+             */
+            basis: string;
+            /**
+             * Basis Mm
+             * @description Диаметр области поиска, мм — нормировочная база
+             */
+            basis_mm: number;
+            /**
+             * Kd Filter
+             * @description Что ушло в кластеры: `kd_passed` — только прошедшие КД; None — пороги методики не заданы, взяты все точки
+             */
+            kd_filter?: string | null;
         };
         /**
          * CompareBandOut
@@ -6910,6 +7233,306 @@ export interface components {
              * @description Ведущие ПК (топокарты, число — из конфига)
              */
             components?: components["schemas"]["CovariancePcOut"][];
+        };
+        /**
+         * DipoleBandComparisonOut
+         * @description Строка сопоставления полос (С1): **только нормированные величины**.
+         *
+         *     GOF между полосами не сравним (принцип 3 ``docs/rules/dipoles.md``) — в
+         *     контракте его нет; кросс-полосной фильтр доверия — только ``median_riv``.
+         */
+        DipoleBandComparisonOut: {
+            /** Band Key */
+            band_key: string;
+            /** Label */
+            label: string;
+            /** Band Hz */
+            band_hz: number[];
+            /** N Points */
+            n_points: number;
+            /** N Kd Passed */
+            n_kd_passed?: number | null;
+            /**
+             * Kd Share
+             * @description Доля точек, прошедших КД (0..1)
+             */
+            kd_share?: number | null;
+            /**
+             * Moment Share Median
+             * @description Медиана доли момента точки от максимума своей полосы (0..1)
+             */
+            moment_share_median?: number | null;
+            /**
+             * Moment Share P90
+             * @description 90-й перцентиль той же доли (0..1)
+             */
+            moment_share_p90?: number | null;
+            /**
+             * Peak Time Median Ms
+             * @description Медиана моментов пика GFP внутри эпохи, мс
+             */
+            peak_time_median_ms?: number | null;
+            /**
+             * Median Riv
+             * @description Медианный RIV полосы — единственный кросс-полосной фильтр доверия (2.6)
+             */
+            median_riv?: number | null;
+            /**
+             * N Clusters
+             * @description Кластеров полосы (С2)
+             * @default 0
+             */
+            n_clusters: number;
+            /**
+             * Cluster Share
+             * @description Доля точек полосы, вошедших в кластеры (0..1)
+             */
+            cluster_share?: number | null;
+        };
+        /**
+         * DipoleBandRunOut
+         * @description Полоса прогона пакета (B7 ``per_band_status``) с её точками.
+         */
+        DipoleBandRunOut: {
+            /**
+             * Band Key
+             * @description Стабильный адрес полосы (п.6 dipoles.md)
+             */
+            band_key: string;
+            /**
+             * Label
+             * @description Подпись полосы для UI
+             */
+            label: string;
+            /**
+             * Band Hz
+             * @description Границы полосы, Гц (производные от ключа)
+             */
+            band_hz: number[];
+            /**
+             * State
+             * @description ok | empty | error
+             */
+            state: string;
+            /** N Points */
+            n_points: number;
+            /**
+             * N Kd Passed
+             * @description Прошли КД; None — вердикт не считался
+             */
+            n_kd_passed?: number | null;
+            /**
+             * N Errors
+             * @description Число предупреждений полосы
+             */
+            n_errors: number;
+            /**
+             * Moment Max Nam
+             * @description Максимум момента полосы, нА·м — база КД внутри полосы
+             */
+            moment_max_nam?: number | null;
+            /**
+             * Median Gof
+             * @description Медианный GOF полосы, 0..1; **только внутри полосы** — GOF между полосами не сравним (принцип 3 dipoles.md)
+             */
+            median_gof?: number | null;
+            /** @description Базис КД полосы (С0) */
+            kd_basis: components["schemas"]["KdBasisOut"];
+            /** N Epochs Total */
+            n_epochs_total?: number | null;
+            /** N Epochs Used */
+            n_epochs_used?: number | null;
+            /** Points */
+            points?: components["schemas"]["DipoleBatchPointOut"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * DipoleBatchPointOut
+         * @description Точка пакета (B6): точка быстрого расчёта + вердикт КД полями точки.
+         */
+        DipoleBatchPointOut: {
+            /** Epoch Index */
+            epoch_index: number;
+            /**
+             * Time Ms
+             * @description Время пика GFP внутри эпохи, мс
+             */
+            time_ms: number;
+            /**
+             * Head Coords
+             * @description Позиция в системе координат головы, мм
+             */
+            head_coords: number[];
+            /**
+             * Mni Coords
+             * @description MNI (мм); None — fsaverage недоступен, точка не наводится
+             */
+            mni_coords?: number[] | null;
+            /**
+             * Moment
+             * @description Единичный вектор момента диполя (направление)
+             */
+            moment: number[];
+            /**
+             * Amplitude Nam
+             * @description Амплитуда момента, нА·м
+             */
+            amplitude_nam: number;
+            /**
+             * Gof
+             * @description Goodness of fit, 0..1
+             */
+            gof: number;
+            /**
+             * Riv
+             * @description Доля отбелённой невязки (in-band ковариация шума), 2.6/N23: кросс-полосной фильтр доверия. GOF между полосами не сравним (узкая полоса завышает R²), RIV — сравним. `null` — не посчитан
+             */
+            riv?: number | null;
+            /**
+             * Ci Mm
+             * @description Радиус доверительной области позиции, мм (2.6/N23): «плато» сетки (узлы в пределах ΔGOF от лучшего); `null` — не оценён
+             */
+            ci_mm?: number | null;
+            /**
+             * Anatomical Structure
+             * @description Ближайшая анатомическая структура по MNI-координате (aparc+aseg — тот же атлас, что и контуры срезов); None — координат/метки нет
+             */
+            anatomical_structure?: string | null;
+            /**
+             * Brodmann Area
+             * @description Ближайшее поле Бродмана объёмного атласа, например BA17-lh
+             */
+            brodmann_area?: string | null;
+            /**
+             * Structure Distance Mm
+             * @description Расстояние от точки до ближайшей структуры, мм (шаг 1.4); None — координат/атласа нет
+             */
+            structure_distance_mm?: number | null;
+            /**
+             * Brodmann Distance Mm
+             * @description Расстояние от точки до ближайшего узла поля Бродмана, мм (шаг 1.4); None — координат/атласа нет
+             */
+            brodmann_distance_mm?: number | null;
+            /**
+             * Outside Brain
+             * @description Точка вне маски мозга brainmask (шаг 1.4): у такой строки подпись «вне мозга (~N мм до X)» вместо выдуманной атрибуции; None — маска недоступна
+             */
+            outside_brain?: boolean | null;
+            /**
+             * Kd Passed
+             * @description КД (С0): момент ≥ доли максимума своей полосы И GOF ≥ порога; None — «не оценено» (пороги методики не заданы)
+             */
+            kd_passed?: boolean | null;
+        };
+        /**
+         * DipoleBatchResult
+         * @description Результат задачи пакета поддиапазонов (``kind=dipole_batch``, С1/С2).
+         *
+         *     **Набор результатов** одной сессии вместо одного: полосы со своими точками
+         *     (ключ «эпоха × поддиапазон»), сопоставление по нормированным величинам и
+         *     кластеры с устойчивостью по поддиапазонам. Одна длина эпохи на прогон (п.7).
+         */
+        DipoleBatchResult: {
+            /** Recording Id */
+            recording_id: string;
+            /**
+             * Method
+             * @description Метод расчёта: `fast_grid`
+             */
+            method: string;
+            /**
+             * Params Sig
+             * @description Отпечаток прогона (B7 fingerprint)
+             */
+            params_sig: string;
+            /**
+             * Reference
+             * @default average
+             */
+            reference: string;
+            /** Reference Channels */
+            reference_channels?: string[] | null;
+            /** Channels */
+            channels: string[];
+            /** Sfreq */
+            sfreq?: number | null;
+            /**
+             * Epoch Length Ms
+             * @description Одна длина эпохи на весь прогон (п.7)
+             */
+            epoch_length_ms: number;
+            /** Notch Hz */
+            notch_hz?: number | null;
+            /** Grid Mm */
+            grid_mm: number;
+            /** Bands */
+            bands?: components["schemas"]["DipoleBandRunOut"][];
+            /** Comparison */
+            comparison?: components["schemas"]["DipoleBandComparisonOut"][];
+            /** Clusters */
+            clusters?: components["schemas"]["DipoleClusterOut"][];
+            cluster_params: components["schemas"]["ClusterParamsOut"];
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Duration Sec Calc
+             * @default 0
+             */
+            duration_sec_calc: number;
+        };
+        /**
+         * DipoleClusterOut
+         * @description Кластер диполей прогона (С2, B8): геометрия + устойчивость по поддиапазонам.
+         */
+        DipoleClusterOut: {
+            /** Band Key */
+            band_key: string;
+            /**
+             * Cluster Index
+             * @description Номер в полосе (крупные первыми)
+             */
+            cluster_index: number;
+            /**
+             * Centroid Mni
+             * @description Центроид, MNI мм
+             */
+            centroid_mni?: number[] | null;
+            /** N Points */
+            n_points: number;
+            /**
+             * Share
+             * @description Доля точек полосы в кластере (0..1)
+             */
+            share: number;
+            /** Volume Cm3 */
+            volume_cm3?: number | null;
+            /**
+             * Density Per Cm3
+             * @description Плотность точек, 1/см³
+             */
+            density_per_cm3?: number | null;
+            /**
+             * Extent Mm
+             * @description Протяжённость по осям x/y/z, мм
+             */
+            extent_mm?: number[] | null;
+            /** Top Structures */
+            top_structures?: string[];
+            /** Top Brodmann */
+            top_brodmann?: string[];
+            /**
+             * N Bands Matched
+             * @description Устойчивость: в скольких полосах пакета найден кластер той же области
+             */
+            n_bands_matched: number;
+            /**
+             * Band Share
+             * @description Доля этих полос от числа полос пакета (0..1)
+             */
+            band_share: number;
+            /** Matched Band Keys */
+            matched_band_keys?: string[];
         };
         /**
          * DipoleFit
@@ -11366,6 +11989,70 @@ export interface operations {
             };
         };
     };
+    create_archive_batch_job_api_v1_archive_batches_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_archive_batch_job_api_v1_archive_batches_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_archive_batch_result_api_v1_archive_batches__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveBatchResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_compare_report_api_v1_compare__job_id__report_get: {
         parameters: {
             query?: never;
@@ -11536,6 +12223,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DipoleScanResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/x-www-form-urlencoded": components["schemas"]["Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipoles_batch_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dipole_batch_result_api_v1_recordings__recording_id__dipole_batch__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DipoleBatchResult"];
                 };
             };
             /** @description Validation Error */

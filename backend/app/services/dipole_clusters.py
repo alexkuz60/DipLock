@@ -18,6 +18,16 @@
 ``core/config.py`` и входят в паспорт (``GroupClusterParamsOut``): смена
 сетки меняет кластеры — числа без базиса не подписываем.
 
+**С2 (кластеры прогона, 15.10.2026):** тот же воксельный метод работает на
+точках пакета поддиапазонов (``cluster_points`` — ядро с параметрами, а не из
+конфига; ``cluster_dipoles`` — групповая обёртка). Параметры прогона задаются
+в **нормированных единицах** (concept.md §6 С2): ``voxel_norm`` — доля от
+диаметра области поиска (``SEARCH_DIAMETER_MM``, та же сфера, где лежат все
+точки быстрого расчёта), в паспорт попадают и доля, и миллиметры с базисом.
+**Устойчивость по поддиапазонам** (``cluster_stability``) — «тот же» кластер
+соседней полосы = центроид в пределах диагонали вокселя; метрика — доля полос
+пакета, где такой кластер найден.
+
 Порядок следования кластеров — по убыванию числа точек (крупные первыми).
 """
 import math
@@ -27,9 +37,19 @@ from typing import Any
 import numpy as np
 
 from app.core.config import Settings
+from app.services.dipole_scanner import GRID_RADIUS_MM
 
 # Топ доминирующих ROI кластера (подпись «к чему относится кластер»)
 TOP_ROI_IN_CLUSTER = 3
+
+# Диаметр области поиска быстрого расчёта, мм — нормировочная база параметров
+# кластеризации прогона (С2): все точки `fast_grid` лежат внутри сферы
+# `GRID_RADIUS_MM`, поэтому доли от диаметра сравнимы между прогонами и
+# полосами, а мм — производные (в паспорте рядом).
+SEARCH_DIAMETER_MM = 2.0 * GRID_RADIUS_MM
+
+# Базис нормировки параметров кластеризации (в паспорте каждого числа).
+CLUSTER_NORM_BASIS = "share_of_search_sphere_diameter"
 
 
 def cluster_params(cfg: Settings) -> dict[str, Any]:
@@ -41,8 +61,27 @@ def cluster_params(cfg: Settings) -> dict[str, Any]:
     }
 
 
-def cluster_dipoles(
-    points: list[dict[str, Any]], cfg: Settings,
+def resolve_cluster_params(voxel_norm: float, min_points: int) -> dict[str, Any]:
+    """Паспорт кластеризации прогона (С2) из нормированных единиц.
+
+    ``voxel_norm`` — доля от диаметра области поиска (``SEARCH_DIAMETER_MM``);
+    в паспорте живут и доля, и миллиметры, и базис — числа без базиса не
+    подписываем (``docs/data-blocks.md`` §2.2). Проверки параметров — форма
+    (``api/params.py``), здесь только честный перевод.
+    """
+    voxel_mm = float(voxel_norm) * SEARCH_DIAMETER_MM
+    return {
+        "voxel_norm": float(voxel_norm),
+        "voxel_mm": round(voxel_mm, 3),
+        "min_points": int(min_points),
+        "connectivity": 26,
+        "basis": CLUSTER_NORM_BASIS,
+        "basis_mm": SEARCH_DIAMETER_MM,
+    }
+
+
+def cluster_points(
+    points: list[dict[str, Any]], voxel_mm: float, min_points: int,
 ) -> list[dict[str, Any]]:
     """Кластеризует точки одной полосы; ``points`` — flat-словари с MNI.
 
@@ -51,10 +90,10 @@ def cluster_dipoles(
     ``min_points`` отбрасывается — случайные скопления не показываем.
     """
     usable = [point for point in points if point.get("mni")]
-    if len(usable) < int(cfg.group_cluster_min_points):
+    if len(usable) < int(min_points):
         return []
-    voxel = float(cfg.group_cluster_voxel_mm)
-    min_points = int(cfg.group_cluster_min_points)
+    voxel = float(voxel_mm)
+    min_points = int(min_points)
 
     # Индексы ячеек сетки (без сдвига в начало: важны только различия)
     cells: dict[tuple[int, int, int], list[dict[str, Any]]] = defaultdict(list)
@@ -144,3 +183,73 @@ def cluster_dipoles(
         })
     results.sort(key=lambda item: (-item["n_points"], item["centroid_mni"]))
     return results
+
+
+def cluster_dipoles(
+    points: list[dict[str, Any]], cfg: Settings,
+) -> list[dict[str, Any]]:
+    """Групповая кластеризация (остаток 4.7): параметры из конфига группы.
+
+    Обёртка над ``cluster_points`` — прежний контракт ``POST /group/aggregate``
+    сохранён, а ядро теперь общее с прогоном пакета (С2).
+    """
+    return cluster_points(
+        points, float(cfg.group_cluster_voxel_mm), int(cfg.group_cluster_min_points),
+    )
+
+
+def cluster_stability(
+    clusters_by_band: dict[str, list[dict[str, Any]]], voxel_mm: float,
+) -> dict[str, dict[str, Any]]:
+    """Устойчивость кластеров по поддиапазонам (С2, B8).
+
+    «Тот же» кластер соседней полосы — центроид в пределах **диагонали вокселя**
+    (единственная производная от параметров кластеризации, без новых порогов).
+    Для каждого кластера ``(band_key, cluster_index)`` возвращается метрика:
+
+    * ``n_bands_matched`` — в скольких полосах пакета найден кластер той же
+      области (включая свою полосу);
+    * ``band_share`` — доля этих полос от числа полос пакета (нормированная
+      величина — единственная сравнимая между пакетами разного состава);
+    * ``matched_band_keys`` — какие именно полосы.
+
+    GOF между полосами не сравним (принцип 3 ``docs/rules/dipoles.md``), поэтому
+    устойчивость считается **только по геометрии** (совпадение областей), без
+    взвешивания по GOF.
+    """
+    band_keys = list(clusters_by_band)
+    radius_mm = float(voxel_mm) * math.sqrt(3.0)
+    matched: dict[tuple[str, int], list[str]] = {
+        (band_key, index): []
+        for band_key, clusters in clusters_by_band.items()
+        for index in range(len(clusters))
+    }
+    for band_key, clusters in clusters_by_band.items():
+        for index, cluster in enumerate(clusters):
+            centroid = np.asarray(cluster.get("centroid_mni") or [], dtype=float)
+            if centroid.size != 3:
+                continue
+            hits: list[str] = []
+            for other_key, other_clusters in clusters_by_band.items():
+                for other in other_clusters:
+                    other_centroid = np.asarray(
+                        other.get("centroid_mni") or [], dtype=float,
+                    )
+                    if other_centroid.size != 3:
+                        continue
+                    if float(np.linalg.norm(centroid - other_centroid)) <= radius_mm:
+                        hits.append(other_key)
+                        break
+            matched[(band_key, index)] = sorted(set(hits))
+
+    total_bands = max(1, len(band_keys))
+    return {
+        f"{band_key}:{index}": {
+            "band_key": band_key,
+            "cluster_index": index,
+            "n_bands_matched": len(keys),
+            "band_share": len(keys) / total_bands,
+            "matched_band_keys": keys,
+        }
+        for (band_key, index), keys in matched.items()
+    }

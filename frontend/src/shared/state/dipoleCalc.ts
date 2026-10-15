@@ -70,10 +70,16 @@ import {
   type PlaybackState,
 } from '@/shared/lib/dipoleCalcModel'
 import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
+import {
+  BATCH_MAX_BANDS,
+  BATCH_MIN_BANDS,
+  buildDipoleBatchForm,
+  scanResultOfBand,
+} from '@/shared/lib/dipoleBatch'
 import { recommendedEpochLengthMs, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import { canPlayback, clampEpochIndex, normalizePlaybackSpeed } from '@/shared/lib/playback'
-import type { DipoleRefineResult, DipoleScanResult, EloretaResult, SpectrumResult } from '@/shared/api/types'
+import type { DipoleBatchResult, DipoleRefineResult, DipoleScanResult, EloretaResult, SpectrumResult } from '@/shared/api/types'
 
 /**
  * Токен запуска расчёта: новый расчёт, новый спектр или сброс делают ответы
@@ -114,6 +120,23 @@ export type DipoleCalcState = {
   job: CalcJob | null
   /** Результат расчёта диполей (точки MNI) */
   result: DipoleScanResult | null
+  /**
+   * Прогон по набору поддиапазонов (С1): **набор** результатов одной сессии
+   * (полосы + сопоставление + кластеры), а не один `result`. Правка формы
+   * пакета (как и любая правка) ничего не запускает — считает кнопка.
+   */
+  batch: DipoleBatchResult | null
+  /** Задача пакета поддиапазонов (прогресс/ошибка) */
+  batchJob: CalcJob | null
+  /** Текст последней ошибки пакета — отдельно от ошибки одиночного расчёта */
+  batchError: string | null
+  /** Выбор полос формы пакета (ключи `freq_bands`/`functional_bands` из `/meta`) */
+  batchBandKeys: string[]
+  /**
+   * Активная полоса пакета: её точки показывают проекции, playback и таблица
+   * (`result` держит скан активной полосы — прежняя отрисовка работает без правок).
+   */
+  activeBandKey: string | null
   /** Задача спектра по диапазонам */
   spectrumJob: CalcJob | null
   /** Результат спектра (диапазоны + ссылки на топокарты) */
@@ -203,6 +226,16 @@ export type DipoleCalcState = {
   setBandwidth: (value: number) => void
   /** Быстрый расчёт диполей по кнопке (202 + поллинг + результат) */
   runCalculation: (recordingId: string | null) => Promise<void>
+  /** Выбор полос формы пакета (порядок сохраняется; дубли снимаются) */
+  setBatchBandKeys: (keys: string[]) => void
+  /**
+   * Прогон по набору поддиапазонов (С1) по кнопке: набор результатов вместо
+   * одного (`batch`), активная полоса — первая из набора; `result` становится
+   * сканом активной полосы (проекции/таблица/подписи — без правок).
+   */
+  runBatch: (recordingId: string | null) => Promise<void>
+  /** Смена активной полосы пакета: `result` = скан её точек, кадр снимается */
+  setActiveBand: (bandKey: string) => void
   /** Расчёт спектра по кнопке: числа PSD + топокарты диапазонов */
   runSpectrum: (recordingId: string | null) => Promise<void>
   /** Отмена идущего быстрого расчёта (3.2): DELETE на сервере + локальный статус */
@@ -243,6 +276,11 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       params: { ...CALC_PARAM_DEFAULTS },
       job: null,
       result: null,
+      batch: null,
+      batchJob: null,
+      batchError: null,
+      batchBandKeys: [],
+      activeBandKey: null,
       spectrumJob: null,
       spectrum: null,
       error: null,
@@ -438,6 +476,11 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           set({
             result,
             job: succeededJob(get().job),
+            // Одиночный расчёт затирает набор пакета (С1): показывать «смесь»
+            // одного результата и чужого набора было бы враньём
+            batch: null,
+            batchJob: null,
+            activeBandKey: null,
             // Уточнения привязаны к нарезке прежнего результата — новая нарезка
             // делает их чужими (как и кадр воспроизведения ниже)
             refinedPoints: {},
@@ -462,6 +505,102 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           set({ job: failedJob(get().job, apiErrorText(error)), error: apiErrorText(error) })
         }
       },
+
+      setBatchBandKeys: (keys) =>
+        set({ batchBandKeys: [...new Set(keys)].slice(0, BATCH_MAX_BANDS) }),
+
+      runBatch: async (recordingId) => {
+        if (!recordingId) return
+        const { batchBandKeys, params } = get()
+        if (batchBandKeys.length < BATCH_MIN_BANDS) {
+          set({
+            batchError: `Пакету нужны минимум ${BATCH_MIN_BANDS} полосы: выберите набор`,
+          })
+          return
+        }
+        const token = calcRunToken.next()
+        const isCurrent = () => calcRunToken.isCurrent(token)
+        set({ batchJob: runningJob(), batchError: null })
+        try {
+          const created = await api.dipoleBatch.start(
+            recordingId,
+            buildDipoleBatchForm({
+              bandKeys: batchBandKeys,
+              epochLengthMs: params.epochLengthMs,
+              gridMm: params.gridMm,
+              notchHz: params.notchHz,
+              reference: 'average',
+              referenceChannels: null,
+            }),
+          )
+          set({ batchJob: { ...(get().batchJob ?? runningJob()), jobId: created.job_id } })
+          await waitForJob(created.job_id, isCurrent, (status) =>
+            set({ batchJob: calcJobFromStatus(status) }),
+          )
+          if (!isCurrent()) return
+          const batch = await api.dipoleBatch.result(recordingId, created.job_id)
+          if (!isCurrent()) return
+          const bands = batch.bands ?? []
+          const first = bands.find((band) => band.state === 'ok') ?? bands[0]
+          set({
+            batch,
+            batchJob: succeededJob(get().batchJob),
+            activeBandKey: first?.band_key ?? null,
+            // Проекции/таблица/подписи читают `result` — кладём в него скан
+            // активной полосы набора (та же нарезка, свои точки)
+            result: first ? scanResultOfBand(batch, first) : null,
+            // Уточнения/eLORETA/кадр привязаны к прежней нарезке — снимаются
+            refinedPoints: {},
+            refineJob: null,
+            refiningEpoch: null,
+            refineError: null,
+            eloretaResults: {},
+            eloretaJob: null,
+            eloretaEpochIndex: null,
+            eloretaError: null,
+            selectedPointId: null,
+            playback: {
+              ...get().playback,
+              playing: false,
+              active: false,
+              epochIndex: 0,
+              seekSeq: 0,
+            },
+          })
+        } catch (error) {
+          if (isCancelled(error) || !isCurrent()) return
+          set({
+            batchJob: failedJob(get().batchJob, apiErrorText(error)),
+            batchError: apiErrorText(error),
+          })
+        }
+      },
+
+      setActiveBand: (bandKey) =>
+        set((state) => {
+          const batch = state.batch
+          const band = (batch?.bands ?? []).find((item) => item.band_key === bandKey) ?? null
+          if (!batch || !band || bandKey === state.activeBandKey) return {}
+          return {
+            activeBandKey: bandKey,
+            result: scanResultOfBand(batch, band),
+            // Прежние выделение/уточнения/кадр относились к точкам другой полосы
+            selectedPointId: null,
+            refinedPoints: {},
+            refiningEpoch: null,
+            refineError: null,
+            eloretaResults: {},
+            eloretaEpochIndex: null,
+            eloretaError: null,
+            playback: {
+              ...state.playback,
+              playing: false,
+              active: false,
+              epochIndex: 0,
+              seekSeq: 0,
+            },
+          }
+        }),
 
       runSpectrum: async (recordingId) => {
         if (!recordingId) return
@@ -584,6 +723,11 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         set({
           job: null,
           result: null,
+          // Набор пакета (С1) живёт с результатом — сбрасывается вместе с ним
+          batch: null,
+          batchJob: null,
+          batchError: null,
+          activeBandKey: null,
           spectrumJob: null,
           spectrum: null,
           error: null,

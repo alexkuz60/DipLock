@@ -67,6 +67,8 @@ def _fake_src(n_lh: int = 4, n_rh: int = 3) -> list[dict]:
 def fake_pipeline(monkeypatch):
     """Подмена MNE-цепочки forward/inverse и атласа: возвращает собранные вызовы."""
     calls: dict[str, object] = {}
+    # Кэш операторов (С1) живёт между тестами — начинаем с чистого
+    eloreta_module.clear_operator_cache()
 
     def fake_forward(info, trans=None, src=None, bem=None, **kwargs):
         calls["forward"] = {"trans": trans, "n_channels": len(info["ch_names"])}
@@ -257,3 +259,40 @@ def test_eloreta_form_window_is_validated(client, tmp_path, fake_pipeline):
     assert status["status"] == "succeeded", status
     body = client.get(status["result_url"]).json()
     assert body["halfwin_ms"] == limit
+
+
+def test_eloreta_reuses_forward_inverse_operators(tmp_path, fake_pipeline, monkeypatch):
+    """Переиспользование MNE-операторов (С1, §7.1): forward/inverse один раз.
+
+    Операторы зависят от «модель × монтаж», не от эпохи: повторный eLORETA
+    той же записи строить их заново не должен. Кэшируется только вариант с
+    ковариацией из файла — эмпирическая (по эпохам) меняется и не кэшируется.
+    """
+    import mne as real_mne
+
+    recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-eloreta-cache")
+    counters = {"forward": 0, "inverse": 0}
+    original_forward = real_mne.make_forward_solution
+    original_inverse = real_mne.minimum_norm.make_inverse_operator
+
+    def counting_forward(*args, **kwargs):
+        counters["forward"] += 1
+        return original_forward(*args, **kwargs)
+
+    def counting_inverse(*args, **kwargs):
+        counters["inverse"] += 1
+        return original_inverse(*args, **kwargs)
+
+    monkeypatch.setattr(real_mne, "make_forward_solution", counting_forward)
+    monkeypatch.setattr(
+        real_mne.minimum_norm, "make_inverse_operator", counting_inverse,
+    )
+    # Ковариация «из файла» → операторы кэшируются (это и проверяем)
+    monkeypatch.setattr(eloreta_module, "_get_covariance", lambda cfg: object())
+    eloreta_module.clear_operator_cache()
+
+    run_eloreta(recording, settings, _params(0))
+    run_eloreta(recording, settings, _params(1))  # другая эпоха — те же операторы
+
+    assert counters["forward"] == 1
+    assert counters["inverse"] == 1

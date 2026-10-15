@@ -1279,6 +1279,84 @@
         }
       }
     },
+    "/api/v1/archive/batches": {
+      "post": {
+        "summary": "Пакетная обработка архива: серия прогонов по каталогу записей (С8)",
+        "description": "Серия прогонов пакета (С1) по каталогу + отчёт «обработано/ошибки/дубли».\n\nРасчёты идут **по снимку параметров** (один на серию), запись в БД — после\nкаждой записи; дубли содержимого (sha256) считаются один раз, остальные\nчестно попадают в «дубли» отчёта. Одна упавшая запись не валит серию.",
+        "operationId": "create_archive_batch_job_api_v1_archive_batches_post",
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_archive_batch_job_api_v1_archive_batches_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/archive/batches/{job_id}": {
+      "get": {
+        "summary": "Отчёт пакетной обработки архива (обработано/ошибки/дубли)",
+        "description": "Построчный отчёт серии. 409 — задача идёт или упала.",
+        "operationId": "get_archive_batch_result_api_v1_archive_batches__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveBatchResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/compare/{job_id}/report": {
       "get": {
         "summary": "Отчёт по результату сравнения (Тип 1) — раздел «Итоги»",
@@ -1634,6 +1712,104 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DipoleScanResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/dipole_batch": {
+      "post": {
+        "summary": "Прогон по набору поддиапазонов (пакет полос, С1/С2)",
+        "description": "Пакет поддиапазонов (С1): несколько расчётов одной сессии и их сопоставление.\n\nНабор результатов вместо одного результата: полосы со своими точками\n(«эпоха × поддиапазон + момент пика GFP своей полосы»), сопоставление по\n**нормированным** величинам (GOF между полосами не сравним — принцип 3\n``docs/rules/dipoles.md``) и кластеры диполей с устойчивостью по\nподдиапазонам (С2). Ядро перебора (свинцовое поле + обращённая `GᵀG`)\nстроится один раз на прогон и переиспользуется всеми полосами.",
+        "operationId": "create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/dipole_batch/{job_id}": {
+      "get": {
+        "summary": "Результат прогона по набору поддиапазонов",
+        "description": "Набор результатов пакета: полосы, сопоставление, кластеры. 409 — задача идёт/упала.",
+        "operationId": "get_dipole_batch_result_api_v1_recordings__recording_id__dipole_batch__job_id__get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DipoleBatchResult"
                 }
               }
             }
@@ -8111,6 +8287,178 @@
         "title": "AnalyzeResponse",
         "description": "POST /api/v1/analyze (и результат job) — итог полного пайплайна."
       },
+      "ArchiveBatchItemOut": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "processed — посчитана; error — ошибка; duplicate — дубль содержимого"
+          },
+          "duplicate_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duplicate Of",
+            "description": "Какой записью уже посчитано это содержимое (sha256); None — не дубль"
+          },
+          "n_points": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Points",
+            "description": "Точек по всем полосам"
+          },
+          "n_kd_passed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Kd Passed",
+            "description": "Прошедших КД; None — вердикт не считался"
+          },
+          "n_bands_ok": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Bands Ok",
+            "description": "Полос без ошибок"
+          },
+          "duration_sec": {
+            "type": "number",
+            "title": "Duration Sec",
+            "default": 0.0
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст ошибки записи; None — не было"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "filename",
+          "state"
+        ],
+        "title": "ArchiveBatchItemOut",
+        "description": "Строка отчёта серии: одна запись каталога."
+      },
+      "ArchiveBatchResult": {
+        "properties": {
+          "pipeline": {
+            "type": "string",
+            "title": "Pipeline",
+            "description": "Чем посчитана серия: `dipole_batch`"
+          },
+          "params_sig": {
+            "type": "string",
+            "title": "Params Sig",
+            "description": "Отпечаток снимка параметров серии"
+          },
+          "requested": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Requested",
+            "description": "Записи серии в порядке обхода"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ArchiveBatchItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ArchiveBatchSummaryOut"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "duration_sec_calc": {
+            "type": "number",
+            "title": "Duration Sec Calc",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "pipeline",
+          "params_sig",
+          "requested",
+          "summary"
+        ],
+        "title": "ArchiveBatchResult",
+        "description": "Отчёт пакетной обработки архива (``kind=archive_batch``, С8).\n\nСерия прогонов пакета (С1) по каталогу записей: расчёты по **снимку\nпараметров** (``params_sig``), запись в БД после каждой записи и построчный\nотчёт «обработано / ошибки / дубли». Одна упавшая запись не валит серию."
+      },
+      "ArchiveBatchSummaryOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "processed": {
+            "type": "integer",
+            "title": "Processed"
+          },
+          "errors": {
+            "type": "integer",
+            "title": "Errors"
+          },
+          "duplicates": {
+            "type": "integer",
+            "title": "Duplicates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "processed",
+          "errors",
+          "duplicates"
+        ],
+        "title": "ArchiveBatchSummaryOut",
+        "description": "Итог серии: «обработано / ошибки / дубли» (``concept.md`` §6 С8)."
+      },
       "ArtifactThresholds": {
         "properties": {
           "z_score_threshold": {
@@ -9182,6 +9530,92 @@
         ],
         "title": "Body_create_analysis_job_api_v1_jobs_post"
       },
+      "Body_create_archive_batch_job_api_v1_archive_batches_post": {
+        "properties": {
+          "recording_ids": {
+            "type": "string",
+            "title": "Recording Ids",
+            "description": "Записи серии через запятую; пусто — весь каталог реестра (лимит — archive_batch_max_recordings)",
+            "default": ""
+          },
+          "bands": {
+            "type": "string",
+            "title": "Bands",
+            "description": "Набор полос через запятую (как в пакете поддиапазонов): ключи и/или свои диапазоны «от-до» в Гц; пусто — 400",
+            "default": ""
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz",
+            "description": "Сетевой фильтр 50/60 Гц"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference",
+            "description": "average | custom",
+            "default": "average"
+          },
+          "reference_channels": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Channels",
+            "description": "Каналы референса через запятую"
+          },
+          "epoch_length_ms": {
+            "type": "number",
+            "title": "Epoch Length Ms",
+            "description": "Длина эпохи — одна на серию (п.7)",
+            "default": 1000.0
+          },
+          "grid_mm": {
+            "type": "number",
+            "maximum": 20.0,
+            "minimum": 2.0,
+            "title": "Grid Mm",
+            "description": "Шаг объёмной сетки поиска, мм",
+            "default": 7.0
+          },
+          "cluster_voxel_norm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Voxel Norm",
+            "description": "Кластеризация (С2): доля от диаметра области поиска"
+          },
+          "cluster_min_points": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Min Points",
+            "description": "Минимум точек в кластере"
+          }
+        },
+        "type": "object",
+        "title": "Body_create_archive_batch_job_api_v1_archive_batches_post"
+      },
       "Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post": {
         "properties": {
           "format": {
@@ -9327,6 +9761,86 @@
           "recording_id_b"
         ],
         "title": "Body_create_compare_job_api_v1_compare_post"
+      },
+      "Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post": {
+        "properties": {
+          "bands": {
+            "type": "string",
+            "title": "Bands",
+            "description": "Набор полос через запятую: именованные ключи (alpha,beta,…) и/или свои диапазоны «от-до» в Гц (например 2.5-4); пусто — 400",
+            "default": ""
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz",
+            "description": "Сетевой фильтр 50/60 Гц"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference",
+            "description": "average | custom",
+            "default": "average"
+          },
+          "reference_channels": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Channels",
+            "description": "Каналы референса через запятую"
+          },
+          "epoch_length_ms": {
+            "type": "number",
+            "title": "Epoch Length Ms",
+            "description": "Длина эпохи — одна на весь прогон (п.7)",
+            "default": 1000.0
+          },
+          "grid_mm": {
+            "type": "number",
+            "maximum": 20.0,
+            "minimum": 2.0,
+            "title": "Grid Mm",
+            "description": "Шаг объёмной сетки поиска, мм",
+            "default": 7.0
+          },
+          "cluster_voxel_norm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Voxel Norm",
+            "description": "Кластеризация (С2): размер вокселя как доля от диаметра области поиска (0.02…0.5; пусто — дефолт сервера)"
+          },
+          "cluster_min_points": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Min Points",
+            "description": "Минимум точек в кластере (пусто — дефолт сервера)"
+          }
+        },
+        "type": "object",
+        "title": "Body_create_dipole_batch_job_api_v1_recordings__recording_id__dipole_batch_post"
       },
       "Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post": {
         "properties": {
@@ -10818,6 +11332,62 @@
         ],
         "title": "CleanZoneOut",
         "description": "Зона вклада чистки (шаг 2 плана): интервал, где чистка изменила сигнал.\n\n``id`` серверный и стабильный между пересчётами (по порядку onset от\n**полного** вклада): UI отменяет зоны по id, поэтому «поехавшие» id\nпревращают отмену в лотерею. ``excluded`` — зона отменена в текущей\nконфигурации (вклада в сигнал не даёт, в списке остаётся)."
+      },
+      "ClusterParamsOut": {
+        "properties": {
+          "voxel_norm": {
+            "type": "number",
+            "title": "Voxel Norm",
+            "description": "Размер вокселя как доля от диаметра области поиска (нормированные единицы)"
+          },
+          "voxel_mm": {
+            "type": "number",
+            "title": "Voxel Mm",
+            "description": "Тот же размер в мм (производная величина)"
+          },
+          "min_points": {
+            "type": "integer",
+            "title": "Min Points"
+          },
+          "connectivity": {
+            "type": "integer",
+            "title": "Connectivity",
+            "description": "Связность сетки (26)"
+          },
+          "basis": {
+            "type": "string",
+            "title": "Basis",
+            "description": "Базис нормировки: share_of_search_sphere_diameter"
+          },
+          "basis_mm": {
+            "type": "number",
+            "title": "Basis Mm",
+            "description": "Диаметр области поиска, мм — нормировочная база"
+          },
+          "kd_filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kd Filter",
+            "description": "Что ушло в кластеры: `kd_passed` — только прошедшие КД; None — пороги методики не заданы, взяты все точки"
+          }
+        },
+        "type": "object",
+        "required": [
+          "voxel_norm",
+          "voxel_mm",
+          "min_points",
+          "connectivity",
+          "basis",
+          "basis_mm"
+        ],
+        "title": "ClusterParamsOut",
+        "description": "Паспорт кластеризации (С2): параметры в нормированных единицах + базис."
       },
       "CompareBandOut": {
         "properties": {
@@ -15753,6 +16323,652 @@
         ],
         "title": "CovarianceQcSideOut",
         "description": "Числа и картинки QC-слоя ковариации одной стороны — «до» или «после» чистки."
+      },
+      "DipoleBandComparisonOut": {
+        "properties": {
+          "band_key": {
+            "type": "string",
+            "title": "Band Key"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "band_hz": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Band Hz"
+          },
+          "n_points": {
+            "type": "integer",
+            "title": "N Points"
+          },
+          "n_kd_passed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Kd Passed"
+          },
+          "kd_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kd Share",
+            "description": "Доля точек, прошедших КД (0..1)"
+          },
+          "moment_share_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moment Share Median",
+            "description": "Медиана доли момента точки от максимума своей полосы (0..1)"
+          },
+          "moment_share_p90": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moment Share P90",
+            "description": "90-й перцентиль той же доли (0..1)"
+          },
+          "peak_time_median_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Time Median Ms",
+            "description": "Медиана моментов пика GFP внутри эпохи, мс"
+          },
+          "median_riv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Riv",
+            "description": "Медианный RIV полосы — единственный кросс-полосной фильтр доверия (2.6)"
+          },
+          "n_clusters": {
+            "type": "integer",
+            "title": "N Clusters",
+            "description": "Кластеров полосы (С2)",
+            "default": 0
+          },
+          "cluster_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Share",
+            "description": "Доля точек полосы, вошедших в кластеры (0..1)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "band_key",
+          "label",
+          "band_hz",
+          "n_points"
+        ],
+        "title": "DipoleBandComparisonOut",
+        "description": "Строка сопоставления полос (С1): **только нормированные величины**.\n\nGOF между полосами не сравним (принцип 3 ``docs/rules/dipoles.md``) — в\nконтракте его нет; кросс-полосной фильтр доверия — только ``median_riv``."
+      },
+      "DipoleBandRunOut": {
+        "properties": {
+          "band_key": {
+            "type": "string",
+            "title": "Band Key",
+            "description": "Стабильный адрес полосы (п.6 dipoles.md)"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Подпись полосы для UI"
+          },
+          "band_hz": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Band Hz",
+            "description": "Границы полосы, Гц (производные от ключа)"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "ok | empty | error"
+          },
+          "n_points": {
+            "type": "integer",
+            "title": "N Points"
+          },
+          "n_kd_passed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Kd Passed",
+            "description": "Прошли КД; None — вердикт не считался"
+          },
+          "n_errors": {
+            "type": "integer",
+            "title": "N Errors",
+            "description": "Число предупреждений полосы"
+          },
+          "moment_max_nam": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moment Max Nam",
+            "description": "Максимум момента полосы, нА·м — база КД внутри полосы"
+          },
+          "median_gof": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Gof",
+            "description": "Медианный GOF полосы, 0..1; **только внутри полосы** — GOF между полосами не сравним (принцип 3 dipoles.md)"
+          },
+          "kd_basis": {
+            "$ref": "#/components/schemas/KdBasisOut",
+            "description": "Базис КД полосы (С0)"
+          },
+          "n_epochs_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Epochs Total"
+          },
+          "n_epochs_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Epochs Used"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/DipoleBatchPointOut"
+            },
+            "type": "array",
+            "title": "Points"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "band_key",
+          "label",
+          "band_hz",
+          "state",
+          "n_points",
+          "n_errors",
+          "kd_basis"
+        ],
+        "title": "DipoleBandRunOut",
+        "description": "Полоса прогона пакета (B7 ``per_band_status``) с её точками."
+      },
+      "DipoleBatchPointOut": {
+        "properties": {
+          "epoch_index": {
+            "type": "integer",
+            "title": "Epoch Index"
+          },
+          "time_ms": {
+            "type": "number",
+            "title": "Time Ms",
+            "description": "Время пика GFP внутри эпохи, мс"
+          },
+          "head_coords": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Head Coords",
+            "description": "Позиция в системе координат головы, мм"
+          },
+          "mni_coords": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mni Coords",
+            "description": "MNI (мм); None — fsaverage недоступен, точка не наводится"
+          },
+          "moment": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Moment",
+            "description": "Единичный вектор момента диполя (направление)"
+          },
+          "amplitude_nam": {
+            "type": "number",
+            "title": "Amplitude Nam",
+            "description": "Амплитуда момента, нА·м"
+          },
+          "gof": {
+            "type": "number",
+            "title": "Gof",
+            "description": "Goodness of fit, 0..1"
+          },
+          "riv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Riv",
+            "description": "Доля отбелённой невязки (in-band ковариация шума), 2.6/N23: кросс-полосной фильтр доверия. GOF между полосами не сравним (узкая полоса завышает R²), RIV — сравним. `null` — не посчитан"
+          },
+          "ci_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Mm",
+            "description": "Радиус доверительной области позиции, мм (2.6/N23): «плато» сетки (узлы в пределах ΔGOF от лучшего); `null` — не оценён"
+          },
+          "anatomical_structure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anatomical Structure",
+            "description": "Ближайшая анатомическая структура по MNI-координате (aparc+aseg — тот же атлас, что и контуры срезов); None — координат/метки нет"
+          },
+          "brodmann_area": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brodmann Area",
+            "description": "Ближайшее поле Бродмана объёмного атласа, например BA17-lh"
+          },
+          "structure_distance_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structure Distance Mm",
+            "description": "Расстояние от точки до ближайшей структуры, мм (шаг 1.4); None — координат/атласа нет"
+          },
+          "brodmann_distance_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brodmann Distance Mm",
+            "description": "Расстояние от точки до ближайшего узла поля Бродмана, мм (шаг 1.4); None — координат/атласа нет"
+          },
+          "outside_brain": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outside Brain",
+            "description": "Точка вне маски мозга brainmask (шаг 1.4): у такой строки подпись «вне мозга (~N мм до X)» вместо выдуманной атрибуции; None — маска недоступна"
+          },
+          "kd_passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kd Passed",
+            "description": "КД (С0): момент ≥ доли максимума своей полосы И GOF ≥ порога; None — «не оценено» (пороги методики не заданы)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "epoch_index",
+          "time_ms",
+          "head_coords",
+          "moment",
+          "amplitude_nam",
+          "gof"
+        ],
+        "title": "DipoleBatchPointOut",
+        "description": "Точка пакета (B6): точка быстрого расчёта + вердикт КД полями точки."
+      },
+      "DipoleBatchResult": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "description": "Метод расчёта: `fast_grid`"
+          },
+          "params_sig": {
+            "type": "string",
+            "title": "Params Sig",
+            "description": "Отпечаток прогона (B7 fingerprint)"
+          },
+          "reference": {
+            "type": "string",
+            "title": "Reference",
+            "default": "average"
+          },
+          "reference_channels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Channels"
+          },
+          "channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Channels"
+          },
+          "sfreq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sfreq"
+          },
+          "epoch_length_ms": {
+            "type": "number",
+            "title": "Epoch Length Ms",
+            "description": "Одна длина эпохи на весь прогон (п.7)"
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz"
+          },
+          "grid_mm": {
+            "type": "number",
+            "title": "Grid Mm"
+          },
+          "bands": {
+            "items": {
+              "$ref": "#/components/schemas/DipoleBandRunOut"
+            },
+            "type": "array",
+            "title": "Bands"
+          },
+          "comparison": {
+            "items": {
+              "$ref": "#/components/schemas/DipoleBandComparisonOut"
+            },
+            "type": "array",
+            "title": "Comparison"
+          },
+          "clusters": {
+            "items": {
+              "$ref": "#/components/schemas/DipoleClusterOut"
+            },
+            "type": "array",
+            "title": "Clusters"
+          },
+          "cluster_params": {
+            "$ref": "#/components/schemas/ClusterParamsOut"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "duration_sec_calc": {
+            "type": "number",
+            "title": "Duration Sec Calc",
+            "default": 0.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "method",
+          "params_sig",
+          "channels",
+          "epoch_length_ms",
+          "grid_mm",
+          "cluster_params"
+        ],
+        "title": "DipoleBatchResult",
+        "description": "Результат задачи пакета поддиапазонов (``kind=dipole_batch``, С1/С2).\n\n**Набор результатов** одной сессии вместо одного: полосы со своими точками\n(ключ «эпоха × поддиапазон»), сопоставление по нормированным величинам и\nкластеры с устойчивостью по поддиапазонам. Одна длина эпохи на прогон (п.7)."
+      },
+      "DipoleClusterOut": {
+        "properties": {
+          "band_key": {
+            "type": "string",
+            "title": "Band Key"
+          },
+          "cluster_index": {
+            "type": "integer",
+            "title": "Cluster Index",
+            "description": "Номер в полосе (крупные первыми)"
+          },
+          "centroid_mni": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Centroid Mni",
+            "description": "Центроид, MNI мм"
+          },
+          "n_points": {
+            "type": "integer",
+            "title": "N Points"
+          },
+          "share": {
+            "type": "number",
+            "title": "Share",
+            "description": "Доля точек полосы в кластере (0..1)"
+          },
+          "volume_cm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Cm3"
+          },
+          "density_per_cm3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density Per Cm3",
+            "description": "Плотность точек, 1/см³"
+          },
+          "extent_mm": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Extent Mm",
+            "description": "Протяжённость по осям x/y/z, мм"
+          },
+          "top_structures": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Structures"
+          },
+          "top_brodmann": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Top Brodmann"
+          },
+          "n_bands_matched": {
+            "type": "integer",
+            "title": "N Bands Matched",
+            "description": "Устойчивость: в скольких полосах пакета найден кластер той же области"
+          },
+          "band_share": {
+            "type": "number",
+            "title": "Band Share",
+            "description": "Доля этих полос от числа полос пакета (0..1)"
+          },
+          "matched_band_keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Band Keys"
+          }
+        },
+        "type": "object",
+        "required": [
+          "band_key",
+          "cluster_index",
+          "n_points",
+          "share",
+          "n_bands_matched",
+          "band_share"
+        ],
+        "title": "DipoleClusterOut",
+        "description": "Кластер диполей прогона (С2, B8): геометрия + устойчивость по поддиапазонам."
       },
       "DipoleFit": {
         "properties": {

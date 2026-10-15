@@ -9,6 +9,7 @@
 ``docs/rules/api-jobs.md``): молча зажимать значения нельзя, пользователь
 должен видеть, что именно не так.
 """
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -16,8 +17,10 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.schemas.analysis import PreprocessStage
+from app.services.archive_batch import ArchiveBatchParams
 from app.services.artifact_cleaner import CLEAN_METHODS, CleanSpec
 from app.services.compare import CompareParams, TfrSpec
+from app.services.dipole_batch import BandSpec, DipoleBatchParams
 from app.services.dipole_scanner import DipoleRefineParams, DipoleScanParams
 from app.services.eloreta import EloretaParams
 from app.services.evoked import EvokedParams
@@ -769,3 +772,158 @@ def report_params(
     return ReportParams(
         preprocess=base, grid_mm=grid_mm, band_keys=report_band_keys(bands),
     )
+
+
+_CUSTOM_BAND_RE = re.compile(r"^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$")
+
+
+def dipole_batch_bands(raw: str | None) -> list[BandSpec]:
+    """Полосы пакета (С1) из формы: именованные ключи и «свои» диапазоны «от-до».
+
+    Список — через запятую («alpha,2.5-4,mu»): именованная полоса — ключ из
+    ``freq_bands``/``functional_bands`` (границы производные), «своя» — запись
+    «от-до» в Гц с ключом ``custom:от-до`` (адрес стабилен — п.6
+    ``docs/rules/dipoles.md``). Порядок сохраняется, дубли снимаются по ключу.
+    Пустой список — 400: одиночный расчёт живёт в ``POST …/dipoles``, пакет —
+    это **набор** полос.
+    """
+    if not raw or not raw.strip():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Пакету нужен набор полос: перечислите ключи (например alpha,beta) "
+                "и/или свои диапазоны «от-до» в Гц (например 2.5-4)"
+            ),
+        )
+    catalog = report_band_catalog(settings)
+    specs: list[BandSpec] = []
+    seen: set[str] = set()
+    unknown: list[str] = []
+    for item in raw.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if item in catalog:
+            lo_hz, hi_hz = catalog[item]
+            key, label = item, item
+        else:
+            match = _CUSTOM_BAND_RE.match(item)
+            if match is None:
+                unknown.append(item)
+                continue
+            lo_hz, hi_hz = float(match.group(1)), float(match.group(2))
+            if not (0.0 < lo_hz < hi_hz <= 500.0):
+                unknown.append(item)
+                continue
+            key = f"custom:{lo_hz:g}-{hi_hz:g}"
+            label = f"{lo_hz:g}–{hi_hz:g} Гц"
+        if key in seen:
+            continue
+        seen.add(key)
+        specs.append(
+            BandSpec(band_key=key, lo_hz=float(lo_hz), hi_hz=float(hi_hz), label=label),
+        )
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Неизвестные полосы: {', '.join(unknown)}. Именованные: "
+                f"{', '.join(catalog)}; свои — записью «от-до» в Гц (например 2.5-4)"
+            ),
+        )
+    if len(specs) > settings.dipole_batch_max_bands:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Слишком много полос пакета: {len(specs)} при лимите "
+                f"{settings.dipole_batch_max_bands}"
+            ),
+        )
+    return specs
+
+
+def dipole_batch_params(
+    *,
+    bands: str | None,
+    notch_hz: float | None,
+    reference: str,
+    reference_channels: str | None,
+    epoch_length_ms: float,
+    grid_mm: float,
+    cluster_voxel_norm: float | None = None,
+    cluster_min_points: int | None = None,
+) -> DipoleBatchParams:
+    """Параметры прогона по набору поддиапазонов (С1/С2).
+
+    Одна длина эпохи на весь прогон (п.7 ``docs/rules/dipoles.md``);
+    ``cluster_voxel_norm`` — размер вокселя кластеризации в **нормированных**
+    единицах (доля от диаметра области поиска, С2), ``None`` — дефолт конфига.
+    """
+    require_epoch_length(epoch_length_ms)
+    specs = dipole_batch_bands(bands)
+    voxel_norm = (
+        settings.cluster_voxel_norm
+        if cluster_voxel_norm is None else float(cluster_voxel_norm)
+    )
+    if not 0.02 <= voxel_norm <= 0.5:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "cluster_voxel_norm — доля от диаметра области поиска в диапазоне "
+                f"0.02…0.5 (получено: {voxel_norm:g})"
+            ),
+        )
+    min_points = (
+        settings.cluster_min_points
+        if cluster_min_points is None else int(cluster_min_points)
+    )
+    if not 1 <= min_points <= 100:
+        raise HTTPException(
+            status_code=400,
+            detail=f"cluster_min_points — от 1 до 100 (получено: {min_points})",
+        )
+    return DipoleBatchParams(
+        bands=specs,
+        notch_hz=notch_hz,
+        epoch_length_ms=epoch_length_ms,
+        reference=reference,
+        reference_channels=parse_reference_channels(reference_channels),
+        grid_mm=grid_mm,
+        cluster_voxel_norm=voxel_norm,
+        cluster_min_points=min_points,
+    )
+
+
+def archive_batch_params(
+    *,
+    recording_ids: str | None,
+    bands: str | None,
+    notch_hz: float | None,
+    reference: str,
+    reference_channels: str | None,
+    epoch_length_ms: float,
+    grid_mm: float,
+    cluster_voxel_norm: float | None = None,
+    cluster_min_points: int | None = None,
+) -> ArchiveBatchParams:
+    """Параметры серии (С8): записи (пусто — весь каталог) + снимок расчёта.
+
+    Снимок один на серию (``concept.md`` §6 С8 «расчёты по снимку параметров»):
+    все записи считаются одинаково, отпечаток снимка — ``params_sig`` отчёта.
+    """
+    batch = dipole_batch_params(
+        bands=bands, notch_hz=notch_hz, reference=reference,
+        reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, grid_mm=grid_mm,
+        cluster_voxel_norm=cluster_voxel_norm, cluster_min_points=cluster_min_points,
+    )
+    ids = [item.strip() for item in (recording_ids or "").split(",") if item.strip()]
+    if len(ids) > settings.archive_batch_max_recordings:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Слишком много записей серии: {len(ids)} при лимите "
+                f"{settings.archive_batch_max_recordings}"
+            ),
+        )
+    return ArchiveBatchParams(recording_ids=ids, batch=batch)

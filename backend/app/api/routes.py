@@ -42,8 +42,10 @@ from app.api.assets import (
     asset_response,
 )
 from app.api.params import (
+    archive_batch_params,
     bundle_params,
     compare_params,
+    dipole_batch_params,
     dipole_refine_params,
     dipole_scan_params,
     eloreta_params,
@@ -58,11 +60,13 @@ from app.api.params import (
     validate_analysis_request,
 )
 from app.api.recording_jobs import (
+    archive_batch_job_result,
     compare_job_result,
     job_by_id,
     job_status,
     recording_job_result,
     require_recording,
+    submit_archive_batch_job,
     submit_compare_job,
     submit_recording_job,
 )
@@ -73,6 +77,7 @@ from app.schemas.analysis import (
     AnalysisDetailOut,
     AnalysisSummaryOut,
     AnalyzeResponse,
+    ArchiveBatchResult,
     ArtifactThresholds,
     BrodmannAreaOut,
     BrodmannIndexOut,
@@ -82,6 +87,7 @@ from app.schemas.analysis import (
     ContourSliceOut,
     ContoursOut,
     ContoursRef,
+    DipoleBatchResult,
     DipoleOut,
     DipolePointOut,
     DipoleRefineResult,
@@ -912,6 +918,63 @@ async def get_compare_result(job_id: str) -> CompareResult:
     return CompareResult(**job.result)
 
 
+@router.post(
+    "/archive/batches", status_code=202, response_model=JobCreated,
+    summary="Пакетная обработка архива: серия прогонов по каталогу записей (С8)",
+)
+async def create_archive_batch_job(
+    recording_ids: str = Form(
+        "",
+        description=(
+            "Записи серии через запятую; пусто — весь каталог реестра "
+            "(лимит — archive_batch_max_recordings)"
+        ),
+    ),
+    bands: str = Form(
+        "", description=(
+            "Набор полос через запятую (как в пакете поддиапазонов): ключи "
+            "и/или свои диапазоны «от-до» в Гц; пусто — 400"
+        ),
+    ),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
+    epoch_length_ms: float = Form(1000.0, description="Длина эпохи — одна на серию (п.7)"),
+    grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг объёмной сетки поиска, мм"),
+    cluster_voxel_norm: float | None = Form(
+        None, description="Кластеризация (С2): доля от диаметра области поиска",
+    ),
+    cluster_min_points: int | None = Form(
+        None, description="Минимум точек в кластере",
+    ),
+) -> JobCreated:
+    """Серия прогонов пакета (С1) по каталогу + отчёт «обработано/ошибки/дубли».
+
+    Расчёты идут **по снимку параметров** (один на серию), запись в БД — после
+    каждой записи; дубли содержимого (sha256) считаются один раз, остальные
+    честно попадают в «дубли» отчёта. Одна упавшая запись не валит серию.
+    """
+    params = archive_batch_params(
+        recording_ids=recording_ids, bands=bands, notch_hz=notch_hz,
+        reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, grid_mm=grid_mm,
+        cluster_voxel_norm=cluster_voxel_norm, cluster_min_points=cluster_min_points,
+    )
+    for known_id in params.recording_ids:
+        require_recording(known_id)  # 404 с текстом для UI: неизвестная/устаревшая
+    return submit_archive_batch_job(params)
+
+
+@router.get(
+    "/archive/batches/{job_id}", response_model=ArchiveBatchResult,
+    summary="Отчёт пакетной обработки архива (обработано/ошибки/дубли)",
+)
+async def get_archive_batch_result(job_id: str) -> ArchiveBatchResult:
+    """Построчный отчёт серии. 409 — задача идёт или упала."""
+    job = archive_batch_job_result(job_id)
+    return ArchiveBatchResult(**job.result)
+
+
 @router.get(
     "/compare/{job_id}/report", response_model=ReportHtmlOut,
     summary="Отчёт по результату сравнения (Тип 1) — раздел «Итоги»",
@@ -1054,6 +1117,68 @@ async def get_dipole_scan_result(recording_id: str, job_id: str) -> DipoleScanRe
     """Точки диполей (MNI, момент, амплитуда, GOF). 409 — задача идёт или упала."""
     job = recording_job_result(recording_id, job_id, "dipoles")
     return DipoleScanResult(**job.result)
+
+
+@router.post(
+    "/recordings/{recording_id}/dipole_batch", status_code=202, response_model=JobCreated,
+    summary="Прогон по набору поддиапазонов (пакет полос, С1/С2)",
+)
+async def create_dipole_batch_job(
+    recording_id: str,
+    bands: str = Form(
+        "", description=(
+            "Набор полос через запятую: именованные ключи (alpha,beta,…) "
+            "и/или свои диапазоны «от-до» в Гц (например 2.5-4); пусто — 400"
+        ),
+    ),
+    notch_hz: float | None = Form(None, description="Сетевой фильтр 50/60 Гц"),
+    reference: str = Form("average", description="average | custom"),
+    reference_channels: str | None = Form(None, description="Каналы референса через запятую"),
+    epoch_length_ms: float = Form(1000.0, description="Длина эпохи — одна на весь прогон (п.7)"),
+    grid_mm: float = Form(7.0, ge=2.0, le=20.0, description="Шаг объёмной сетки поиска, мм"),
+    cluster_voxel_norm: float | None = Form(
+        None,
+        description=(
+            "Кластеризация (С2): размер вокселя как доля от диаметра области "
+            "поиска (0.02…0.5; пусто — дефолт сервера)"
+        ),
+    ),
+    cluster_min_points: int | None = Form(
+        None, description="Минимум точек в кластере (пусто — дефолт сервера)",
+    ),
+) -> JobCreated:
+    """Пакет поддиапазонов (С1): несколько расчётов одной сессии и их сопоставление.
+
+    Набор результатов вместо одного результата: полосы со своими точками
+    («эпоха × поддиапазон + момент пика GFP своей полосы»), сопоставление по
+    **нормированным** величинам (GOF между полосами не сравним — принцип 3
+    ``docs/rules/dipoles.md``) и кластеры диполей с устойчивостью по
+    поддиапазонам (С2). Ядро перебора (свинцовое поле + обращённая `GᵀG`)
+    строится один раз на прогон и переиспользуется всеми полосами.
+    """
+    recording = require_recording(recording_id)
+    params = dipole_batch_params(
+        bands=bands, notch_hz=notch_hz,
+        reference=reference, reference_channels=reference_channels,
+        epoch_length_ms=epoch_length_ms, grid_mm=grid_mm,
+        cluster_voxel_norm=cluster_voxel_norm, cluster_min_points=cluster_min_points,
+    )
+    return submit_recording_job(
+        "dipole_batch", recording, params,
+        meta={"bands": [band.band_key for band in params.bands]},
+    )
+
+
+@router.get(
+    "/recordings/{recording_id}/dipole_batch/{job_id}", response_model=DipoleBatchResult,
+    summary="Результат прогона по набору поддиапазонов",
+)
+async def get_dipole_batch_result(
+    recording_id: str, job_id: str,
+) -> DipoleBatchResult:
+    """Набор результатов пакета: полосы, сопоставление, кластеры. 409 — задача идёт/упала."""
+    job = recording_job_result(recording_id, job_id, "dipole_batch")
+    return DipoleBatchResult(**job.result)
 
 
 @router.post(

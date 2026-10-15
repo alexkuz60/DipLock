@@ -5,6 +5,8 @@ import { vi } from 'vitest'
 import {
   calcJobFixture,
   compareResultFixture,
+  dipoleBatchResultFixture,
+  archiveBatchResultFixture,
   dipoleRefineResultFixture,
   dipoleScanResultFixture,
   eloretaResultFixture,
@@ -33,8 +35,10 @@ import {
 import { encodeSignalBlob } from './signalBlob'
 import { spectrogramBlobFixture } from './spectrogramBlob'
 import type {
+  ArchiveBatchResult,
   CompareResult,
   ContourSlice,
+  DipoleBatchResult,
   DipoleRefineResult,
   DipoleScanResult,
   EloretaResult,
@@ -72,7 +76,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 /** 202-ответ запуска задачи расчёта (срез 3.4): id задачи и адреса поллинга. */
 function calcJobCreated(
   jobId: string,
-  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine' | 'evoked' | 'report' | 'bundle' | 'eloreta',
+  kind: 'spectrum' | 'dipoles' | 'spectrogram' | 'dipole_refine' | 'evoked' | 'report' | 'bundle' | 'eloreta' | 'dipole_batch',
 ): Record<string, string> {
   return {
     job_id: jobId,
@@ -158,6 +162,10 @@ export type MockApiOptions = {
   spectrumResult?: SpectrumResult
   /** Явный результат быстрого расчёта диполей */
   dipoleScanResult?: DipoleScanResult
+  /** Явный результат пакета поддиапазонов (`GET …/dipole_batch/{id}`, С1) */
+  dipoleBatchResult?: DipoleBatchResult
+  /** Явный отчёт пакетной обработки архива (`GET /archive/batches/{id}`, С8) */
+  archiveBatchResult?: ArchiveBatchResult
   /** Явный результат точного уточнения эпохи (кнопка «Уточнить…») */
   dipoleRefineResult?: DipoleRefineResult
   /** Явный результат eLORETA (остаток B9); иначе — фикстура */
@@ -345,6 +353,34 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse(calcJobCreated(calcJobFixture.job_id, 'eloreta'), 202)
       }
       return jsonResponse(options.eloretaResult ?? eloretaResultFixture())
+    }
+    // Пакет поддиапазонов (С1): пара запросов задачи — `/dipole_batch` (POST)
+    // и `/dipole_batch/{id}` (GET); подстрока `/dipole_batch` не пересекается
+    // с `/dipoles`, порядок веток не важен, но держим её рядом с одиночным
+    if (url.includes('/dipole_batch')) {
+      if (method === 'POST') {
+        if (options.calcStartFails) {
+          return jsonResponse({ detail: 'Запись не найдена или уже удалена' }, 404)
+        }
+        return jsonResponse(calcJobCreated('job-batch-1', 'dipole_batch'), 202)
+      }
+      return jsonResponse(options.dipoleBatchResult ?? dipoleBatchResultFixture())
+    }
+    // Пакетная обработка архива (С8): задача принадлежит серии, её результат —
+    // отчёт «обработано/ошибки/дубли» на своём адресе
+    if (url.includes('/archive/batches')) {
+      if (method === 'POST') {
+        return jsonResponse(
+          {
+            job_id: 'job-archive-1',
+            status: 'queued',
+            poll_url: '/api/v1/jobs/job-archive-1',
+            result_url: '/api/v1/archive/batches/job-archive-1',
+          },
+          202,
+        )
+      }
+      return jsonResponse(options.archiveBatchResult ?? archiveBatchResultFixture())
     }
     if (url.includes('/dipoles')) {
       if (method === 'POST') {

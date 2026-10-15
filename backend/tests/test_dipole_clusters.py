@@ -103,3 +103,47 @@ def test_cluster_params_passport():
     assert params["voxel_mm"] == settings.group_cluster_voxel_mm
     assert params["min_points"] == settings.group_cluster_min_points
     assert params["connectivity"] == 26
+
+
+# ---------- С2: нормированные единицы и устойчивость по поддиапазонам ----------
+
+
+def test_resolve_cluster_params_normalizes_and_keeps_basis():
+    """Параметры прогона в нормированных единицах: доля + мм + базис (С2)."""
+    from app.services.dipole_clusters import (
+        CLUSTER_NORM_BASIS,
+        SEARCH_DIAMETER_MM,
+        resolve_cluster_params,
+    )
+
+    params = resolve_cluster_params(0.1, 3)
+    assert params["voxel_norm"] == 0.1
+    assert params["voxel_mm"] == pytest.approx(0.1 * SEARCH_DIAMETER_MM)
+    assert params["min_points"] == 3
+    assert params["basis"] == CLUSTER_NORM_BASIS
+    assert params["basis_mm"] == SEARCH_DIAMETER_MM
+
+
+def test_cluster_stability_matches_bands_by_centroid():
+    """«Тот же» кластер соседней полосы — центроид в пределах диагонали вокселя."""
+    from app.services.dipole_clusters import cluster_stability
+
+    left = [0.0, 0.0, 50.0]
+    far = [60.0, 0.0, 30.0]
+    clusters_by_band = {
+        "alpha": [
+            {"centroid_mni": left, "n_points": 5},
+            {"centroid_mni": far, "n_points": 4},
+        ],
+        "beta": [{"centroid_mni": [2.0, 1.0, 51.0], "n_points": 3}],
+    }
+    stability = cluster_stability(clusters_by_band, voxel_mm=12.0)
+
+    alpha0 = stability["alpha:0"]
+    assert alpha0["matched_band_keys"] == ["alpha", "beta"]  # бета-кластер рядом
+    assert alpha0["n_bands_matched"] == 2
+    assert alpha0["band_share"] == 1.0
+    alpha1 = stability["alpha:1"]
+    assert alpha1["matched_band_keys"] == ["alpha"]  # дальний кластер одинок
+    assert alpha1["band_share"] == 0.5
+    assert stability["beta:0"]["matched_band_keys"] == ["alpha", "beta"]

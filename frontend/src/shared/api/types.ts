@@ -219,6 +219,15 @@ export type DipoleScanResult = Schemas['DipoleScanResult']
 
 export type DipoleRefineResult = Schemas['DipoleRefineResult']
 export type EloretaResult = Schemas['EloretaResult']
+export type DipoleBatchResult = Schemas['DipoleBatchResult']
+export type DipoleBandRun = Schemas['DipoleBandRunOut']
+export type DipoleBandComparison = Schemas['DipoleBandComparisonOut']
+export type DipoleBatchPoint = Schemas['DipoleBatchPointOut']
+export type DipoleCluster = Schemas['DipoleClusterOut']
+export type ClusterParams = Schemas['ClusterParamsOut']
+export type ArchiveBatchResult = Schemas['ArchiveBatchResult']
+export type ArchiveBatchItem = Schemas['ArchiveBatchItemOut']
+export type ArchiveBatchSummary = Schemas['ArchiveBatchSummaryOut']
 
 /** Виртуальный канал «ЭЭГ» из паспорта записи (микс групп 10-20) */
 export type RecordingMix = Schemas['ChannelMixOut']

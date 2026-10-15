@@ -5,6 +5,14 @@ import type {
   BundleResult,
   CompareResult,
   ContourSlice,
+  ArchiveBatchResult,
+  ArchiveBatchItem,
+  ArchiveBatchSummary,
+  ClusterParams,
+  DipoleBandComparison,
+  DipoleBandRun,
+  DipoleBatchResult,
+  DipoleCluster,
   DipoleScanPoint,
   DipoleRefineResult,
   EloretaResult,
@@ -1245,6 +1253,183 @@ export function llmDecideProbeFixture(
     },
     error: null,
     models: [],
+    ...overrides,
+  }
+}
+
+/** Полоса прогона пакета (С1): точки + статус + базис КД своей полосы. */
+function batchBandRun(
+  scan: DipoleScanResult,
+  bandKey: string,
+  label: string,
+  bandHz: [number, number],
+): DipoleBandRun {
+  const points = (scan.points ?? []).slice(0, 3)
+  return {
+    band_key: bandKey,
+    label,
+    band_hz: bandHz,
+    state: 'ok',
+    n_points: points.length,
+    n_kd_passed: 2,
+    n_errors: 0,
+    moment_max_nam: 60,
+    median_gof: 0.85,
+    kd_basis: {
+      moment_share_x: 0.5,
+      gof_min: 0.8,
+      moment_max_nam: 60,
+      moment_basis: 'share_of_band_max',
+      gof_basis: 'absolute',
+    },
+    n_epochs_total: 4,
+    n_epochs_used: 4,
+    points: points.map((point, index) => ({ ...point, kd_passed: index < 2 })),
+    warnings: [],
+  }
+}
+
+/**
+ * Прогон по набору поддиапазонов (С1/С2): две полосы (alpha/beta),
+ * сопоставление нормированных величин и один кластер с устойчивостью.
+ */
+export function dipoleBatchResultFixture(
+  overrides: Partial<DipoleBatchResult> = {},
+): DipoleBatchResult {
+  const scan = dipoleScanResultFixture()
+  const alpha = batchBandRun(scan, 'alpha', 'alpha', [8, 13])
+  const beta = batchBandRun(scan, 'beta', 'beta', [13, 30])
+  const comparison: DipoleBandComparison[] = [
+    {
+      band_key: 'alpha',
+      label: 'alpha',
+      band_hz: [8, 13],
+      n_points: alpha.n_points ?? 3,
+      n_kd_passed: 2,
+      kd_share: 2 / 3,
+      moment_share_median: 0.62,
+      moment_share_p90: 1,
+      peak_time_median_ms: 120,
+      median_riv: 0.12,
+      n_clusters: 1,
+      cluster_share: 2 / 3,
+    },
+    {
+      band_key: 'beta',
+      label: 'beta',
+      band_hz: [13, 30],
+      n_points: beta.n_points ?? 3,
+      n_kd_passed: 1,
+      kd_share: 1 / 3,
+      moment_share_median: 0.41,
+      moment_share_p90: 0.9,
+      peak_time_median_ms: 80,
+      median_riv: 0.2,
+      n_clusters: 0,
+      cluster_share: 0,
+    },
+  ]
+  const clusterParams: ClusterParams = {
+    voxel_norm: 0.1,
+    voxel_mm: 14,
+    min_points: 2,
+    connectivity: 26,
+    basis: 'share_of_search_sphere_diameter',
+    basis_mm: 140,
+    kd_filter: 'kd_passed',
+  }
+  const cluster: DipoleCluster = {
+    band_key: 'alpha',
+    cluster_index: 0,
+    centroid_mni: [-42, -18, 58],
+    n_points: 2,
+    share: 2 / 3,
+    volume_cm3: 2.74,
+    density_per_cm3: 0.7,
+    extent_mm: [7, 7, 7],
+    top_structures: ['таламус (слева)'],
+    top_brodmann: ['BA7-lh'],
+    n_bands_matched: 1,
+    band_share: 0.5,
+    matched_band_keys: ['alpha'],
+  }
+  return {
+    recording_id: scan.recording_id,
+    method: 'fast_grid',
+    params_sig: 'sig-batch-1',
+    reference: 'average',
+    reference_channels: null,
+    channels: scan.channels,
+    sfreq: scan.sfreq,
+    epoch_length_ms: scan.epoch_length_ms,
+    notch_hz: null,
+    grid_mm: scan.grid_mm,
+    bands: [alpha, beta],
+    comparison,
+    clusters: [cluster],
+    cluster_params: clusterParams,
+    warnings: [],
+    duration_sec_calc: 6.2,
+    ...overrides,
+  }
+}
+
+/**
+ * Отчёт пакетной обработки архива (С8): «обработано / ошибки / дубли»
+ * построчно по записям каталога.
+ */
+export function archiveBatchResultFixture(
+  overrides: Partial<ArchiveBatchResult> = {},
+): ArchiveBatchResult {
+  const items: ArchiveBatchItem[] = [
+    {
+      recording_id: 'rec-1',
+      filename: 'probe.edf',
+      state: 'processed',
+      duplicate_of: null,
+      n_points: 8,
+      n_kd_passed: 4,
+      n_bands_ok: 2,
+      duration_sec: 6.2,
+      error: null,
+    },
+    {
+      recording_id: 'rec-2',
+      filename: 'copy.edf',
+      state: 'duplicate',
+      duplicate_of: 'rec-1',
+      n_points: null,
+      n_kd_passed: null,
+      n_bands_ok: null,
+      duration_sec: 0,
+      error: null,
+    },
+    {
+      recording_id: 'rec-3',
+      filename: 'broken.edf',
+      state: 'error',
+      duplicate_of: null,
+      n_points: null,
+      n_kd_passed: null,
+      n_bands_ok: null,
+      duration_sec: 0.4,
+      error: 'Для расчёта нужно минимум 4 канала с позициями в монтаже 10-20',
+    },
+  ]
+  const summary: ArchiveBatchSummary = {
+    total: 3,
+    processed: 1,
+    errors: 1,
+    duplicates: 1,
+  }
+  return {
+    pipeline: 'dipole_batch',
+    params_sig: 'sig-batch-1',
+    requested: items.map((item) => item.recording_id),
+    items,
+    summary,
+    warnings: ['broken.edf: Для расчёта нужно минимум 4 канала с позициями в монтаже 10-20'],
+    duration_sec_calc: 12.5,
     ...overrides,
   }
 }

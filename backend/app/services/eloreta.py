@@ -72,6 +72,66 @@ def _read_src(path: str) -> list:
     return mne.read_source_spaces(path, verbose=False)
 
 
+# Кэш forward/inverse-операторов eLORETA (С1/§7.1): операторы зависят только от
+# модели головы (BEM/src/trans) и монтажа — не от сигнала и не от полосы, а
+# стоят дороже всего в MNE. Ограничен: операторы — десятки МБ.
+_OPERATOR_CACHE: dict[tuple, tuple[Any, Any]] = {}
+_OPERATOR_CACHE_MAX = 4
+
+
+def clear_operator_cache() -> None:
+    """Сброс кэша операторов (тесты и смена ассетов fsaverage)."""
+    _OPERATOR_CACHE.clear()
+
+
+def _forward_inverse(
+    cfg: Settings, info: Any, src: Any, bem: Any, cov: Any, *,
+    cacheable: bool,
+) -> tuple[Any, Any]:
+    """Forward + inverse операторы eLORETA, с переиспользованием на пакет (С1).
+
+    Пакет поддиапазонов и повторные eLORETA одной записи строят операторы
+    **один раз** на пару «модель × монтаж» (оптимизация ``audits/audit_qwen.md``
+    §7.1: «один раз подготовить сигнал и forward/inverse и переиспользовать их
+    для всех полос»). Кэшируется только вариант с ковариацией из файла
+    (``_get_covariance``): эмпирическая ковариация (``compute_covariance`` по
+    эпохам) меняется от вызова к вызову — её молча не подменяем.
+    """
+    key = (
+        str(cfg.fsaverage_trans),
+        src_path(cfg),
+        tuple(info["ch_names"]),
+        float(info["sfreq"]),
+        cacheable,
+    )
+    if cacheable and key in _OPERATOR_CACHE:
+        journal.record(
+            "localize", "eloreta_operator", ms=0.0,
+            note="forward/inverse взяты из кэша (переиспользование, С1)", epochs=0,
+        )
+        return _OPERATOR_CACHE[key]
+    with journal.step(
+        "localize", "eloreta_forward", epochs=1,
+        note=f"channels={len(info['ch_names'])}",
+    ):
+        forward = mne.make_forward_solution(
+            info, trans=cfg.fsaverage_trans, src=src, bem=bem,
+            eeg=True, meg=False, n_jobs=1, verbose=False,
+        )
+    with journal.step(
+        "localize", "eloreta_inverse", epochs=1,
+        note=f"lambda2={cfg.eloreta_lambda2:g}",
+    ):
+        inverse = mne.minimum_norm.make_inverse_operator(
+            info, forward, cov, verbose=False,
+        )
+    if cacheable:
+        if len(_OPERATOR_CACHE) >= _OPERATOR_CACHE_MAX:
+            _OPERATOR_CACHE.pop(next(iter(_OPERATOR_CACHE)))
+        _OPERATOR_CACHE[key] = (forward, inverse)
+    return forward, inverse
+
+
 def run_eloreta(
     recording: Any,
     cfg: Settings,
@@ -135,30 +195,22 @@ def run_eloreta(
     except (FileNotFoundError, OSError) as exc:
         raise EloretaError(f"eLORETA недоступна: {exc}") from exc
     cov = _get_covariance(cfg)
+    cacheable = cov is not None
     if cov is None:
         cov = mne.compute_covariance(epochs, method="empirical", verbose=False)
 
-    with journal.step(
-        "localize", "eloreta_forward", epochs=1,
-        note=f"epoch={params.epoch_index + 1}, окно ±{params.halfwin_ms:g} мс",
-    ):
-        forward = mne.make_forward_solution(
-            info, trans=cfg.fsaverage_trans, src=src, bem=bem,
-            eeg=True, meg=False, n_jobs=1, verbose=False,
-        )
+    # forward/inverse строятся один раз на «модель × монтаж» и переиспользуются
+    # (кэш `_OPERATOR_CACHE`, С1/§7.1): пакет полос и повторные eLORETA одной
+    # записи не платят за MNE-операторы на каждый прогон.
+    _forward, inverse = _forward_inverse(
+        cfg, info, src, bem, cov, cacheable=cacheable,
+    )
 
     report("eloreta", 0.6, message="Обратная задача (eLORETA)")
-    with journal.step(
-        "localize", "eloreta_inverse", epochs=1,
-        note=f"lambda2={cfg.eloreta_lambda2:g}",
-    ):
-        inverse = mne.minimum_norm.make_inverse_operator(
-            info, forward, cov, verbose=False,
-        )
-        stc = mne.minimum_norm.apply_inverse(
-            evoked, inverse, lambda2=cfg.eloreta_lambda2,
-            method="eLORETA", verbose=False,
-        )
+    stc = mne.minimum_norm.apply_inverse(
+        evoked, inverse, lambda2=cfg.eloreta_lambda2,
+        method="eLORETA", verbose=False,
+    )
 
     report("eloreta", 0.9, message="Пик и ROI (апарц+асег)")
     peak, roi_rows, other_share, atlas_missing = _peak_and_roi(cfg, stc, src)

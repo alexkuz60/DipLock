@@ -49,6 +49,7 @@ import {
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { epochRuleWarnings, type EpochSignalInfo } from '@/shared/lib/epochRules'
+import { BatchPanel } from './BatchPanel'
 import {
   BANDWIDTH_RANGE,
   BAND_RANGE,
@@ -446,6 +447,8 @@ export function DipolesPanel() {
           </ul>
         ) : null}
       </Panel>
+      {/* С1/С2: набор поддиапазонов одним прогоном — сопоставление и кластеры */}
+      <BatchPanel />
     </>
   )
 }

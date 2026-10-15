@@ -630,3 +630,94 @@ describe('отмена расчёта (3.2)', () => {
     expect(cancelSpy).not.toHaveBeenCalled()
   })
 })
+
+describe('пакет поддиапазонов (С1)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    useDipoleCalc.setState({
+      params: { ...CALC_PARAM_DEFAULTS },
+      batch: null,
+      batchJob: null,
+      batchError: null,
+      batchBandKeys: [],
+      activeBandKey: null,
+      result: null,
+      job: null,
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('не запускает пакет без набора полос: понятная ошибка, ни одного запроса', async () => {
+    const fetchSpy = mockApiFetch()
+    await useDipoleCalc.getState().runBatch('rec-1')
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(useDipoleCalc.getState().batchError).toMatch(/минимум 2 полосы/)
+
+    useDipoleCalc.getState().setBatchBandKeys(['alpha'])
+    await useDipoleCalc.getState().runBatch('rec-1')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('снимает дубли выбора и зажимает набор лимитом полос', () => {
+    useDipoleCalc.getState().setBatchBandKeys(['alpha', 'alpha', 'beta'])
+    expect(useDipoleCalc.getState().batchBandKeys).toEqual(['alpha', 'beta'])
+  })
+
+  it('проводит пакет задачей: 202 → поллинг → набор результатов', async () => {
+    const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
+    useDipoleCalc.getState().setBatchBandKeys(['alpha', 'beta'])
+
+    await useDipoleCalc.getState().runBatch('rec-1')
+
+    const urls = fetchSpy.mock.calls.map(
+      ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
+    )
+    expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/dipole_batch')
+    expect(urls.some((url) => url.startsWith('GET /api/v1/jobs/'))).toBe(true)
+    expect(
+      urls.some((url) => url.startsWith('GET /api/v1/recordings/rec-1/dipole_batch/')),
+    ).toBe(true)
+
+    const state = useDipoleCalc.getState()
+    expect(state.batch?.bands).toHaveLength(2)
+    expect(state.batchJob?.status).toBe('succeeded')
+    expect(state.batchError).toBeNull()
+    // Активная полоса — первая; `result` держит её скан (прежняя отрисовка)
+    expect(state.activeBandKey).toBe('alpha')
+    expect(state.result?.filter_band_hz).toEqual([8, 13])
+  })
+
+  it('переключение полосы набора меняет result и снимает прежние выделение/кадр', async () => {
+    mockApiFetch({ calcJob: calcJobFixture })
+    useDipoleCalc.getState().setBatchBandKeys(['alpha', 'beta'])
+    await useDipoleCalc.getState().runBatch('rec-1')
+    useDipoleCalc.setState({ selectedPointId: 'p-1' })
+
+    useDipoleCalc.getState().setActiveBand('beta')
+
+    const state = useDipoleCalc.getState()
+    expect(state.activeBandKey).toBe('beta')
+    expect(state.result?.filter_band_hz).toEqual([13, 30])
+    // Выделение и кадр относились к точкам прежней полосы — они сняты
+    expect(state.selectedPointId).toBeNull()
+    expect(state.playback.playing).toBe(false)
+    expect(state.playback.epochIndex).toBe(0)
+  })
+
+  it('одиночный расчёт затирает набор: «смесь» результата и пакета не показываем', async () => {
+    mockApiFetch({ calcJob: calcJobFixture })
+    useDipoleCalc.getState().setBatchBandKeys(['alpha', 'beta'])
+    await useDipoleCalc.getState().runBatch('rec-1')
+    expect(useDipoleCalc.getState().batch).not.toBeNull()
+
+    await useDipoleCalc.getState().runCalculation('rec-1')
+
+    const state = useDipoleCalc.getState()
+    expect(state.batch).toBeNull()
+    expect(state.activeBandKey).toBeNull()
+    expect(state.result?.points).toHaveLength(4) // точки одиночного расчёта
+  })
+})

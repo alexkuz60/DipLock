@@ -2037,3 +2037,205 @@ class AnalysesPageOut(BaseModel):
     offset: int
     items: list[AnalysisSummaryOut] = Field(default_factory=list)
 
+
+# --- Прогон по набору поддиапазонов (С1) и кластеры (С2) ---
+
+
+class DipoleBatchPointOut(DipoleScanPointOut):
+    """Точка пакета (B6): точка быстрого расчёта + вердикт КД полями точки."""
+
+    kd_passed: bool | None = Field(
+        default=None,
+        description=(
+            "КД (С0): момент ≥ доли максимума своей полосы И GOF ≥ порога; "
+            "None — «не оценено» (пороги методики не заданы)"
+        ),
+    )
+
+
+class DipoleBandRunOut(BaseModel):
+    """Полоса прогона пакета (B7 ``per_band_status``) с её точками."""
+
+    band_key: str = Field(description="Стабильный адрес полосы (п.6 dipoles.md)")
+    label: str = Field(description="Подпись полосы для UI")
+    band_hz: list[float] = Field(description="Границы полосы, Гц (производные от ключа)")
+    state: str = Field(description="ok | empty | error")
+    n_points: int
+    n_kd_passed: int | None = Field(
+        default=None, description="Прошли КД; None — вердикт не считался",
+    )
+    n_errors: int = Field(description="Число предупреждений полосы")
+    moment_max_nam: float | None = Field(
+        default=None,
+        description="Максимум момента полосы, нА·м — база КД внутри полосы",
+    )
+    median_gof: float | None = Field(
+        default=None,
+        description=(
+            "Медианный GOF полосы, 0..1; **только внутри полосы** — GOF между "
+            "полосами не сравним (принцип 3 dipoles.md)"
+        ),
+    )
+    kd_basis: KdBasisOut = Field(description="Базис КД полосы (С0)")
+    n_epochs_total: int | None = None
+    n_epochs_used: int | None = None
+    points: list[DipoleBatchPointOut] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DipoleBandComparisonOut(BaseModel):
+    """Строка сопоставления полос (С1): **только нормированные величины**.
+
+    GOF между полосами не сравним (принцип 3 ``docs/rules/dipoles.md``) — в
+    контракте его нет; кросс-полосной фильтр доверия — только ``median_riv``.
+    """
+
+    band_key: str
+    label: str
+    band_hz: list[float]
+    n_points: int
+    n_kd_passed: int | None = None
+    kd_share: float | None = Field(
+        default=None, description="Доля точек, прошедших КД (0..1)",
+    )
+    moment_share_median: float | None = Field(
+        default=None,
+        description="Медиана доли момента точки от максимума своей полосы (0..1)",
+    )
+    moment_share_p90: float | None = Field(
+        default=None, description="90-й перцентиль той же доли (0..1)",
+    )
+    peak_time_median_ms: float | None = Field(
+        default=None, description="Медиана моментов пика GFP внутри эпохи, мс",
+    )
+    median_riv: float | None = Field(
+        default=None,
+        description="Медианный RIV полосы — единственный кросс-полосной фильтр доверия (2.6)",
+    )
+    n_clusters: int = Field(default=0, description="Кластеров полосы (С2)")
+    cluster_share: float | None = Field(
+        default=None, description="Доля точек полосы, вошедших в кластеры (0..1)",
+    )
+
+
+class DipoleClusterOut(BaseModel):
+    """Кластер диполей прогона (С2, B8): геометрия + устойчивость по поддиапазонам."""
+
+    band_key: str
+    cluster_index: int = Field(description="Номер в полосе (крупные первыми)")
+    centroid_mni: list[float] | None = Field(default=None, description="Центроид, MNI мм")
+    n_points: int
+    share: float = Field(description="Доля точек полосы в кластере (0..1)")
+    volume_cm3: float | None = None
+    density_per_cm3: float | None = Field(
+        default=None, description="Плотность точек, 1/см³",
+    )
+    extent_mm: list[float] | None = Field(
+        default=None, description="Протяжённость по осям x/y/z, мм",
+    )
+    top_structures: list[str] = Field(default_factory=list)
+    top_brodmann: list[str] = Field(default_factory=list)
+    n_bands_matched: int = Field(
+        description="Устойчивость: в скольких полосах пакета найден кластер той же области",
+    )
+    band_share: float = Field(
+        description="Доля этих полос от числа полос пакета (0..1)",
+    )
+    matched_band_keys: list[str] = Field(default_factory=list)
+
+
+class ClusterParamsOut(BaseModel):
+    """Паспорт кластеризации (С2): параметры в нормированных единицах + базис."""
+
+    voxel_norm: float = Field(
+        description="Размер вокселя как доля от диаметра области поиска (нормированные единицы)",
+    )
+    voxel_mm: float = Field(description="Тот же размер в мм (производная величина)")
+    min_points: int
+    connectivity: int = Field(description="Связность сетки (26)")
+    basis: str = Field(description="Базис нормировки: share_of_search_sphere_diameter")
+    basis_mm: float = Field(description="Диаметр области поиска, мм — нормировочная база")
+    kd_filter: str | None = Field(
+        default=None,
+        description=(
+            "Что ушло в кластеры: `kd_passed` — только прошедшие КД; "
+            "None — пороги методики не заданы, взяты все точки"
+        ),
+    )
+
+
+class DipoleBatchResult(BaseModel):
+    """Результат задачи пакета поддиапазонов (``kind=dipole_batch``, С1/С2).
+
+    **Набор результатов** одной сессии вместо одного: полосы со своими точками
+    (ключ «эпоха × поддиапазон»), сопоставление по нормированным величинам и
+    кластеры с устойчивостью по поддиапазонам. Одна длина эпохи на прогон (п.7).
+    """
+
+    recording_id: str
+    method: str = Field(description="Метод расчёта: `fast_grid`")
+    params_sig: str = Field(description="Отпечаток прогона (B7 fingerprint)")
+    reference: str = "average"
+    reference_channels: list[str] | None = None
+    channels: list[str]
+    sfreq: float | None = None
+    epoch_length_ms: float = Field(description="Одна длина эпохи на весь прогон (п.7)")
+    notch_hz: float | None = None
+    grid_mm: float
+    bands: list[DipoleBandRunOut] = Field(default_factory=list)
+    comparison: list[DipoleBandComparisonOut] = Field(default_factory=list)
+    clusters: list[DipoleClusterOut] = Field(default_factory=list)
+    cluster_params: ClusterParamsOut
+    warnings: list[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
+
+
+# --- Пакетная обработка архива (С8) ---
+
+
+class ArchiveBatchItemOut(BaseModel):
+    """Строка отчёта серии: одна запись каталога."""
+
+    recording_id: str
+    filename: str
+    state: str = Field(
+        description="processed — посчитана; error — ошибка; duplicate — дубль содержимого",
+    )
+    duplicate_of: str | None = Field(
+        default=None,
+        description="Какой записью уже посчитано это содержимое (sha256); None — не дубль",
+    )
+    n_points: int | None = Field(default=None, description="Точек по всем полосам")
+    n_kd_passed: int | None = Field(
+        default=None, description="Прошедших КД; None — вердикт не считался",
+    )
+    n_bands_ok: int | None = Field(default=None, description="Полос без ошибок")
+    duration_sec: float = 0.0
+    error: str | None = Field(default=None, description="Текст ошибки записи; None — не было")
+
+
+class ArchiveBatchSummaryOut(BaseModel):
+    """Итог серии: «обработано / ошибки / дубли» (``concept.md`` §6 С8)."""
+
+    total: int
+    processed: int
+    errors: int
+    duplicates: int
+
+
+class ArchiveBatchResult(BaseModel):
+    """Отчёт пакетной обработки архива (``kind=archive_batch``, С8).
+
+    Серия прогонов пакета (С1) по каталогу записей: расчёты по **снимку
+    параметров** (``params_sig``), запись в БД после каждой записи и построчный
+    отчёт «обработано / ошибки / дубли». Одна упавшая запись не валит серию.
+    """
+
+    pipeline: str = Field(description="Чем посчитана серия: `dipole_batch`")
+    params_sig: str = Field(description="Отпечаток снимка параметров серии")
+    requested: list[str] = Field(description="Записи серии в порядке обхода")
+    items: list[ArchiveBatchItemOut] = Field(default_factory=list)
+    summary: ArchiveBatchSummaryOut
+    warnings: list[str] = Field(default_factory=list)
+    duration_sec_calc: float = 0.0
+

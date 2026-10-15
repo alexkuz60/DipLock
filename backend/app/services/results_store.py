@@ -36,7 +36,7 @@ from typing import Any
 
 from sqlalchemy import case, func, select
 
-from app.core.config import KD_GOF_BASIS, KD_MOMENT_BASIS, settings
+from app.core.config import settings
 from app.models.db import (
     Analysis,
     AnalysisBand,
@@ -53,6 +53,7 @@ from app.models.db import (
     init_db,
 )
 from app.services.cache_store import cache_path
+from app.services.kd_criteria import kd_basis_for
 from app.services.recordings import Recording
 
 logger = logging.getLogger(__name__)
@@ -325,38 +326,9 @@ async def _persist_report(
 
         # Базис КД (§2.2 data-blocks): максимум момента — внутри полосы;
         # пороги задаёт методика (concept.md §3, C0) — без них вердикт NULL.
-        amplitudes = [
-            float(p["amplitude_nam"]) for p in points if p.get("amplitude_nam") is not None
-        ]
-        moment_max = max(amplitudes) if amplitudes else None
-        share = settings.kd_moment_share
-        gof_min = settings.kd_gof_min
-        evaluated = (
-            share is not None and gof_min is not None and moment_max is not None
-        )
-        kd_basis = {
-            "moment_share_x": share,
-            "gof_min": gof_min,
-            "moment_max_nam": moment_max,
-            # Базисы нормировки (concept.md §3): обязательная часть описания порога
-            "moment_basis": KD_MOMENT_BASIS,
-            "gof_basis": KD_GOF_BASIS,
-        }
-
-        verdicts: list[int | None] = []
-        for point in points:
-            amplitude = point.get("amplitude_nam")
-            gof = point.get("gof")
-            verdict: int | None = None
-            if (
-                share is not None and gof_min is not None and moment_max is not None
-                and amplitude is not None and gof is not None
-            ):
-                verdict = int(
-                    float(amplitude) >= share * moment_max and float(gof) >= gof_min
-                )
-            verdicts.append(verdict)
-        n_kd_passed = sum(v for v in verdicts if v) if evaluated else None
+        # Формула — один владелец (`services/kd_criteria.py`): те же вердикты
+        # считает пакетный прогон (С1) для кластеров.
+        kd_basis, verdicts, n_kd_passed = kd_basis_for(points, settings)
 
         session.add(AnalysisBand(
             analysis_id=analysis.id,
@@ -367,7 +339,7 @@ async def _persist_report(
             n_points=len(points),
             n_kd_passed=n_kd_passed,
             n_errors=len(summary.get("warnings") or []),
-            moment_max_nam=moment_max,
+            moment_max_nam=kd_basis.get("moment_max_nam"),
         ))
         for point, verdict in zip(points, verdicts, strict=True):
             session.add(DipolePoint(
@@ -446,6 +418,80 @@ async def _persist_report(
                 ))
 
 
+async def _persist_dipole_batch(
+    session: Any, recording: Recording, params: Any,
+    result: dict[str, Any], job_id: str,
+) -> None:
+    """С1: прогон пакета поддиапазонов → ``analyses``/``analysis_bands``/``dipole_points``.
+
+    Кирпичи B7/B6 (§8.3 ``docs/data-blocks.md``): одна строка ``analyses`` на
+    прогон (``params_sig`` — отпечаток пакета), ``analysis_bands`` — статус
+    каждой полосы (включая ``moment_max_nam`` — базу КД внутри полосы),
+    ``dipole_points`` — точки с вердиктом КД (ключ «эпоха × поддиапазон»).
+    В отличие от отчёта, точки из результата **не** вынимаются: контракт
+    ``DipoleBatchResult`` несёт их в раздел «Диполи» (набор результатов С1).
+    """
+    bands = list(result.get("bands") or [])
+    totals = [b.get("n_epochs_total") for b in bands if b.get("n_epochs_total") is not None]
+    used = [b.get("n_epochs_used") for b in bands if b.get("n_epochs_used") is not None]
+    analysis = Analysis(
+        recording_id=recording.recording_id,
+        kind="fast_grid",  # пакет — быстрый расчёт по полосам (eLORETA в пакет не тащим)
+        params_sig=result.get("params_sig"),  # отпечаток набора полос + параметров (B7)
+        created_at=datetime.utcnow(),
+        job_id=job_id,
+        reference=result.get("reference"),
+        channels=list(result.get("channels") or []),
+        sfreq=result.get("sfreq"),
+        epoch_length_ms=result.get("epoch_length_ms"),
+        grid_mm=result.get("grid_mm"),
+        # Одна сетка эпох на прогон (п.7): нарезка полос может различаться
+        # только краями BAD_edge своих фильтров — берём максимум как объём.
+        n_epochs_total=max(totals) if totals else None,
+        n_epochs_used=max(used) if used else None,
+        warnings=list(result.get("warnings") or []),
+        duration_sec_calc=result.get("duration_sec_calc"),
+    )
+    session.add(analysis)
+    await session.flush()
+
+    for band in bands:
+        band_key = str(band.get("band_key") or "")
+        band_hz = band.get("band_hz") or [None, None]
+        kd_basis = dict(band.get("kd_basis") or {})
+        session.add(AnalysisBand(
+            analysis_id=analysis.id,
+            band_key=band_key,
+            band_hz_lo=band_hz[0],
+            band_hz_hi=band_hz[1],
+            state=band.get("state") or ("ok" if band.get("points") else "empty"),
+            n_points=band.get("n_points"),
+            n_kd_passed=band.get("n_kd_passed"),
+            n_errors=band.get("n_errors"),
+            moment_max_nam=band.get("moment_max_nam"),
+        ))
+        for point in band.get("points") or []:
+            verdict = point.get("kd_passed")
+            session.add(DipolePoint(
+                analysis_id=analysis.id,
+                band_key=band_key,
+                band_hz_lo=band_hz[0],
+                band_hz_hi=band_hz[1],
+                epoch_index=point.get("epoch_index"),
+                peak_time_ms=point.get("time_ms"),
+                head_coords=point.get("head_coords"),
+                mni_coords=point.get("mni_coords"),
+                moment_dir=point.get("moment"),
+                amplitude_nam=point.get("amplitude_nam"),
+                gof=point.get("gof"),
+                anatomical_structure=point.get("anatomical_structure"),
+                brodmann_area=point.get("brodmann_area"),
+                method="fast_grid",
+                kd_passed=int(verdict) if verdict is not None else None,
+                kd_basis=kd_basis,
+            ))
+
+
 _PERSISTERS: dict[
     str,
     Callable[[Any, Recording, Any, dict[str, Any], str], Awaitable[None]],
@@ -455,6 +501,7 @@ _PERSISTERS: dict[
     "dipole_refine": _persist_dipole_refine,
     "spectrogram": _persist_spectrogram,
     "report": _persist_report,
+    "dipole_batch": _persist_dipole_batch,
 }
 
 
