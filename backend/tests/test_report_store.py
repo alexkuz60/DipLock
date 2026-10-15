@@ -11,7 +11,7 @@ import os
 import pytest
 from sqlalchemy import func, select
 
-from app.core.config import settings
+from app.core.config import KD_GOF_BASIS, KD_MOMENT_BASIS, settings
 from app.models import db as db_module
 from app.models.db import (
     Analysis,
@@ -183,6 +183,9 @@ def test_report_persists_analysis_bands_and_points():
             "moment_share_x": None,
             "gof_min": None,
             "moment_max_nam": 100.0,
+            # Базисы нормировки — обязательная часть описания порога (С0)
+            "moment_basis": KD_MOMENT_BASIS,
+            "gof_basis": KD_GOF_BASIS,
         }
 
     asyncio.run(_check())
@@ -294,6 +297,8 @@ def test_kd_verdict_computed_when_thresholds_configured(monkeypatch):
             "moment_share_x": 0.5,
             "gof_min": 0.7,
             "moment_max_nam": 100.0,
+            "moment_basis": KD_MOMENT_BASIS,
+            "gof_basis": KD_GOF_BASIS,
         }
 
     asyncio.run(_check())

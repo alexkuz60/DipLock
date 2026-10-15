@@ -227,13 +227,19 @@ describe('кадр воспроизведения траектории', () => {
     expect(trail.map((segment) => segment.id)).toEqual(['0-1', '3-4'])
   })
 
-  it('подчиняется порогу «КД», как облако и маркер кадра', () => {
+  it('подчиняется порогам отображения, как облако и маркер кадра', () => {
     const points = pointByEpoch([point(0), point(1), point(2)])
 
-    // Порог выше амплитуд всех точек — рисовать нечего
-    expect(trailSegments(points, 2, 1000, 50)).toHaveLength(0)
+    // Порог момента выше амплитуд всех точек — рисовать нечего
+    expect(trailSegments(points, 2, 1000, { minGofPercent: 0, minAmplitudeNaM: 50 })).toHaveLength(0)
     // Порог ниже — те же два отрезка
-    expect(trailSegments(points, 2, 1000, 5)).toHaveLength(2)
+    expect(trailSegments(points, 2, 1000, { minGofPercent: 0, minAmplitudeNaM: 5 })).toHaveLength(2)
+    // Порог GOF выше всех точек (gof 0.9) — тоже нечего
+    expect(trailSegments(points, 2, 1000, { minGofPercent: 95, minAmplitudeNaM: 0 })).toHaveLength(0)
+    // Слабее порогов хотя бы один конец — отрезок не рисуется: слабая эпоха 0
+    // гасит отрезок 0-1, но не 1-2
+    const mixed = pointByEpoch([point(0, { gof: 0.5 }), point(1), point(2)])
+    expect(trailSegments(mixed, 2, 1000, { minGofPercent: 70, minAmplitudeNaM: 0 })).toHaveLength(1)
   })
 
   it('ограничивает длину шлейфа и молчит без нарезки', () => {

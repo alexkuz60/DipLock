@@ -1432,6 +1432,24 @@ class JobStatus(BaseModel):
     result_url: str | None = None
 
 
+class KdCriteriaOut(BaseModel):
+    """Паспорт критерия КД (С0) в манифесте прогона: пороги и базисы нормировки."""
+
+    kd_moment_share: float | None = Field(
+        default=None,
+        description="Порог «доля от максимума поддиапазона»; None — методика не задала",
+    )
+    kd_gof_min: float | None = Field(
+        default=None, description="Порог GOF; None — методика не задала",
+    )
+    kd_moment_basis: str | None = Field(
+        default=None, description="Базис порога момента: «доля от максимума поддиапазона»",
+    )
+    kd_gof_basis: str | None = Field(
+        default=None, description="Базис порога GOF: «абсолютный» (доля дисперсии)",
+    )
+
+
 class RunManifestOut(BaseModel):
     """Run manifest задачи: на чём, чем и на каких данных посчитано (N40/4.6).
 
@@ -1450,6 +1468,9 @@ class RunManifestOut(BaseModel):
     )
     assets: dict[str, str] = Field(
         description="Отпечатки ассетов FSAverage (меш, МРТ, атлас) — как в /meta",
+    )
+    criteria: KdCriteriaOut = Field(
+        description="Паспорт критерия КД (С0): пороги и базисы нормировки",
     )
 
 
@@ -1930,6 +1951,13 @@ class KdBasisOut(BaseModel):
     gof_min: float | None = Field(default=None, description="Порог GOF; None — не задан")
     moment_max_nam: float | None = Field(
         default=None, description="Максимум момента полосы, нА·м",
+    )
+    moment_basis: str | None = Field(
+        default=None,
+        description="Базис порога момента: «доля от максимума поддиапазона»",
+    )
+    gof_basis: str | None = Field(
+        default=None, description="Базис порога GOF: «абсолютный» (доля дисперсии)",
     )
 
 

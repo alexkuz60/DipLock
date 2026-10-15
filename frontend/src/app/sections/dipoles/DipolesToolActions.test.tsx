@@ -2,7 +2,8 @@
  * Тесты тулс-хедера раздела «Диполи» (срез 3.4).
  *
  * Проверяется правило «обработка — только по кнопке»: расчёт запускается
- * нажатием и показывается прогрессом по эпохам, порог «КД ≥ X нАм» правит
+ * нажатием и показывается прогрессом по эпохам, пороги отображения
+ * («GOF ≥ X %» и «Момент диполя ≥ X нАм») правят
  * отображение (без единого запроса), а кнопки панелей лишь открывают одну
  * выдвижную панель за раз.
  */
@@ -139,7 +140,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     ).toBeNull()
   })
 
-  it('порог «КД ≥» меняет состояние отображения и не делает запросов', async () => {
+  it('пороги отображения меняют состояние и не делают запросов', async () => {
     const user = userEvent.setup()
     useEdfRecording.setState({ recording: recordingFixture })
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
@@ -149,8 +150,14 @@ describe('тулс-хедер раздела «Диполи»', () => {
     const field = screen.getByLabelText('Порог момента диполя, нАм')
     await user.clear(field)
     await user.type(field, '60')
-
     expect(useDipoleCalc.getState().amplitudeThresholdNam).toBe(60)
+
+    // Основной порог — GOF, %: правится так же без запросов
+    const gofField = screen.getByLabelText('Порог GOF отображения, %')
+    await user.clear(gofField)
+    await user.type(gofField, '80')
+    expect(useDipoleCalc.getState().gofThresholdPercent).toBe(80)
+
     expect(stateCalls(fetchSpy)).toEqual([])
   })
 

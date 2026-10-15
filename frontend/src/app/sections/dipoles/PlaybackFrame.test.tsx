@@ -73,6 +73,7 @@ describe('часы воспроизведения траектории', () => {
     localStorage.clear()
     useDipoleCalc.setState({
       result: null,
+      gofThresholdPercent: 0,
       amplitudeThresholdNam: 0,
       playback: { ...PLAYBACK_DEFAULTS },
     })

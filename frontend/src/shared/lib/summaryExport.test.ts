@@ -41,7 +41,7 @@ describe('summaryExport (CSV ROI, 4.5)', () => {
     const lines = csv.trimEnd().split('\n')
 
     expect(lines[0]).toBe(
-      'тип,название,полушарие,полоса,точек,доля %,GOF ≥ порога,медианный GOF,медианная КД нАм',
+      'тип,название,полушарие,полоса,точек,доля %,GOF ≥ порога,медианный GOF,медианный момент нАм',
     )
     // Precuneus в theta: 5 точек (55.6 %), 4 с GOF ≥ 0.8, медиана 0.83
     expect(lines).toContain('структура,Precuneus (слева),lh,theta,5,55.6,4,0.83,12.5')

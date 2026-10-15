@@ -66,6 +66,7 @@ describe('рабочая область раздела «Диполи»', () => 
     })
     useDipoleCalc.setState({
       params: { ...CALC_PARAM_DEFAULTS },
+      gofThresholdPercent: 0,
       amplitudeThresholdNam: 0,
       fftRangeHz: null,
       selectedPointId: null,
@@ -187,7 +188,7 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(await screen.findByText('МРТ: метаданные недоступны')).toBeInTheDocument()
   })
 
-  it('рисует точки из результата расчёта и подчиняется порогу «КД» (срез 3.4)', () => {
+  it('рисует точки из результата расчёта и подчиняется порогам отображения (срез 3.4)', () => {
     // Фикстура: четыре точки, одна без MNI, амплитуды 60 / 25 / 90 нАм.
     // Порог 60 пропускает на проекции две точки — слой фильтруется, но результат
     // задачи остаётся нетронутым (порог — параметр отображения).
@@ -198,7 +199,7 @@ describe('рабочая область раздела «Диполи»', () => 
       expect(screen.getAllByTestId(new RegExp(`^dipole-dot-${plane}-`))).toHaveLength(2)
     }
     expect(screen.getByText('Точек диполей: 2')).toBeInTheDocument()
-    expect(screen.getByText('Скрыто порогом «КД ≥ 60 нАм»: 1')).toBeInTheDocument()
+    expect(screen.getByText('Скрыто порогами «момент ≥ 60 нАм»: 1')).toBeInTheDocument()
     expect(screen.getByText(/Быстрый режим, сетка 7 мм · эпох 4 из 4/)).toBeInTheDocument()
     expect(
       screen.getByText('Часть точек без MNI (fsaverage недоступен) — на проекции не попадают'),
@@ -211,7 +212,7 @@ describe('рабочая область раздела «Диполи»', () => 
 
     // Порог выше всех амплитуд: ни одной точки, но расчёт на месте
     expect(screen.queryAllByTestId(/^dipole-dot-axial-/)).toHaveLength(0)
-    expect(screen.getByText('Скрыто порогом «КД ≥ 200 нАм»: 3')).toBeInTheDocument()
+    expect(screen.getByText('Скрыто порогами «момент ≥ 200 нАм»: 3')).toBeInTheDocument()
     expect(screen.getByText(/Быстрый режим, сетка 7 мм/)).toBeInTheDocument()
   })
 

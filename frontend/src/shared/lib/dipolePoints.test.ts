@@ -3,7 +3,7 @@
  *
  * Проверяется контракт отрисовки (направление вектора в плоскости среза, зажим
  * длины, «торец» — момент вдоль нормали, детерминированность фикстуры) и переход
- * результата задачи в слой: точки без MNI не рисуются, а порог «КД ≥» фильтрует
+ * результата задачи в слой: точки без MNI не рисуются, а пороги отображения фильтруют
  * **отображение**, не меняя результат.
  */
 import { describe, expect, it } from 'vitest'
@@ -43,7 +43,10 @@ import {
   attributionText,
   labelWithDistance,
   outsideBrainText,
+  NO_THRESHOLDS,
   thresholdDipoleLayer,
+  thresholdsActive,
+  thresholdsLabel,
   withOverlapCounts,
   dipoleNodeSiblings,
   dipoleNodeTitle,
@@ -311,16 +314,46 @@ describe('результат расчёта в слой проекций (сре
     expect(dipolePointTitle(layer.points[0])).toContain('60.0 нАм')
   })
 
-  it('порог «КД ≥» фильтрует слой, но не выдумывает «ноль»', () => {
+  it('пороги отображения фильтруют слой, но не выдумывают «ноль»', () => {
     const layer = dipoleLayerFromScan(dipoleScanResultFixture())
 
-    const filtered = thresholdDipoleLayer(layer, 60)
-    expect(filtered.points.map((point) => point.amplitudeNaM)).toEqual([60, 90])
-    expect(hiddenByThreshold(layer, 60)).toBe(1)
+    // Порог по моменту: ниже 60 нАм скрыта одна точка
+    const byMoment = thresholdDipoleLayer(layer, { minGofPercent: 0, minAmplitudeNaM: 60 })
+    expect(byMoment.points.map((point) => point.amplitudeNaM)).toEqual([60, 90])
+    expect(hiddenByThreshold(layer, { minGofPercent: 0, minAmplitudeNaM: 60 })).toBe(1)
 
-    // Нулевой порог ничего не скрывает и возвращает тот же объект слоя
-    expect(thresholdDipoleLayer(layer, 0)).toBe(layer)
-    expect(hiddenByThreshold(layer, 0)).toBe(0)
+    // Порог по GOF (основной): у всех точек фикстуры gof = 0.91 → 95% скрывает все
+    const byGof = thresholdDipoleLayer(layer, { minGofPercent: 95, minAmplitudeNaM: 0 })
+    expect(byGof.points).toHaveLength(0)
+    expect(hiddenByThreshold(layer, { minGofPercent: 95, minAmplitudeNaM: 0 })).toBe(3)
+
+    // Смешанный слой: граница GOF включительная (≥), пороги складываются по «И»
+    const mixed: DipoleLayer = {
+      source: 'result',
+      points: layer.points.map((point, index) => ({
+        ...point,
+        gof: index === 0 ? 0.7 : 0.6,
+      })),
+    }
+    const both = thresholdDipoleLayer(mixed, { minGofPercent: 70, minAmplitudeNaM: 60 })
+    // Точка 0: gof 0.7 (= порогу) и момент 60 (= порогу) — проходит оба условия;
+    // точки 1/2: gof 0.6 ниже 70% — скрыты даже при моменте 90
+    expect(both.points.map((point) => point.amplitudeNaM)).toEqual([60])
+    expect(hiddenByThreshold(mixed, { minGofPercent: 70, minAmplitudeNaM: 60 })).toBe(2)
+
+    // Нулевые пороги ничего не скрывают и возвращают тот же объект слоя
+    expect(thresholdDipoleLayer(layer, NO_THRESHOLDS)).toBe(layer)
+    expect(hiddenByThreshold(layer, NO_THRESHOLDS)).toBe(0)
+  })
+
+  it('подписывает только активные пороги (thresholdsLabel)', () => {
+    expect(thresholdsLabel({ minGofPercent: 0, minAmplitudeNaM: 0 })).toBe('')
+    expect(thresholdsLabel({ minGofPercent: 70, minAmplitudeNaM: 0 })).toBe('GOF ≥ 70 %')
+    expect(thresholdsLabel({ minGofPercent: 0, minAmplitudeNaM: 200 })).toBe('момент ≥ 200 нАм')
+    expect(thresholdsLabel({ minGofPercent: 70, minAmplitudeNaM: 200 }))
+      .toBe('GOF ≥ 70 % · момент ≥ 200 нАм')
+    expect(thresholdsActive(NO_THRESHOLDS)).toBe(false)
+    expect(thresholdsActive({ minGofPercent: 0, minAmplitudeNaM: 1 })).toBe(true)
   })
 })
 

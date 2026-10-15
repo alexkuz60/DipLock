@@ -36,7 +36,7 @@ from typing import Any
 
 from sqlalchemy import case, func, select
 
-from app.core.config import settings
+from app.core.config import KD_GOF_BASIS, KD_MOMENT_BASIS, settings
 from app.models.db import (
     Analysis,
     AnalysisBand,
@@ -338,6 +338,9 @@ async def _persist_report(
             "moment_share_x": share,
             "gof_min": gof_min,
             "moment_max_nam": moment_max,
+            # Базисы нормировки (concept.md §3): обязательная часть описания порога
+            "moment_basis": KD_MOMENT_BASIS,
+            "gof_basis": KD_GOF_BASIS,
         }
 
         verdicts: list[int | None] = []

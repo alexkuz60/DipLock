@@ -6,12 +6,14 @@
  * результата задачи (быстрый режим, `shared/lib/dipolePoints.ts`). Расчёт идёт
  * **только по кнопке в шапке** (`POST /recordings/{id}/dipoles`), правка
  * параметров панели ничего не запускает — она лишь скрывает/показывает уже
- * посчитанные точки (порог «КД») и наводит срезы.
+ * посчитанные точки (пороги отображения: GOF % и момент нА·м) и наводит срезы.
  *
  * Запросы раздела: `/meta` за ссылками на статику (срезы МРТ и контуры атласа) и —
- * по кнопке — задачи расчёта. Порог «КД ≥ X нАм» — параметр отображения: он
- * фильтрует слой перед отрисовкой, поэтому счётчик скрытых точек считается по
- * слою, а не по результату задачи (в результате точки остаются).
+ * по кнопке — задачи расчёта. Пороги отображения («GOF ≥ X %» — основной,
+ * «Момент диполя ≥ X нАм» — дополнительный) — параметры отображения: они
+ * фильтруют слой перед отрисовкой, поэтому счётчик скрытых точек считается по
+ * слою, а не по результату задачи (в результате точки остаются). Настоящий «КД»
+ * (критерий годности, `kd_passed`) — вердикт анализа С0, в отображении не участвует.
  *
  * Контуры атласа (срез 3.9) — тоже статика: `GET /surface/contours/{plane}/{mm}`
  * по срезу каждой плоскости, только когда слои «Анатомические структуры» или
@@ -25,8 +27,8 @@
  * позицию — срезы обязаны меняться при любом клике по фигуре.
  *
  * Состояние — в zustand-срезах `shared/state/dipoleParams.ts` (слои, срезы,
- * референс-точка) и `shared/state/dipoleCalc.ts` (параметры расчёта, порог КД,
- * результаты задач). Клик по любой проекции наводит все три среза на выбранную
+ * референс-точка) и `shared/state/dipoleCalc.ts` (параметры расчёта, пороги
+ * отображения, результаты задач). Клик по любой проекции наводит все три среза на выбранную
  * точку (`applyPointToSlices`).
  *
  * **Пояснений в рабочей области нет** (поправка ручной проверки): абзац о том, как
@@ -55,6 +57,7 @@ import {
   contourSummary,
 } from '@/shared/lib/atlasContours'
 import {
+  type DisplayThresholds,
   dipoleLayerFromScan,
   dipoleLayerStatus,
   dipolePointTitle,
@@ -62,6 +65,8 @@ import {
   hiddenByThreshold,
   withOverlapCounts,
   thresholdDipoleLayer,
+  thresholdsActive,
+  thresholdsLabel,
 } from '@/shared/lib/dipolePoints'
 import { api } from '@/shared/api/client'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
@@ -90,7 +95,8 @@ export function DipolesSection() {
   const setProjectionCursor = useDipoleParams((state) => state.setProjectionCursor)
 
   const result = useDipoleCalc((state) => state.result)
-  const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
+  const minGofPercent = useDipoleCalc((state) => state.gofThresholdPercent)
+  const minAmplitudeNaM = useDipoleCalc((state) => state.amplitudeThresholdNam)
   const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
   const toggleSelectedPoint = useDipoleCalc((state) => state.toggleSelectedPoint)
   const clearSelectedPoint = useDipoleCalc((state) => state.clearSelectedPoint)
@@ -170,24 +176,31 @@ export function DipolesSection() {
 
   /**
    * Слой диполей из результата задачи. Результат не пересчитывается на клиенте:
-   * смена порога «КД» меняет только **отрисовку** (какие точки рисовать), поэтому
-   * слой строится из результата и фильтруется порогом отдельной чистой функцией.
+   * смена порогов отображения меняет только **отрисовку** (какие точки рисовать),
+   * поэтому слой строится из результата и фильтруется порогами отдельной чистой
+   * функцией. Пороги (GOF % — основной, момент нА·м — дополнительный) — параметры
+   * отображения, а «КД» (вердикт `kd_passed`) — параметр анализа (С0).
    */
   const layer = useMemo(() => (result ? dipoleLayerFromScan(result) : EMPTY_DIPOLE_LAYER), [result])
-  const visibleLayer = useMemo(() => thresholdDipoleLayer(layer, threshold), [layer, threshold])
+  /** Пороги отображения — мемоизированный объект: от него зависит перерисовка */
+  const thresholds: DisplayThresholds = useMemo(
+    () => ({ minGofPercent, minAmplitudeNaM }),
+    [minGofPercent, minAmplitudeNaM],
+  )
+  const visibleLayer = useMemo(() => thresholdDipoleLayer(layer, thresholds), [layer, thresholds])
   /**
    * Слой для проекций: каждой точке проставляется кратность узла сетки
    * (`overlapCount`) — по ней рисуется размер кольца и заливка (поправка ручной
-   * проверки, 18.09.2026). Считается по **видимому** слою, то есть после порога
-   * «КД ≥»: кольцо не должно обещать диполи, которые скрыты порогом. Координаты,
+   * проверки, 18.09.2026). Считается по **видимому** слою, то есть после порогов
+   * отображения: кольцо не должно обещать диполи, которые скрыты порогом. Координаты,
    * векторы и анимация от этого не меняются — это производное число для отрисовки.
    */
   const displayLayer = useMemo(() => withOverlapCounts(visibleLayer), [visibleLayer])
-  const hidden = hiddenByThreshold(layer, threshold)
+  const hidden = hiddenByThreshold(layer, thresholds)
   const mniMissing = result !== null && layer.points.length < (result.points?.length ?? 0)
   /**
-   * Выделенный диполь ищем в **полном** слое, а не в отфильтрованном порогом:
-   * порог «КД» управляет только отрисовкой, и уже выделенная точка не должна
+   * Выделенный диполь ищем в **полном** слое, а не в отфильтрованном порогами:
+   * пороги отображения управляют только отрисовкой, и уже выделенная точка не должна
    * «теряться» из подписи при подъёме порога.
    */
   const selected = selectedPointId
@@ -219,10 +232,10 @@ export function DipolesSection() {
           </StatusPill>
         ) : null}
         {hidden > 0 ? (
-          <StatusPill tone="warn">{`Скрыто порогом «КД ≥ ${threshold} нАм»: ${hidden}`}</StatusPill>
+          <StatusPill tone="warn">{`Скрыто порогами «${thresholdsLabel(thresholds)}»: ${hidden}`}</StatusPill>
         ) : null}
-        {threshold > 0 ? (
-          <StatusPill tone="neutral">{`Порог КД: ≥ ${threshold} нАм`}</StatusPill>
+        {thresholdsActive(thresholds) ? (
+          <StatusPill tone="neutral">{`Пороги отображения: ${thresholdsLabel(thresholds)}`}</StatusPill>
         ) : null}
         {mniMissing ? (
           <StatusPill tone="warn">

@@ -51,7 +51,7 @@
 | `edfRecording.ts` | `useEdfRecording` | **нет** | сессия записи: паспорт, окно, `navRequest`, `artifactNav` (шаг режима «Навигация»), `epochMarks` — живёт только в текущей сессии браузера |
 | `eegParams.ts` | `useEegParams` | `diplock.eeg` | канал, окно, зум, `navMode`, `navKind`, `artifactNav`, палитра/дБ, `eegNav`, отпечаток расчёта |
 | `dipoleParams.ts` | `useDipoleParams` | `diplock.dipoles` | слои проекций, срезы, референс-точка, выделенное поле |
-| `dipoleCalc.ts` | `useDipoleCalc` | `diplock.dipoleCalc` | задача расчёта, результат, порог «КД», окно FFT, окно уточнения (`refineHalfwinMs`), playback, `seekSeq` |
+| `dipoleCalc.ts` | `useDipoleCalc` | `diplock.dipoleCalc` | задача расчёта, результат, пороги отображения (GOF % / момент нА·м), окно FFT, окно уточнения (`refineHalfwinMs`), playback, `seekSeq` |
 | `tableParams.ts` | `useTableParams` | `diplock.table` | сортировка и состав колонок таблицы (только отображение) |
 | `summaryReport.ts` | `useSummaryReport` | `diplock.summary` | параметры пакета автоотчёта (полосы `bandKeys`, шаг сетки), идущая задача `kind=report`, результат и ошибка (результат/задача сессионные — сбрасываются при смене записи, `SummarySection`); вид отчёта `kind` и отчёты группового анализа (выбор источника `compareJobId`/`groupRunId`, сборка `buildCompareReport`/`buildGroupReport` — только кнопка, §3.9.8; состояние сессии, не персистится) |
 | `consiliumOptions.ts` | `useConsiliumOptions` | `diplock.consilium` | разовые настройки Консилиума (срез 0014): роли запуска раунда, фильтр советников, «раскрывать разделы ответов сразу» — правая панель «Опции»; плюс срез 0015: выдвижной левый сайдбар рабочей области (открытость, ширина 240–640 px, вкладка «Чат»/«Дерево», советник чата) |

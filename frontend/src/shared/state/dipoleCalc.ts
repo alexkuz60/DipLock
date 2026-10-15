@@ -1,5 +1,6 @@
 /**
- * Состояние раздела «Диполи» (срез 3.4): выделенный диполь, порог «КД», окно
+ * Состояние раздела «Диполи» (срез 3.4): выделенный диполь, пороги отображения
+ * (GOF % — основной, момент нА·м — дополнительный), окно
  * частот FFT-графика, открытая выдвижная панель и результаты задач.
  *
  * Правило раздела то же, что в EDF (`docs/ui.md`): правка параметра **ничего не
@@ -53,6 +54,7 @@ import {
 } from '@/shared/lib/calcFilter'
 import {
   CALC_PARAM_DEFAULTS,
+  GOF_THRESHOLD_RANGE,
   GRID_MM_RANGE,
   PLAYBACK_DEFAULTS,
   THRESHOLD_NAM_RANGE,
@@ -83,7 +85,16 @@ const calcRunToken = createRunToken()
 export type DipoleCalcState = {
   /** Открытая выдвижная панель раздела (`none` — закрыта) */
   view: CalcView
-  /** Порог отображения «КД ≥ X нАм»: слабее — не рисуется */
+  /**
+   * Порог отображения «GOF ≥ X %» (основной контур отбора, 0 — выключен):
+   * слабее по GOF — не рисуется. Параметр отображения, расчёт не меняет.
+   */
+  gofThresholdPercent: number
+  /**
+   * Дополнительный порог отображения «Момент диполя ≥ X нАм» (0 — выключен):
+   * опционная фильтрация по абсолютному моменту. «КД» этот порог **не** является —
+   * КД (критерий годности) живёт в `kd_passed`/`kd_basis` (С0).
+   */
   amplitudeThresholdNam: number
   /**
    * Окно частот FFT-графика, Гц (`null` — весь измеренный диапазон).
@@ -140,6 +151,9 @@ export type DipoleCalcState = {
   setView: (view: CalcView) => void
   /** Открыть панель, а повторное нажатие — закрыть (кнопки тулс-хедера) */
   toggleView: (view: Exclude<CalcView, 'none'>) => void
+  /** Порог отображения по GOF, % (зажимается в `GOF_THRESHOLD_RANGE`) */
+  setGofThreshold: (value: number) => void
+  /** Дополнительный порог отображения по моменту, нА·м (зажимается в `THRESHOLD_NAM_RANGE`) */
   setAmplitudeThreshold: (value: number) => void
   /** Окно частот FFT-графика по кнопке ритма или полю «от/до»; `null` — весь диапазон */
   setFftRange: (range: FreqWindow | null) => void
@@ -221,6 +235,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
   persist(
     (set, get) => ({
       view: 'none',
+      gofThresholdPercent: 0,
       amplitudeThresholdNam: 0,
       fftRangeHz: null,
       selectedPointId: null,
@@ -247,6 +262,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       setView: (view) => set({ view }),
       toggleView: (view) => set((state) => ({ view: state.view === view ? 'none' : view })),
 
+      setGofThreshold: (value) =>
+        set({ gofThresholdPercent: clamp(value, GOF_THRESHOLD_RANGE) }),
       setAmplitudeThreshold: (value) =>
         set({ amplitudeThresholdNam: clamp(value, THRESHOLD_NAM_RANGE) }),
       setFftRange: (range) => set({ fftRangeHz: normalizeFreqWindow(range) }),
@@ -594,6 +611,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       // предпочтение просмотра, оно переживает перезагрузку.
       partialize: (state) => ({
         view: state.view,
+        gofThresholdPercent: state.gofThresholdPercent,
         amplitudeThresholdNam: state.amplitudeThresholdNam,
         fftRangeHz: state.fftRangeHz,
         params: state.params,
@@ -614,6 +632,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         return {
           ...current,
           view: stored.view ?? current.view,
+          // Старое хранилище не знало GOF-порога: берём дефолт «выключен»
+          gofThresholdPercent: stored.gofThresholdPercent ?? current.gofThresholdPercent,
           amplitudeThresholdNam: stored.amplitudeThresholdNam ?? current.amplitudeThresholdNam,
           fftRangeHz: normalizeFreqWindow(stored.fftRangeHz ?? current.fftRangeHz),
           // Окно уточнения из старого хранилища может быть любым числом (или его

@@ -315,7 +315,7 @@ def test_job_manifest_endpoint(client, tmp_path):
     response = client.get(f"{_PREFIX}/jobs/{job_id}/manifest")
     assert response.status_code == 200, response.text
     manifest = response.json()
-    assert manifest["manifest_version"] == 1
+    assert manifest["manifest_version"] == 2
     assert manifest["kind"] == "bundle"
     assert manifest["recording_id"] == recording_id
     # params_sig — repr параметров задачи (тот же отпечаток, что в истории)
@@ -323,10 +323,17 @@ def test_job_manifest_endpoint(client, tmp_path):
     assert manifest["versions"].get("python")
     assert manifest["versions"].get("mne")
     assert manifest["assets"]
+    # Паспорт критерия КД (С0): пороги и базисы нормировки, None — методика не задала
+    assert manifest["criteria"] == {
+        "kd_moment_share": None,
+        "kd_gof_min": None,
+        "kd_moment_basis": "share_of_band_max",
+        "kd_gof_basis": "absolute",
+    }
     # Контракт RunManifestOut: лишних ключей нет
     assert set(manifest) == {
         "manifest_version", "kind", "recording_id", "params_sig",
-        "finished_at", "versions", "assets",
+        "finished_at", "versions", "assets", "criteria",
     }
 
     unknown = client.get(f"{_PREFIX}/jobs/00000000-0000-0000-0000-000000000000/manifest")
@@ -349,11 +356,13 @@ def test_manifest_is_saved_next_to_result_in_job_file():
         with open(path, encoding="utf-8") as fh:
             payload = json.load(fh)
         manifest = payload["manifest"]
-        assert manifest["manifest_version"] == 1
+        assert manifest["manifest_version"] == 2
         assert manifest["kind"] == "spectrum"
         assert manifest["params_sig"] == "SpectrumParams()"
         assert manifest["finished_at"] == "2026-10-04T12:00:00"
         assert manifest["versions"].get("python")
         assert manifest["assets"]
+        # Паспорт критерия КД (С0) лежит рядом с результатом прогона
+        assert manifest["criteria"]["kd_moment_basis"] == "share_of_band_max"
     finally:
         os.remove(path)

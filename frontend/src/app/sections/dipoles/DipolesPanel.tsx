@@ -20,11 +20,13 @@ import {
   sliceTicks,
 } from '@/shared/lib/mriProjections'
 import {
+  type DisplayThresholds,
   dipoleLayerFromScan,
   dipoleLayerStatus,
   emptyDipoleLayer,
   hiddenByThreshold,
   thresholdDipoleLayer,
+  thresholdsLabel,
 } from '@/shared/lib/dipolePoints'
 import { api } from '@/shared/api/client'
 import {
@@ -35,6 +37,7 @@ import {
   useDipoleParams,
 } from '@/shared/state/dipoleParams'
 import {
+  GOF_THRESHOLD_RANGE,
   GRID_MM_RANGE,
   REFINE_HALFWIN_OPTIONS,
   THRESHOLD_NAM_RANGE,
@@ -83,10 +86,12 @@ export function DipolesPanel() {
   const calcJob = useDipoleCalc((state) => state.job)
   const calcResult = useDipoleCalc((state) => state.result)
   const spectrum = useDipoleCalc((state) => state.spectrum)
+  const gofThresholdPercent = useDipoleCalc((state) => state.gofThresholdPercent)
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
   const setEpochLengthMs = useDipoleCalc((state) => state.setEpochLengthMs)
   const setGridMm = useDipoleCalc((state) => state.setGridMm)
   const setPsdMethod = useDipoleCalc((state) => state.setPsdMethod)
+  const setGofThreshold = useDipoleCalc((state) => state.setGofThreshold)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const setFilterPreset = useDipoleCalc((state) => state.setFilterPreset)
   const setFilterBand = useDipoleCalc((state) => state.setFilterBand)
@@ -138,8 +143,10 @@ export function DipolesPanel() {
   const staleResult = calcResult !== null && !resultMatchesParams(calcResult, calcParams)
 
   const layer = calcResult ? dipoleLayerFromScan(calcResult) : EMPTY_DIPOLE_LAYER
-  const visibleLayer = thresholdDipoleLayer(layer, threshold)
-  const hidden = hiddenByThreshold(layer, threshold)
+  /** Пороги отображения (GOF % — основной, момент нА·м — дополнительный) */
+  const thresholds: DisplayThresholds = { minGofPercent: gofThresholdPercent, minAmplitudeNaM: threshold }
+  const visibleLayer = thresholdDipoleLayer(layer, thresholds)
+  const hidden = hiddenByThreshold(layer, thresholds)
 
   return (
     <>
@@ -391,18 +398,28 @@ export function DipolesPanel() {
           }
         />
         <NumberField
-          label="КД ≥"
+          label="GOF ≥"
+          value={gofThresholdPercent}
+          min={GOF_THRESHOLD_RANGE[0]}
+          max={GOF_THRESHOLD_RANGE[1]}
+          step={1}
+          unit="%"
+          onChange={setGofThreshold}
+          hint="Основной порог отображения: диполи с GOF ниже не рисуются на проекциях, но остаются в результате задачи. 0 — без фильтра."
+        />
+        <NumberField
+          label="Момент диполя ≥"
           value={threshold}
           min={THRESHOLD_NAM_RANGE[0]}
           max={THRESHOLD_NAM_RANGE[1]}
           step={5}
           unit="нАм"
           onChange={setAmplitudeThreshold}
-          hint="Порог отображения: диполи слабее момента не рисуются на проекциях, но остаются в результате задачи."
+          hint="Дополнительная фильтрация по моменту (не «КД»): диполи слабее момента не рисуются на проекциях, но остаются в результате задачи. 0 — без фильтра."
         />
         {hidden > 0 ? (
           <p className="mt-1 text-sm text-warn">
-            {`Скрыто порогом «КД ≥ ${threshold} нАм»: ${hidden} из ${layer.points.length}`}
+            {`Скрыто порогами «${thresholdsLabel(thresholds)}»: ${hidden} из ${layer.points.length}`}
           </p>
         ) : null}
 

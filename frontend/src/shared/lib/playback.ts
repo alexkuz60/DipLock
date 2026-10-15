@@ -21,7 +21,15 @@
  * Модуль чистый (без DOM и zustand): состояние — `shared/state/dipoleCalc.ts`,
  * часы и отрисовка — `app/sections/dipoles/PlaybackFrame.tsx`.
  */
-import { atlasLabels, attributionText, type DipolePoint, type PointAttribution } from './dipolePoints'
+import {
+  atlasLabels,
+  attributionText,
+  pointPassesThresholds,
+  NO_THRESHOLDS,
+  type DisplayThresholds,
+  type DipolePoint,
+  type PointAttribution,
+} from './dipolePoints'
 import type { MniVector } from './mriProjections'
 import type { DipoleScanResult } from '@/shared/api/types'
 
@@ -282,15 +290,16 @@ export type TrailSegment = {
  * Возраст считается по **новому** концу отрезка, поэтому сегмент, примыкающий к
  * кадру, самый свежий и самый плотный; эпохи старше окна не рисуются вовсе.
  *
- * `minAmplitudeNam` — порог «КД»: он правило **отображения**, и шлейф подчиняется
- * ему так же, как облако и маркер кадра. Отрезок не рисуется, если слабее порога
- * хотя бы один из его концов: иначе шлейф вёл бы к точке, которой на проекциях нет.
+ * `thresholds` — пороги отображения (GOF % и момент нА·м): они правило
+ * **отображения**, и шлейф подчиняется им так же, как облако и маркер кадра.
+ * Отрезок не рисуется, если слабее порогов хотя бы один из его концов: иначе
+ * шлейф вёл бы к точке, которой на проекциях нет.
  */
 export function trailSegments(
   points: Map<number, DipolePoint>,
   epochIndex: number,
   epochLengthMs: number,
-  minAmplitudeNam = 0,
+  thresholds: DisplayThresholds = NO_THRESHOLDS,
 ): TrailSegment[] {
   if (!(epochLengthMs > 0) || points.size < 2) return []
   const span = Math.max(1, Math.min(TRAIL_MAX_SEGMENTS, Math.ceil(TRAIL_WINDOW_MS / epochLengthMs)))
@@ -300,7 +309,7 @@ export function trailSegments(
     const from = points.get(start)
     const to = points.get(start + 1)
     if (!from || !to) continue
-    if (from.amplitudeNaM < minAmplitudeNam || to.amplitudeNaM < minAmplitudeNam) continue
+    if (!pointPassesThresholds(from, thresholds) || !pointPassesThresholds(to, thresholds)) continue
     const age = Math.max(0, epochIndex - (start + 1)) * epochLengthMs
     const alpha = TRAIL_ALPHA_HEAD * Math.max(0, 1 - age / TRAIL_WINDOW_MS)
     if (alpha < TRAIL_ALPHA_MIN) continue

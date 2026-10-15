@@ -3,7 +3,7 @@
  *
  * Проверяют обещание строки: она называет структуру и поле **той эпохи, на которой
  * стоит кадр**, показывает ближайшую смену только в непрерывной цепочке эпох и
- * молчит там, где данных нет (эпоха без диполя с MNI, кадр скрыт порогом «КД»).
+ * молчит там, где данных нет (эпоха без диполя с MNI, кадр скрыт порогами отображения).
  * Ни одного запроса: анатомию сервер посчитал в результате, а строка лишь её читает.
  */
 import { act, render, screen } from '@testing-library/react'
@@ -36,11 +36,12 @@ function scanPoint(epochIndex: number, overrides: Partial<DipoleScanPoint> = {})
   }
 }
 
-/** Рендерит строку на состоянии раздела: результат, порог «КД» и положение кадра. */
+/** Рендерит строку на состоянии раздела: результат, пороги отображения и положение кадра. */
 function renderLine(
   options: {
     epochIndex?: number
     threshold?: number
+    gofThreshold?: number
     active?: boolean
     playing?: boolean
     points?: DipoleScanPoint[]
@@ -53,6 +54,7 @@ function renderLine(
       n_epochs_total: points.length,
       n_epochs_used: points.length,
     }),
+    gofThresholdPercent: options.gofThreshold ?? 0,
     amplitudeThresholdNam: options.threshold ?? 0,
     playback: {
       ...PLAYBACK_DEFAULTS,
@@ -74,6 +76,7 @@ describe('строка анатомии кадра воспроизведени�
     localStorage.clear()
     useDipoleCalc.setState({
       result: null,
+      gofThresholdPercent: 0,
       amplitudeThresholdNam: 0,
       playback: { ...PLAYBACK_DEFAULTS },
     })
@@ -178,11 +181,20 @@ describe('строка анатомии кадра воспроизведени�
     expect(screen.getByText('Кадр: эпоха 2 — диполя с MNI нет')).toBeInTheDocument()
   })
 
-  it('не подписывает кадр, скрытый порогом «КД»: подпись не должна спорить с картинкой', () => {
+  it('не подписывает кадр, скрытый порогами отображения: подпись не должна спорить с картинкой', () => {
     renderLine({ epochIndex: 0, threshold: 100 })
 
     expect(
-      screen.getByText('Кадр: эпоха 1 — скрыт порогом «КД ≥ 100 нАм»'),
+      screen.getByText('Кадр: эпоха 1 — скрыт порогами «момент ≥ 100 нАм»'),
+    ).toBeInTheDocument()
+  })
+
+  it('скрывает кадр и по GOF-порогу (основной контур отбора)', () => {
+    // gof точек фикстуры 0.91 → порог 95% прячет кадр
+    renderLine({ epochIndex: 0, gofThreshold: 95 })
+
+    expect(
+      screen.getByText('Кадр: эпоха 1 — скрыт порогами «GOF ≥ 95 %»'),
     ).toBeInTheDocument()
   })
 

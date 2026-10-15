@@ -33,6 +33,7 @@ describe('панель раздела «Диполи»', () => {
     // Расчёт — сессионное состояние: каждый тест начинает с чистых параметров
     useDipoleCalc.setState({
       params: { ...CALC_PARAM_DEFAULTS },
+      gofThresholdPercent: 0,
       amplitudeThresholdNam: 0,
       fftRangeHz: null,
       selectedPointId: null,
@@ -192,14 +193,22 @@ describe('панель раздела «Диполи»', () => {
     expect(urls.every((url) => url.includes('/meta'))).toBe(true)
   })
 
-  it('порог «КД ≥» скрывает слабые диполи и сообщает, сколько скрыто', () => {
+  it('пороги отображения скрывают слабые диполи и сообщают, сколько скрыто', () => {
     useDipoleCalc.setState({ result: dipoleScanResultFixture(), amplitudeThresholdNam: 50 })
     renderWithProviders(<DipolesPanel />)
 
     // В фикстуре три точки с MNI (60, 25, 90 нАм): порог 50 скрывает одну
-    expect(screen.getByText('Скрыто порогом «КД ≥ 50 нАм»: 1 из 3')).toBeInTheDocument()
+    expect(screen.getByText('Скрыто порогами «момент ≥ 50 нАм»: 1 из 3')).toBeInTheDocument()
     expect(screen.getByText('Точек диполей: 2')).toBeInTheDocument()
     expect(screen.getByText('Эпох в расчёте: 4 из 4')).toBeInTheDocument()
+  })
+
+  it('порог GOF (основной) скрывает по GOF и подписывается в счётчике', () => {
+    // gof всех точек фикстуры = 0.91 → 95% скрывает все три
+    useDipoleCalc.setState({ result: dipoleScanResultFixture(), gofThresholdPercent: 95 })
+    renderWithProviders(<DipolesPanel />)
+
+    expect(screen.getByText('Скрыто порогами «GOF ≥ 95 %»: 3 из 3')).toBeInTheDocument()
   })
 
   it('кнопка «Сбросить расчёт» убирает результат, но не параметры', async () => {

@@ -37,9 +37,14 @@
    Сбой обезличивания — отказ регистрации (fail closed, файл удаляется).
    Записи, загруженные до 4.4, автоматически не анонимизируются.
 5. **КД — вердикт с базисом** (§2.2 `data-blocks`, concept.md §3): `kd_basis` =
-   `{moment_share_x, gof_min, moment_max_nam}` — максимум момента **внутри своей
-   полосы**; пороги задаёт методика (`KD_MOMENT_SHARE`/`KD_GOF_MIN`, по умолчанию
-   `None`) — без них `kd_passed` = NULL («не оценено»), а не 0.
+   `{moment_share_x, gof_min, moment_max_nam, moment_basis, gof_basis}` — максимум
+   момента **внутри своей полосы** и базисы нормировки обоих порогов
+   (`moment_basis` = «доля от максимума поддиапазона», `gof_basis` =
+   «абсолютный», константы `KD_MOMENT_BASIS`/`KD_GOF_BASIS` в `core/config.py`);
+   пороги задаёт методика (`KD_MOMENT_SHARE`/`KD_GOF_MIN`, по умолчанию
+   `None`) — без них `kd_passed` = NULL («не оценено»), а не 0. Паспорт критерия
+   продублирован в манифесте прогона (`run_manifest.py`, блок `criteria`,
+   manifest v2) — он рядом с результатом каждой задачи.
 6. **Внутренние ключи результата задачи**: `run_report` кладёт точки пакета под
    `_package_points`, `summarize_band` — полный счёт имён под `name_counts` в
    агрегатах (§8.4.4 — в БД все имена, не топ-N HTML); `results_store` потребляет

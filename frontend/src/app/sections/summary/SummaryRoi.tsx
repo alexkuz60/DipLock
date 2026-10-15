@@ -1,7 +1,7 @@
 /**
  * Вкладка «ROI» раздела «Итоги» (4.5): строки ROI × полоса из агрегата
  * `ReportResult.roi` — «надёжные» точки (GOF ≥ порога), доли эпох, медианные
- * GOF/КД внутри полосы и асимметрия полушарий.
+ * GOF/момента внутри полосы и асимметрия полушарий.
  *
  * Только просмотр готового результата: селект полосы и экспорт CSV — локальное
  * состояние и скачивание, запросов нет (правило «правка не запускает расчёт»).
@@ -58,7 +58,7 @@ function RoiTable({
             <th className="py-1 pr-2 text-right font-normal">Доля, %</th>
             <th className="py-1 pr-2 text-right font-normal">{`GOF ≥ ${threshold}`}</th>
             <th className="py-1 pr-2 text-right font-normal">Медианный GOF</th>
-            <th className="py-1 text-right font-normal">Медианная КД, нАм</th>
+            <th className="py-1 text-right font-normal">Медианный момент, нАм</th>
           </tr>
         </thead>
         <tbody>

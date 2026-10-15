@@ -1,13 +1,15 @@
 /**
  * Тулс-хедер раздела «Диполи» (срез 3.4; воспроизведение — срез 3.7): запуск
- * расчёта, кадр траектории, порог «КД ≥ X нАм» и выдвижные панели спектра.
+ * расчёта, кадр траектории, пороги отображения («GOF ≥ X %» и «Момент ≥ X нАм»)
+ * и выдвижные панели спектра.
  *
  * Правила, заложенные в разметке:
  *
  * * расчёт стартует **только кнопкой** — правка порога или параметров ничего не
  *   запускает (как в EDF, `docs/ui.md`);
- * * порог «КД» — параметр **отображения**, а не расчёта: он скрывает слабые
- *   диполи на проекциях, но не меняет результат задачи, поэтому рядом стоит
+ * * пороги отображения (GOF % — основной, момент нА·м — дополнительный) —
+ *   параметры **отображения**, а не расчёта: они скрывают слабые
+ *   диполи на проекциях, но не меняют результат задачи, поэтому рядом стоит
  *   подпись со счётчиком скрытых точек;
  * * пока идёт задача, кнопка показывает прогресс по этапам и эпохам
  *   (`epochs_done`/`epochs_total`), а не «крутилку» без чисел: расчёт по эпохам
@@ -214,7 +216,9 @@ export function DipolesToolHeaderActions() {
   // Вид рабочей области (срез 3.5): отрисовка, параметр вне STAGE_PARAM_KEYS
   const view3d = useDipoleParams((state) => state.params.view3d)
   const setView3d = useDipoleParams((state) => state.setView3d)
+  const gofThresholdPercent = useDipoleCalc((state) => state.gofThresholdPercent)
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
+  const setGofThreshold = useDipoleCalc((state) => state.setGofThreshold)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const toggleView = useDipoleCalc((state) => state.toggleView)
   const runCalculation = useDipoleCalc((state) => state.runCalculation)
@@ -340,7 +344,24 @@ export function DipolesToolHeaderActions() {
       <span aria-hidden className="mx-0.5 h-6 w-px bg-border" />
 
       <label className="flex items-center gap-2 text-sm text-fg-2">
-        <span className="shrink-0">КД ≥</span>
+        <span className="shrink-0">GOF ≥</span>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={100}
+          step={1}
+          value={gofThresholdPercent}
+          aria-label="Порог GOF отображения, %"
+          title="Основной порог отображения: диполи с GOF ниже на проекциях не рисуются (расчёт не меняется)"
+          onChange={(event) => setGofThreshold(Number(event.target.value))}
+          className="tnum w-20 rounded-lg border border-border bg-bg-2 px-2 py-1.5 text-right text-sm text-fg-0"
+        />
+        <span className="shrink-0">%</span>
+      </label>
+
+      <label className="flex items-center gap-2 text-sm text-fg-2">
+        <span className="shrink-0">Момент ≥</span>
         <input
           type="number"
           inputMode="decimal"
@@ -348,7 +369,7 @@ export function DipolesToolHeaderActions() {
           step={5}
           value={threshold}
           aria-label="Порог момента диполя, нАм"
-          title="Порог отображения: диполи со слабее этого момента на проекциях не рисуются (расчёт не меняется)"
+          title="Дополнительная фильтрация по моменту: диполи со слабее этого момента на проекциях не рисуются (расчёт не меняется)"
           onChange={(event) => setAmplitudeThreshold(Number(event.target.value))}
           className="tnum w-20 rounded-lg border border-border bg-bg-2 px-2 py-1.5 text-right text-sm text-fg-0"
         />

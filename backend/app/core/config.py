@@ -9,6 +9,12 @@ from pydantic_settings import BaseSettings, NoDecode
 _BACKEND_DIR = Path(__file__).resolve().parents[2]
 _REPO_DIR = _BACKEND_DIR.parent
 
+# Базисы нормировки порогов КД (concept.md §3): обязательная часть описания
+# каждого порога, иначе числа разных поддиапазонов молча встанут в один ряд.
+# Используются в kd_basis (write-API 4.4) и паспорте критерия манифеста прогона.
+KD_MOMENT_BASIS = "share_of_band_max"  # доля от максимума момента своего поддиапазона
+KD_GOF_BASIS = "absolute"  # GOF — доля объяснённой дисперсии (0…1), своя у каждого метода
+
 
 class Settings(BaseSettings):
     # FastAPI

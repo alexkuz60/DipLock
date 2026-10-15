@@ -61,7 +61,8 @@ export type DipolePoint = {
    *
    * Быстрый расчёт ищет позицию перебором узлов, поэтому несколько эпох часто
    * выбирают один и тот же узел, и их кольца рисуются ровно друг на друге. Число
-   * заполняет `withOverlapCounts` по **видимому** слою (после порога «КД»), и по нему
+   * заполняет `withOverlapCounts` по **видимому** слою (после порогов отображения),
+   * и по нему
    * считается размер кольца и заливка (`dipoleDotVisual`); `1`/`undefined` — узел
    * занят одним диполем.
    */
@@ -126,24 +127,74 @@ export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
 }
 
 /**
- * Слой с порогом по моменту «КД ≥ X нАм»: слабые диполи скрываются.
+ * Пороги отображения диполей на проекциях (оба — параметры **отображения**).
  *
- * Порог — параметр **отображения**: он не меняет результат задачи (точки в слое
- * остаются теми же), поэтому счётчик скрытых точек возвращается отдельно, и
- * панель объясняет, что часть диполей не рисуется из-за порога.
+ * Основной — `minGofPercent` (отбор по GOF, %): безразмерная доля объяснённой
+ * дисперсии. Дополнительный — `minAmplitudeNaM` (момент диполя, нА·м):
+ * опционная фильтрация по абсолютной величине. Настоящий «КД» (критерий
+ * годности, `kd_passed`) — составной вердикт анализа С0, он живёт в
+ * `dipole_points`/паспорте и к этим полям отношения не имеет.
  */
-export function thresholdDipoleLayer(layer: DipoleLayer, minAmplitudeNaM: number): DipoleLayer {
-  if (!(minAmplitudeNaM > 0)) return layer
+export type DisplayThresholds = {
+  /** Минимальный GOF, % (0 — порог выключен) */
+  minGofPercent: number
+  /** Минимальный момент диполя, нА·м (0 — порог выключен) */
+  minAmplitudeNaM: number
+}
+
+/** Оба порога выключены: ничего не скрывать. */
+export const NO_THRESHOLDS: DisplayThresholds = { minGofPercent: 0, minAmplitudeNaM: 0 }
+
+/**
+ * Точка проходит пороги отображения (оба условия «И»; нулевой порог не фильтрует).
+ *
+ * GOF в точке хранится 0…1, порог задаётся в процентах: сравнение идёт через
+ * долю (`minGofPercent / 100`), чтобы float-сравнение не спотыкалось на
+ * `0.6 * 100 = 60.000…1`.
+ */
+export function pointPassesThresholds(point: DipolePoint, thresholds: DisplayThresholds): boolean {
+  return (
+    point.gof >= thresholds.minGofPercent / 100
+    && point.amplitudeNaM >= thresholds.minAmplitudeNaM
+  )
+}
+
+/** Активны ли пороги (хотя бы один больше нуля). */
+export function thresholdsActive(thresholds: DisplayThresholds): boolean {
+  return thresholds.minGofPercent > 0 || thresholds.minAmplitudeNaM > 0
+}
+
+/**
+ * Подпись активных порогов одной строкой («GOF ≥ 60 % · момент ≥ 200 нАм») —
+ * пилюли и счётчики скрытых не должны выдумывать названия порогов по-своему.
+ * Неактивные пороги в подпись не попадают; оба выключены — пустая строка.
+ */
+export function thresholdsLabel(thresholds: DisplayThresholds): string {
+  const parts: string[] = []
+  if (thresholds.minGofPercent > 0) parts.push(`GOF ≥ ${thresholds.minGofPercent} %`)
+  if (thresholds.minAmplitudeNaM > 0) parts.push(`момент ≥ ${thresholds.minAmplitudeNaM} нАм`)
+  return parts.join(' · ')
+}
+
+/**
+ * Слой с порогами отображения: слабые по GOF и/или моменту диполи скрываются.
+ *
+ * Пороги — параметры **отображения**: они не меняют результат задачи (точки в
+ * слое остаются теми же), поэтому счётчик скрытых точек возвращается отдельно,
+ * и панель объясняет, что часть диполей не рисуется из-за порога.
+ */
+export function thresholdDipoleLayer(layer: DipoleLayer, thresholds: DisplayThresholds): DipoleLayer {
+  if (!thresholdsActive(thresholds)) return layer
   return {
-    points: layer.points.filter((point) => point.amplitudeNaM >= minAmplitudeNaM),
+    points: layer.points.filter((point) => pointPassesThresholds(point, thresholds)),
     source: layer.source,
   }
 }
 
-/** Сколько точек скрыто порогом (для пояснения в панели). */
-export function hiddenByThreshold(layer: DipoleLayer, minAmplitudeNaM: number): number {
-  if (!(minAmplitudeNaM > 0)) return 0
-  return layer.points.filter((point) => point.amplitudeNaM < minAmplitudeNaM).length
+/** Сколько точек скрыто порогами (для пояснения в панели). */
+export function hiddenByThreshold(layer: DipoleLayer, thresholds: DisplayThresholds): number {
+  if (!thresholdsActive(thresholds)) return 0
+  return layer.points.filter((point) => !pointPassesThresholds(point, thresholds)).length
 }
 
 /**
@@ -177,7 +228,7 @@ function positionKey(position: MniVector): string {
 /**
  * Проставить точкам число диполей в их узле (`overlapCount`).
  *
- * Считается по **видимому** слою (после порога «КД ≥»): кольцо не должно обещать
+ * Считается по **видимому** слою (после порогов отображения): кольцо не должно обещать
  * диполи, скрытые порогом. Функция чистая: координаты, порядок и сами точки не
  * меняются, добавляется только производное число; узел с одним диполем остаётся с
  * `1`. Если совпадений нет, возвращается тот же объект слоя.

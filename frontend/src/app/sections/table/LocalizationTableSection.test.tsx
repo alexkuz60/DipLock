@@ -49,6 +49,7 @@ describe('раздел «Таблица локализации»', () => {
     })
     useDipoleCalc.setState({
       params: { ...CALC_PARAM_DEFAULTS },
+      gofThresholdPercent: 0,
       amplitudeThresholdNam: 0,
       job: null,
       result: null,
@@ -185,14 +186,14 @@ describe('раздел «Таблица локализации»', () => {
     expect(screen.queryByTestId('loc-col-structure')).not.toBeInTheDocument()
   })
 
-  it('порог «КД» скрывает точки только на проекциях — в таблице остаются все', () => {
+  it('пороги отображения скрывают точки только на проекциях — в таблице остаются все', () => {
     useEdfRecording.setState({ recording: recordingFixture })
     useDipoleCalc.setState({ result: dipoleScanResultFixture(), amplitudeThresholdNam: 200 })
     renderWithProviders(<LocalizationTableSection />)
 
     expect(screen.getAllByTestId(/^loc-row-/)).toHaveLength(4)
     expect(
-      screen.getByText('Порог «КД ≥ 200 нАм» — только на проекциях: в таблице все точки'),
+      screen.getByText('Пороги «момент ≥ 200 нАм» — только на проекциях: в таблице все точки'),
     ).toBeInTheDocument()
   })
 

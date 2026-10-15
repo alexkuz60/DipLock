@@ -64,7 +64,7 @@ frontend/
     │       ├── viewer/TrackStack.tsx               # uPlot-стек треков: зум, панорама, курсор, разворот трека
     │       ├── viewer/TrackLayers.tsx / ExportActions.tsx  # DOM-слои (зоны/эпохи), кнопки экспорта окна
     │       ├── dipoles/        # MriProjection.tsx (SVG-проекция: слои, сетка, клик), DipolesSection/Panel.tsx,
-    │       │                   # DipolesToolActions/Drawer.tsx (кнопка расчёта, порог «КД», топокарты/FFT)
+    │       │                   # DipolesToolActions/Drawer.tsx (кнопка расчёта, пороги отображения GOF/момент, топокарты/FFT)
     │       ├── table/          # LocalizationTable.tsx (таблица точек результата), Section/Panel.tsx (срез 4)
     │       ├── eeg/            # EegSection.tsx (две половины, разделитель, курсор), EegTrackView.tsx (трек),
     │       │                   # SpectrogramCanvas.tsx (сетка дБ), EegTimeline.tsx (полоса времени),
@@ -84,7 +84,7 @@ frontend/
     │   │                       # theme.ts (токены темы для canvas/DOM)
     │   ├── state/              # uiStore.ts, edfParams.ts (параметры + стадии), edfRecording.ts (запись, кадры сигналов, паспорт),
     │   │                       # dipoleParams.ts (слои проекций, срезы MNI, референс-точка),
-    │   │                       # dipoleCalc.ts (расчёт и спектр, порог «КД»), tableParams.ts (сортировка/колонки таблицы),
+    │   │                       # dipoleCalc.ts (расчёт и спектр, пороги отображения GOF/момент), tableParams.ts (сортировка/колонки таблицы),
     │   │                       # eegParams.ts (канал, окно, параметры спектрограммы, задача расчёта)
     │   └── ui/                 # Tooltip, IconButton, Button, Panel, Placeholder, StateViews, контролы (в т.ч.
     │                           # SliceScrubber — линейка среза MNI, ZoomNavControls — зум + листание окна)

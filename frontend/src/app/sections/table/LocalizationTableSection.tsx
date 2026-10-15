@@ -16,8 +16,9 @@
  *
  * * строки — **все точки результата** (включая те, что без MNI, — координаты у
  *   них «—»), сортировка — по номеру эпохи (параметр панели);
- * * порог «КД ≥ X нАм» из раздела «Диполи» — параметр **отображения проекций**:
- *   в таблице он ничего не скрывает, и это сказано подписью, иначе «в таблице
+ * * пороги отображения («GOF ≥ X %» / «Момент диполя ≥ X нАм») из раздела
+ *   «Диполи» — параметры **отображения проекций**:
+ *   в таблице они ничего не скрывают, и это сказано подписью, иначе «в таблице
  *   4 точки, на проекциях 2» выглядело бы ошибкой;
  * * результат принадлежит записи: при загрузке новой или закрытии записи он
  *   сбрасывается вместе с расчётом (`edfRecording` → `dipoleCalc.reset()`).
@@ -35,6 +36,7 @@ import {
   visibleColumns,
 } from '@/shared/lib/tableRows'
 import { calcJobSummary, refinedSummary, refineTooltip, resultMatchesParams } from '@/shared/lib/dipoleCalcModel'
+import { thresholdsActive, thresholdsLabel, type DisplayThresholds } from '@/shared/lib/dipolePoints'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useTableParams } from '@/shared/state/tableParams'
@@ -50,7 +52,13 @@ export function LocalizationTableSection() {
   const result = useDipoleCalc((state) => state.result)
   const job = useDipoleCalc((state) => state.job)
   const error = useDipoleCalc((state) => state.error)
+  const gofThresholdPercent = useDipoleCalc((state) => state.gofThresholdPercent)
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
+  /** Пороги отображения проекций (в таблице они ничего не скрывают) */
+  const thresholds: DisplayThresholds = useMemo(
+    () => ({ minGofPercent: gofThresholdPercent, minAmplitudeNaM: threshold }),
+    [gofThresholdPercent, threshold],
+  )
   const calcParams = useDipoleCalc((state) => state.params)
   const refineJob = useDipoleCalc((state) => state.refineJob)
   const refiningEpoch = useDipoleCalc((state) => state.refiningEpoch)
@@ -198,9 +206,9 @@ export function LocalizationTableSection() {
             {`Точек без MNI: ${missingMni} — координаты «—» (на проекции не наводятся)`}
           </StatusPill>
         ) : null}
-        {threshold > 0 ? (
+        {thresholdsActive(thresholds) ? (
           <StatusPill tone="neutral">
-            {`Порог «КД ≥ ${threshold} нАм» — только на проекциях: в таблице все точки`}
+            {`Пороги «${thresholdsLabel(thresholds)}» — только на проекциях: в таблице все точки`}
           </StatusPill>
         ) : null}
       </div>

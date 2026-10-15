@@ -15,7 +15,7 @@
  * Запросов здесь нет: структуру и поле сервер посчитал ещё в результате.
  *
  * Честность состояний: пустой эпохе (отброшена нарезкой или у точки нет MNI) и
- * кадру, скрытому порогом «КД», метки соседних эпох не подставляются. Смена
+ * кадру, скрытому порогами отображения, метки соседних эпох не подставляются. Смена
  * анатомии показывается только в непрерывной цепочке эпох: через разрыв в данных
  * «перехода» нет (это разрыв, а не переход). Выключенный слой «Кадр
  * воспроизведения» убирает кадр с проекций — вместе с ним молчит и строка.
@@ -27,7 +27,7 @@ import {
   nextAnatomyChange,
   pointByEpoch,
 } from '@/shared/lib/playback'
-import { atlasLabels, dipoleLayerFromScan } from '@/shared/lib/dipolePoints'
+import { atlasLabels, dipoleLayerFromScan, pointPassesThresholds, type DisplayThresholds, thresholdsLabel } from '@/shared/lib/dipolePoints'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -47,7 +47,10 @@ export function PlaybackAnatomyLine() {
   const epochIndex = useDipoleCalc((state) => state.playback.epochIndex)
   const active = useDipoleCalc((state) => state.playback.active)
   const playing = useDipoleCalc((state) => state.playback.playing)
-  const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
+  const minGofPercent = useDipoleCalc((state) => state.gofThresholdPercent)
+  const minAmplitudeNaM = useDipoleCalc((state) => state.amplitudeThresholdNam)
+  /** Пороги отображения (GOF % и момент нА·м) — то же правило, что у кадра */
+  const thresholds: DisplayThresholds = { minGofPercent, minAmplitudeNaM }
   /** Выключенный слой анимации убирает кадр с проекций — подписывать его нечего */
   const playbackLayerVisible = useDipoleParams((state) => state.params.layerVisibility.playback)
 
@@ -62,8 +65,8 @@ export function PlaybackAnatomyLine() {
 
   const epoch = epochIndex + 1
   const point = pointsByEpoch.get(epochIndex) ?? null
-  /** Порог «КД» — правило отображения: скрытому кадру метки не подставляем */
-  const hidden = point !== null && point.amplitudeNaM < threshold
+  /** Пороги отображения — правило отображения: скрытому кадру метки не подставляем */
+  const hidden = point !== null && !pointPassesThresholds(point, thresholds)
 
   if (!point) {
     return (
@@ -82,9 +85,9 @@ export function PlaybackAnatomyLine() {
       <StatusPill
         tone="warn"
         className="w-full"
-        title={`Кадр слабее порога «КД ≥ ${threshold} нАм»: он не рисуется на проекциях, поэтому и анатомия не подписывается — иначе подпись расходилась бы с картинкой.`}
+        title={`Кадр слабее порогов «${thresholdsLabel(thresholds)}»: он не рисуется на проекциях, поэтому и анатомия не подписывается — иначе подпись расходилась бы с картинкой.`}
       >
-        <span className={ANATOMY_TEXT_CLASS}>{`Кадр: эпоха ${epoch} — скрыт порогом «КД ≥ ${threshold} нАм»`}</span>
+        <span className={ANATOMY_TEXT_CLASS}>{`Кадр: эпоха ${epoch} — скрыт порогами «${thresholdsLabel(thresholds)}»`}</span>
       </StatusPill>
     )
   }

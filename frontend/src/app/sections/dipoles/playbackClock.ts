@@ -35,7 +35,12 @@ import {
   trailSegments,
   type TrailSegment,
 } from '@/shared/lib/playback'
-import { dipoleLayerFromScan, type DipolePoint } from '@/shared/lib/dipolePoints'
+import {
+  dipoleLayerFromScan,
+  pointPassesThresholds,
+  type DisplayThresholds,
+  type DipolePoint,
+} from '@/shared/lib/dipolePoints'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 
 /** Кадр воспроизведения: время, доля внутри эпохи, точка и шлейф траектории. */
@@ -44,7 +49,7 @@ export type PlaybackFrame = {
   timeMs: number
   /** Доля внутри текущей эпохи, 0…1 (для интерполяции позиции и вектора) */
   fraction: number
-  /** Точка кадра; `null` — кадр пуст (эпоха без диполя или слабее порога «КД») */
+  /** Точка кадра; `null` — кадр пуст (эпоха без диполя или слабее порогов отображения) */
   point: DipolePoint | null
   /** Шлейф к кадру: измеренные отрезки последних секунд сессии, гаснущие с возрастом */
   trail: TrailSegment[]
@@ -81,7 +86,13 @@ export function usePlaybackClock(): PlaybackFrame {
   const epochIndex = useDipoleCalc((state) => state.playback.epochIndex)
   const seekSeq = useDipoleCalc((state) => state.playback.seekSeq)
   const active = useDipoleCalc((state) => state.playback.active)
-  const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
+  const minGofPercent = useDipoleCalc((state) => state.gofThresholdPercent)
+  const minAmplitudeNaM = useDipoleCalc((state) => state.amplitudeThresholdNam)
+  /** Пороги отображения (GOF % и момент нА·м) — одно правило на кадр и шлейф */
+  const thresholds: DisplayThresholds = useMemo(
+    () => ({ minGofPercent, minAmplitudeNaM }),
+    [minGofPercent, minAmplitudeNaM],
+  )
 
   const epochLengthMs = result?.epoch_length_ms ?? 0
   const totalEpochs = result?.n_epochs_total ?? 0
@@ -146,17 +157,17 @@ export function usePlaybackClock(): PlaybackFrame {
   const point = useMemo(() => {
     if (!active) return null
     const frame = interpolatedPoint(pointsByEpoch, epochIndex, fraction)
-    // Порог «КД» — правило отображения для всех диполей, включая кадр: слабый кадр
+    // Пороги отображения — правило для всех диполей, включая кадр: слабый кадр
     // не рисуется, но воспроизведение продолжается (эпоха видна в шапке)
-    return frame && frame.amplitudeNaM >= threshold ? frame : null
-  }, [active, pointsByEpoch, epochIndex, fraction, threshold])
+    return frame && pointPassesThresholds(frame, thresholds) ? frame : null
+  }, [active, pointsByEpoch, epochIndex, fraction, thresholds])
   /**
-   * Шлейф — история **измеренных** точек (порог «КД» действует на него так же, как
-   * на облако и маркер кадра: правило отображения одно на всех).
+   * Шлейф — история **измеренных** точек (пороги отображения действуют на него
+   * так же, как на облако и маркер кадра: правило отображения одно на всех).
    */
   const trail = useMemo(
-    () => (active ? trailSegments(pointsByEpoch, epochIndex, epochLengthMs, threshold) : NO_TRAIL),
-    [active, pointsByEpoch, epochIndex, epochLengthMs, threshold],
+    () => (active ? trailSegments(pointsByEpoch, epochIndex, epochLengthMs, thresholds) : NO_TRAIL),
+    [active, pointsByEpoch, epochIndex, epochLengthMs, thresholds],
   )
 
   return { timeMs, fraction, point, trail }

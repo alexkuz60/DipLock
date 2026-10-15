@@ -29,7 +29,7 @@ import { cx } from '@/shared/ui/cx'
 export type Brain3DProps = {
   /** Ссылка на тома из `/meta` (`null` — метаданные недоступны, вид не рисуется) */
   volumes: MriVolumeRef | null
-  /** Видимый слой диполей (после порога «КД») — узлы connectome */
+  /** Видимый слой диполей (после порогов отображения) — узлы connectome */
   layer: DipoleLayer
   /** Совместный курсор проекций: мировые мм (MNI) положения кроссхейра */
   cursor: MniVector | null

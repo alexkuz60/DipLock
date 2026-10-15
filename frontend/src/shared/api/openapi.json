@@ -18461,11 +18461,90 @@
             ],
             "title": "Moment Max Nam",
             "description": "Максимум момента полосы, нА·м"
+          },
+          "moment_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moment Basis",
+            "description": "Базис порога момента: «доля от максимума поддиапазона»"
+          },
+          "gof_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gof Basis",
+            "description": "Базис порога GOF: «абсолютный» (доля дисперсии)"
           }
         },
         "type": "object",
         "title": "KdBasisOut",
         "description": "Базис вердикта КД (§2.2 ``data-blocks``): максимум момента — в своей полосе."
+      },
+      "KdCriteriaOut": {
+        "properties": {
+          "kd_moment_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kd Moment Share",
+            "description": "Порог «доля от максимума поддиапазона»; None — методика не задала"
+          },
+          "kd_gof_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kd Gof Min",
+            "description": "Порог GOF; None — методика не задала"
+          },
+          "kd_moment_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kd Moment Basis",
+            "description": "Базис порога момента: «доля от максимума поддиапазона»"
+          },
+          "kd_gof_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kd Gof Basis",
+            "description": "Базис порога GOF: «абсолютный» (доля дисперсии)"
+          }
+        },
+        "type": "object",
+        "title": "KdCriteriaOut",
+        "description": "Паспорт критерия КД (С0) в манифесте прогона: пороги и базисы нормировки."
       },
       "LlmChatProbeModelOut": {
         "properties": {
@@ -21239,6 +21318,10 @@
             "type": "object",
             "title": "Assets",
             "description": "Отпечатки ассетов FSAverage (меш, МРТ, атлас) — как в /meta"
+          },
+          "criteria": {
+            "$ref": "#/components/schemas/KdCriteriaOut",
+            "description": "Паспорт критерия КД (С0): пороги и базисы нормировки"
           }
         },
         "type": "object",
@@ -21249,7 +21332,8 @@
           "params_sig",
           "finished_at",
           "versions",
-          "assets"
+          "assets",
+          "criteria"
         ],
         "title": "RunManifestOut",
         "description": "Run manifest задачи: на чём, чем и на каких данных посчитано (N40/4.6).\n\nВерсии/отпечатки — те же источники, что `/meta` и manifest внутри\nsession-пакета: задача обязана честно сказать про своё окружение рядом\nсо своим результатом, а не заставлять сверять сборки вручную."

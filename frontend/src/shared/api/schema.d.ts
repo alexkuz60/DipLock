@@ -8326,6 +8326,42 @@ export interface components {
              * @description Максимум момента полосы, нА·м
              */
             moment_max_nam?: number | null;
+            /**
+             * Moment Basis
+             * @description Базис порога момента: «доля от максимума поддиапазона»
+             */
+            moment_basis?: string | null;
+            /**
+             * Gof Basis
+             * @description Базис порога GOF: «абсолютный» (доля дисперсии)
+             */
+            gof_basis?: string | null;
+        };
+        /**
+         * KdCriteriaOut
+         * @description Паспорт критерия КД (С0) в манифесте прогона: пороги и базисы нормировки.
+         */
+        KdCriteriaOut: {
+            /**
+             * Kd Moment Share
+             * @description Порог «доля от максимума поддиапазона»; None — методика не задала
+             */
+            kd_moment_share?: number | null;
+            /**
+             * Kd Gof Min
+             * @description Порог GOF; None — методика не задала
+             */
+            kd_gof_min?: number | null;
+            /**
+             * Kd Moment Basis
+             * @description Базис порога момента: «доля от максимума поддиапазона»
+             */
+            kd_moment_basis?: string | null;
+            /**
+             * Kd Gof Basis
+             * @description Базис порога GOF: «абсолютный» (доля дисперсии)
+             */
+            kd_gof_basis?: string | null;
         };
         /**
          * LlmChatProbeModelOut
@@ -9979,6 +10015,8 @@ export interface components {
             assets: {
                 [key: string]: string;
             };
+            /** @description Паспорт критерия КД (С0): пороги и базисы нормировки */
+            criteria: components["schemas"]["KdCriteriaOut"];
         };
         /**
          * ServerRestartOut
