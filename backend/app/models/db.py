@@ -721,12 +721,25 @@ def _upgrade_to_head(database_url: str) -> None:
         command.upgrade(config, "head")
 
 
+_SCHEMA_READY: set[str] = set()
+
+
 async def init_db() -> None:
     """Поднимает схему БД до head: схему создают и меняют только миграции.
 
     Файлы, созданные ``create_all`` до alembic (в т.ч. «до 4.1» с 4 полосами),
     ревизия ``0001`` догоняет автоматически — ручная догонка (4.1) удалена.
     Выполняется в отдельном потоке: синхронные запросы блокируют event loop.
+
+    Миграция выполняется **один раз на URL за процесс** (первый вызов — в
+    ``lifespan``, см. `app/main.py`); повторные вызовы из операций хранилищ —
+    дешёвый guard по `_SCHEMA_READY` (аудит 15.10.2026: «init_db() на каждой
+    операции БД вместо upgrade в lifespan»). Ключ — именно URL: тесты подменяют
+    движок на изолированную БД, и её схема обязана подняться.
     """
-    await asyncio.to_thread(_upgrade_to_head, _sync_driver_url(engine.url))
+    url = _sync_driver_url(engine.url)
+    if url in _SCHEMA_READY:
+        return
+    await asyncio.to_thread(_upgrade_to_head, url)
+    _SCHEMA_READY.add(url)
 

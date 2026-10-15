@@ -131,25 +131,32 @@ class Settings(BaseSettings):
             return [int(part) for part in cleaned.replace(";", ",").split(",") if part.strip()]
         return value
 
-    # База данных
+    # База данных (дефолт — локальный SQLite в data/; PostgreSQL — через DATABASE_URL)
     database_url: str = Field(
-        default="postgresql+asyncpg://neurodipole:neurodipole@db:5432/diplock",
+        default=f"sqlite+aiosqlite:///{(_REPO_DIR / 'data' / 'diplock.db').as_posix()}",
     )
 
-        # FSAverage
+    # FSAverage (FreeSurfer): дефолт — ~/mne_data (без хардкода домашнего пути)
     subjects_dir: str = Field(
-        default="/home/alexkuz60/mne_data/MNE-fsaverage-data",
+        default=str(Path.home() / "mne_data" / "MNE-fsaverage-data"),
     )
     fsaverage_trans: str = Field(
-        default="/home/alexkuz60/mne_data/MNE-fsaverage-data/fsaverage/bem/fsaverage-trans.fif",
+        default=str(
+            Path.home()
+            / "mne_data"
+            / "MNE-fsaverage-data"
+            / "fsaverage"
+            / "bem"
+            / "fsaverage-trans.fif"
+        ),
     )
 
-    # Папки для загрузки и результатов (локальная разработка)
+    # Папки для загрузки и результатов (локальные данные репозитория)
     upload_dir: str = Field(
-        default="/app/data/edf",
+        default=str(_REPO_DIR / "data" / "edf"),
     )
     results_dir: str = Field(
-        default="/app/data/results",
+        default=str(_REPO_DIR / "data" / "results"),
     )
     # Кэш тяжёлых статических ассетов (меш fsaverage, метки Brodmann)
     cache_dir: str = Field(

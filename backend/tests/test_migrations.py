@@ -98,6 +98,35 @@ def test_init_db_is_idempotent(tmp_path, monkeypatch):
     assert _rows(path, "select version_num from alembic_version") == [(_alembic_head(),)]
 
 
+def test_init_db_upgrades_once_per_url(tmp_path, monkeypatch):
+    """Миграция — один раз на URL за процесс; повторный init_db — дешёвый guard.
+
+    Срез 15.10.2026 (P0 аудита Deepseek): раньше ``alembic upgrade head`` уходил
+    на **каждой** операции БД. Ключ guard — URL (тесты подменяют движок на
+    изолированный файл, и его схема обязана подняться).
+    """
+    path = tmp_path / "once.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+    monkeypatch.setattr(db_module, "engine", engine)
+    calls: list[str] = []
+    real_upgrade = db_module._upgrade_to_head
+
+    def counting_upgrade(url: str) -> None:
+        calls.append(url)
+        real_upgrade(url)
+
+    monkeypatch.setattr(db_module, "_upgrade_to_head", counting_upgrade)
+    url = db_module._sync_driver_url(engine.url)
+    db_module._SCHEMA_READY.discard(url)
+    try:
+        asyncio.run(db_module.init_db())
+        asyncio.run(db_module.init_db())
+        assert len(calls) == 1, f"upgrade ушёл {len(calls)} раз вместо одного"
+    finally:
+        # Восстанавливаем guard «не готово»: фейковый upgrade схему этого URL не трогал.
+        db_module._SCHEMA_READY.discard(url)
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

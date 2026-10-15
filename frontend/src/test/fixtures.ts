@@ -216,7 +216,7 @@ export const initStatusFixture: InitStatus = {
   status: 'pending',
   versions: { python: '3.12.3', mne: '1.13.2', numpy: '2.5.3', trimesh: '5.1.0' },
   code: { code_mtime: '2026-09-24T12:00:00', server_started_at: '2026-09-24T12:00:05', stale: false },
-  ui: { built: false, url: '/ui/', legacy_url: '/legacy' },
+  ui: { built: false, url: '/ui/' },
   paths: {
     subjects_dir: '/home/user/mne_data/MNE-fsaverage-data',
     fsaverage_trans: '/home/user/mne_data/fsaverage-trans.fif',

@@ -9,8 +9,8 @@
 
 ## 1. Зачем отдельный слой
 
-Коллективный аудит (4 версии: `audit_strategy.md`, `audit_strategy_gml5_3.md`,
-`audit_strategy_kimi3.md`, `audit_strategy_mimo.md` + реконсиляция `audit_strategy_diff.md`)
+Коллективный аудит (4 версии: `audits/audit_strategy.md`, `audits/audit_strategy_gml5_3.md`,
+`audits/audit_strategy_kimi3.md`, `audits/audit_strategy_mimo.md` + реконсиляция `audits/audit_strategy_diff.md`)
 разобрал **ремесло** и **научный аппарат**. Он не отвечал на другой вопрос: **как это выглядит
 глазами пользователя-нейрофизиолога** — что он видит на экране, какие решения принимает, по какому
 числу понимает, что стало лучше. Аудит — про «правильно ли посчитано», стратегия — про «что человек

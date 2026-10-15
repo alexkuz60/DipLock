@@ -324,6 +324,11 @@ def test_init_db_upgrades_legacy_db_with_four_band_columns(tmp_path, monkeypatch
     finally:
         con.close()
 
+    # Guard мемоизации init_db (15.10.2026): схему «за спиной» меняет не этот процесс,
+    # поэтому повторный upgrade моделируем сбросом guard — как при старте нового
+    # процесса над старым файлом (ключ guard — URL движка).
+    db_module._SCHEMA_READY.discard(db_module._sync_driver_url(engine.url))
+
     result = _result()
     result["epochs"][0]["band_powers"]["gamma_power"] = 42.0
     # init_db внутри сохранения и догоняет колонки — вставка проходит.

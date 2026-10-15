@@ -201,7 +201,7 @@
   обязаны ехать в результат (`AnalyzeResponse`, дамп `results/{session_id}.json` → `dipole_fit`).
   Новый шаг фитинга, у которого есть режим отказа, добавляет счётчик сюда же, а не в лог.
 - **Цена — часть контракта до запуска.** `mne.fit_dipole` ≈ 5.4 с на временную точку (замер
-  `audit.md` §7.7), поэтому дефолты (все эпохи, `decim=5`) — это часы. `/meta` отдаёт
+  `audits/audit.md` §7.7), поэтому дефолты (все эпохи, `decim=5`) — это часы. `/meta` отдаёт
   `dipole_fit_sec_per_point` (`DIPOLE_FIT_SEC_PER_POINT`), `dipole_fit_n_jobs` (`DIPOLE_FIT_N_JOBS`,
   уходит в `fit_dipole`) и `dipole_fit_experimental=true`; прогресс этапа `dipoles` дробится по эпохам
   (`epochs_done`/`epochs_total`). Профиль **остаётся экспериментальным**: превью-режим и профили

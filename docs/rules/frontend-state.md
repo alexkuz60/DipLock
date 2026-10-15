@@ -127,7 +127,7 @@
    только пишет URL — «правка не запускает расчёт» остаётся в силе; `rec` открывает
    запись через `openRecordingById` (паспорт из реестра, ушедшая по TTL — `uploadError`).
 
-## Известный долг фронтенда (см. `audit-2026-09.md`)
+## Известный долг фронтенда (см. `audits/audit-2026-09.md`)
 
 - ~~`CalcJob`, `calcJobFromStatus`, `calcJobSummary` (срез 3.4), `resultMatchesParams`,
   `resultSignature`, `PLAYBACK_DEFAULTS` живут в сторе `dipoleCalc.ts`~~ — **закрыто 17.09.2026:**

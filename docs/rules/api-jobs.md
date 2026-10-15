@@ -1,7 +1,7 @@
 # API и фоновые задачи
 
 > Карта контракта. Нормативные правила — в `docs/rules/safety.md` (безопасность) и
-> `docs/rules/data-and-caches.md` (кэши/артефакты). Полный аудит API — `audit-2026-09.md`.
+> `docs/rules/data-and-caches.md` (кэши/артефакты). Полный аудит API — `audits/audit-2026-09.md`.
 
 ## Где что лежит
 
@@ -25,8 +25,9 @@
   - `services/asset_versions.py` — входы и единый отпечаток версий ассетов (A7, этап 6);
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
-- `backend/app/main.py` — 5 путей уровня приложения: `GET /`, `GET /ui/{path}`, `GET /legacy`,
-  `GET /init-status`, `GET /health` (+ монтирование `/static`). Итого **78 уникальных HTTP-путей** (74 в `routes.py` + 5 уровня приложения).
+- `backend/app/main.py` — 4 пути уровня приложения: `GET /`, `GET /ui/{path}`,
+  `GET /init-status`, `GET /health`. Итого **118 уникальных HTTP-путей** (полный
+  инвентарь путей — начало этого файла).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/schema.d.ts` (`npm run gen:api`;
   выгрузка `openapi.json` — `venv/bin/python -m scripts.export_openapi`, свежесть — pytest

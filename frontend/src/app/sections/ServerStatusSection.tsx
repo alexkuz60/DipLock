@@ -275,13 +275,12 @@ export function ServerStatusSection() {
                 ) : null}
               </div>
               <InfoRow label="UI URL" value={init.data.ui.url} mono />
-              <InfoRow label="Legacy" value={init.data.ui.legacy_url} mono />
             </Panel>
 
             {meta.data ? (
               <Panel
                 title="Параметры расчёта"
-                hint="Изменяются в backend/.env — единый источник конфигурации для сервера и Docker"
+                hint="Изменяются в backend/.env — единый источник конфигурации сервера"
               >
                 <InfoRow label="Диапазоны, Гц" value={JSON.stringify(meta.data.freq_bands)} mono />
                 <InfoRow

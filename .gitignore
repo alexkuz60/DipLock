@@ -115,8 +115,12 @@ task.md
 # --- Скриншоты для просмотра ИИ-кодером
 screenshots/
 
-# --- Сторонние аудиты проекта ---
-audits/
+# --- Протоколы приёмки (черновики до вердикта владельца — не коммитятся) ---
+data/protocols/
+
+# --- Личные срезы владельца: не изменять и не включать в коммит (docs/session-start.md) ---
+audits/audit_dsh.md
+audits/audit_sol_61.md
 
 # --- Sonic Annotator (VAMP, бинарь GPL — не коммитим; ставится по README) ---
 tools/sonic-annotator/

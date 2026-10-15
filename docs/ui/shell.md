@@ -102,7 +102,7 @@ cd frontend && npm install && npm run dev      # → http://localhost:5173/ui/
 
 # 3) Прод-режим: собрать и раздавать из FastAPI
 cd frontend && npm run build                   # → backend/app/static/ui
-# → http://localhost:8000/ui/   (корень / редиректит на /ui/, старая страница осталась на /legacy)
+# → http://localhost:8000/ui/   (корень / редиректит на /ui/)
 ```
 
 Проверки качества: `npm run typecheck` (tsc strict), `npm run lint` (ESLint 9 flat config),

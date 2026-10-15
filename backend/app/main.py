@@ -8,12 +8,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 
 from app.api.consilium import router as consilium_router
 from app.api.llm_router import router as llm_router_api
 from app.api.routes import router as api_router
 from app.core.config import settings
+from app.models.db import init_db
 from app.services import recording_store
 from app.services.fsaverage_assets import bem_source, trans_source
 from app.services.job_manager import job_manager
@@ -44,7 +44,7 @@ def _configure_logging() -> None:
 
 _configure_logging()
 
-# Статика: legacy-страница (index.html) и собранный frontend (ui/)
+# Статика: собранный frontend (ui/) раздаётся маршрутами ниже
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 UI_DIR = os.path.join(STATIC_DIR, "ui")
 
@@ -63,6 +63,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     report = sweep_orphans(settings)
     if report.total:
         logger.info("Уборка сирот при старте: %s", report.as_dict())
+    # Схема БД — один раз при старте (guard в init_db дёшев для повторных вызовов):
+    # миграции выполняет только alembic (аудит 15.10.2026, P0 «init_db на операциях»).
+    try:
+        await init_db()
+    except Exception:
+        logger.exception("Не удалось поднять схему БД при старте")
     # Строки таблицы recordings без живой записи — БД-дубль того же обхода (4.4):
     # «TTL строки = TTL записи» (§8.4.3), сироты не переживают каталог на диске.
     try:
@@ -112,10 +118,6 @@ app.add_middleware(
 # Тяжёлые JSON-ассеты (меш fsaverage, индексы Brodmann) сжимаем на лету
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-# Legacy-статика (стартовая страница-заглушка)
-if os.path.isdir(STATIC_DIR):
-    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
 app.include_router(api_router, prefix=settings.api_prefix)
 app.include_router(consilium_router, prefix=settings.api_prefix)
 app.include_router(llm_router_api, prefix=settings.api_prefix)
@@ -133,7 +135,11 @@ async def root():
     """Корень: собранный UI (если есть), иначе legacy-страница."""
     if os.path.exists(os.path.join(UI_DIR, "index.html")):
         return RedirectResponse(url="/ui/")
-    return await legacy_page()
+    return HTMLResponse(
+        "<h1>DipLock</h1><p>UI не собран. Выполните: "
+        "cd frontend &amp;&amp; npm install &amp;&amp; npm run build. "
+        "<a href='/docs'>Документация API</a></p>"
+    )
 
 
 @app.get("/ui/{rest_of_path:path}", include_in_schema=False)
@@ -156,18 +162,6 @@ async def ui_app(rest_of_path: str = ""):
     # no-cache: эвристический кэш браузера держал старый index.html со ссылкой
     # на прежний бандл — «нового кода нет» при живой сборке (случай 24.09.2026)
     return HTMLResponse(_read_html(index_path), headers={"Cache-Control": "no-cache"})
-
-
-@app.get("/legacy", response_class=HTMLResponse, include_in_schema=False)
-async def legacy_page():
-    """Старая стартовая страница (поллинг /init-status) — до сборки UI."""
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        return HTMLResponse(_read_html(index_path))
-    return HTMLResponse(
-        "<h1>DipLock</h1><p>Добро пожаловать! "
-        "<a href='/docs'>Документация API</a></p>"
-    )
 
 
 async def _cache_usage() -> dict[str, int]:
@@ -280,7 +274,6 @@ async def init_status() -> dict:
         "ui": {
             "built": os.path.exists(os.path.join(UI_DIR, "index.html")),
             "url": "/ui/",
-            "legacy_url": "/legacy",
         },
         "paths": {
             "subjects_dir": settings.subjects_dir,

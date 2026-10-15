@@ -355,7 +355,7 @@ export type InitStatus = {
   versions: Record<string, string | null>
   /** Свежесть кода бэкенда: `stale` = исходники новее старта процесса (сервер не обновлён) */
   code: { code_mtime: string; server_started_at: string; stale: boolean }
-  ui: { built: boolean; url: string; legacy_url: string }
+  ui: { built: boolean; url: string }
   paths: {
     subjects_dir: string
     fsaverage_trans: string

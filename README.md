@@ -9,7 +9,7 @@
 | 3 | Авто-детекция артефактов | z-score, порог 100 µV, ICA EOG/EMG, flat-line |
 | 4 | Условная модель мозга | FSAverage (шаблон FreeSurfer) |
 | 5 | Частотная фильтрация | δ/θ/α/β/γ + **кастомный диапазон** + **одиночная частота** (например, 7.83 Гц, bw=0.5 Гц) |
-| 6 | Анимация диполей | trajectory по времени → Three.js |
+| 6 | Анимация диполей | trajectory по времени → 3D Niivue + SVG-проекции |
 | 7 | База данных | PostgreSQL для группового анализа |
 | 8 | Локализация | Анатомия (FreeSurfer aparc) + Brodmann Area (BA1–BA48) |
 | 9 | 3 проекции | Top (axial) / Side (sagittal L/R) / Front (coronal) |
@@ -24,7 +24,7 @@ DipLock/
 │   ├── app/
 │   │   ├── main.py            # FastAPI entry: CORS, gzip, /ui (сборка frontend), /init-status
 │   │   ├── core/config.py     # Pydantic Settings — единый источник конфигурации
-│   │   ├── api/routes.py      # /analyze, /jobs, /recordings (+/signals, /preprocess, /dipoles, /spectrum), /surface, /meta
+│   │   ├── api/routes.py      # роуты API (инвентарь путей — docs/rules/api-jobs.md)
 │   │   │                      # + assets.py (ETag/304), params.py (формы), recording_jobs.py (задачи), uploads.py
 │   │   ├── schemas/analysis.py# Pydantic-контракт ответов (→ TypeScript-типы UI)
 │   │   ├── services/
@@ -52,7 +52,6 @@ DipLock/
 │   │       └── ui/            # сборка frontend (npm run build) — раздаётся по /ui/
 │   ├── tests/                 # pytest: контракт API, job-API, поверхность, сервисы
 │   ├── requirements.txt / requirements-dev.txt
-│   ├── Dockerfile
 │   └── .env.example           # шаблон конфигурации (реальный .env не коммитится)
 ├── frontend/                  # UI: Vite + React + TypeScript + Tailwind
 │   ├── src/app/               # каркас (layout) и разделы (sections)
@@ -67,8 +66,8 @@ DipLock/
 │   ├── edf/                   # test.edf в репо + каталоги записей сессий (копии не плодятся)
 │   ├── results/               # результаты анализа (игнорируются)
 │   └── cache/                 # кэш меша/BA (игнорируется, пересчитывается)
-├── AGENTS.md / audit-2026-09.md / audit.md / todo.md
-└── docker-compose.yml / init_db.sql / setup.sh
+├── AGENTS.md / todo.md / audits/ (архивы аудитов, версируются)
+└── setup.sh
 ```
 
 ---
@@ -115,7 +114,6 @@ npm run build:watch # автосборка туда же при правках: 
 **Таблица локализации** (все точки результата, включая структуру и поле Бродмана),
 **Групповой анализ**; внизу рейла — **Настройки** и **Состояние сервера**
 (туда перенесена информация о готовности компонентов, ранее отображавшаяся на стартовой странице).
-Legacy-страница с прогрессом инициализации осталась доступна по `/legacy`.
 Статус фаз, принципы интерфейса и план работ — `docs/ui.md`.
 
 ## Консилиум: ручное исследование (Т1)
@@ -165,15 +163,13 @@ bash desktop/install-desktop.sh remove   # удалить ярлык
 
 ---
 
-## 🐳 Запуск через Docker Compose
+## 🐳 Docker (не поддерживается)
 
-```bash
-docker-compose up --build
-# → backend: http://localhost:8000
-# → Swagger UI: http://localhost:8000/docs
-# → PostgreSQL: localhost:5432
-# → Redis: localhost:6379
-```
+`docker-compose.yml`/`init_db.sql`/`Dockerfile` удалены 15.10.2026 как нерабочий второй
+путь запуска (redis не использовался, `init_db.sql` создавал схему в обход alembic,
+тома не совпадали с фактическими данными — разбор: `audits/audit_qwen.md` §8.2).
+Поддерживаемый запуск — `./start.sh` (см. выше); когда Docker понадобится,
+образ собирается заново с `alembic upgrade head` в entrypoint.
 
 ---
 
@@ -215,8 +211,8 @@ VAMP_PATH=$HOME/vamp tools/sonic-annotator/sonic-annotator -l | grep keydetector
   **всегда** передаёт `VAMP_PATH` явно; при ручном запуске делайте так же.
 - **Пути** настраиваются в `.env`: `SONIC_ANNOTATOR_BIN` (дефолт
   `tools/sonic-annotator/sonic-annotator`) и `VAMP_PATH` (дефолт `~/vamp`).
-- **Docker**: в образ инструмент не входит — ставьте внутрь контейнера
-  по шагам выше либо монтируйте `tools/` и `~/vamp` томами.
+- **Docker**: официально не поддерживается (см. выше); при сборке своего образа
+  монтируйте `tools/` и `~/vamp` томами.
 - Transform плагина зафиксирован в репо:
   `backend/vamp/transforms/qm-keydetector-key.n3` (step/block 32768,
   length 10, tuning 440). Лицензия инструмента — GPL-2.0 (запускается

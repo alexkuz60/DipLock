@@ -21,6 +21,10 @@ os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_TMP_DATA}/diplock.db"
 # Аналитическая проекция журнала (4.3) — свой отдельный файл; без изоляции
 # record() писал бы в рабочее data/analytics.db.
 os.environ["ANALYTICS_DB_PATH"] = os.path.join(_TMP_DATA, "analytics.db")
+# Квота кэша и TTL записей из .env пользователя не меняют поведение тестов:
+# дефолты — квота выключена (0), записи не истекают (решение 4.4).
+os.environ["CACHE_QUOTA_MB"] = "0"
+os.environ["RECORDINGS_TTL_HOURS"] = "0"
 for _sub in ("edf", "cache", "results"):
     os.makedirs(os.path.join(_TMP_DATA, _sub), exist_ok=True)
 atexit.register(shutil.rmtree, _TMP_DATA, True)
