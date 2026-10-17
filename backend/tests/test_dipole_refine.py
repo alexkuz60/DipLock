@@ -97,13 +97,55 @@ def failing_free_fit(monkeypatch):
     return calls
 
 
-def _params(epoch_index: int = 0, halfwin_ms: float = 0.0) -> DipoleRefineParams:
+def _params(
+    epoch_index: int = 0,
+    halfwin_ms: float = 0.0,
+    moment_sign_ref: list[float] | None = None,
+) -> DipoleRefineParams:
     """Параметры уточнения: окно по умолчанию 0 — фитится только пик GFP."""
     return DipoleRefineParams(
         scan=DipoleScanParams(filter_band=(1, 40), epoch_length_ms=1000.0),
         epoch_index=epoch_index,
         halfwin_ms=halfwin_ms,
+        moment_sign_ref=moment_sign_ref,
     )
+
+
+def test_refine_flips_moment_to_match_sign_ref(tmp_path, fake_fit):
+    """Срез 3.11: знак «стало» сверяется с моментом заменяемой точки.
+
+    Фейк `fit_dipole` даёт момент [0, 0, 1]; якорь формы [0, 0, -1] —
+    уточнение обязано развернуться, иначе «стало» рвало бы цепочку
+    траектории (и спиральный след показывал бы ложный разворот).
+    """
+    recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-sign")
+    scan = compute_dipole_scan(recording, settings, _params().scan)
+    epoch_index = int(scan["points"][1]["epoch_index"])
+
+    result = refine_dipole_point(
+        recording, settings,
+        _params(epoch_index, moment_sign_ref=[0.0, 0.0, -1.0]),
+    )
+
+    assert result["point"]["moment"] == pytest.approx([0.0, 0.0, -1.0])
+    # Без якоря знак остаётся как у фита (прежний контракт формы)
+    plain = refine_dipole_point(recording, settings, _params(epoch_index))
+    assert plain["point"]["moment"] == pytest.approx([0.0, 0.0, 1.0])
+
+
+def test_refine_form_moment_dir_is_validated():
+    """Поле `moment_dir` формы: «x,y,z» → якорь знака, кривое значение — 400."""
+    from fastapi import HTTPException
+
+    from app.api.params import parse_moment_dir
+
+    assert parse_moment_dir(None) is None
+    assert parse_moment_dir("0,0.5,-1") == [0.0, 0.5, -1.0]
+    with pytest.raises(HTTPException) as exc:
+        parse_moment_dir("0,0.5")
+    assert exc.value.status_code == 400
+    with pytest.raises(HTTPException):
+        parse_moment_dir("a,b,c")
 
 
 def test_refine_repeats_scan_epoch_and_grid_start(tmp_path, fake_fit):

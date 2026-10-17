@@ -195,6 +195,12 @@ export function buildRefineForm(
 ): FormData {
   const form = new FormData()
   form.set('epoch_index', String(epochIndex))
+  // Момент заменяемой точки — якорь знака уточнения (срез 3.11): сервер
+  // сверяет знак «стало» с ним, чтобы траектория не разворачивалась на 180°.
+  const anchor = (result.points ?? []).find((point) => point.epoch_index === epochIndex)
+  if (anchor && anchor.moment.length === 3) {
+    form.set('moment_dir', anchor.moment.map((value) => String(value)).join(','))
+  }
   if (result.filter_band_hz) {
     form.set('band_min', String(result.filter_band_hz[0]))
     form.set('band_max', String(result.filter_band_hz[1]))

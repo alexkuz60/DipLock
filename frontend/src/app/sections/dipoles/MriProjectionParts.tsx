@@ -27,6 +27,14 @@ import {
   pointPassesThresholds,
   type DisplayThresholds,
 } from '@/shared/lib/dipolePoints'
+import {
+  SPIRAL_SENSE_COLORS,
+  SPIRAL_STROKE_PX,
+  arcSenseOnPlane,
+  spiralSenseLabel,
+  spiralTipsPx,
+} from '@/shared/lib/spiralTrail'
+import { useSpiralTrail } from './useSpiralTrail'
 import { bandVectorPx } from '@/shared/lib/bandColors'
 import { TRAIL_ALPHA_HEAD, frameAnchor, interpolatedPoint } from '@/shared/lib/playback'
 import { frameSources } from '@/shared/lib/dipoleBatch'
@@ -433,6 +441,56 @@ export function FrameAnatomyHighlight({
             </path>
           ))
         : null}
+    </g>
+  )
+}
+
+
+/**
+ * Слой «Спираль момента» (срез 3.11): затухающий шлейф витков кончика луча
+ * момента вдоль траектории.
+ *
+ * Шлейф строит `useSpiralTrail` (окно последних секунд и угасание с возрастом —
+ * как у шлейфа кадра анимации), здесь только отрисовка: виток — полилиния
+ * кончиков луча (`spiralTipsPx`), цвет — знак поворота момента **на этой
+ * проекции** (`arcSenseOnPlane`), непрозрачность — `arc.alpha`, легенда — в
+ * подсказке слоя. Подписка — на номер эпохи кадра (шлейф следует за ним), а не
+ * на 60 fps-контекст. Шлейф — отображение интерполяции (slerp), а не измерение.
+ */
+export function SpiralTrailLayer({
+  plane,
+  visibility,
+  pxPerUnit,
+}: {
+  plane: ProjectionPlane
+  visibility: Record<DipoleLayerId, boolean>
+  pxPerUnit: number
+}) {
+  const arcs = useSpiralTrail()
+  if (!layerVisible(visibility, 'spiral') || arcs.length === 0) return null
+  return (
+    <g data-testid={`layer-spiral-${plane}`}>
+      {arcs.map((arc) => {
+        const sense = arcSenseOnPlane(arc, plane)
+        const tips = spiralTipsPx(arc, plane)
+        return (
+          <path
+            key={arc.id}
+            data-testid={`spiral-arc-${plane}-${arc.id}`}
+            d={tips.map((tip, index) => `${index === 0 ? 'M' : 'L'}${tip.x},${tip.y}`).join(' ')}
+            fill="none"
+            stroke={SPIRAL_SENSE_COLORS[sense]}
+            strokeWidth={SPIRAL_STROKE_PX / pxPerUnit}
+            strokeOpacity={arc.alpha}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <title>
+              {`Спираль момента: эпоха ${arc.from.epochIndex + 1} → ${arc.to.epochIndex + 1} — ${spiralSenseLabel(sense)}`}
+            </title>
+          </path>
+        )
+      })}
     </g>
   )
 }

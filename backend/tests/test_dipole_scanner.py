@@ -11,11 +11,13 @@
 import os
 import shutil
 import time
+from itertools import pairwise
 
 import numpy as np
 import pytest
 
 from app.core.config import settings
+from app.services import dipole_scanner
 from app.services.dipole_fitter import inband_whitener
 from app.services.dipole_scanner import (
     GRID_CENTER_MM,
@@ -24,12 +26,15 @@ from app.services.dipole_scanner import (
     MIN_SENSOR_DISTANCE_MM,
     DipoleScanError,
     DipoleScanParams,
+    ScanFit,
     _leadfield,
     _scan_kernel,
+    align_moment_sign,
     candidate_grid,
     compute_dipole_scan,
     scan_point,
     scan_point_fast,
+    stabilize_moment_signs,
 )
 from app.services.recordings import recording_registry
 from app.services.spectral import channel_positions
@@ -293,6 +298,85 @@ def test_compute_dipole_scan_drops_epochs_by_stage_annotations(tmp_path):
     assert any(
         "Отброшено эпох аннотациями BAD_" in w for w in with_zone["warnings"]
     )
+
+
+def test_align_moment_sign_flips_to_anchor_orientation():
+    """Срез 3.11: знак момента — к ориентации якоря; функция чистая (копия)."""
+    moment = [0.0, 0.0, -1.0]
+    assert align_moment_sign(moment, [0.0, 0.0, 1.0]) == [0.0, 0.0, 1.0]
+    # Исходный список не изменён — знак меняется только у копии
+    assert moment == [0.0, 0.0, -1.0]
+    # Сонаправленные не трогаются, ортогональные (dot = 0) не флипаются
+    assert align_moment_sign([0.0, 1.0, 0.0], [0.0, 1.0, 0.0]) == [0.0, 1.0, 0.0]
+    assert align_moment_sign([0.0, 0.0, -1.0], [0.0, 1.0, 0.0]) == [0.0, 0.0, -1.0]
+    # Некорректная длина возвращается как есть
+    assert align_moment_sign([1.0, 0.0], [0.0, 0.0, 1.0]) == [1.0, 0.0]
+
+
+def test_stabilize_moment_signs_makes_chain_continuous():
+    """Инверсии знака фита (Q ↔ −Q) не должны рвать цепочку траектории."""
+    points = [
+        {"moment": [0.0, 0.0, 1.0]},
+        {"moment": [0.0, 0.0, -1.0]},  # инверсия → флип к [0, 0, 1]
+        {"moment": [-0.6, 0.0, -0.8]},  # dot с якорем −0.8 → флип к [0.6, 0, 0.8]
+    ]
+
+    stabilize_moment_signs(points)
+
+    assert points[0]["moment"] == [0.0, 0.0, 1.0]
+    assert points[1]["moment"] == [0.0, 0.0, 1.0]
+    assert points[2]["moment"] == pytest.approx([0.6, 0.0, 0.8])
+    moments = [np.asarray(point["moment"]) for point in points]
+    assert all(float(np.dot(a, b)) >= 0.0 for a, b in pairwise(moments))
+
+
+def test_stabilize_moment_signs_skips_broken_points():
+    """Точка без корректного момента пропускается и не сбивает цепочку."""
+    points = [
+        {"moment": [0.0, 0.0, 1.0]},
+        {"moment": None},
+        {"moment": [1.0, 0.0]},
+        {"moment": [0.0, 0.0, -1.0]},  # якорь — первая точка: флип к [0, 0, 1]
+    ]
+
+    stabilize_moment_signs(points)
+
+    assert points[3]["moment"] == [0.0, 0.0, 1.0]
+    # Пустой список и одиночная точка — без ошибок
+    stabilize_moment_signs([])
+    stabilize_moment_signs([{"moment": [0.0, -1.0, 0.0]}])
+
+
+def test_compute_dipole_scan_stabilizes_moment_signs(tmp_path, monkeypatch):
+    """Результат сканирования несёт непрерывную цепочку знаков (срез 3.11).
+
+    `scan_point_fast` подменяется обёрткой, флипающей направление каждой
+    второй эпохи (модель произвола знака MNE-фита): в результате флипов быть
+    не должно — соседние моменты всегда dot ≥ 0.
+    """
+    real_fast = scan_point_fast
+    counter = {"n": 0}
+
+    def alternating(kernel, signal, whitener=None):
+        fit = real_fast(kernel, signal, whitener)
+        counter["n"] += 1
+        direction = fit.direction if counter["n"] % 2 == 1 else -fit.direction
+        return ScanFit(
+            fit.position_m, direction, fit.amplitude_am,
+            fit.gof, fit.riv, fit.ci_mm,
+        )
+
+    monkeypatch.setattr(dipole_scanner, "scan_point_fast", alternating)
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+
+    result = compute_dipole_scan(
+        recording, settings,
+        DipoleScanParams(filter_band=(1, 40), epoch_length_ms=1000.0),
+    )
+
+    moments = [np.asarray(point["moment"]) for point in result["points"]]
+    assert counter["n"] >= 2  # инверсии действительно моделировались
+    assert all(float(np.dot(a, b)) >= 0.0 for a, b in pairwise(moments))
 
 
 def test_montage_sparse_warning_threshold():

@@ -20,6 +20,8 @@
 import type { MriVolumeRef } from '@/shared/api/types'
 import type { DipoleLayer } from './dipolePoints'
 import type { MniVector } from './mriProjections'
+import { arcSense3d, spiralTipsMm, type SpiralTrailArc } from './spiralTrail'
+import { TRAIL_ALPHA_HEAD } from './playback'
 
 /**
  * Ожидаемый affine `fsaverage/mri/T1.mgz` (воксель → мировые мм, RAS).
@@ -217,4 +219,59 @@ export function worldEqualsMni(
     Math.abs(world[1] - mni.y) <= toleranceMm &&
     Math.abs(world[2] - mni.z) <= toleranceMm
   )
+}
+
+/** Ребро connectome Niivue: индексы узлов + значение цвета (знак поворота витка). */
+export type ConnectomeEdgeInput = {
+  first: number
+  second: number
+  colorValue: number
+}
+
+/**
+ * Затухающий шлейф спиральных витков в 3D (срез 3.11): кончики луча — узлами
+ * connectome (крошечные, линия читается рёбрами), рёбра — сегменты витков.
+ * `colorValue` — знак поворота (+1 против часовой / −1 по часовой, вид сверху,
+ * вертикальная ось MNI; знак зафиксирован относительно головы, а не камеры),
+ * умноженный на **нормированную непрозрачность** витка: свежий виток — ярче,
+ * старые гаснут (у шлейфа кадра — те же `TRAIL_ALPHA_*`). Niivue красит
+ * положительные значения `edgeColormap`, отрицательные — `edgeColormapNegative`
+ * (зелёный/красный — те же роли, что токены темы на проекциях), величина
+ * значения даёт плотность цвета. Витки без однозначного знака (`none`) в 3D не
+ * рисуются: окрашивать их нечем, а «врать» цветом нельзя. Узлы — каркас для
+ * последующего рисования в объёме.
+ */
+export function spiralConnectome(
+  arcs: readonly SpiralTrailArc[],
+  affine: VolumeAffine,
+): { nodes: ConnectomeNodeInput[]; edges: ConnectomeEdgeInput[] } {
+  const nodes: ConnectomeNodeInput[] = []
+  const edges: ConnectomeEdgeInput[] = []
+  for (const arc of arcs) {
+    const sense = arcSense3d(arc)
+    if (sense === 'none') continue
+    const alphaNorm = Math.min(1, Math.max(0, arc.alpha / TRAIL_ALPHA_HEAD))
+    const colorValue = (sense === 'ccw' ? 1 : -1) * alphaNorm
+    const tips = spiralTipsMm(arc).map((tip) => mniToWorldMm(tip, affine))
+    // Дуга с неконвертируемыми координатами отбрасывается целиком: рёбра не
+    // должны вести «в никуда» (как и узлы `connectomeNodes`)
+    if (!tips.every((world) => world.every(Number.isFinite))) continue
+    const base = nodes.length
+    tips.forEach((world, index) => {
+      nodes.push({
+        name: `${arc.id}:${index}`,
+        x: world[0],
+        y: world[1],
+        z: world[2],
+        // Цвет узла не кодирует знак (его несут рёбра) — середина шкалы
+        colorValue: 0.5,
+        // Крошечный размер: виток читается линией, а не точками
+        sizeValue: 0.02,
+      })
+      if (index > 0) {
+        edges.push({ first: base + index - 1, second: base + index, colorValue })
+      }
+    })
+  }
+  return { nodes, edges }
 }

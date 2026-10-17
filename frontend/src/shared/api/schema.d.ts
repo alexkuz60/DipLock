@@ -4158,6 +4158,11 @@ export interface components {
              * @description Половина окна свободного фитинга вокруг пика GFP, мс (0 — только пик; пусто — дефолт сервера)
              */
             halfwin_ms?: number | null;
+            /**
+             * Moment Dir
+             * @description Момент заменяемой точки (x,y,z через запятую) — знак уточнения сверяется с ним, чтобы траектория не разворачивалась на 180° (срез 3.11)
+             */
+            moment_dir?: string | null;
         };
         /** Body_create_dipole_scan_job_api_v1_recordings__recording_id__dipoles_post */
         Body_create_dipole_scan_job_api_v1_recordings__recording_id__dipoles_post: {
@@ -7371,7 +7376,7 @@ export interface components {
             mni_coords?: number[] | null;
             /**
              * Moment
-             * @description Единичный вектор момента диполя (направление)
+             * @description Единичный вектор момента диполя (направление); знак стабилизирован вдоль траектории — dot с моментом предыдущей эпохи ≥ 0 (срез 3.11)
              */
             moment: number[];
             /**
@@ -7625,7 +7630,7 @@ export interface components {
             mni_coords?: number[] | null;
             /**
              * Moment Dir
-             * @description Единичное направление момента
+             * @description Единичное направление момента (знак стабилизирован вдоль траектории)
              */
             moment_dir?: number[] | null;
             /** Amplitude Nam */
@@ -7759,7 +7764,7 @@ export interface components {
             mni_coords?: number[] | null;
             /**
              * Moment
-             * @description Единичный вектор момента диполя (направление)
+             * @description Единичный вектор момента диполя (направление); знак стабилизирован вдоль траектории — dot с моментом предыдущей эпохи ≥ 0 (срез 3.11)
              */
             moment: number[];
             /**

@@ -1230,7 +1230,12 @@ class DipoleScanPointOut(BaseModel):
     mni_coords: list[float] | None = Field(
         default=None, description="MNI (мм); None — fsaverage недоступен, точка не наводится"
     )
-    moment: list[float] = Field(description="Единичный вектор момента диполя (направление)")
+    moment: list[float] = Field(
+        description=(
+            "Единичный вектор момента диполя (направление); знак стабилизирован вдоль "
+            "траектории — dot с моментом предыдущей эпохи ≥ 0 (срез 3.11)"
+        ),
+    )
     amplitude_nam: float = Field(description="Амплитуда момента, нА·м")
     gof: float = Field(description="Goodness of fit, 0..1")
     riv: float | None = Field(
@@ -2081,7 +2086,10 @@ class DipolePointOut(BaseModel):
     mni_coords: list[float] | None = Field(
         default=None, description="[x, y, z] MNI, мм; None — наводки не было",
     )
-    moment_dir: list[float] | None = Field(default=None, description="Единичное направление момента")
+    moment_dir: list[float] | None = Field(
+        default=None,
+        description="Единичное направление момента (знак стабилизирован вдоль траектории)",
+    )
     amplitude_nam: float | None = None
     gof: float | None = None
     anatomical_structure: str | None = None

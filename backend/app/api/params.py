@@ -617,6 +617,24 @@ def require_halfwin_ms(halfwin_ms: float | None) -> float:
     return value
 
 
+def parse_moment_dir(moment_dir: str | None) -> list[float] | None:
+    """Момент заменяемой точки формы (``x,y,z``) → список для сверки знака (срез 3.11).
+
+    ``None`` — поле не прислали (знак уточнения остаётся как у фита); кривое
+    значение — 400 с текстом (правило: молча зажимать нельзя).
+    """
+    detail = "moment_dir: три числа через запятую (x,y,z), например 0,0.5,-1"
+    if moment_dir is None:
+        return None
+    try:
+        values = [float(value) for value in moment_dir.split(",")]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=detail) from exc
+    if len(values) != 3:
+        raise HTTPException(status_code=400, detail=detail)
+    return values
+
+
 def dipole_refine_params(
     *,
     epoch_index: int,
@@ -628,6 +646,7 @@ def dipole_refine_params(
     epoch_length_ms: float,
     grid_mm: float,
     halfwin_ms: float | None = None,
+    moment_dir: str | None = None,
 ) -> DipoleRefineParams:
     """Параметры точного уточнения: сканирование (нарезка результата) + эпоха.
 
@@ -647,6 +666,7 @@ def dipole_refine_params(
         scan=scan,
         epoch_index=epoch_index,
         halfwin_ms=require_halfwin_ms(halfwin_ms),
+        moment_sign_ref=parse_moment_dir(moment_dir),
     )
 
 

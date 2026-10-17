@@ -57,6 +57,10 @@ vi.mock('@niivue/niivue', () => {
 import { Brain3D } from './Brain3D'
 import type { MriVolumeRef } from '@/shared/api/types'
 import type { DipoleLayer } from '@/shared/lib/dipolePoints'
+import { SPIRAL_SAMPLES_PER_ARC } from '@/shared/lib/spiralTrail'
+import { PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
+import { dipoleScanResultFixture } from '@/test/fixtures'
 
 const REF: MriVolumeRef = {
   version: 'vol12345678',
@@ -107,6 +111,8 @@ beforeEach(() => {
   niivueCalls.loadConnectome.length = 0
   niivueCalls.setSliceType.length = 0
   niivueCalls.attached.length = 0
+  // Шлейф витков читает стор результата — между тестами он пуст
+  useDipoleCalc.setState({ result: null, batch: null })
 })
 
 afterEach(cleanup)
@@ -132,6 +138,35 @@ describe('Brain3D: 3D-вид Niivue', () => {
     // Ожидаемый affine: мировые мм = мм MNI (инвариант talairach)
     expect(connectome.nodes).toHaveLength(1)
     expect(connectome.nodes[0]).toMatchObject({ x: -42, y: -18, z: 16 })
+  })
+
+  it('рисует затухающий шлейф витков рёбрами connectome со знаком поворота (срез 3.11)', async () => {
+    // Моменты точек эпох 0 и 1: Q (1,0,0) → (0,1,0) — вид сверху против часовой
+    const base = dipoleScanResultFixture()
+    useDipoleCalc.setState({
+      result: {
+        ...base,
+        points: (base.points ?? []).map((point, index) => ({
+          ...point,
+          moment: index === 0 ? [1, 0, 0] : [0, 1, 0],
+        })),
+      },
+      // Кадр на эпохе 1: завершённый виток 0 → 1 — свежайший (полная яркость)
+      playback: { ...PLAYBACK_DEFAULTS, epochIndex: 1 },
+    })
+
+    render3d()
+    await screen.findByTestId('brain3d-canvas')
+
+    const connectome = (niivueCalls.loadConnectome.at(-1) ?? {}) as unknown as {
+      nodes: unknown[]
+      edges: { colorValue: number }[]
+    }
+    // Узлы: облако диполей + кончики витка; рёбра — сегменты витка, цвет ребра —
+    // знак поворота (+1 CCW / −1 CW, вид сверху), плотность — возраст витка
+    expect(connectome.nodes).toHaveLength(1 + SPIRAL_SAMPLES_PER_ARC + 1)
+    expect(connectome.edges).toHaveLength(SPIRAL_SAMPLES_PER_ARC)
+    expect(connectome.edges.every((edge) => edge.colorValue === 1)).toBe(true)
   })
 
   it('переключает режим Niivue (мультисрез / 3D-рендер)', async () => {

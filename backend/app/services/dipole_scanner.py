@@ -486,6 +486,44 @@ def shared_scan_kernel(channels: Sequence[str], grid_mm: float) -> Any:
     )
 
 
+def align_moment_sign(moment: Any, sign_ref: Any) -> list[float]:
+    """Возвращает момент с ориентацией ``sign_ref`` (флип при отрицательном dot).
+
+    Знак ECD-момента в MNE произволен: один и тот же источник может дать Q и
+    −Q в соседних эпохах (шум, произвол знака фита), и на траектории это
+    читается как мгновенный разворот тока. ``sign_ref`` — момент-«якорь»:
+    предыдущая эпоха цепочки или заменяемая точка уточнения. Функция чистая:
+    знак меняется только у возвращаемой копии. Некорректный вход возвращается
+    как есть (список чисел) — валидацией занимается схема.
+    """
+    values = [float(value) for value in moment]
+    ref = [float(value) for value in sign_ref]
+    if len(values) != 3 or len(ref) != 3:
+        return values
+    if sum(value * anchor for value, anchor in zip(values, ref, strict=True)) < 0:
+        return [-value for value in values]
+    return values
+
+
+def stabilize_moment_signs(points: list[dict[str, Any]]) -> None:
+    """Приводит знаки моментов точек к непрерывной цепочке **на месте**.
+
+    Сканирование кладёт точки в порядке эпох, поэтому «якорь» каждой точки —
+    момент предыдущей точки результата (сам уже стабилизированный). Точки с
+    некорректным моментом цепочку не сбивают — просто пропускаются. Нужно для
+    вращения момента в анимации (срез 3.11): без стабилизации «спиральный
+    след» показывал бы ложные развороты на инверсиях знака фита.
+    """
+    previous: Any = None
+    for point in points:
+        moment = point.get("moment")
+        if not moment or len(moment) != 3:
+            continue
+        if previous is not None:
+            point["moment"] = align_moment_sign(moment, previous)
+        previous = point["moment"]
+
+
 def compute_dipole_scan(
     recording: Recording,
     cfg: Settings,
@@ -612,6 +650,10 @@ def compute_dipole_scan(
             epochs_total=n_epochs,
         )
 
+    # Срез 3.11: знаки моментов приводятся к непрерывной цепочке — инверсия
+    # знака фита (Q ↔ −Q) не должна выглядеть как разворот тока в анимации.
+    stabilize_moment_signs(points)
+
     if not mni_available:
         warnings.append(
             "MNI-координаты недоступны (нет transform fsaverage): точки показаны "
@@ -680,11 +722,17 @@ class DipoleRefineParams:
     выбрал быстрый расчёт. Каждый следующий отсчёт окна стоит ≈7 с (замер
     20.09.2026, `docs/rules/dipoles.md`), поэтому окно приходит из формы и
     расширяется пользователем осознанно.
+
+    ``moment_sign_ref`` — момент заменяемой точки (срез 3.11): знак результата
+    уточнения сверяется с ним (`align_moment_sign`), чтобы «стало» не
+    разворачивалось на 180° и не рвало цепочку траектории/спирального следа.
+    ``None`` — форма не прислала момент, знак остаётся как у фита.
     """
 
     scan: DipoleScanParams
     epoch_index: int
     halfwin_ms: float = 0.0
+    moment_sign_ref: list[float] | None = None
 
 
 def _refine_point_payload(
@@ -901,6 +949,15 @@ def refine_dipole_point(
         point = grid_point
     else:
         point = free_point
+
+    # Срез 3.11: знак момента уточнения сверяется с моментом заменяемой точки
+    # (форма шлёт `moment_dir` из результата быстрого расчёта) — иначе «стало»
+    # могло бы развернуться на 180° и нарушить цепочку траектории.
+    if params.moment_sign_ref:
+        point = {
+            **point,
+            "moment": align_moment_sign(point["moment"], params.moment_sign_ref),
+        }
 
     report("done", 1.0, message=f"Эпоха {params.epoch_index + 1} уточнена (BEM)")
     return {

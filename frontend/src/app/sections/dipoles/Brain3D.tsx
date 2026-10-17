@@ -20,7 +20,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Niivue, SLICE_TYPE } from '@niivue/niivue'
 import type { MriVolumeRef } from '@/shared/api/types'
 import type { DipoleLayer } from '@/shared/lib/dipolePoints'
-import { connectomeNodes, nodeColorScale, t1VolumeUrl } from '@/shared/lib/brain3d'
+import { connectomeNodes, nodeColorScale, spiralConnectome, t1VolumeUrl } from '@/shared/lib/brain3d'
+import { useSpiralTrail } from './useSpiralTrail'
 import type { MniVector } from '@/shared/lib/mriProjections'
 import { Button } from '@/shared/ui/Button'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -59,6 +60,14 @@ export function Brain3D({ volumes, layer, cursor, onCursor }: Brain3DProps) {
   const nodes = useMemo(
     () => (volumes ? connectomeNodes(layer, affine, nodeColorScale(layer)) : []),
     [layer, affine, volumes],
+  )
+  // Затухающий шлейф спиральных витков (срез 3.11): общий хук с проекциями —
+  // те же источники, окно и угасание, что у слоя «Спираль момента»
+  const spiral = useSpiralTrail()
+  // Спиральный шлейф: узлы-кончики + рёбра со знаком поворота
+  const spiralParts = useMemo(
+    () => (volumes ? spiralConnectome(spiral, affine) : { nodes: [], edges: [] }),
+    [spiral, affine, volumes],
   )
 
   // Инициализация Niivue: один экземпляр на жизнь компонента (canvas фиксирован)
@@ -108,14 +117,15 @@ export function Brain3D({ volumes, layer, cursor, onCursor }: Brain3DProps) {
     niivueRef.current?.drawScene()
   }, [sliceType])
 
-  // Узлы диполей: перезагрузка connectome при смене слоя (тонн точек не бывает)
+  // Узлы диполей и спиральный след: перезагрузка connectome при смене слоя
   useEffect(() => {
     const nv = niivueRef.current
-    if (!nv || failed || nodes.length === 0) return
+    const allNodes = [...nodes, ...spiralParts.nodes]
+    if (!nv || failed || allNodes.length === 0) return
     try {
       nv.loadConnectome({
         name: 'dipoles',
-        nodes: nodes.map((node) => ({
+        nodes: allNodes.map((node) => ({
           name: node.name,
           x: node.x,
           y: node.y,
@@ -123,15 +133,22 @@ export function Brain3D({ volumes, layer, cursor, onCursor }: Brain3DProps) {
           colorValue: node.colorValue,
           sizeValue: node.sizeValue,
         })),
-        edges: [],
+        // Рёбра спирального следа (срез 3.11): colorValue = знак поворота
+        // (+1 CCW / −1 CW, вид сверху); 'green'/'red' — те же роли, что токены
+        // темы на проекциях. Дуги без знака не рисуются (`spiralConnectome`)
+        edges: spiralParts.edges.map((edge) => ({
+          first: edge.first,
+          second: edge.second,
+          colorValue: edge.colorValue,
+        })),
         nodeColormap: 'warmiron',
         nodeColormapNegative: '',
         nodeMinColor: 0,
         nodeMaxColor: 1,
         nodeScale: 3,
-        edgeColormap: 'warmiron',
-        edgeColormapNegative: '',
-        edgeMin: 0,
+        edgeColormap: 'green',
+        edgeColormapNegative: 'red',
+        edgeMin: -1,
         edgeMax: 1,
         edgeScale: 1,
       })
@@ -139,7 +156,7 @@ export function Brain3D({ volumes, layer, cursor, onCursor }: Brain3DProps) {
     } catch {
       // Connectome — вспомогательный слой: его сбой не должен ломать вид тома
     }
-  }, [nodes, failed])
+  }, [nodes, spiralParts, failed])
 
   // Совместный курсор: положение из проекций → кроссхейр Niivue
   useEffect(() => {

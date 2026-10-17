@@ -1202,6 +1202,13 @@ async def create_dipole_refine_job(
             "пусто — дефолт сервера)"
         ),
     ),
+    moment_dir: str | None = Form(
+        None,
+        description=(
+            "Момент заменяемой точки (x,y,z через запятую) — знак уточнения сверяется "
+            "с ним, чтобы траектория не разворачивалась на 180° (срез 3.11)"
+        ),
+    ),
 ) -> JobCreated:
     """Кнопка «Уточнить для эпохи…» (F19): `mne.fit_dipole` на BEM fsaverage.
 
@@ -1218,6 +1225,7 @@ async def create_dipole_refine_job(
         epoch_length_ms=epoch_length_ms,
         grid_mm=grid_mm,
         halfwin_ms=halfwin_ms,
+        moment_dir=moment_dir,
     )
     return submit_recording_job(
         "dipole_refine", recording, params,

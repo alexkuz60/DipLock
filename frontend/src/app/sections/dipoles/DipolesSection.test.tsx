@@ -407,6 +407,35 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(screen.queryByText(/^Кадр: эпоха/)).not.toBeInTheDocument()
   })
 
+  it('рисует затухающий шлейф спиральных витков слоем «Спираль момента» (срез 3.11)', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      // Кадр на эпохе 2: завершённые витки 0 → 1 и 1 → 2 (оба в окне шлейфа)
+      playback: { ...PLAYBACK_DEFAULTS, epochIndex: 2 },
+    })
+    renderWithProviders(<DipolesSection />)
+
+    expect(screen.getByTestId('layer-spiral-axial')).toBeInTheDocument()
+    expect(screen.getAllByTestId(/^spiral-arc-/)).toHaveLength(6)
+  })
+
+  it('убирает шлейф витков выключенным слоем «Спираль момента», не трогая облако', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, epochIndex: 2 },
+    })
+    useDipoleParams.setState({
+      params: {
+        ...DIPOLE_PARAM_DEFAULTS,
+        layerVisibility: { ...DIPOLE_PARAM_DEFAULTS.layerVisibility, spiral: false },
+      },
+    })
+    renderWithProviders(<DipolesSection />)
+
+    expect(screen.queryByTestId('layer-spiral-axial')).not.toBeInTheDocument()
+    expect(screen.getByTestId('dipole-dot-axial-0-120')).toBeInTheDocument()
+  })
+
   it('убирает анимацию выключенным слоем «Кадр воспроизведения», не трогая облако', () => {
     useDipoleCalc.setState({
       result: dipoleScanResultFixture(),

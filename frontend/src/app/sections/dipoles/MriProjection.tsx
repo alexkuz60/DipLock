@@ -117,7 +117,7 @@ import {
   MriLayer,
   VectorLayer,
 } from './MriProjectionLayers'
-import { EdgeLabel, FrameAnatomyHighlight, FrameMarker, ReferenceCross } from './MriProjectionParts'
+import { EdgeLabel, FrameAnatomyHighlight, FrameMarker, ReferenceCross, SpiralTrailLayer } from './MriProjectionParts'
 import { ProjectionCursor } from './ProjectionCursor'
 
 export type MriProjectionProps = {
@@ -497,6 +497,10 @@ export function MriProjection({
           dotStrokePx={dotStrokePx}
           dim={dim}
         />
+
+        {/* Затухающий шлейф спиральных витков (срез 3.11): окно и угасание — как
+            у шлейфа кадра, знак поворота считается для этой проекции */}
+        <SpiralTrailLayer plane={plane} visibility={visibility} pxPerUnit={pxPerUnit} />
 
         {/* Анимация — свой слой (`layer-playback`, поправка ручной проверки):
             кадр рисуется поверх остальных слоёв и не зависит от слоёв облака */}
