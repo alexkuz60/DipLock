@@ -2,9 +2,18 @@
  * Настройка jsdom для Vitest: матчеры jest-dom + изоляция между тестами.
  */
 import '@testing-library/jest-dom/vitest'
-import { cleanup } from '@testing-library/react'
+import { cleanup, configure } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 import type { MockUPlotChart } from './src/test/uplot'
+
+/**
+ * Таймаут `findBy*`/`waitFor` (дефолт Testing Library — 1 с) поднят до 10 с:
+ * под нагрузкой `vitest-coverage` в CI ожидание мок-ответа `/meta` + ре-рендер
+ * не укладывалось в секунду и тест падал «Unable to find…» (флейк 17.10.2026,
+ * AppShell «аккордеоны EDF»). Потолок остаётся ниже `testTimeout` 15 с
+ * (`vitest.config.ts`): реально зависший поиск виден, а не маскируется.
+ */
+configure({ asyncUtilTimeout: 10_000 })
 
 /**
  * jsdom не реализует ResizeObserver, а вьюер треков меряет им ширину области треков

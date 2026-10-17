@@ -71,7 +71,29 @@ def isolated_consilium(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Itera
 
 
 @pytest.fixture
-def fake_llm(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+def fake_router(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Маршрут ``chat`` назначен: тесты не зависят от локального ``llm_router.json``.
+
+    Без этого стаба ``chat_target`` читает реальный конфиг модельного роутера
+    (``data/llm_router.json``, gitignored), которого в CI нет, и запуск падает
+    400 «Маршрут ИИ не назначен» (флейк CI 17.10.2026: тест проходил только на
+    машине с настроенным роутером).
+    """
+
+    async def fake_state() -> llm_router.RouterState:
+        provider = llm_router.Provider(
+            id="prov", label="Тест", protocol="openai", base_url="http://llm.test",
+            model="model-x", enabled=True, api_key=None,
+        )
+        return llm_router.RouterState(
+            providers=(provider,), routes={"chat": "prov", "chat_model": None, "transcribe": None},
+        )
+
+    monkeypatch.setattr(llm_router, "get_state", fake_state)
+
+
+@pytest.fixture
+def fake_llm(monkeypatch: pytest.MonkeyPatch, fake_router: None) -> SimpleNamespace:
     """Тестовый провайдер: один голос штурма, журнал вызовов, отказ по запросу."""
     state = SimpleNamespace(calls=[], fail=False)
 
@@ -92,17 +114,7 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
             text=DRAFT, provider_id="prov", model="model-x", latency_ms=5.0,
         )
 
-    async def fake_state() -> llm_router.RouterState:
-        provider = llm_router.Provider(
-            id="prov", label="Тест", protocol="openai", base_url="http://llm.test",
-            model="model-x", enabled=True, api_key=None,
-        )
-        return llm_router.RouterState(
-            providers=(provider,), routes={"chat": "prov", "chat_model": None, "transcribe": None},
-        )
-
     monkeypatch.setattr(llm_router, "chat", fake_chat)
-    monkeypatch.setattr(llm_router, "get_state", fake_state)
     return state
 
 
@@ -186,9 +198,14 @@ def test_brainstorm_persists_summary_and_ideas(
 
 
 def test_unparseable_answer_keeps_draft_with_warnings(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    client: TestClient, fake_router: None, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Нераспознанный формат — предупреждения и сырой текст, без достроенных идей."""
+    """Нераспознанный формат — предупреждения и сырой текст, без достроенных идей.
+
+    Маршрут ``chat`` назначен стабом ``fake_router`` (запуск без него — честный
+    400, отдельный тест), а ответ модели подменён мусором поверх любого
+    провайдера.
+    """
 
     async def junk_chat(
         messages: list[dict[str, str]], *, route: str = "chat",
