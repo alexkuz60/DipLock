@@ -21,11 +21,10 @@ import {
   projectionBox,
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
-import { demoBrodmannAreas } from '@/shared/lib/mriDemoShapes'
 import { MRI_SLICE_UNAVAILABLE } from '@/shared/lib/mriSlices'
 import type { MriSliceRef } from '@/shared/api/types'
 import {
-  ARROW_LENGTH_MAX_PX,
+  DIPOLE_ARROW_PX,
   DIPOLE_DOT_GROWTH_PX,
   DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
@@ -43,7 +42,8 @@ import { TRAIL_ALPHA_HEAD } from '@/shared/lib/playback'
 import { PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { DIPOLE_PARAM_DEFAULTS, type DipoleLayerId } from '@/shared/state/dipoleParams'
-import { dipoleScanResultFixture, contourSliceFixture } from '@/test/fixtures'
+import { bandColor } from '@/shared/lib/bandColors'
+import { dipoleScanResultFixture, contourSliceFixture, dipoleBatchResultFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { MriProjection } from './MriProjection'
 import { PlaybackFrameProvider } from './PlaybackFrame'
@@ -116,7 +116,13 @@ const EXPECTED_EDGES: Record<
 describe('проекция мозга', () => {
   beforeEach(() => {
     // Кадр воспроизведения — состояние сессии: тесты не должны влиять друг на друга
-    useDipoleCalc.setState({ result: null, playback: { ...PLAYBACK_DEFAULTS } })
+    // (пакет и чекбоксы полос — тоже: они меняют источник кадра и суффиксы test-id)
+    useDipoleCalc.setState({
+      result: null,
+      batch: null,
+      playbackBandKeys: [],
+      playback: { ...PLAYBACK_DEFAULTS },
+    })
   })
 
   it('подписывает края буквами направлений MNI', () => {
@@ -172,14 +178,9 @@ describe('проекция мозга', () => {
   })
 
   it('подсвечивает выбранное поле Бродмана', () => {
-    const areas = demoBrodmannAreas('axial', 0)
-    const other = areas[0].name
-    const target = areas[areas.length - 1].name
+    renderProjection('axial', { contours: contourSliceFixture(), selectedArea: 'BA17-lh' })
 
-    renderProjection('axial', { selectedArea: target })
-
-    expect(screen.getByTestId(`brodmann-axial-${target}`)).toHaveAttribute('data-active', 'true')
-    expect(screen.getByTestId(`brodmann-axial-${other}`)).toHaveAttribute('data-active', 'false')
+    expect(screen.getByTestId('area-axial-BA17-lh')).toHaveAttribute('data-active', 'true')
   })
 
   it('по умолчанию слой диполей пуст: расчёт не подключён', () => {
@@ -260,9 +261,10 @@ describe('проекция мозга', () => {
     const right = { x: vertices[2][0], y: vertices[2][1] }
     // Наконечник продолжает луч: вершина дальше от точки, чем штрих
     expect(dist(tip, at)).toBeGreaterThan(dist(shaftEnd, at))
-    // Длина наконечника — от длины луча и зажата, а не «на всю проекцию»
+    // Размер наконечника фиксирован (~4 px, поправка владельца 17.10.2026):
+    // один для всех полос и длин луча, а не «на всю проекцию»
     expect(dist(tip, shaftEnd)).toBeGreaterThan(0)
-    expect(dist(tip, shaftEnd)).toBeLessThanOrEqual(ARROW_LENGTH_MAX_PX + 1e-9)
+    expect(dist(tip, shaftEnd)).toBeCloseTo(DIPOLE_ARROW_PX, 6)
     // Крылья симметричны: треугольник, а не «клин» в одну сторону
     expect(dist(tip, left)).toBeCloseTo(dist(tip, right), 6)
   })
@@ -500,18 +502,19 @@ describe('проекция мозга', () => {
     expect(point.x).toBe(24)
   })
 
-  it('клик по полю Бродмана отдаёт имя поля (попадание по нарисованной геометрии)', () => {
+  it('без ассета контуров клик не «угадывает» поле Бродмана', () => {
+    // Условных эллипсов фикстуры больше нет (17.10.2026): без контуров атласа
+    // метки нет — честный `null`, а не выдуманное имя поля
     const onPick = vi.fn()
     renderProjection('axial', { onPick })
     const svg = stubFigure('axial')
-    const area = demoBrodmannAreas('axial', 0)[0]
-    const px = normalizedToPx(area.center, 'axial')
+    const px = normalizedToPx({ u: 0.34, v: 0.22 }, 'axial')
 
     fireEvent.click(svg, { clientX: px.x, clientY: px.y })
 
     expect(onPick).toHaveBeenCalledTimes(1)
     const [point, name] = onPick.mock.calls[0]
-    expect(name).toBe(area.name)
+    expect(name).toBeNull()
     expect(point.z).toBe(0)
   })
 
@@ -567,7 +570,7 @@ describe('проекция мозга', () => {
     expect(screen.getByTestId('projection-readout-axial')).toHaveTextContent(PROJECTION_HINTS.axial)
   })
 
-  it('рисует реальный срез МРТ и убирает условную схему среза', () => {
+  it('рисует реальный срез МРТ во всю плоскость фигуры', () => {
     renderProjection('axial', { mri: MRI_REF })
 
     const image = screen.getByTestId('layer-mri-axial')
@@ -580,22 +583,23 @@ describe('проекция мозга', () => {
     expect(image).toHaveAttribute('y', String(PROJECTION_PADDING))
     expect(image).toHaveAttribute('width', String(box.innerWidth))
     expect(image).toHaveAttribute('height', String(box.innerHeight))
-    // Фикстура анатомии больше не рисуется — на срезе настоящий том
+    // Условной схемы среза больше нет (17.10.2026) — только настоящий том
     expect(screen.queryByTestId(/slice-structure-axial-/)).not.toBeInTheDocument()
   })
 
-  it('без ссылки на срезы остаётся условная схема среза', () => {
+  it('без ссылки на срезы условная схема среза не рисуется', () => {
     renderProjection('axial')
 
     expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
-    expect(screen.getAllByTestId(/slice-structure-axial-/).length).toBeGreaterThan(0)
+    // Эллипсы схемы удалены (17.10.2026): без ассета — честно пусто
+    expect(screen.queryByTestId(/slice-structure-axial-/)).not.toBeInTheDocument()
   })
 
-  it('выключенный слой МРТ возвращает схему среза', () => {
+  it('выключенный слой МРТ оставляет фигуру без условной схемы', () => {
     renderProjection('axial', { mri: MRI_REF, visibility: visible({ mri: false }) })
 
     expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
-    expect(screen.getAllByTestId(/slice-structure-axial-/).length).toBeGreaterThan(0)
+    expect(screen.queryByTestId(/slice-structure-axial-/)).not.toBeInTheDocument()
   })
 
   it('квантует срез картинки к сетке тома', () => {
@@ -608,14 +612,15 @@ describe('проекция мозга', () => {
     )
   })
 
-  it('недоступная картинка среза сообщается текстом и возвращает схему', () => {
+  it('недоступная картинка среза сообщается текстом под фигурой', () => {
     renderProjection('axial', { mri: MRI_REF })
 
     fireEvent.error(screen.getByTestId('layer-mri-axial'))
 
     expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('projection-readout-axial')).toHaveTextContent(MRI_SLICE_UNAVAILABLE)
-    expect(screen.getAllByTestId(/slice-structure-axial-/).length).toBeGreaterThan(0)
+    // Условной схемы-заместителя больше нет (17.10.2026)
+    expect(screen.queryByTestId(/slice-structure-axial-/)).not.toBeInTheDocument()
   })
 
   /**
@@ -658,6 +663,68 @@ describe('проекция мозга', () => {
       'stroke-opacity',
       String(cloudRayOpacity),
     )
+  })
+
+  /**
+   * Мультиполосный кадр пакета (п.1.4, 17.10.2026): отмеченные полосы рисуются
+   * одновременно своими цветами (гамма red→violet), каждая — своей группой
+   * (`frame-{plane}-{band}`), и чекбоксы выбирают любую комбинацию.
+   */
+  it('рисует кадры всех отмеченных полос пакета в их цветах', () => {
+    const batch = dipoleBatchResultFixture()
+    useDipoleCalc.setState({
+      result: null,
+      batch,
+      playbackBandKeys: ['alpha', 'beta'],
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 0 },
+    })
+
+    renderProjectionWithFrame('axial', { dimmed: true })
+
+    const alphaColor = bandColor([8, 13])
+    const betaColor = bandColor([13, 30])
+    // Каждая полоса — своя группа кадра с точкой и гало в цвете полосы
+    expect(screen.getByTestId('frame-axial-alpha')).toBeInTheDocument()
+    expect(screen.getByTestId('frame-axial-beta')).toBeInTheDocument()
+    expect(screen.getByTestId('frame-halo-axial-alpha')).toHaveAttribute('stroke', alphaColor)
+    expect(screen.getByTestId('frame-halo-axial-beta')).toHaveAttribute('stroke', betaColor)
+    expect(screen.getByTestId('frame-dot-axial-alpha')).toHaveAttribute('fill', alphaColor)
+    expect(screen.getByTestId('frame-dot-axial-beta')).toHaveAttribute('fill', betaColor)
+    // Вектор момента кадра — тоже в цвете полосы
+    expect(screen.getByTestId('frame-vector-axial-beta')).toHaveAttribute('stroke', betaColor)
+  })
+
+  it('снятая чекбоксом полоса уходит из кадра, отмеченная остаётся', () => {
+    const batch = dipoleBatchResultFixture()
+    useDipoleCalc.setState({
+      result: null,
+      batch,
+      playbackBandKeys: ['beta'],
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 0 },
+    })
+
+    renderProjectionWithFrame('axial', { dimmed: true })
+
+    expect(screen.queryByTestId('frame-dot-axial-alpha')).not.toBeInTheDocument()
+    expect(screen.getByTestId('frame-dot-axial-beta')).toBeInTheDocument()
+  })
+
+  /**
+   * Подсветка анатомии кадра (п.3, 17.10.2026): поле Бродмана и структура точки
+   * текущего кадра выделяются на проекциях во время анимации — тем же видом, что
+   * кликовое выделение (`data-active` слоёв), но оверлеем поверх контуров.
+   */
+  it('подсвечивает поле Бродмана и структуру диполя текущего кадра', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 0 },
+    })
+
+    renderProjection('axial', { contours: contourSliceFixture() })
+
+    // Точка фикстуры: BA17-lh и «таламус (слева)» — обе метки подсвечены
+    expect(screen.getByTestId('frame-area-axial-BA17-lh')).toBeInTheDocument()
+    expect(screen.getByTestId('frame-anatomy-axial-Left-Thalamus-Proper')).toBeInTheDocument()
   })
 
   /**
@@ -757,8 +824,8 @@ function axialPx(x: number, y: number) {
 /**
  * Контуры атласа (срез 3.9): структуры и поля приходят полигонами в мм MNI.
  * Проверяется, что слой рисуется **из них**, хит-тест считает по тем же
- * полигонам (а не по «второму, невидимому» слою), а без ассета раздел остаётся
- * на условных эллипсах фикстуры.
+ * полигонам (а не по «второму, невидимому» слою), а без ассета слои честно
+ * пусты (условных эллипсов фикстуры с 17.10.2026 больше нет).
  */
 describe('контуры атласа в проекции', () => {
   it('рисует структуры и поля полигонами вместо условных эллипсов', () => {
@@ -776,13 +843,13 @@ describe('контуры атласа в проекции', () => {
     expect(screen.queryByTestId(/^brodmann-axial-/)).not.toBeInTheDocument()
   })
 
-  it('без ассета контуров остаётся на условных эллипсах фикстуры', () => {
+  it('без ассета контуров слои анатомии и полей честно пусты', () => {
     renderProjection('axial')
 
     expect(screen.queryByTestId('layer-anatomy-axial')).not.toBeInTheDocument()
     expect(screen.queryByTestId('area-axial-BA17-lh')).not.toBeInTheDocument()
-    // Ассета нет — раздел не молчит, а рисует условную схему полей
-    expect(screen.getAllByTestId(/^brodmann-axial-/).length).toBeGreaterThan(0)
+    // Условных эллипсов схемы больше нет (17.10.2026): «второй анатомии» не рисуется
+    expect(screen.queryByTestId(/^brodmann-axial-/)).not.toBeInTheDocument()
   })
 
   it('клик по полигону отдаёт структуру и поле, считая по нарисованной геометрии', () => {
@@ -825,9 +892,9 @@ describe('контуры атласа в проекции', () => {
 })
 
 /**
- * Силуэт головы (срез 3.5): реальные полигоны `head` из ответа контуров
- * вместо условной фикстуры. Паттерн — как у полей Бродмана: `null` (ассета
- * нет) → запасной вид, пустой список (на срезе нет вокселей) → ничего.
+ * Силуэт головы (срез 3.5): реальные полигоны `head` из ответа контуров.
+ * Условная фикстура-эллипс удалена (17.10.2026): `null` ассета и пустой список
+ * (на срезе нет вокселей) оба означают «слой не рисуется».
  */
 describe('силуэт головы в проекции', () => {
   /** Реальный контур: квадрат в мм MNI по осям аксиальной плоскости. */
@@ -857,16 +924,16 @@ describe('силуэт головы в проекции', () => {
     expect(screen.queryByTestId('layer-head-axial')).not.toBeInTheDocument()
   })
 
-  it('head: null (ассета seghead нет) — условная фикстура, слой на месте', () => {
+  it('head: null (ассета seghead нет) — условной фикстуры нет, слой пуст', () => {
     renderProjection('axial', { contours: contourSliceFixture({ head: null }) })
 
-    expect(screen.getByTestId('layer-head-axial')).toBeInTheDocument()
+    expect(screen.queryByTestId('layer-head-axial')).not.toBeInTheDocument()
   })
 
-  it('без контуров вовсе (null) — тоже фикстура (данных ещё нет)', () => {
+  it('без контуров вовсе (null) — слой силуэта тоже пуст', () => {
     renderProjection('axial')
 
-    expect(screen.getByTestId('layer-head-axial')).toBeInTheDocument()
+    expect(screen.queryByTestId('layer-head-axial')).not.toBeInTheDocument()
   })
 })
 

@@ -28,6 +28,7 @@ describe('панель «Пакет поддиапазонов»', () => {
       batchError: null,
       batchBandKeys: [],
       activeBandKey: null,
+      playbackBandKeys: [],
       result: null,
       job: null,
     })
@@ -111,6 +112,30 @@ describe('панель «Пакет поддиапазонов»', () => {
     expect(state.activeBandKey).toBe('beta')
     // Проекции/таблица читают `result` — в нём скан активной полосы
     expect(state.result?.filter_band_hz).toEqual([13, 30])
+  })
+
+  it('чекбоксы полос управляют анимацией и облаком: от всех до одной', async () => {
+    const user = userEvent.setup()
+    useDipoleCalc.setState({
+      batch: dipoleBatchResultFixture(),
+      batchBandKeys: ['alpha', 'beta'],
+      activeBandKey: 'alpha',
+      playbackBandKeys: ['alpha', 'beta'],
+    })
+    renderWithProviders(<BatchPanel />)
+
+    // Снять полосу — её больше нет в кадре и облаке
+    await user.click(screen.getByRole('checkbox', { name: 'alpha' }))
+    expect(useDipoleCalc.getState().playbackBandKeys).toEqual(['beta'])
+    // Вернуть — снова обе
+    await user.click(screen.getByRole('checkbox', { name: 'alpha' }))
+    expect(useDipoleCalc.getState().playbackBandKeys).toEqual(['beta', 'alpha'])
+    // Быстрая комбинация «только активная»
+    await user.click(screen.getByRole('button', { name: 'Только активная' }))
+    expect(useDipoleCalc.getState().playbackBandKeys).toEqual(['alpha'])
+    // …и «все полосы»
+    await user.click(screen.getByRole('button', { name: 'Все полосы' }))
+    expect(useDipoleCalc.getState().playbackBandKeys).toEqual(['alpha', 'beta'])
   })
 
   it('показывает кластеры с паспортом нормировки и устойчивостью по поддиапазонам', () => {

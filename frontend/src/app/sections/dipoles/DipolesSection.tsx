@@ -56,6 +56,7 @@ import {
   contourSliceUrl,
   contourSummary,
 } from '@/shared/lib/atlasContours'
+import { batchDipoleLayer } from '@/shared/lib/dipoleBatch'
 import {
   type DisplayThresholds,
   dipoleLayerFromScan,
@@ -95,6 +96,8 @@ export function DipolesSection() {
   const setProjectionCursor = useDipoleParams((state) => state.setProjectionCursor)
 
   const result = useDipoleCalc((state) => state.result)
+  const batch = useDipoleCalc((state) => state.batch)
+  const playbackBandKeys = useDipoleCalc((state) => state.playbackBandKeys)
   const minGofPercent = useDipoleCalc((state) => state.gofThresholdPercent)
   const minAmplitudeNaM = useDipoleCalc((state) => state.amplitudeThresholdNam)
   const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
@@ -175,13 +178,19 @@ export function DipolesSection() {
     : null
 
   /**
-   * Слой диполей из результата задачи. Результат не пересчитывается на клиенте:
-   * смена порогов отображения меняет только **отрисовку** (какие точки рисовать),
-   * поэтому слой строится из результата и фильтруется порогами отдельной чистой
-   * функцией. Пороги (GOF % — основной, момент нА·м — дополнительный) — параметры
-   * отображения, а «КД» (вердикт `kd_passed`) — параметр анализа (С0).
+   * Слой диполей из результата задачи. У пакета (С1) облако — точки **всех
+   * отмеченных полос** (`playbackBandKeys`) в полосных цветах (п.1.4 17.10.2026);
+   * одиночный расчёт — прежний слой своего результата. Результат не
+   * пересчитывается на клиенте: смена порогов отображения меняет только
+   * **отрисовку** (какие точки рисовать), поэтому слой строится из результата и
+   * фильтруется порогами отдельной чистой функцией. Пороги (GOF % — основной,
+   * момент нА·м — дополнительный) — параметры отображения, а «КД» (вердикт
+   * `kd_passed`) — параметр анализа (С0).
    */
-  const layer = useMemo(() => (result ? dipoleLayerFromScan(result) : EMPTY_DIPOLE_LAYER), [result])
+  const layer = useMemo(() => {
+    if (batch) return batchDipoleLayer(batch, playbackBandKeys)
+    return result ? dipoleLayerFromScan(result) : EMPTY_DIPOLE_LAYER
+  }, [batch, playbackBandKeys, result])
   /** Пороги отображения — мемоизированный объект: от него зависит перерисовка */
   const thresholds: DisplayThresholds = useMemo(
     () => ({ minGofPercent, minAmplitudeNaM }),
@@ -197,7 +206,17 @@ export function DipolesSection() {
    */
   const displayLayer = useMemo(() => withOverlapCounts(visibleLayer), [visibleLayer])
   const hidden = hiddenByThreshold(layer, thresholds)
-  const mniMissing = result !== null && layer.points.length < (result.points?.length ?? 0)
+  /**
+   * Точки без MNI (fsaverage недоступен) — по **исходному** числу точок того же
+   * набора (у пакета — сумма только отмеченных полос, иначе счётчик врал бы про
+   * снятые чекбоксы).
+   */
+  const rawPointCount = batch
+    ? (batch.bands ?? [])
+        .filter((band) => playbackBandKeys.includes(band.band_key))
+        .reduce((total, band) => total + (band.points?.length ?? 0), 0)
+    : (result?.points?.length ?? 0)
+  const mniMissing = rawPointCount > 0 && layer.points.length < rawPointCount
   /**
    * Выделенный диполь ищем в **полном** слое, а не в отфильтрованном порогами:
    * пороги отображения управляют только отрисовкой, и уже выделенная точка не должна

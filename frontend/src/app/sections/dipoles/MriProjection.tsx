@@ -55,10 +55,10 @@
  * от слоёв облака, а её выключение убирает анимацию целиком. В режиме кадра облако
  * приглушается (`dimmed`, α 0.3) — иначе сотни колец спорят с маркером за внимание.
  *
- * Схема среза (`demoSliceStructures`) — фикстура анатомии: она показывается только
- * без реального тома, иначе рисовала бы «вторую» анатомию поверх настоящей.
- * Силуэт головы остаётся: это граница черепа (в маске МРТ её нет), а не имитация
- * среза.
+ * Условные фигуры первой версии удалены (17.10.2026): эллипсы схемы среза
+ * (`demoSliceStructures`) и эллипс-силуэт головы (`demoHeadContours`) больше не
+ * рисуются — анатомию и границу головы показывают только реальные ассеты
+ * (срез МРТ, контуры атласа, `seghead.mgz`), и без них слои честно пусты.
  *
  * Компонент **не управляет состоянием раздела**: срезы, видимость слоёв,
  * ссылка на срезы МРТ и референс-точка приходят пропсами из `DipolesSection`, а
@@ -86,14 +86,9 @@ import {
   type ProjectionPlane,
   type SliceTriplet,
 } from '@/shared/lib/mriProjections'
-// Условные фигуры (силуэт, схема среза, поля Бродмана) — отдельный модуль-заглушка:
-// он удаляется целиком, когда панель закроют реальные срезы/контуры атласа.
-import {
-  brodmannAreaAt,
-  demoBrodmannAreas,
-  demoHeadContours,
-  demoSliceStructures,
-} from '@/shared/lib/mriDemoShapes'
+// Условные фигуры первой версии (эллипсы схемы среза и силуэт-эллипс головы)
+// удалены (17.10.2026): панель закрыта реальными срезами/контурами атласа, и
+// модуль-заглушка `mriDemoShapes.ts` удалён целиком.
 import { MRI_SLICE_UNAVAILABLE, mriSliceRect, mriSliceUrl } from '@/shared/lib/mriSlices'
 import { contourPointToNormalized, shapeAtPoint } from '@/shared/lib/atlasContours'
 import type { ContourSlice, MriSliceRef } from '@/shared/api/types'
@@ -122,7 +117,7 @@ import {
   MriLayer,
   VectorLayer,
 } from './MriProjectionLayers'
-import { EdgeLabel, FrameMarker, ReferenceCross } from './MriProjectionParts'
+import { EdgeLabel, FrameAnatomyHighlight, FrameMarker, ReferenceCross } from './MriProjectionParts'
 import { ProjectionCursor } from './ProjectionCursor'
 
 export type MriProjectionProps = {
@@ -147,8 +142,8 @@ export type MriProjectionProps = {
   /** Выделенная структура атласа (имя метки) — подсвечивается, как и поле */
   selectedStructure?: string | null
   /**
-   * Контуры атласа для этого среза (срез 3.9). `null` — ассета нет: слои рисуют
-   * условные фигуры (`demoBrodmannAreas`), честно помеченные как схема. Пустой
+   * Контуры атласа для этого среза (срез 3.9). `null` — ассета нет: слои анатомии
+   * и полей Бродмана пусты (условных эллипсов больше нет, 17.10.2026). Пустой
    * массив меток — это «на срезе их нет», а не «данных нет», и подменять одно
    * другим нельзя.
    */
@@ -261,22 +256,14 @@ export function MriProjection({
   const imageRect = mriSliceRect(plane)
 
   /**
-   * Силуэт головы: **реальные** полигоны `head` из ответа контуров (срез 3.5),
-   * а при `null` (ассета `seghead.mgz` нет или контуры ещё не пришли) — условная
-   * фикстура `demoHeadContours` (запасной вид, строго по паттерну полей
-   * Бродмана: `null` ≠ пустой список — пустой массив значит «на срезе нет
-   * вокселей головы», и подменять его фикстурой нельзя).
+   * Силуэт головы: **реальные** полигоны `head` из ответа контуров (срез 3.5).
+   * Условная фикстура-эллипс удалена (17.10.2026): `null` ассета и «на срезе нет
+   * вокселей головы» теперь оба означают «слой пуст» — подменять их нечем и не
+   * нужно (как у полей Бродмана: без ассета — честная пустота).
    */
   const headHulls = contours?.head ?? null
   const headPolygons = useMemo(() => {
-    if (headHulls === null) {
-      return [
-        demoHeadContours(plane, sliceMm)
-          .map((point) => normalizedToPx(point, plane))
-          .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
-          .join(' '),
-      ]
-    }
+    if (headHulls === null) return []
     return headHulls
       .map((hull) =>
         hull
@@ -287,13 +274,11 @@ export function MriProjection({
           .join(' '),
       )
       .filter((points) => points.length > 0)
-  }, [plane, sliceMm, headHulls])
+  }, [plane, headHulls])
 
-  const structures = useMemo(() => demoSliceStructures(plane, sliceMm), [plane, sliceMm])
-  const demoAreas = useMemo(() => demoBrodmannAreas(plane, sliceMm), [plane, sliceMm])
   /**
-   * Контуры атласа: `null` — ассета нет, и тогда рисуется условная фикстура;
-   * пустой список — «на этом срезе метки нет», и подменять это фикстурой нельзя
+   * Контуры атласа: `null` — ассета нет (слои анатомии/полей пусты); пустой
+   * список — «на этом срезе метки нет», и подменять одно другим нельзя
    * (иначе на срезе без поля появилось бы нарисованное поле).
    */
   const structureShapes = contours?.structures ?? null
@@ -377,13 +362,12 @@ export function MriProjection({
     if (!onPick) return
     const normalized = pxToNormalized(px, plane)
     // Поле и структуру ищем по **той же** геометрии, что нарисована: реальные
-    // контуры атласа, когда они есть, иначе — условные эллипсы фикстуры.
+    // контуры атласа. Условных эллипсов фикстуры больше нет (17.10.2026), и без
+    // ассета клик не «угадывает» поле — метки нет, честный `null`.
     const structure = structureShapes
       ? (shapeAtPoint(structureShapes, plane, normalized)?.id ?? null)
       : null
-    const area = areaShapes
-      ? (shapeAtPoint(areaShapes, plane, normalized)?.id ?? null)
-      : brodmannAreaAt(plane, sliceMm, normalized)
+    const area = areaShapes ? (shapeAtPoint(areaShapes, plane, normalized)?.id ?? null) : null
     onPick(pointFromProjectionClick(plane, sliceMm, px), area, structure)
   }
 
@@ -475,17 +459,25 @@ export function MriProjection({
           visibility={visibility}
           box={box}
           grid={grid}
-          structures={structures}
           guides={guides}
-          mriShown={mriShown}
         />
 
         <BrodmannLayer
           plane={plane}
           visibility={visibility}
           areaShapes={areaShapes}
-          demoAreas={demoAreas}
           selectedArea={selectedArea}
+        />
+
+        {/* Подсветка анатомии кадра (п.3, 17.10.2026): поле Бродмана и структура,
+            в которых находится диполь текущего кадра, выделяются на проекциях во
+            время анимации. Подписка — на номер эпохи (метки измеренной точки
+            меняются только на её смене), а не на 60 fps-контекст кадра */}
+        <FrameAnatomyHighlight
+          plane={plane}
+          visibility={visibility}
+          structureShapes={structureShapes}
+          areaShapes={areaShapes}
         />
 
         <VectorLayer

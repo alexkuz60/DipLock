@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { PROJECTION_SCALE, projectPoint } from './mriProjections'
 import { dipoleScanResultFixture } from '@/test/fixtures'
 import {
-  ARROW_LENGTH_MAX_PX,
+  DIPOLE_ARROW_PX,
   DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
   DIPOLE_FRAME_HALO_RADIUS_PX,
@@ -103,10 +103,18 @@ describe('слой диполей', () => {
     expect(inPlane.vectorPx).toBeGreaterThanOrEqual(VECTOR_MIN_PX)
   })
 
-  it('зажимает длину вектора в разумные рамки', () => {
+  it('зажимает длину вектора в разумные рамки, а полосе даёт свой масштаб', () => {
     expect(dipoleVectorLength(0)).toBe(VECTOR_MIN_PX)
     expect(dipoleVectorLength(1000)).toBe(VECTOR_MAX_PX)
     expect(dipoleVectorLength(20)).toBeGreaterThan(VECTOR_MIN_PX)
+    // Полоса пакета (С1): масштаб обратно зависим от частот (дельта — длиннее),
+    // амплитуда — доля масштаба; при полной амплитуде луч равен полосному масштабу
+    const delta = dipoleVectorLength(1000, [0.5, 2])
+    const highGamma = dipoleVectorLength(1000, [64, 128])
+    expect(delta).toBeGreaterThan(highGamma)
+    expect(highGamma).toBeGreaterThanOrEqual(VECTOR_MIN_PX)
+    // Слабый диполь своей полосы короче её максимума (гибрид «полоса × амплитуда»)
+    expect(dipoleVectorLength(20, [0.5, 2])).toBeLessThan(delta)
   })
 
   it('подписывает точку для тултипа: эпоха, MNI, структура, поле, амплитуда и GOF', () => {
@@ -247,7 +255,7 @@ describe('отрисовка маркера диполя (срез 3.5)', () => 
     expect(strong).not.toHaveProperty('vectorStroke')
   })
 
-  it('строит наконечник от длины луча, а не «одним размером на проекцию»', () => {
+  it('строит наконечник одним размером для всех полос: залитый треугольник ~4 px', () => {
     const short = dipoleMarker('axial', {
       ...POINT,
       amplitudeNaM: 20,
@@ -263,7 +271,7 @@ describe('отрисовка маркера диполя (срез 3.5)', () => 
     expect(long.head).not.toBeNull()
     /**
      * Длина наконечника по оси луча: расстояние от вершины до середины основания
-     * (крылья отстоят в стороны, и hypotenuse дал бы «длину» больше зажатой).
+     * (крылья отстоят в стороны, и hypotenuse дал бы «длину» больше).
      */
     const axisLength = (head: NonNullable<DipoleMarker['head']>) =>
       Math.hypot(head[0].x - (head[1].x + head[2].x) / 2, head[0].y - (head[1].y + head[2].y) / 2)
@@ -271,9 +279,10 @@ describe('отрисовка маркера диполя (срез 3.5)', () => 
     // Вершина наконечника — конец луча, основание — ближе к точке
     expect(short.head?.[0]).toEqual(short.end)
     expect(axisLength(short.head!)).toBeLessThanOrEqual(short.vectorPx)
-    // Наконечник зажат: на длинном луче он не растёт вместе с ним бесконечно
-    expect(axisLength(long.head!)).toBeLessThanOrEqual(ARROW_LENGTH_MAX_PX + 1e-9)
-    expect(axisLength(long.head!)).toBeGreaterThan(axisLength(short.head!))
+    // Размер стрелы **фиксирован** (поправка владельца 17.10.2026): одинаков у
+    // короткого и длинного луча и не растёт от длины/полосы
+    expect(axisLength(short.head!)).toBeCloseTo(DIPOLE_ARROW_PX, 6)
+    expect(axisLength(long.head!)).toBeCloseTo(DIPOLE_ARROW_PX, 6)
     // Штрих луча короче луча: наконечник стоит на его конце, а не «проткнут» им
     expect(short.shaftEnd).not.toEqual(short.end)
     const toAt = (point: { x: number; y: number }) =>

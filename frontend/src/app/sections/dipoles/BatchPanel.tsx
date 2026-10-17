@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Play } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import { BATCH_MIN_BANDS, bandLabel, shareLabel } from '@/shared/lib/dipoleBatch'
+import { bandColor } from '@/shared/lib/bandColors'
 import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
@@ -34,9 +35,12 @@ export function BatchPanel() {
   const batchError = useDipoleCalc((state) => state.batchError)
   const batchBandKeys = useDipoleCalc((state) => state.batchBandKeys)
   const activeBandKey = useDipoleCalc((state) => state.activeBandKey)
+  const playbackBandKeys = useDipoleCalc((state) => state.playbackBandKeys)
   const setBatchBandKeys = useDipoleCalc((state) => state.setBatchBandKeys)
   const runBatch = useDipoleCalc((state) => state.runBatch)
   const setActiveBand = useDipoleCalc((state) => state.setActiveBand)
+  const togglePlaybackBand = useDipoleCalc((state) => state.togglePlaybackBand)
+  const setPlaybackBandKeys = useDipoleCalc((state) => state.setPlaybackBandKeys)
 
   const meta = useQuery({
     queryKey: ['meta'],
@@ -116,11 +120,46 @@ export function BatchPanel() {
                     : 'border-line text-fg hover:border-accent',
                 )}
                 onClick={() => setActiveBand(band.band_key)}
-                title="Показать точки этой полосы на проекциях и в таблице"
+                title="Активная полоса: её точки идут в таблицу (облако и анимация — по чекбоксам ниже)"
               >
                 {bandLabel(band)}
               </button>
             ))}
+          </div>
+
+          {/* П.1.4 (17.10.2026): любая комбинация полос в анимации и облаке —
+              от всех до одной. Цвета полос — гамма от красного (δ) до
+              ярко-фиолетового (высокая гамма), маркеры чекбоксов показывают её */}
+          <p className="mt-3 text-sm font-medium">Полосы в анимации и облаке</p>
+          <p className="mt-1 text-xs text-fg-2">
+            Отмеченные полосы рисуются одновременно своими цветами (красный — δ,
+            ярко-фиолетовый — высокая гамма): чекбоксы управляют и кадром анимации, и
+            облаком точек с векторами.
+          </p>
+          {bands.map((band) => (
+            <CheckboxRow
+              key={`playback-${band.band_key}`}
+              label={band.label}
+              mono
+              swatch={bandColor(band.band_hz)}
+              hint={`Полоса ${band.band_hz[0]}–${band.band_hz[1]} Гц — в анимации и облаке точек`}
+              checked={playbackBandKeys.includes(band.band_key)}
+              onChange={() => togglePlaybackBand(band.band_key)}
+            />
+          ))}
+          <div className="mt-2 flex gap-2">
+            <Button
+              onClick={() => setPlaybackBandKeys(bands.map((band) => band.band_key))}
+              title="Показать в анимации и облаке все полосы пакета"
+            >
+              Все полосы
+            </Button>
+            <Button
+              onClick={() => setPlaybackBandKeys(activeBandKey ? [activeBandKey] : [])}
+              title="Показать только активную полосу (её чип нажат выше)"
+            >
+              Только активная
+            </Button>
           </div>
         </>
       ) : null}

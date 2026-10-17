@@ -24,10 +24,18 @@ import { useMemo } from 'react'
 import {
   anatomyChangeText,
   anatomyText,
+  frameAnchor,
+  interpolatedPoint,
   nextAnatomyChange,
-  pointByEpoch,
+  nextMeasuredPoint,
 } from '@/shared/lib/playback'
-import { atlasLabels, dipoleLayerFromScan, pointPassesThresholds, type DisplayThresholds, thresholdsLabel } from '@/shared/lib/dipolePoints'
+import { frameSources } from '@/shared/lib/dipoleBatch'
+import {
+  atlasLabels,
+  pointPassesThresholds,
+  type DisplayThresholds,
+  thresholdsLabel,
+} from '@/shared/lib/dipolePoints'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -42,8 +50,19 @@ import { StatusPill } from '@/shared/ui/StatusPill'
  */
 const ANATOMY_TEXT_CLASS = 'text-lg leading-snug'
 
+/** Описание кадра одной полосы для строки анатомии. */
+type BandAnatomySegment = {
+  key: string
+  /** Подпись полосы пакета (пусто — одиночный расчёт) */
+  label: string
+  text: string
+  change: ReturnType<typeof nextAnatomyChange>
+}
+
 export function PlaybackAnatomyLine() {
   const result = useDipoleCalc((state) => state.result)
+  const batch = useDipoleCalc((state) => state.batch)
+  const playbackBandKeys = useDipoleCalc((state) => state.playbackBandKeys)
   const epochIndex = useDipoleCalc((state) => state.playback.epochIndex)
   const active = useDipoleCalc((state) => state.playback.active)
   const playing = useDipoleCalc((state) => state.playback.playing)
@@ -54,59 +73,73 @@ export function PlaybackAnatomyLine() {
   /** Выключенный слой анимации убирает кадр с проекций — подписывать его нечего */
   const playbackLayerVisible = useDipoleParams((state) => state.params.layerVisibility.playback)
 
-  /** Точки по эпохам — тот же источник и та же раскладка, что у часов кадра */
-  const pointsByEpoch = useMemo(
-    () => (result ? pointByEpoch(dipoleLayerFromScan(result).points) : null),
-    [result],
-  )
+  /** Источники кадра — тот же сборщик и те же точки, что у часов кадра и облака */
+  const sources = useMemo(() => frameSources(result, batch, playbackBandKeys), [result, batch, playbackBandKeys])
 
-  // Нет результата или кадр не задействован (нет слоя/кадра) — подписывать нечего
-  if (!result || !pointsByEpoch || !active || !playbackLayerVisible) return null
+  // Кадр не задействован (нет слоя/результата/полос) — подписывать нечего
+  if (sources.length === 0 || !active || !playbackLayerVisible) return null
 
   const epoch = epochIndex + 1
-  const point = pointsByEpoch.get(epochIndex) ?? null
-  /** Пороги отображения — правило отображения: скрытому кадру метки не подставляем */
-  const hidden = point !== null && !pointPassesThresholds(point, thresholds)
+  /**
+   * Кадры полос: метки — измеренной точке-якорю (кадр между эпохами
+   * интерполирован, анатомия — нет); в эпохе без диполя честно подписывается
+   * замедленный переход (сглаживание разрывов, 17.10.2026), а не «дыра».
+   */
+  const segments: BandAnatomySegment[] = sources.map(({ band, points }) => {
+    const anchor = frameAnchor(points, epochIndex)
+    const label = band?.label ?? ''
+    const key = band?.key ?? 'single'
+    if (!anchor) {
+      return { key, label, text: 'диполя с MNI нет', change: null }
+    }
+    const frame = interpolatedPoint(points, epochIndex, 0)
+    if (!frame || !pointPassesThresholds(frame, thresholds)) {
+      return { key, label, text: `скрыт порогами «${thresholdsLabel(thresholds)}»`, change: null }
+    }
+    const gapEpochs = epochIndex - anchor.epochIndex
+    let gapText = ''
+    if (gapEpochs > 0) {
+      // Эпохи без диполя от якоря до текущей (1-based): одиночная — «эпоха»,
+      // диапазон — «эпохи». Дальше точки есть — переход замедлен; нет — кадр
+      // держит последнюю измеренную точку (без «моргания», поправка 17.10.2026)
+      const from = anchor.epochIndex + 2
+      const noun = from === epoch ? 'эпоха' : 'эпохи'
+      const range = from === epoch ? `${from}` : `${from}–${epoch}`
+      gapText =
+        nextMeasuredPoint(points, epochIndex) !== null
+          ? ` (${noun} ${range} без диполя — переход замедлен)`
+          : ` (удержание: ${noun} ${range} без диполя)`
+    }
+    return {
+      key,
+      label,
+      text: anatomyText(atlasLabels(anchor)) + gapText,
+      change: nextAnatomyChange(points, epochIndex),
+    }
+  })
 
-  if (!point) {
-    return (
-      <StatusPill
-        tone="warn"
-        className="w-full"
-        title="Эпоха отброшена нарезкой (reject) или у её точки нет MNI (fsaverage недоступен): анатомии в результате нет, и подставлять чужую нельзя."
-      >
-        <span className={ANATOMY_TEXT_CLASS}>{`Кадр: эпоха ${epoch} — диполя с MNI нет`}</span>
-      </StatusPill>
-    )
-  }
-
-  if (hidden) {
-    return (
-      <StatusPill
-        tone="warn"
-        className="w-full"
-        title={`Кадр слабее порогов «${thresholdsLabel(thresholds)}»: он не рисуется на проекциях, поэтому и анатомия не подписывается — иначе подпись расходилась бы с картинкой.`}
-      >
-        <span className={ANATOMY_TEXT_CLASS}>{`Кадр: эпоха ${epoch} — скрыт порогами «${thresholdsLabel(thresholds)}»`}</span>
-      </StatusPill>
-    )
-  }
-
-  const change = nextAnatomyChange(pointsByEpoch, epochIndex)
+  const parts = segments.map((segment) =>
+    segment.label ? `${segment.label}: ${segment.text}` : segment.text,
+  )
   const hint = [
-    `Анатомия — метки измеренной точки эпохи ${epoch}: кадр между эпохами интерполирован, анатомия — нет.`,
-    change
-      ? anatomyChangeText(change)
-      : 'Смены анатомии впереди не показано: впереди разрыв в данных или метки не меняются.',
+    'Анатомия — метки измеренной точки-якоря кадра: кадр между эпохами интерполирован (и замедлен через эпохи без диполя), анатомия — нет.',
+    ...segments.map((segment) =>
+      segment.change
+        ? `${segment.label ? `${segment.label}: ` : ''}${anatomyChangeText(segment.change)}`
+        : `${segment.label ? `${segment.label}: ` : ''}смены анатомии впереди не показано (метки не меняются или точек больше нет).`,
+    ),
   ].join('\n')
+  const changes = segments.filter((segment) => segment.change !== null)
 
   return (
     <StatusPill tone={playing ? 'accent' : 'neutral'} className="w-full" title={hint}>
       {/* Одной строкой крупным текстом (поправка ручной проверки): подпись читают
           «на бегу» кадра, а локация и переход складываются в одну фразу */}
       <span className={ANATOMY_TEXT_CLASS}>
-        {`Кадр: эпоха ${epoch} — ${anatomyText(atlasLabels(point))}`}
-        {change ? ` · ${anatomyChangeText(change)}` : ''}
+        {`Кадр: эпоха ${epoch} — ${parts.join(' · ')}`}
+        {changes.length === 1 && changes[0].change
+          ? ` · ${anatomyChangeText(changes[0].change)}`
+          : ''}
       </span>
     </StatusPill>
   )

@@ -11,6 +11,14 @@
  * сборка `DipoleScanResult` одной полосы для существующей отрисовки):
  * правила проверяются без хранилища и без DOM.
  */
+import {
+  dipoleLayerFromScan,
+  type DipoleBandTag,
+  type DipoleLayer,
+  type DipolePoint,
+} from './dipolePoints'
+import { bandColor } from './bandColors'
+import { pointByEpoch } from './playback'
 import type {
   DipoleBatchResult,
   DipoleBandRun,
@@ -102,4 +110,75 @@ export function bandLabel(band: { label: string; band_hz: number[] }): string {
 export function shareLabel(value: number | null | undefined): string {
   if (value === null || value === undefined) return '—'
   return `${Math.round(value * 100)}%`
+}
+
+/**
+ * Тег полосы для отрисовки (С1): цвет из гаммы red→violet по границам полосы
+ * (`bandColor`), стабильный ключ и подпись — из прогона. Тегом помечаются точки
+ * `dipoleLayerFromScan`, по нему слои и кадр анимации рисуют полосу её цветом.
+ */
+export function bandTagOf(band: DipoleBandRun): DipoleBandTag {
+  return {
+    key: band.band_key,
+    label: band.label,
+    bandHz: [...band.band_hz],
+    color: bandColor(band.band_hz),
+  }
+}
+
+/**
+ * Источник кадра анимации/облака: одна полоса (или одиночный расчёт без полосы)
+ * и её точки по эпохам. Единый сборщик для часов кадра, строки анатомии и
+ * подсветки поля/структуры — все обязаны видеть **одни и те же** точки, что и
+ * проекции, а не «похожие».
+ */
+export type BandFrameSource = {
+  band: DipoleBandTag | null
+  points: Map<number, DipolePoint>
+}
+
+/**
+ * Источники кадра по чекбоксам полос (`playbackBandKeys`): пакет даёт по одному
+ * источнику на отмеченную полосу (порядок — как в прогоне, а не как в чекбоксах),
+ * одиночный расчёт — один источник без полосы. Пустой набор чекбоксов при живом
+ * пакете — честное «полос не выбрано»: источников нет, кадр не рисуется.
+ */
+export function frameSources(
+  result: DipoleScanResult | null,
+  batch: DipoleBatchResult | null,
+  playbackBandKeys: readonly string[],
+): BandFrameSource[] {
+  const bands = batch?.bands ?? []
+  if (batch && bands.length > 0) {
+    const selected = new Set(playbackBandKeys)
+    return bands
+      .filter((band) => selected.has(band.band_key))
+      .map((band) => {
+        const tag = bandTagOf(band)
+        return {
+          band: tag,
+          points: pointByEpoch(dipoleLayerFromScan(scanResultOfBand(batch, band), tag).points),
+        }
+      })
+  }
+  if (!result) return []
+  return [{ band: null, points: pointByEpoch(dipoleLayerFromScan(result).points) }]
+}
+
+/**
+ * Облако пакета для проекций: точки **всех отмеченных полос** одним слоем, с
+ * тегами полос (цвет/длина вектора — по `point.band`). Пороги отображения и
+ * кратность узла применяются к этому слою снаружи (`thresholdDipoleLayer`,
+ * `withOverlapCounts` — кратность внутри полосы). Без пакета/чекбоксов слой
+ * пуст: облако не подменяется одиночным расчётом своей активной полосы.
+ */
+export function batchDipoleLayer(
+  batch: DipoleBatchResult | null,
+  playbackBandKeys: readonly string[],
+): DipoleLayer {
+  const sources = frameSources(null, batch, playbackBandKeys)
+  return {
+    points: sources.flatMap((source) => [...source.points.values()]),
+    source: 'result',
+  }
 }

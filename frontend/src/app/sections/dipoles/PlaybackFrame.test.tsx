@@ -19,14 +19,15 @@ import { usePlaybackFrame } from './playbackClock'
 /** Проба: показывает то, что видит проекция — время, долю, точку и длину шлейфа. */
 function Probe() {
   const frame = usePlaybackFrame()
+  const first = frame?.frames[0] ?? null
   return (
     <>
       <span data-testid="frame">
         {frame
-          ? `${Math.round(frame.timeMs)}|${frame.fraction.toFixed(3)}|${frame.point?.id ?? '—'}`
+          ? `${Math.round(frame.timeMs)}|${frame.fraction.toFixed(3)}|${first?.point?.id ?? '—'}`
           : 'нет кадра'}
       </span>
-      <span data-testid="trail">{frame ? frame.trail.length : 0}</span>
+      <span data-testid="trail">{first ? first.trail.length : 0}</span>
     </>
   )
 }
@@ -162,7 +163,9 @@ describe('часы воспроизведения траектории', () => {
       playing: false,
       epochIndex: 3,
     })
-    expect(frameText()).toBe('3000|0.000|—')
+    // У 3-й эпохи точки нет (нет MNI), но кадр держит последнюю измеренную точку
+    // (эпоха 2), а не «мигает» (сглаживание разрывов, 17.10.2026)
+    expect(frameText()).toBe('3000|0.000|2-60')
   })
 
   it('переносит кадр по команде «покадрово» и ставится на паузу', () => {

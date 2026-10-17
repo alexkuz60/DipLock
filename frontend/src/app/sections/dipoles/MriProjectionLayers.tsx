@@ -24,10 +24,8 @@ import {
   type DipolePoint,
   type DipoleRayVisual,
 } from '@/shared/lib/dipolePoints'
-import { type MniAreaShape, type MniSliceStructure } from '@/shared/lib/mriDemoShapes'
 import {
   PROJECTION_PADDING,
-  ellipsePx,
   xOfNormalized,
   yOfNormalized,
   type MniGridLine,
@@ -131,13 +129,13 @@ export function AnatomyLayer({
 }
 
 /**
- * Силуэт головы на срезе: **реальный контур** `seghead.mgz` (срез 3.5), а при
- * отсутствии ассета — условная фикстура (запасной вид, как у полей Бродмана).
+ * Силуэт головы на срезе: **реальный контур** `seghead.mgz` (срез 3.5). Условная
+ * фикстура-эллипс удалена (17.10.2026): без ассета слой честно пуст.
  *
  * Проп `polygons` — уже посчитанные точки в пикселях (см. `MriProjection`):
- * `null` — ассета нет (рисуется фикстура вызывающим), пустой массив — на срезе
- * вокселей головы нет (слой не рисуется), иначе — полигоны контура (могут быть
- * несколько: даже-нечётная заливка корректно вычитает дырки).
+ * пустой массив (`null` ассета и «на срезе нет вокселей») — слой не рисуется,
+ * иначе — полигоны контура (могут быть несколько: даже-нечётная заливка
+ * корректно вычитает дырки).
  */
 export function HeadLayer({
   plane,
@@ -169,27 +167,22 @@ export function HeadLayer({
 }
 
 /**
- * Слой MNI: координатная сетка (нулевые линии — оси AC–PC), условная схема
- * среза (только без реального тома — иначе поверх настоящей анатомии рисовалась
- * бы «вторая») и следы срезов соседних проекций.
+ * Слой MNI: координатная сетка (нулевые линии — оси AC–PC) и следы срезов
+ * соседних проекций. Условная схема среза (эллипсы структур) удалена
+ * (17.10.2026): анатомию рисуют только реальные контуры атласа и срез МРТ.
  */
 export function MniLayer({
   plane,
   visibility,
   box,
   grid,
-  structures,
   guides,
-  mriShown,
 }: {
   plane: ProjectionPlane
   visibility: Record<DipoleLayerId, boolean>
   box: ProjectionBox
   grid: MniGridLine[]
-  structures: MniSliceStructure[]
   guides: MniGuideLine[]
-  /** Реальный срез показан — условная схема поверх него не рисуется */
-  mriShown: boolean
 }) {
   return layerVisible(visibility, 'mni') ? (
     <g data-testid={`layer-mni-${plane}`}>
@@ -228,29 +221,8 @@ export function MniLayer({
         )
       })}
 
-      {/* Схема среза: желудочки, мозолистое тело, ствол — фикстура тома.
-          Показывается только без реального среза: иначе поверх настоящей
-          анатомии рисовалась бы «вторая», условная. */}
-      {mriShown
-        ? null
-        : structures.map((structure) => {
-            const ellipse = ellipsePx(plane, structure.center, structure.radius)
-            return (
-              <ellipse
-                key={structure.id}
-                data-testid={`slice-structure-${plane}-${structure.id}`}
-                cx={ellipse.cx}
-                cy={ellipse.cy}
-                rx={ellipse.rx}
-                ry={ellipse.ry}
-                fill={structure.hollow ? 'none' : 'var(--color-mri-slice)'}
-                fillOpacity={structure.hollow ? 0 : 0.12 * structure.alpha}
-                stroke="var(--color-mri-slice)"
-                strokeOpacity={0.5 * structure.alpha}
-                strokeWidth={1.1}
-              />
-            )
-          })}
+      {/* Схема среза (эллипсы структур) удалена (17.10.2026): анатомию рисуют
+          только реальные контуры атласа (слои `anatomy`/`brodmann`) и срез МРТ */}
 
       {/* Следы срезов соседних проекций: только когда сосед стоит на оси */}
       {guides.map((guide) =>
@@ -285,84 +257,45 @@ export function MniLayer({
 }
 
 /**
- * Поля Бродмана: реальные контуры атласа, а пока ассета нет — условные
- * эллипсы фикстуры (это видно по подписи метода в полосе состояния раздела).
+ * Поля Бродмана: реальные контуры атласа. Условные эллипсы фикстуры удалены
+ * (17.10.2026): без ассета контуров слой честно пуст, а не рисует «вторую»
+ * схематичную анатомию (подсказка `CONTOURS_UNAVAILABLE` — в полосе состояния).
  */
 export function BrodmannLayer({
   plane,
   visibility,
   areaShapes,
-  demoAreas,
   selectedArea,
 }: {
   plane: ProjectionPlane
   visibility: Record<DipoleLayerId, boolean>
-  /** `null` — ассета нет: рисуются условные эллипсы `demoAreas` */
+  /** `null` — ассета нет: слой пуст (условных эллипсов больше нет) */
   areaShapes: ContourShape[] | null
-  demoAreas: MniAreaShape[]
   selectedArea?: string | null
 }) {
-  return layerVisible(visibility, 'brodmann') ? (
+  return layerVisible(visibility, 'brodmann') && areaShapes ? (
     <g data-testid={`layer-brodmann-${plane}`}>
-      {/*
-        Реальные поля атласа: контуры приходят полигонами в мм MNI и по ним же
-        считается попадание клика. Пока ассета нет, рисуются условные эллипсы
-        фикстуры — и это видно по подписи метода в полосе состояния раздела.
-      */}
-      {areaShapes
-        ? areaShapes.map((shape) => {
-            const active = selectedArea === shape.id
-            return (
-              <path
-                key={shape.id}
-                data-testid={`area-${plane}-${shape.id}`}
-                data-active={active ? 'true' : 'false'}
-                d={contourPathPx(plane, shape)}
-                fillRule="evenodd"
-                fill="var(--color-mri-brodmann)"
-                fillOpacity={active ? 0.32 : 0.13}
-                stroke="var(--color-mri-brodmann)"
-                strokeOpacity={active ? 0.95 : 0.5}
-                strokeWidth={active ? 1.8 : 1}
-              >
-                <title>{`${shape.label} · ${shape.area_mm2} мм²`}</title>
-              </path>
-            )
-          })
-        : demoAreas.map((area) => {
-            const ellipse = ellipsePx(plane, area.center, area.radius)
-            const active = selectedArea === area.name
-            return (
-              <g
-                key={area.name}
-                data-testid={`brodmann-${plane}-${area.name}`}
-                data-active={active ? 'true' : 'false'}
-              >
-                <ellipse
-                  cx={ellipse.cx}
-                  cy={ellipse.cy}
-                  rx={ellipse.rx}
-                  ry={ellipse.ry}
-                  fill="var(--color-mri-brodmann)"
-                  fillOpacity={(active ? 0.32 : 0.13) * area.alpha}
-                  stroke="var(--color-mri-brodmann)"
-                  strokeOpacity={(active ? 0.95 : 0.5) * area.alpha}
-                  strokeWidth={active ? 1.8 : 1}
-                />
-                <text
-                  x={ellipse.cx}
-                  y={ellipse.cy}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize={10}
-                  fill="var(--color-mri-brodmann)"
-                  fillOpacity={Math.max(0.35, area.alpha)}
-                >
-                  {area.name}
-                </text>
-              </g>
-            )
-          })}
+      {/* Реальные поля атласа: контуры приходят полигонами в мм MNI и по ним же
+          считается попадание клика. */}
+      {areaShapes.map((shape) => {
+        const active = selectedArea === shape.id
+        return (
+          <path
+            key={shape.id}
+            data-testid={`area-${plane}-${shape.id}`}
+            data-active={active ? 'true' : 'false'}
+            d={contourPathPx(plane, shape)}
+            fillRule="evenodd"
+            fill="var(--color-mri-brodmann)"
+            fillOpacity={active ? 0.32 : 0.13}
+            stroke="var(--color-mri-brodmann)"
+            strokeOpacity={active ? 0.95 : 0.5}
+            strokeWidth={active ? 1.8 : 1}
+          >
+            <title>{`${shape.label} · ${shape.area_mm2} мм²`}</title>
+          </path>
+        )
+      })}
     </g>
   ) : null
 }
@@ -397,11 +330,15 @@ export function VectorLayer({
         /**
          * Цвет луча — **приглушённый** токен (`--color-mri-dipole-vector`),
          * а не оранжевый диполя: векторы («куда») не должны спорить с
-         * кольцами позиций («где»). Выделение остаётся акцентным, а вектор
+         * кольцами позиций («где»). У полос пакета (С1) луч рисуется **цветом
+         * полосы** (гамма red→violet, `point.band.color`) — так потоки разных
+         * полос различимы в общем облаке. Выделение остаётся акцентным, а вектор
          * кадра анимации (`MriProjectionParts.FrameMarker`) не затрагивается:
          * приглушение — признак облака, а не кадра.
          */
-        const rayColor = selected ? 'var(--color-accent)' : 'var(--color-mri-dipole-vector)'
+        const rayColor = selected
+          ? 'var(--color-accent)'
+          : (point.band?.color ?? 'var(--color-mri-dipole-vector)')
         return (
           <g key={point.id} data-testid={`dipole-ray-${plane}-${point.id}`}>
             <title>{dipolePointTitle(point)}</title>
@@ -416,9 +353,10 @@ export function VectorLayer({
               strokeOpacity={selected ? 1 : visual.opacity * dim}
             />
             {/*
-              Наконечник: залитый треугольник от длины луча (вдвое меньший, чем раньше),
-              а не `<marker>` на всю проекцию. Вершина — конец луча, крылья — по сторонам
-              от неё; размер уменьшен, поэтому заливка больше не сливается в комок.
+              Наконечник: залитый треугольник **фиксированного** размера (~4 px,
+              `DIPOLE_ARROW_PX` — один для всех полос, поправка 17.10.2026),
+              а не `<marker>` на всю проекцию. Вершина — конец луча, крылья — по
+              сторонам от неё; полосу несёт цвет заливки, а не размер стрелы.
             */}
             <polygon
               data-testid={`dipole-arrow-${plane}-${point.id}`}
@@ -486,7 +424,7 @@ export function DipoleDotsLayer({
                     : 'none'
               }
               fillOpacity={selected ? 1 : dot.fillOpacity}
-              stroke="var(--color-mri-dipole-point)"
+              stroke={point.band?.color ?? 'var(--color-mri-dipole-point)'}
               strokeWidth={dotStrokePx}
               strokeOpacity={selected ? 1 : dim}
             />

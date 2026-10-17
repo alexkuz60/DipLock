@@ -149,32 +149,74 @@ export function slerpUnit(a: MniVector, b: MniVector, fraction: number): MniVect
 
 /**
  * Кадр воспроизведения: интерполяция позиции, направления момента и амплитуды
- * между точкой эпохи `epochIndex` и точкой следующей эпохи.
+ * между соседними **измеренными** точками траектории.
  *
- * `null` — в этой эпохе диполя нет (эпоха отброшена): кадр остаётся пустым, а не
- * «дотягивается» от соседней эпохи. Если у следующей эпохи точки нет или доля
- * нулевая, кадр — **измеренная** точка своей эпохи (id, эпоха, время пика, GOF и
- * поле Бродмана всегда берутся у неё: это измеренные величины, их не размываем).
+ * Разрывы (эпохи без диполя: отброшены нарезкой/BAD-зонами или без MNI) больше
+ * не «мигают» (поправка владельца 17.10.2026): движение между соседними
+ * измеренными точками просто **замедляется** — переход занимает время всех
+ * эпох между ними, включая заблокированные. Кадр через дыру едет по прямой
+ * между этими точками (это отображение, а не измерение — метки ниже), а после
+ * последней точки держится на ней до конца нарезки, а не исчезает.
+ *
+ * Якорь кадра — последняя измеренная точка не позже текущей эпохи (`frameAnchor`):
+ * измеренные величины (id, эпоха, время пика, GOF, анатомия) всегда берутся у неё
+ * и не «размываются». На паузе и при шаге у эпохи с диполем кадр равен её точке
+ * (доля 0); в эпохе без диполя — точке замедленного перехода на её границе
+ * (непрерывность движения: пауза не «прыгает» вдоль пути).
  */
+export function frameAnchor(
+  points: Map<number, DipolePoint>,
+  epochIndex: number,
+): DipolePoint | null {
+  let anchor: DipolePoint | null = null
+  for (const point of points.values()) {
+    if (point.epochIndex <= epochIndex && (!anchor || point.epochIndex > anchor.epochIndex)) {
+      anchor = point
+    }
+  }
+  return anchor
+}
+
+/** Следующая измеренная точка после эпохи (`null` — дальше точек в нарезке нет). */
+export function nextMeasuredPoint(
+  points: Map<number, DipolePoint>,
+  epochIndex: number,
+): DipolePoint | null {
+  let next: DipolePoint | null = null
+  for (const point of points.values()) {
+    if (point.epochIndex > epochIndex && (!next || point.epochIndex < next.epochIndex)) {
+      next = point
+    }
+  }
+  return next
+}
+
 export function interpolatedPoint(
   points: Map<number, DipolePoint>,
   epochIndex: number,
   fraction: number,
 ): DipolePoint | null {
-  const current = points.get(epochIndex) ?? null
-  if (!current) return null
-  const next = points.get(epochIndex + 1) ?? null
-  if (!next || !(fraction > 0)) return current
+  const anchor = frameAnchor(points, epochIndex)
+  if (!anchor) return null
+  const next = nextMeasuredPoint(points, anchor.epochIndex)
+  // Последняя измеренная точка: кадр держится на ней, пока идёт хвост нарезки
+  if (!next) return anchor
   const f = Math.min(1, Math.max(0, fraction))
+  // Пауза/шаг на эпохе с диполем — чистое измерение своей эпохи
+  if (!(f > 0) && anchor.epochIndex === epochIndex) return anchor
+  // Переход идёт во времени всех эпох между точками (замедление на разрывах)
+  const span = next.epochIndex - anchor.epochIndex
+  const t = Math.min(1, Math.max(0, (epochIndex + f - anchor.epochIndex) / span))
+  if (!(t > 0)) return anchor
   return {
-    ...current,
+    ...anchor,
     position: {
-      x: lerp(current.position.x, next.position.x, f),
-      y: lerp(current.position.y, next.position.y, f),
-      z: lerp(current.position.z, next.position.z, f),
+      x: lerp(anchor.position.x, next.position.x, t),
+      y: lerp(anchor.position.y, next.position.y, t),
+      z: lerp(anchor.position.z, next.position.z, t),
     },
-    orientation: slerpUnit(current.orientation, next.orientation, f),
-    amplitudeNaM: lerp(current.amplitudeNaM, next.amplitudeNaM, f),
+    orientation: slerpUnit(anchor.orientation, next.orientation, t),
+    amplitudeNaM: lerp(anchor.amplitudeNaM, next.amplitudeNaM, t),
   }
 }
 
@@ -217,9 +259,10 @@ export function anatomyText(labels: AnatomyLabels): string {
  * Ближайшая **смена** анатомии впереди: на какой эпохе диполь оказывается в
  * другой структуре или поле.
  *
- * Идём только по непрерывной цепочке эпох с точками: эпоха без диполя — это
- * разрыв в данных, и «протягивать» через неё переход нельзя (`null`) — то же
- * правило, что у интерполяции кадра и шлейфа. Отсутствие метки (`null`) —
+ * Идём по **измеренным** точкам вперёд от якоря кадра, в том числе через
+ * разрывы (поправка 17.10.2026): движение через эпоху без диполя замедляется,
+ * но продолжается, поэтому и смена меток за разрывом — реальная веха пути
+ * («дальше: эпоха N»), а не потерянный переход. Отсутствие метки (`null`) —
  * такая же величина, как и название: переход «таламус → не определено»
  * показывается, а не прячется.
  *
@@ -231,17 +274,16 @@ export function nextAnatomyChange(
   points: Map<number, DipolePoint>,
   epochIndex: number,
 ): AnatomyChange | null {
-  const current = points.get(epochIndex)
+  const current = frameAnchor(points, epochIndex)
   if (!current) return null
   const currentLabels = atlasLabels(current)
-  // Не больше эпох, чем есть в карте: цикл конечен даже на «дырявой» нарезке
-  for (let step = 0, index = epochIndex + 1; step < points.size; step++, index++) {
-    const candidate = points.get(index)
-    // Разрыв (эпоха отброшена нарезкой или у точки нет MNI): «перехода» нет
-    if (!candidate) return null
+  const ahead = [...points.values()]
+    .filter((point) => point.epochIndex > current.epochIndex)
+    .sort((a, b) => a.epochIndex - b.epochIndex)
+  for (const candidate of ahead) {
     const labels = atlasLabels(candidate)
     if (labels.structure !== currentLabels.structure || labels.area !== currentLabels.area) {
-      return { epochIndex: index, timeMs: candidate.timeMs, labels }
+      return { epochIndex: candidate.epochIndex, timeMs: candidate.timeMs, labels }
     }
   }
   return null
@@ -279,16 +321,20 @@ export type TrailSegment = {
 }
 
 /**
- * Шлейф к текущему кадру: отрезки между точками соседних эпох за последние
- * `TRAIL_WINDOW_MS` сессии, гаснущие с возрастом.
+ * Шлейф к текущему кадру: отрезки между соседними **измеренными** точками за
+ * последние `TRAIL_WINDOW_MS` сессии, гаснущие с возрастом.
  *
- * Сегменты строятся **по измеренным точкам**, а не по интерполированным
- * положениям: шлейф — это история измерений, и «дорисовывать» промежуточные
- * положения там, где их никто не считал, нельзя. Через разрыв (эпоху, у которой
- * точки нет) шлейф не тянется: вместо сквозного отрезка получаются два.
+ * Сегменты строятся по измеренным точкам, а не по интерполированным
+ * положениям: шлейф — это история измерений. Через разрыв (эпоху без диполя)
+ * шлейф **переходит одним отрезком** между измеренными концами (поправка
+ * 17.10.2026: движение через разрыв замедляется, но продолжается — и «хвост»
+ * траектории обязан это отражать, а не рваться и не исчезать). Растущий сегмент
+ * текущего перехода (от якоря к кадру) рисует маркер кадра (`headSegment`).
  *
  * Возраст считается по **новому** концу отрезка, поэтому сегмент, примыкающий к
- * кадру, самый свежий и самый плотный; эпохи старше окна не рисуются вовсе.
+ * кадру, самый свежий и самый плотный; отрезки старше окна не рисуются вовсе.
+ * В шлейф идут только завершённые переходы (новый конец не позже текущей эпохи):
+ * путь «в будущее» — это не история.
  *
  * `thresholds` — пороги отображения (GOF % и момент нА·м): они правило
  * **отображения**, и шлейф подчиняется им так же, как облако и маркер кадра.
@@ -302,18 +348,25 @@ export function trailSegments(
   thresholds: DisplayThresholds = NO_THRESHOLDS,
 ): TrailSegment[] {
   if (!(epochLengthMs > 0) || points.size < 2) return []
-  const span = Math.max(1, Math.min(TRAIL_MAX_SEGMENTS, Math.ceil(TRAIL_WINDOW_MS / epochLengthMs)))
+  const measured = [...points.values()]
+    .filter((point) => point.epochIndex <= epochIndex)
+    .sort((a, b) => a.epochIndex - b.epochIndex)
   const segments: TrailSegment[] = []
-  for (let start = epochIndex - span; start < epochIndex; start++) {
-    if (start < 0) continue
-    const from = points.get(start)
-    const to = points.get(start + 1)
-    if (!from || !to) continue
-    if (!pointPassesThresholds(from, thresholds) || !pointPassesThresholds(to, thresholds)) continue
-    const age = Math.max(0, epochIndex - (start + 1)) * epochLengthMs
+  for (let index = measured.length - 1; index > 0; index--) {
+    const from = measured[index - 1]
+    const to = measured[index]
+    const age = Math.max(0, epochIndex - to.epochIndex) * epochLengthMs
     const alpha = TRAIL_ALPHA_HEAD * Math.max(0, 1 - age / TRAIL_WINDOW_MS)
-    if (alpha < TRAIL_ALPHA_MIN) continue
-    segments.push({ id: `${start}-${start + 1}`, from: from.position, to: to.position, alpha })
+    if (alpha < TRAIL_ALPHA_MIN) break
+    if (pointPassesThresholds(from, thresholds) && pointPassesThresholds(to, thresholds)) {
+      segments.push({
+        id: `${from.epochIndex}-${to.epochIndex}`,
+        from: from.position,
+        to: to.position,
+        alpha,
+      })
+    }
+    if (segments.length >= TRAIL_MAX_SEGMENTS) break
   }
-  return segments
+  return segments.reverse()
 }

@@ -24,7 +24,25 @@ import {
   type ProjectionPlane,
 } from './mriProjections'
 import { mulberry32 } from './demoSignal'
+import { bandVectorPx } from './bandColors'
 import type { DipoleScanResult } from '@/shared/api/types'
+
+/**
+ * Тег полосы пакета (С1): диполь точки «эпоха × полоса» несёт свою полосу —
+ * цвет (гамма red→violet) и масштаб длины вектора читаются из неё
+ * (`shared/lib/bandColors.ts`). У точек одиночного расчёта тега нет: они
+ * рисуются прежними токенами темы и амплитудной длиной луча.
+ */
+export type DipoleBandTag = {
+  /** Стабильный ключ полосы (`alpha`, `custom:8-12`, …) — адрес в пакете */
+  key: string
+  /** Подпись полосы для UI (та же, что в чипах/таблице) */
+  label: string
+  /** Границы полосы, Гц */
+  bandHz: number[]
+  /** Цвет полосы (`bandColor`) — точки, векторы и шлейф этой полосы */
+  color: string
+}
 
 /** Лучший диполь эпохи: позиция в MNI, момент (вектор) и метрики качества. */
 export type DipolePoint = {
@@ -67,6 +85,11 @@ export type DipolePoint = {
    * занят одним диполем.
    */
   overlapCount?: number
+  /**
+   * Полоса пакета (С1): цвет точки/вектора и масштаб длины луча. `null`/нет —
+   * одиночный расчёт: прежние токены темы и длина по амплитуде.
+   */
+  band?: DipoleBandTag | null
 }
 
 /** Слой диполей: точки + флаг источника («результат задачи» или фикстура). */
@@ -96,8 +119,12 @@ export function dipoleLayerStatus(layer: DipoleLayer): string {
  * попадают**: проекции рисуют MNI-координаты, и «нарисовать» точку в системе
  * головы значило бы показать её не там. Такие точки сообщаются предупреждением
  * задачи, а не подменой координат.
+ *
+ * `band` — тег полосы пакета (С1): точки набора получают его целиком, и слои
+ * рисуют их в цвете полосы с полосной длиной вектора. Без тега (одиночный
+ * расчёт) отрисовка прежняя.
  */
-export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
+export function dipoleLayerFromScan(result: DipoleScanResult, band?: DipoleBandTag | null): DipoleLayer {
   const points: DipolePoint[] = []
   for (const point of result.points ?? []) {
     const coords = point.mni_coords
@@ -121,6 +148,7 @@ export function dipoleLayerFromScan(result: DipoleScanResult): DipoleLayer {
       structureDistanceMm: point.structure_distance_mm ?? null,
       areaDistanceMm: point.brodmann_distance_mm ?? null,
       outsideBrain: point.outside_brain ?? null,
+      band: band ?? null,
     })
   }
   return { points, source: 'result' }
@@ -226,25 +254,35 @@ function positionKey(position: MniVector): string {
 }
 
 /**
+ * Ключ узла для кратности: позиция **внутри своей полосы** (С1). Точки разных
+ * полос стоят в одном узле сетки независимо (это разные измерения одного
+ * места), и их кольца не должны сливаться в одно «мульти-полосное» число.
+ */
+function nodeKey(point: DipolePoint): string {
+  return `${point.band?.key ?? ''}@${positionKey(point.position)}`
+}
+
+/**
  * Проставить точкам число диполей в их узле (`overlapCount`).
  *
- * Считается по **видимому** слою (после порогов отображения): кольцо не должно обещать
- * диполи, скрытые порогом. Функция чистая: координаты, порядок и сами точки не
- * меняются, добавляется только производное число; узел с одним диполем остаётся с
- * `1`. Если совпадений нет, возвращается тот же объект слоя.
+ * Считается по **видимому** слою (после порогов отображения) и **внутри полосы**
+ * точки (см. `nodeKey`): кольцо не должно обещать диполи, скрытые порогом, и
+ * сливать узлы разных полос пакета. Функция чистая: координаты, порядок и сами
+ * точки не меняются, добавляется только производное число; узел с одним диполем
+ * остаётся с `1`. Если совпадений нет, возвращается тот же объект слоя.
  */
 export function withOverlapCounts(layer: DipoleLayer): DipoleLayer {
   if (layer.points.length < 2) return layer
   const counts = new Map<string, number>()
   for (const point of layer.points) {
-    const key = positionKey(point.position)
+    const key = nodeKey(point)
     counts.set(key, (counts.get(key) ?? 0) + 1)
   }
   return {
     ...layer,
     points: layer.points.map((point) => ({
       ...point,
-      overlapCount: counts.get(positionKey(point.position)) ?? 1,
+      overlapCount: counts.get(nodeKey(point)) ?? 1,
     })),
   }
 }
@@ -318,9 +356,22 @@ export const VECTOR_MIN_PX = 7
 /** Верхняя граница длины вектора: сильный диполь не должен закрывать всю проекцию. */
 export const VECTOR_MAX_PX = 30
 
-/** Длина вектора диполя в пикселях по амплитуде момента (с зажимом в разумные рамки). */
-export function dipoleVectorLength(amplitudeNaM: number): number {
+/** Длина вектора диполя в пикселях: полосный масштаб × амплитуда, с зажимом в разумные рамки. */
+export function dipoleVectorLength(
+  amplitudeNaM: number,
+  bandHz: readonly number[] | null = null,
+): number {
   const raw = Math.abs(amplitudeNaM) * VECTOR_PX_PER_NA_M
+  // Полоса пакета (С1) задаёт масштаб/максимум (дельта — длиннее всех, высокая
+  // гамма — короче всех, `bandVectorPx`), амплитуда — долю этого масштаба
+  // (гибрид 17.10.2026: в облаке слабый диполь короче своего полосного
+  // максимума). Нормировка амплитуды — прежняя линейная шкала одиночного
+  // расчёта (`VECTOR_PX_PER_NA_M` от `VECTOR_MAX_PX`), чтобы один и тот же
+  // момент выглядел одинаково в обоих режимах.
+  if (bandHz && bandHz.length >= 2) {
+    const scale = bandVectorPx(bandHz)
+    return Math.min(scale, Math.max(VECTOR_MIN_PX, (raw / VECTOR_MAX_PX) * scale))
+  }
   return Math.min(VECTOR_MAX_PX, Math.max(VECTOR_MIN_PX, raw))
 }
 
@@ -447,24 +498,25 @@ export type DipoleMarker = {
 }
 
 /**
- * Доля длины луча, уходящая под наконечник, и границы его длины, px.
+ * Наконечник стрелы: **один размер для всех полос** — залитый треугольник
+ * `DIPOLE_ARROW_PX` (~4 px, поправка владельца 17.10.2026).
  *
- * Наконечник **вдвое меньше** прежнего (поправка ручной проверки, 18.09.2026: 4…9 px → 2…4.5 px):
- * при плотном облаке точек крупные залитые треугольники сливались в сплошной комок, и направление
- * момента читалось хуже, чем по самому лучу. Ширина крыльев считается от длины (`half`), поэтому
- * вдвое меньшая длина даёт вдвое меньший габарит по обеим осям.
+ * Раньше длина наконечника росла от длины луча (0.38 × длина, зажим 2…4.5 px):
+ * на длинных дельта-векторах пакета стрелка смотрелась «шипом», а на коротких
+ * гамма-векторах съедала весь луч. Теперь габарит стрелы один, а полосу несёт
+ * её **цвет** (`DipoleRayVisual`/`point.band.color`); длина луча остаётся
+ * полосной. Ширина крыльев считается от длины (`half = 0.34 × length`).
  */
-export const ARROW_LENGTH_RATIO = 0.38
-export const ARROW_LENGTH_MIN_PX = 2
-export const ARROW_LENGTH_MAX_PX = 4.5
+export const DIPOLE_ARROW_PX = 4
 
 /**
  * Наконечник вектора: залитый треугольник на конце луча плюс укороченный штрих.
  *
- * Размер наконечника **вдвое меньше** прежнего (поправка ручной проверки, 18.09.2026: 4…9 px →
- * 2…4.5 px): при плотном облаке точек крупные треугольники сливались в сплошной комок, и уменьшение
- * габарита решило это без отказа от заливки (заливка возвращена — ручная проверка). Вершина остаётся
- * концом луча, крылья — по сторонам (порядок точек: `[вершина, левое крыло, правое крыло]`).
+ * Размер **фиксирован** (`DIPOLE_ARROW_PX`, ~4 px — один для всех полос,
+ * поправка владельца 17.10.2026): габарит стрелы не зависит от длины луча, а
+ * полосу несёт её цвет. Вершина остаётся концом луча, крылья — по сторонам
+ * (порядок точек: `[вершина, левое крыло, правое крыло]`). Длиной стрелы
+ * укорачивается штрих (`shaftEnd`), поэтому луч не «протыкает» свой наконечник.
  *
  * `vectorPx <= 0` — направления нет (момент вдоль нормали среза): наконечника и
  * штриха тоже нет, компонент рисует точку кольцом.
@@ -477,11 +529,7 @@ export function dipoleArrowHead(
   if (!(vectorPx > 0)) return null
   const ux = (end.x - at.x) / vectorPx
   const uy = (end.y - at.y) / vectorPx
-  const length = Math.min(
-    ARROW_LENGTH_MAX_PX,
-    Math.max(ARROW_LENGTH_MIN_PX, vectorPx * ARROW_LENGTH_RATIO),
-    vectorPx,
-  )
+  const length = Math.min(DIPOLE_ARROW_PX, vectorPx)
   const half = length * 0.34
   const baseX = end.x - ux * length
   const baseY = end.y - uy * length
@@ -498,6 +546,11 @@ export function dipoleArrowHead(
 /**
  * Маркер диполя на плоскости: позиция точки плюс вектор направления момента.
  *
+ * Длина луча — `dipoleVectorLength` (полосный масштаб × амплитуда), либо явный
+ * `vectorLengthPx` (кадр анимации: фиксированная полосная длина — поток читается
+ * ровнее, когда его векторы не «дышат» по амплитуде). Наконечник стрелы — один
+ * размер для всех полос (`DIPOLE_ARROW_PX`).
+ *
  * `null` в `end` — момент направлен перпендикулярно срезу: на этой проекции
  * диполь видно «в торец», и стрелка была бы нулевой длины и читалась бы как
  * ошибка. Компонент рисует такую точку кольцом без луча.
@@ -506,10 +559,12 @@ export function dipoleMarker(
   plane: ProjectionPlane,
   point: DipolePoint,
   padding = PROJECTION_PADDING,
+  vectorLengthPx?: number,
 ): DipoleMarker {
   const at = projectPoint(plane, point.position, padding)
   const direction = dipoleVectorDirection(plane, point.orientation)
-  const vectorPx = dipoleVectorLength(point.amplitudeNaM)
+  const vectorPx =
+    vectorLengthPx ?? dipoleVectorLength(point.amplitudeNaM, point.band?.bandHz ?? null)
   if (direction.u === 0 && direction.v === 0) {
     return { at, end: null, shaftEnd: null, head: null, vectorPx: 0 }
   }

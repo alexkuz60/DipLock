@@ -12,11 +12,15 @@ import {
   BATCH_MIN_BANDS,
   bandLabel,
   bandRunOf,
+  bandTagOf,
+  batchDipoleLayer,
   buildDipoleBatchForm,
+  frameSources,
   scanResultOfBand,
   shareLabel,
 } from './dipoleBatch'
-import { dipoleBatchResultFixture } from '@/test/fixtures'
+import { bandColor } from './bandColors'
+import { dipoleBatchResultFixture, dipoleScanResultFixture } from '@/test/fixtures'
 
 describe('помощники пакета поддиапазонов', () => {
   it('собирает форму с набором полос и параметрами расчёта', () => {
@@ -74,5 +78,51 @@ describe('помощники пакета поддиапазонов', () => {
     // «Не измерено» — прочерк, а не «0%»
     expect(shareLabel(null)).toBe('—')
     expect(shareLabel(undefined)).toBe('—')
+  })
+})
+
+describe('полосная отрисовка пакета (п.1, 17.10.2026)', () => {
+  it('даёт тег полосы с цветом гаммы red→violet и стабильным ключом', () => {
+    const batch = dipoleBatchResultFixture()
+    const [alpha, beta] = batch.bands ?? []
+    const alphaTag = bandTagOf(alpha)
+    const betaTag = bandTagOf(beta)
+
+    expect(alphaTag.key).toBe('alpha')
+    expect(alphaTag.label).toBe(alpha.label)
+    expect(alphaTag.bandHz).toEqual(alpha.band_hz)
+    // Полоса с более высокими частотами — «правее» в гамме (ближе к фиолетовому)
+    expect(betaTag.color).not.toBe(alphaTag.color)
+    expect(alphaTag.color).toBe(bandColor(alpha.band_hz))
+  })
+
+  it('собирает источники кадра по чекбоксам полос: от всех до одной', () => {
+    const batch = dipoleBatchResultFixture()
+
+    // Все полосы — два источника с тегами (порядок — как в прогоне)
+    const all = frameSources(null, batch, ['beta', 'alpha'])
+    expect(all.map((source) => source.band?.key)).toEqual(['alpha', 'beta'])
+    expect(all[0].points.size).toBeGreaterThan(0)
+    // Только одна — один источник; ни одной — ни одного (честная пустота)
+    expect(frameSources(null, batch, ['beta'])).toHaveLength(1)
+    expect(frameSources(null, batch, [])).toHaveLength(0)
+    // Одиночный расчёт — один источник без полосы
+    const single = frameSources(dipoleScanResultFixture(), null, [])
+    expect(single).toHaveLength(1)
+    expect(single[0].band).toBeNull()
+  })
+
+  it('складывает облако пакета из отмеченных полос с тегами на точках', () => {
+    const batch = dipoleBatchResultFixture()
+
+    const layer = batchDipoleLayer(batch, ['alpha', 'beta'])
+    // Точки обеих полос, каждая несёт свою полосу (цвет/масштаб вектора)
+    expect(layer.source).toBe('result')
+    expect(layer.points.every((point) => point.band !== null && point.band !== undefined)).toBe(true)
+    expect(new Set(layer.points.map((point) => point.band?.key))).toEqual(new Set(['alpha', 'beta']))
+    // Снятая полоса убирает свои точки
+    const alphaOnly = batchDipoleLayer(batch, ['alpha'])
+    expect(new Set(alphaOnly.points.map((point) => point.band?.key))).toEqual(new Set(['alpha']))
+    expect(alphaOnly.points.length).toBeLessThan(layer.points.length)
   })
 })

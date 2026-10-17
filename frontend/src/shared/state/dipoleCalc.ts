@@ -137,6 +137,14 @@ export type DipoleCalcState = {
    * (`result` держит скан активной полосы — прежняя отрисовка работает без правок).
    */
   activeBandKey: string | null
+  /**
+   * Полосы анимации и облака пакета (чекбоксы панели, п.1.4 17.10.2026):
+   * отмеченные полосы рисуются **одновременно** в полосных цветах (гамма
+   * red→violet) и в анимации (мультиполосный кадр), и в облаке точек. Пусто —
+   * полосы не отмечены (облако и кадр пусты). Заполняется «все полосы» после
+   * прогона пакета; одиночный расчёт этого состояния не использует.
+   */
+  playbackBandKeys: string[]
   /** Задача спектра по диапазонам */
   spectrumJob: CalcJob | null
   /** Результат спектра (диапазоны + ссылки на топокарты) */
@@ -236,6 +244,10 @@ export type DipoleCalcState = {
   runBatch: (recordingId: string | null) => Promise<void>
   /** Смена активной полосы пакета: `result` = скан её точек, кадр снимается */
   setActiveBand: (bandKey: string) => void
+  /** Переключить полосу в анимации/облаке (чекбокс панели пакета) */
+  togglePlaybackBand: (bandKey: string) => void
+  /** Задать полосы анимации/облака («Все» / «Только активная») */
+  setPlaybackBandKeys: (bandKeys: string[]) => void
   /** Расчёт спектра по кнопке: числа PSD + топокарты диапазонов */
   runSpectrum: (recordingId: string | null) => Promise<void>
   /** Отмена идущего быстрого расчёта (3.2): DELETE на сервере + локальный статус */
@@ -281,6 +293,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       batchError: null,
       batchBandKeys: [],
       activeBandKey: null,
+      playbackBandKeys: [],
       spectrumJob: null,
       spectrum: null,
       error: null,
@@ -481,6 +494,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             batch: null,
             batchJob: null,
             activeBandKey: null,
+            playbackBandKeys: [],
             // Уточнения привязаны к нарезке прежнего результата — новая нарезка
             // делает их чужими (как и кадр воспроизведения ниже)
             refinedPoints: {},
@@ -546,6 +560,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             batch,
             batchJob: succeededJob(get().batchJob),
             activeBandKey: first?.band_key ?? null,
+            // Чекбоксы анимации/облака (п.1.4): после прогона отмечены все полосы
+            playbackBandKeys: bands.map((band) => band.band_key),
             // Проекции/таблица/подписи читают `result` — кладём в него скан
             // активной полосы набора (та же нарезка, свои точки)
             result: first ? scanResultOfBand(batch, first) : null,
@@ -601,6 +617,15 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             },
           }
         }),
+
+      togglePlaybackBand: (bandKey) =>
+        set((state) => ({
+          playbackBandKeys: state.playbackBandKeys.includes(bandKey)
+            ? state.playbackBandKeys.filter((key) => key !== bandKey)
+            : [...state.playbackBandKeys, bandKey],
+        })),
+
+      setPlaybackBandKeys: (bandKeys) => set({ playbackBandKeys: [...new Set(bandKeys)] }),
 
       runSpectrum: async (recordingId) => {
         if (!recordingId) return
@@ -728,6 +753,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           batchJob: null,
           batchError: null,
           activeBandKey: null,
+          playbackBandKeys: [],
           spectrumJob: null,
           spectrum: null,
           error: null,

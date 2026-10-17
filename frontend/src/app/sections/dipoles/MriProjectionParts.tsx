@@ -13,6 +13,7 @@
  *   контекст (`usePlaybackFrame`), поэтому статичные слои проекции при движении
  *   кадра не перерисовываются.
  */
+import { useMemo } from 'react'
 import {
   DIPOLE_DOT_RADIUS_PX,
   DIPOLE_DOT_STROKE_PX,
@@ -23,7 +24,15 @@ import {
   dipoleMarker,
   dipolePointTitle,
   dipoleRayVisual,
+  pointPassesThresholds,
+  type DisplayThresholds,
 } from '@/shared/lib/dipolePoints'
+import { bandVectorPx } from '@/shared/lib/bandColors'
+import { TRAIL_ALPHA_HEAD, frameAnchor, interpolatedPoint } from '@/shared/lib/playback'
+import { frameSources } from '@/shared/lib/dipoleBatch'
+import { contourPathPx } from '@/shared/lib/atlasContours'
+import type { ContourShape } from '@/shared/api/types'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import {
   PROJECTION_PADDING,
   projectPoint,
@@ -33,7 +42,7 @@ import {
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
 import { layerVisible, type DipoleLayerId } from '@/shared/state/dipoleParams'
-import { usePlaybackFrame } from './playbackClock'
+import { usePlaybackFrame, type BandFrame } from './playbackClock'
 
 /** Подпись края фигуры: буква направления плюс пояснение в тултипе. */
 export function EdgeLabel({
@@ -152,12 +161,19 @@ export function ReferenceCross({
  * поверх приглушённого облака. Кадр приходит **контекстом**, поэтому маркер
  * обновляется сам (60 раз в секунду), а статичные слои проекции не перерисовываются.
  *
+ * У пакета (С1) кадр — **несколько полос сразу** (`frame.frames`): каждая рисуется
+ * своей группой в цвете полосы (точка, гало, вектор фиксированной полосной длины
+ * и шлейф), и чекбоксы панели выбирают любую комбинацию — от всех до одной.
+ * Одиночный расчёт даёт один кадр без полосы (прежние токены темы).
+ *
  * От кликового выделения кадр отличается **гало** — тонким кольцом большего радиуса
  * при том же размере кольца позиции: «все позиции — одинаковые кольца» — правило
  * раздела, и менять размер под курсор времени нельзя.
  *
  * Слои уважаются и здесь: выключенный слой анимации (`playback`) убирает кадр, его
- * луч и шлейф целиком и не трогает облако диполей.
+ * луч и шлейф целиком и не трогает облако диполей. Шлейф **не пропадает** вместе с
+ * кадром в эпохах без диполя (сглаживание разрывов, 17.10.2026): слой рисуется,
+ * пока есть что показать — кадр, его «хвост» перехода или шлейф.
  */
 export function FrameMarker({
   plane,
@@ -169,7 +185,6 @@ export function FrameMarker({
   pxPerUnit: number
 }) {
   const frame = usePlaybackFrame()
-  const point = frame?.point ?? null
   /**
    * Слой анимации (поправка ручной проверки): кадр, его луч и шлейф — **свой
    * слой**, а не часть облака диполей и векторов. Иначе при выключенных позициях
@@ -177,37 +192,77 @@ export function FrameMarker({
    * пропадал бы вместе с лучами. Слой включён по умолчанию; его выключение убирает
    * анимацию целиком и не трогает облако.
    */
-  if (!point || !layerVisible(visibility, 'playback')) return null
-
-  const marker = dipoleMarker(plane, point)
-  const visual = dipoleRayVisual(point.amplitudeNaM)
-  // Луч кадра — отдельным объектом: проверка наличия луча в одном месте, без
-  // «утверждений о непустоте» внутри разметки
-  const ray =
-    marker.shaftEnd && marker.head ? { end: marker.shaftEnd, head: marker.head } : null
-  // Шлейф принадлежит кадру (это история измерений, а не ещё один слой диполей):
-  // нет кадра — нет и шлейфа, а при выключенных позициях он остаётся
-  const trail = frame?.trail ?? []
+  if (!layerVisible(visibility, 'playback')) return null
+  const frames = (frame?.frames ?? []).filter(
+    (bandFrame) => bandFrame.point !== null || bandFrame.trail.length > 0,
+  )
+  if (frames.length === 0) return null
 
   return (
     <g data-testid={`layer-playback-${plane}`}>
-      <title>
-        {`Кадр воспроизведения: ${dipolePointTitle(point)} — между эпохами кадр интерполирован, анатомия — по измеренной точке его эпохи`}
-      </title>
+      {frames.map((bandFrame) => (
+        <BandFrameMarker
+          key={bandFrame.band?.key ?? 'single'}
+          plane={plane}
+          pxPerUnit={pxPerUnit}
+          bandFrame={bandFrame}
+        />
+      ))}
+    </g>
+  )
+}
+
+/** Кадр одной полосы: шлейф, «хвост» перехода, гало, точка и вектор момента. */
+function BandFrameMarker({
+  plane,
+  pxPerUnit,
+  bandFrame,
+}: {
+  plane: ProjectionPlane
+  pxPerUnit: number
+  bandFrame: BandFrame
+}) {
+  const { band, point, trail, headSegment } = bandFrame
+  // Полосной цвет (гамма red→violet) или токены темы для одиночного расчёта
+  const color = band?.color ?? null
+  const haloColor = color ?? 'var(--color-accent)'
+  const rayColor = color ?? 'var(--color-accent)'
+  const trailColor = color ?? 'var(--color-mri-dipole)'
+  // Одиночный кадр сохраняет прежние test-id; полосные суффиксируются ключом
+  const suffix = band ? `-${band.key}` : ''
+  // В анимации луч — фиксированной полосной длины (поток не «дышит» по амплитуде)
+  const marker = point
+    ? dipoleMarker(plane, point, PROJECTION_PADDING, band ? bandVectorPx(band.bandHz) : undefined)
+    : null
+  const visual = point ? dipoleRayVisual(point.amplitudeNaM) : null
+  // Луч кадра — отдельным объектом: проверка наличия луча в одном месте, без
+  // «утверждений о непустоте» внутри разметки
+  const ray =
+    marker && marker.shaftEnd && marker.head ? { end: marker.shaftEnd, head: marker.head } : null
+
+  return (
+    <g data-testid={`frame-${plane}${suffix || '-single'}`}>
+      {point ? (
+        <title>
+          {band
+            ? `Кадр воспроизведения (${band.label}): ${dipolePointTitle(point)} — между эпохами кадр интерполирован, анатомия — по измеренной точке его эпохи`
+            : `Кадр воспроизведения: ${dipolePointTitle(point)} — между эпохами кадр интерполирован, анатомия — по измеренной точке его эпохи`}
+        </title>
+      ) : null}
       {trail.length > 0 ? (
-        <g data-testid={`frame-trail-${plane}`}>
+        <g data-testid={`frame-trail-${plane}${suffix}`}>
           {trail.map((segment) => {
             const from = projectPoint(plane, segment.from)
             const to = projectPoint(plane, segment.to)
             return (
               <line
                 key={segment.id}
-                data-testid={`trail-segment-${plane}-${segment.id}`}
+                data-testid={`trail-segment-${plane}${suffix}-${segment.id}`}
                 x1={from.x}
                 y1={from.y}
                 x2={to.x}
                 y2={to.y}
-                stroke="var(--color-mri-dipole)"
+                stroke={trailColor}
                 strokeWidth={TRAIL_STROKE_PX / pxPerUnit}
                 strokeOpacity={segment.alpha}
                 strokeLinecap="round"
@@ -216,46 +271,168 @@ export function FrameMarker({
           })}
         </g>
       ) : null}
-      {/* Кадр: гало акцентным цветом плюс кольцо позиции того же размера, что и у
-          облака (Ø 6 px) — размер позиции не зависит от того, «сейчас» это или нет */}
-      <circle
-        data-testid={`frame-halo-${plane}`}
-        cx={marker.at.x}
-        cy={marker.at.y}
-        r={DIPOLE_FRAME_HALO_RADIUS_PX / pxPerUnit}
-        fill="none"
-        stroke="var(--color-accent)"
-        strokeWidth={DIPOLE_FRAME_HALO_STROKE_PX / pxPerUnit}
-      />
-      <circle
-        data-testid={`frame-dot-${plane}`}
-        cx={marker.at.x}
-        cy={marker.at.y}
-        r={DIPOLE_DOT_RADIUS_PX / pxPerUnit}
-        fill="var(--color-mri-dipole)"
-        stroke="var(--color-mri-dipole-point)"
-        strokeWidth={DIPOLE_DOT_STROKE_PX / pxPerUnit}
-      />
-      {ray ? (
+      {/* «Хвост» текущего перехода: растущий отрезок от якоря к кадру — траектория
+          не «моргает» на эпохах без диполя (сглаживание разрывов, 17.10.2026) */}
+      {headSegment ? (
+        <line
+          data-testid={`frame-head-${plane}${suffix}`}
+          x1={projectPoint(plane, headSegment.from).x}
+          y1={projectPoint(plane, headSegment.from).y}
+          x2={projectPoint(plane, headSegment.to).x}
+          y2={projectPoint(plane, headSegment.to).y}
+          stroke={trailColor}
+          strokeWidth={TRAIL_STROKE_PX / pxPerUnit}
+          strokeOpacity={TRAIL_ALPHA_HEAD}
+          strokeLinecap="round"
+        />
+      ) : null}
+      {marker && point ? (
         <>
-          <line
-            data-testid={`frame-vector-${plane}`}
-            x1={marker.at.x}
-            y1={marker.at.y}
-            x2={ray.end.x}
-            y2={ray.end.y}
-            stroke="var(--color-accent)"
-            strokeWidth={DIPOLE_RAY_STROKE_PX / pxPerUnit}
-            strokeOpacity={visual.opacity}
+          {/* Кадр: гало акцентным цветом плюс кольцо позиции того же размера, что и у
+              облака (Ø 6 px) — размер позиции не зависит от того, «сейчас» это или нет */}
+          <circle
+            data-testid={`frame-halo-${plane}${suffix}`}
+            cx={marker.at.x}
+            cy={marker.at.y}
+            r={DIPOLE_FRAME_HALO_RADIUS_PX / pxPerUnit}
+            fill="none"
+            stroke={haloColor}
+            strokeWidth={DIPOLE_FRAME_HALO_STROKE_PX / pxPerUnit}
           />
-          <polygon
-            data-testid={`frame-arrow-${plane}`}
-            points={ray.head.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')}
-            fill="var(--color-accent)"
-            fillOpacity={visual.opacity}
+          <circle
+            data-testid={`frame-dot-${plane}${suffix}`}
+            cx={marker.at.x}
+            cy={marker.at.y}
+            r={DIPOLE_DOT_RADIUS_PX / pxPerUnit}
+            fill={color ?? 'var(--color-mri-dipole)'}
+            stroke="var(--color-mri-dipole-point)"
+            strokeWidth={DIPOLE_DOT_STROKE_PX / pxPerUnit}
           />
+          {ray && visual ? (
+            <>
+              <line
+                data-testid={`frame-vector-${plane}${suffix}`}
+                x1={marker.at.x}
+                y1={marker.at.y}
+                x2={ray.end.x}
+                y2={ray.end.y}
+                stroke={rayColor}
+                strokeWidth={DIPOLE_RAY_STROKE_PX / pxPerUnit}
+                strokeOpacity={visual.opacity}
+              />
+              <polygon
+                data-testid={`frame-arrow-${plane}${suffix}`}
+                points={ray.head.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')}
+                fill={rayColor}
+                fillOpacity={visual.opacity}
+              />
+            </>
+          ) : null}
         </>
       ) : null}
+    </g>
+  )
+}
+
+/**
+ * Подсветка анатомии кадра (п.3, 17.10.2026): поле Бродмана и анатомическая
+ * структура, в которых находится диполь текущего кадра, выделяются на проекциях
+ * во время анимации — так же, как при кликовом выделении (`data-active` слоёв),
+ * но отдельным оверлеем: слои атласа статичны и не перерисовываются на кадрах.
+ *
+ * Подписка — на **номер эпохи** (`playback.epochIndex`), а не на 60 fps-контекст:
+ * метки принадлежат измеренной точке-якорю и меняются только на смене эпохи
+ * (несколько раз в секунду). У пакета подсвечивается объединение меток всех
+ * отмеченных полос (`frameSources` — те же точки, что у часов кадра). Кадр,
+ * скрытый порогами отображения, анатомию не подсвечивает: на картинке его нет.
+ */
+export function FrameAnatomyHighlight({
+  plane,
+  visibility,
+  structureShapes,
+  areaShapes,
+}: {
+  plane: ProjectionPlane
+  visibility: Record<DipoleLayerId, boolean>
+  structureShapes: ContourShape[] | null
+  areaShapes: ContourShape[] | null
+}) {
+  const active = useDipoleCalc((state) => state.playback.active)
+  const epochIndex = useDipoleCalc((state) => state.playback.epochIndex)
+  const result = useDipoleCalc((state) => state.result)
+  const batch = useDipoleCalc((state) => state.batch)
+  const playbackBandKeys = useDipoleCalc((state) => state.playbackBandKeys)
+  const minGofPercent = useDipoleCalc((state) => state.gofThresholdPercent)
+  const minAmplitudeNaM = useDipoleCalc((state) => state.amplitudeThresholdNam)
+
+  const sources = useMemo(
+    () => frameSources(result, batch, playbackBandKeys),
+    [result, batch, playbackBandKeys],
+  )
+  const highlight = useMemo(() => {
+    const structures = new Set<string>()
+    const areas = new Set<string>()
+    if (!active) return { structures, areas }
+    const thresholds: DisplayThresholds = { minGofPercent, minAmplitudeNaM }
+    for (const { points } of sources) {
+      const anchor = frameAnchor(points, epochIndex)
+      if (!anchor) continue
+      const frame = interpolatedPoint(points, epochIndex, 0)
+      if (!frame || !pointPassesThresholds(frame, thresholds)) continue
+      if (anchor.structure) structures.add(anchor.structure)
+      if (anchor.brodmannArea) areas.add(anchor.brodmannArea)
+    }
+    return { structures, areas }
+  }, [active, sources, epochIndex, minGofPercent, minAmplitudeNaM])
+
+  // Метки точки (`aparc+aseg`/`BA17-lh`) могут приходить и как имя атласа, и как
+  // русская подпись — контур ищется по `id`, `name` и `label`
+  const match = (shape: ContourShape, labels: Set<string>): boolean =>
+    labels.has(shape.id) || labels.has(shape.name) || labels.has(shape.label)
+  const structureHighlights = (structureShapes ?? []).filter((shape) =>
+    match(shape, highlight.structures),
+  )
+  const areaHighlights = (areaShapes ?? []).filter((shape) => match(shape, highlight.areas))
+  const showStructures = layerVisible(visibility, 'anatomy') && structureHighlights.length > 0
+  const showAreas = layerVisible(visibility, 'brodmann') && areaHighlights.length > 0
+  if (!showStructures && !showAreas) return null
+
+  return (
+    <g data-testid={`layer-frame-anatomy-${plane}`}>
+      {showStructures
+        ? structureHighlights.map((shape) => (
+            <path
+              key={`structure-${shape.id}`}
+              data-testid={`frame-anatomy-${plane}-${shape.id}`}
+              d={contourPathPx(plane, shape)}
+              fillRule="evenodd"
+              fill="var(--color-mri-structure)"
+              fillOpacity={0.3}
+              stroke="var(--color-mri-structure)"
+              strokeOpacity={0.95}
+              strokeWidth={1.6}
+            >
+              <title>{`Анатомия кадра: ${shape.label}`}</title>
+            </path>
+          ))
+        : null}
+      {showAreas
+        ? areaHighlights.map((shape) => (
+            <path
+              key={`area-${shape.id}`}
+              data-testid={`frame-area-${plane}-${shape.id}`}
+              d={contourPathPx(plane, shape)}
+              fillRule="evenodd"
+              fill="var(--color-mri-brodmann)"
+              fillOpacity={0.32}
+              stroke="var(--color-mri-brodmann)"
+              strokeOpacity={0.95}
+              strokeWidth={1.8}
+            >
+              <title>{`Поле Бродмана кадра: ${shape.label}`}</title>
+            </path>
+          ))
+        : null}
     </g>
   )
 }

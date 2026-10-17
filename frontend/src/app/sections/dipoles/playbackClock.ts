@@ -29,35 +29,55 @@ import {
   clampEpochIndex,
   epochAtTime,
   epochFraction,
+  frameAnchor,
   interpolatedPoint,
   playbackDurationMs,
-  pointByEpoch,
   trailSegments,
   type TrailSegment,
 } from '@/shared/lib/playback'
+import { frameSources } from '@/shared/lib/dipoleBatch'
 import {
-  dipoleLayerFromScan,
   pointPassesThresholds,
   type DisplayThresholds,
+  type DipoleBandTag,
   type DipolePoint,
 } from '@/shared/lib/dipolePoints'
+import type { MniVector } from '@/shared/lib/mriProjections'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 
-/** Кадр воспроизведения: время, доля внутри эпохи, точка и шлейф траектории. */
+/**
+ * Кадр одной полосы (С1): у пакета одновременно живут диполи всех отмеченных
+ * полос, и каждая несёт свою точку, шлейф и тег (цвет/подпись). У одиночного
+ * расчёта полосы нет (`band: null`) — один кадр прежнего вида.
+ */
+export type BandFrame = {
+  /** Полоса пакета (`null` — одиночный расчёт: без полосного цвета) */
+  band: DipoleBandTag | null
+  /** Точка кадра; `null` — не рисуется (нет измерений или слабее порогов отображения) */
+  point: DipolePoint | null
+  /** Якорь: последняя измеренная точка не позже эпохи (ей принадлежат метки кадра) */
+  anchor: DipolePoint | null
+  /** Шлейф: завершённые измеренные переходы последних секунд, гаснущие с возрастом */
+  trail: TrailSegment[]
+  /**
+   * Растущий сегмент текущего перехода (якорь → кадр), `null` — кадр стоит на
+   * измеренной точке. Сглаживание разрывов (17.10.2026): пока кадр едет
+   * замедленно к следующей точке, его «хвост» тянется за ним и не исчезает.
+   */
+  headSegment: { from: MniVector; to: MniVector } | null
+}
+
+/** Кадр воспроизведения: время, доля эпохи и кадры отмеченных полос. */
 export type PlaybackFrame = {
   /** Время кадра от начала записи, мс */
   timeMs: number
   /** Доля внутри текущей эпохи, 0…1 (для интерполяции позиции и вектора) */
   fraction: number
-  /** Точка кадра; `null` — кадр пуст (эпоха без диполя или слабее порогов отображения) */
-  point: DipolePoint | null
-  /** Шлейф к кадру: измеренные отрезки последних секунд сессии, гаснущие с возрастом */
-  trail: TrailSegment[]
+  /** Кадры полос: от одного (одиночный расчёт) до всех полос пакета */
+  frames: BandFrame[]
 }
 
-/** Общая «пустая» карта точек: постоянная ссылка не сбрасывает мемоизацию. */
-const NO_POINTS: Map<number, DipolePoint> = new Map()
-/** Общий «пустой» шлейф — по той же причине. */
+/** Общий «пустой» шлейф — постоянная ссылка не сбрасывает мемоизацию. */
 const NO_TRAIL: TrailSegment[] = []
 
 /** Контекст кадра: значение кладёт `PlaybackFrameProvider` (файл-компонент). */
@@ -81,6 +101,8 @@ export function usePlaybackFrame(): PlaybackFrame | null {
  */
 export function usePlaybackClock(): PlaybackFrame {
   const result = useDipoleCalc((state) => state.result)
+  const batch = useDipoleCalc((state) => state.batch)
+  const playbackBandKeys = useDipoleCalc((state) => state.playbackBandKeys)
   const playing = useDipoleCalc((state) => state.playback.playing)
   const speed = useDipoleCalc((state) => state.playback.speed)
   const epochIndex = useDipoleCalc((state) => state.playback.epochIndex)
@@ -148,27 +170,45 @@ export function usePlaybackClock(): PlaybackFrame {
     [],
   )
 
-  /** Точки по эпохам — из тех же данных, что рисует облако проекций */
-  const pointsByEpoch = useMemo(
-    () => (result ? pointByEpoch(dipoleLayerFromScan(result).points) : NO_POINTS),
-    [result],
+  /**
+   * Источники кадра — по чекбоксам полос пакета (`frameSources`): одни и те же
+   * точки, что рисует облако проекций (включая теги полос).
+   */
+  const sources = useMemo(
+    () => frameSources(result, batch, playbackBandKeys),
+    [result, batch, playbackBandKeys],
   )
   const fraction = active ? epochFraction(timeMs, epochLengthMs) : 0
-  const point = useMemo(() => {
-    if (!active) return null
-    const frame = interpolatedPoint(pointsByEpoch, epochIndex, fraction)
-    // Пороги отображения — правило для всех диполей, включая кадр: слабый кадр
-    // не рисуется, но воспроизведение продолжается (эпоха видна в шапке)
-    return frame && pointPassesThresholds(frame, thresholds) ? frame : null
-  }, [active, pointsByEpoch, epochIndex, fraction, thresholds])
   /**
-   * Шлейф — история **измеренных** точек (пороги отображения действуют на него
-   * так же, как на облако и маркер кадра: правило отображения одно на всех).
+   * Кадры полос: точка + шлейф + растущий сегмент перехода. Пороги отображения —
+   * правило для всех диполей, включая кадр: слабый кадр не рисуется, но
+   * воспроизведение продолжается (эпоха видна в шапке), и шлейф при этом живёт.
    */
-  const trail = useMemo(
-    () => (active ? trailSegments(pointsByEpoch, epochIndex, epochLengthMs, thresholds) : NO_TRAIL),
-    [active, pointsByEpoch, epochIndex, epochLengthMs, thresholds],
+  const frames = useMemo<BandFrame[]>(
+    () =>
+      sources.map(({ band, points }) => {
+        const anchor = frameAnchor(points, epochIndex)
+        const raw = active ? interpolatedPoint(points, epochIndex, fraction) : null
+        const point = raw && pointPassesThresholds(raw, thresholds) ? raw : null
+        const trail = active
+          ? trailSegments(points, epochIndex, epochLengthMs, thresholds)
+          : NO_TRAIL
+        // Сегмент текущего перехода: кадр оторвался от якоря (едет к следующей
+        // измеренной точке) — его «хвост» тянется от якоря и не даёт траектории
+        // «моргнуть» на эпохах без диполя
+        const headSegment =
+          point && anchor && pointsDiffer(point.position, anchor.position)
+            ? { from: anchor.position, to: point.position }
+            : null
+        return { band, point, anchor, trail, headSegment }
+      }),
+    [sources, active, epochIndex, fraction, thresholds, epochLengthMs],
   )
 
-  return { timeMs, fraction, point, trail }
+  return { timeMs, fraction, frames }
+}
+
+/** Позиции различаются (кадр едет, а не стоит на измеренной точке). */
+function pointsDiffer(a: MniVector, b: MniVector): boolean {
+  return a.x !== b.x || a.y !== b.y || a.z !== b.z
 }
