@@ -914,11 +914,12 @@ class MipOutlineOut(BaseModel):
 
 
 class MriVolumeRef(BaseModel):
-    """Ссылка на тома fsaverage «как есть» (3D-вид Niivue, 3.5/N33).
+    """Ссылка на тома fsaverage «как есть» (3.5/N33).
 
     Сервер отдаёт файлы без перекодирования (белый список имён, ETag по
     отпечатку файлов); ``affine`` — матрица ``T1.mgz`` (воксель → мировые
-    координаты тома) для конвертации мм MNI координатам тома на клиенте.
+    координаты тома) — граница пространств клиента (`brain3d.ts`): мм MNI и
+    мировые мм fsaverage совпадают, но конвертация остаётся явной.
     """
 
     version: str = Field(description="Отпечаток файлов томов — ETag и `?v=` в URL")
@@ -1923,7 +1924,7 @@ class MetaResponse(BaseModel):
         description="Срезы МРТ (T1) для проекций: версия, базовый URL, шаг сетки"
     )
     mri_volumes: MriVolumeRef = Field(
-        description="Тома fsaverage «как есть» для 3D-вида Niivue: URL, имена, affine T1"
+        description="Тома fsaverage «как есть»: URL, имена, affine T1 (граница пространств клиента)"
     )
     contours: ContoursRef = Field(
         description="Контуры атласа (структуры + поля Бродмана): версия, URL, метод"

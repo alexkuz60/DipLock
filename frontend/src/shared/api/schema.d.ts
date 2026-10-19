@@ -1259,7 +1259,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Том fsaverage как есть (3D-вид Niivue, ETag)
+         * Том fsaverage как есть (байты без перекодирования, ETag)
          * @description Файл тома/поверхности FreeSurfer без перекодирования (3.5, N33).
          *
          *     Имя берётся только из белого словаря (``services/mri_volumes.py``): чужое
@@ -9650,7 +9650,7 @@ export interface components {
             cors_origins: string[];
             /** @description Срезы МРТ (T1) для проекций: версия, базовый URL, шаг сетки */
             mri_slices: components["schemas"]["MriSliceRef"];
-            /** @description Тома fsaverage «как есть» для 3D-вида Niivue: URL, имена, affine T1 */
+            /** @description Тома fsaverage «как есть»: URL, имена, affine T1 (граница пространств клиента) */
             mri_volumes: components["schemas"]["MriVolumeRef"];
             /** @description Контуры атласа (структуры + поля Бродмана): версия, URL, метод */
             contours: components["schemas"]["ContoursRef"];
@@ -9758,11 +9758,12 @@ export interface components {
         };
         /**
          * MriVolumeRef
-         * @description Ссылка на тома fsaverage «как есть» (3D-вид Niivue, 3.5/N33).
+         * @description Ссылка на тома fsaverage «как есть» (3.5/N33).
          *
          *     Сервер отдаёт файлы без перекодирования (белый список имён, ETag по
          *     отпечатку файлов); ``affine`` — матрица ``T1.mgz`` (воксель → мировые
-         *     координаты тома) для конвертации мм MNI координатам тома на клиенте.
+         *     координаты тома) — граница пространств клиента (`brain3d.ts`): мм MNI и
+         *     мировые мм fsaverage совпадают, но конвертация остаётся явной.
          */
         MriVolumeRef: {
             /**

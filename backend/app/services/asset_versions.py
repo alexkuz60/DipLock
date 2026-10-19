@@ -79,7 +79,7 @@ MRI_STAMP_RELATIVE: tuple[str, ...] = (
     "fsaverage/mri/brainmask.mgz",
 )
 
-# Файлы томов fsaverage «как есть» для 3D-вида Niivue (3.5): белый список
+# Файлы томов fsaverage «как есть» (3.5): белый список
 # роута ``/surface/mri/volume/{name}``. Отпечаток по size/mtime (как у MRI).
 MRI_VOLUMES_VERSION = 1
 MRI_VOLUMES_STAMP_RELATIVE: tuple[str, ...] = (
@@ -207,7 +207,7 @@ ASSET_SPECS: dict[str, AssetSpec] = {
     ),
     "volumes": AssetSpec(
         kind="volumes",
-        title="Тома fsaverage как есть (3D-вид Niivue)",
+        title="Тома fsaverage как есть",
         version=MRI_VOLUMES_VERSION,
         params={
             "subject": "fsaverage",

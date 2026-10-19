@@ -160,7 +160,7 @@ export type MriProjectionProps = {
   reference?: MniVector | null
   /**
    * Совместный курсор (срез 3.5): точка MNI под ховером в **любой** проекции
-   * или положение кроссхейра Niivue. Рисуется оверлеем `ProjectionCursor`
+   * (её же маркером показывает 3D-вид «Куб»). Рисуется оверлеем `ProjectionCursor`
    * поверх слоёв (курсор — состояние просмотра, а не слой данных).
    */
   cursor?: MniVector | null
@@ -414,7 +414,7 @@ export function MriProjection({
         onMouseLeave={() => {
           setHover(null)
           setHoverDipole(null)
-          // Курсор сбрасывается: мышь покинула все проекции (Niivue держит свой)
+          // Курсор сбрасывается: мышь покинула все проекции
           onCursorChange?.(null)
         }}
       >
@@ -499,7 +499,7 @@ export function MriProjection({
         {referencePx ? <ReferenceCross plane={plane} at={referencePx} box={box} /> : null}
 
         {/* Совместный курсор (срез 3.5): оверлей поверх всех слоёв — курсор это
-            состояние ховера/кроссхейра Niivue, а не фоновый слой данных, поэтому
+            состояние ховера, а не фоновый слой данных, поэтому
             в DIPOLE_LAYERS его нет и выключается он только выходом мыши. */}
         {cursor ? <ProjectionCursor plane={plane} cursor={cursor} box={box} /> : null}
 

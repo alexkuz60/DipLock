@@ -273,7 +273,7 @@ def _contours_ref() -> ContoursRef:
 
 
 def _mri_volumes_ref() -> MriVolumeRef:
-    """Ссылка на тома Niivue: отпечаток файлов и affine T1, без чтения байтов."""
+    """Ссылка на тома fsaverage: отпечаток файлов и affine T1, без чтения байтов."""
     return MriVolumeRef(**volumes_ref(settings))
 
 
@@ -1930,7 +1930,7 @@ async def get_mri_mip(
 @router.get(
     "/surface/mri/volume/{name}",
     response_class=Response,
-    summary="Том fsaverage как есть (3D-вид Niivue, ETag)",
+    summary="Том fsaverage как есть (байты без перекодирования, ETag)",
 )
 async def get_mri_volume(
     name: str,
@@ -1955,7 +1955,7 @@ async def get_mri_volume(
     return asset_response(
         data, version, if_none_match=if_none_match,
         # Один тип на белый список: mgz — сжатый MGH, surf — бинарь FreeSurfer;
-        # Niivue определяет формат по магическим байтам, а не по Content-Type.
+        # потребитель определяет формат по магическим байтам, а не по Content-Type.
         media_type="application/octet-stream",
         cache_control=CACHE_PUBLIC_WEEK,
     )

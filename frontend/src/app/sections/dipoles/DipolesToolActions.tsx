@@ -360,7 +360,7 @@ export function DipolesToolHeaderActions() {
           type="button"
           data-testid="view-3d"
           aria-pressed={view3d}
-          title="3D-вид Niivue: том T1 с диполями (узлами), мультисрез или 3D-рендер"
+          title="3D-вид «Куб»: срезы МРТ на стенках и облако диполей внутри (как в MNE)"
           className={cx(
             'rounded-lg border px-2.5 py-1 text-sm transition-colors',
             view3d

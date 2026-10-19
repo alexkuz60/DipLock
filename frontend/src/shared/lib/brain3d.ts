@@ -1,10 +1,9 @@
 /**
- * 3D-вид раздела «Диполи» (Niivue, срез 3.5): пространство тома и узлы диполей.
+ * Пространство тома fsaverage для 3D-вида «Куб» (граница пространств).
  *
- * Сервер отдаёт тома fsaverage «как есть» (`GET /surface/mri/volume/{name}`,
- * белый список) и affine `T1.mgz` в `/meta` (`mri_volumes.affine`). Здесь —
- * только чистая арифметика (без DOM и Niivue — модуль тестируется в Vitest
- * без WebGL):
+ * Сервер отдаёт тома fsaverage «как есть» (`GET /surface/mri/volume/{name}`) и
+ * affine `T1.mgz` в `/meta` (`mri_volumes.affine`). Здесь — только чистая
+ * арифметика (без DOM) конвертации «мм MNI ↔ воксели/мировые мм»:
  *
  * * **пространство**: `fsaverage` совмещён с MNI305 (`talairach.xfm` —
  *   единичная, `docs/rules/atlas-mri.md`), поэтому миллиметры MNI и мировые
@@ -12,16 +11,17 @@
  *   через affine (`мми → воксели → мир`): это граница пространств в одном
  *   месте, и гард `test_real_t1_affine_matches_frontend_table` (pytest)
  *   сверяет TS-таблицу `FSAVERAGE_T1_AFFINE` с реальным томом — расхождение
- *   (другой том, сдвинутый мир) видно тестом, а не «уехавшими» диполами;
- * * **URL томов**: `?v=` отпечаток файлов — браузер не отдаёт устаревший том;
- * * **узлы диполей**: точки результата → connectome-узлы Niivue (мировые мм),
- *   цвет кодирует амплитуду момента (шкала min/max считается по слою).
+ *   (другой том, сдвинутый мир) видно тестом, а не «уехавшими» диполями;
+ * * **3D-вид** (`sections/dipoles/DipoleCube.tsx`) рисует в мм MNI напрямую —
+ *   инвариант «мировые мм = мм MNI» (`worldEqualsMni`) делает перевод
+ *   не нужным, но граница остаётся здесь: если том перестанет быть
+ *   MNI-выровненным, правится один модуль, а не компоненты.
+ *
+ * Раньше модуль собирал ещё узлы connectome Niivue — их рисовала легенда
+ * Niivue (вертикальная «колонка диполей» на канвасе). Niivue убран из вида
+ * 19.10.2026 (срез 3.13), узлы удалены вместе с ним.
  */
-import type { MriVolumeRef } from '@/shared/api/types'
-import type { DipoleLayer } from './dipolePoints'
 import type { MniVector } from './mriProjections'
-import { arcSense3d, spiralTipsMm, type SpiralTrailArc } from './spiralTrail'
-import { TRAIL_ALPHA_HEAD } from './playback'
 
 /**
  * Ожидаемый affine `fsaverage/mri/T1.mgz` (воксель → мировые мм, RAS).
@@ -45,19 +45,6 @@ export const FSAVERAGE_T1_AFFINE: readonly (readonly number[])[] = [
 
 /** Affine тома из `/meta` (4×4, строками; `null` — тома нет). */
 export type VolumeAffine = readonly (readonly number[])[] | null
-
-/**
- * URL тома с `?v=` (отпечаток файлов): без версии браузер мог бы отдать
- * том прошлой сборки после замены файлов fsaverage.
- */
-export function volumeUrl(ref: MriVolumeRef, name: string): string {
-  return `${ref.url}/${name}?v=${ref.version}`
-}
-
-/** URL основного тома 3D-вида (T1) из ссылки `/meta`. */
-export function t1VolumeUrl(ref: MriVolumeRef): string {
-  return volumeUrl(ref, 'T1.mgz')
-}
 
 /**
  * Применяет affine 4×4 к точке (воксель или мм) → мировые мм.
@@ -138,8 +125,7 @@ export function mniToVolumeVoxel(
 }
 
 /**
- * мм MNI → мировые миллиметры тома (пространство Niivue: узлы connectome
- * и положение кроссхейра принимаются в нём).
+ * мм MNI → мировые миллиметры тома.
  *
  * Путь «через воксели» для MNI-выровненного тома возвращает точку на месте
  * (инвариант talairach), но оставляет конвертацию явной: если том перестанет
@@ -152,55 +138,6 @@ export function mniToWorldMm(mni: MniVector, affine: VolumeAffine): [number, num
   const inv = invertAffine4(affine)
   if (inv === null) return [mni.x, mni.y, mni.z]
   return applyAffine(affine, applyAffine(inv, [mni.x, mni.y, mni.z]))
-}
-
-/** Один узел connectome Niivue: позиция в мировых мм, цвет/размер по диполю. */
-export type ConnectomeNodeInput = {
-  name: string
-  x: number
-  y: number
-  z: number
-  colorValue: number
-  sizeValue: number
-}
-
-/**
- * Узлы connectome из слоя диполей: позиция — мировые мм тома, `colorValue` —
- * нормированная амплитуда момента (шкала min/max по слою — в
- * `nodeColorScale`), `sizeValue` — единичный размер (масштаб задаёт
- * `nodeScale` в опциях Niivue).
- *
- * Точки с неконвертируемыми координатами (NaN) отбрасываются — Niivue не
- * умеет узлы «в никуда».
- */
-export function connectomeNodes(
-  layer: DipoleLayer,
-  affine: VolumeAffine,
-  scale: { min: number; max: number },
-): ConnectomeNodeInput[] {
-  const span = scale.max - scale.min
-  return layer.points.flatMap((point, index) => {
-    const world = mniToWorldMm(point.position, affine)
-    if (!world.every(Number.isFinite)) return []
-    const normalized = span > 0 ? (point.amplitudeNaM - scale.min) / span : 0.5
-    return [{
-      name: `${point.epochIndex + 1}:${index}`,
-      x: world[0],
-      y: world[1],
-      z: world[2],
-      colorValue: normalized,
-      sizeValue: 1,
-    }]
-  })
-}
-
-/** Шкала цвета узлов по амплитуде момента (для nodeMin/MaxColor Niivue). */
-export function nodeColorScale(layer: DipoleLayer): { min: number; max: number } {
-  if (layer.points.length === 0) return { min: 0, max: 1 }
-  const amplitudes = layer.points.map((point) => point.amplitudeNaM)
-  const min = Math.min(...amplitudes)
-  const max = Math.max(...amplitudes)
-  return { min, max: max > min ? max : min + 1 }
 }
 
 /**
@@ -221,57 +158,3 @@ export function worldEqualsMni(
   )
 }
 
-/** Ребро connectome Niivue: индексы узлов + значение цвета (знак поворота витка). */
-export type ConnectomeEdgeInput = {
-  first: number
-  second: number
-  colorValue: number
-}
-
-/**
- * Затухающий шлейф спиральных витков в 3D (срез 3.11): кончики луча — узлами
- * connectome (крошечные, линия читается рёбрами), рёбра — сегменты витков.
- * `colorValue` — знак поворота (+1 против часовой / −1 по часовой, вид сверху,
- * вертикальная ось MNI; знак зафиксирован относительно головы, а не камеры),
- * умноженный на **нормированную непрозрачность** витка: свежий виток — ярче,
- * старые гаснут (у шлейфа кадра — те же `TRAIL_ALPHA_*`). Niivue красит
- * положительные значения `edgeColormap`, отрицательные — `edgeColormapNegative`
- * (зелёный/красный — те же роли, что токены темы на проекциях), величина
- * значения даёт плотность цвета. Витки без однозначного знака (`none`) в 3D не
- * рисуются: окрашивать их нечем, а «врать» цветом нельзя. Узлы — каркас для
- * последующего рисования в объёме.
- */
-export function spiralConnectome(
-  arcs: readonly SpiralTrailArc[],
-  affine: VolumeAffine,
-): { nodes: ConnectomeNodeInput[]; edges: ConnectomeEdgeInput[] } {
-  const nodes: ConnectomeNodeInput[] = []
-  const edges: ConnectomeEdgeInput[] = []
-  for (const arc of arcs) {
-    const sense = arcSense3d(arc)
-    if (sense === 'none') continue
-    const alphaNorm = Math.min(1, Math.max(0, arc.alpha / TRAIL_ALPHA_HEAD))
-    const colorValue = (sense === 'ccw' ? 1 : -1) * alphaNorm
-    const tips = spiralTipsMm(arc).map((tip) => mniToWorldMm(tip, affine))
-    // Дуга с неконвертируемыми координатами отбрасывается целиком: рёбра не
-    // должны вести «в никуда» (как и узлы `connectomeNodes`)
-    if (!tips.every((world) => world.every(Number.isFinite))) continue
-    const base = nodes.length
-    tips.forEach((world, index) => {
-      nodes.push({
-        name: `${arc.id}:${index}`,
-        x: world[0],
-        y: world[1],
-        z: world[2],
-        // Цвет узла не кодирует знак (его несут рёбра) — середина шкалы
-        colorValue: 0.5,
-        // Крошечный размер: виток читается линией, а не точками
-        sizeValue: 0.02,
-      })
-      if (index > 0) {
-        edges.push({ first: base + index - 1, second: base + index, colorValue })
-      }
-    })
-  }
-  return { nodes, edges }
-}

@@ -168,7 +168,7 @@
 | 35 | `GET /surface` | меш fsaverage (кэш + ETag) |
 | 33–34 | `GET /surface/brodmann`, `/surface/brodmann/{area_name}` | индексы вершин полей Бродмана |
 | 35–36 | `GET /surface/mri`, `/surface/mri/slice/{plane}/{mm}.png`, `/surface/mri/mip/{plane}.png`, `/surface/mri/mip/outline` | метаданные срезов, срез картинкой и glass-brain MIP проекции с обводкой (серый + альфа PNG + JSON-силуэт коры `*.pial`; слой «Границы мозга»; ETag) |
-| 40 | `GET /surface/mri/volume/{name}` | том fsaverage «как есть» для Niivue (3.5): белый список имён (`T1.mgz`, `seghead.mgz`, `lh.white`, `rh.white`), байты без перекодирования, ETag по отпечатку файлов (kind `volumes`); чужое имя — 404 до чтения файловой системы |
+| 40 | `GET /surface/mri/volume/{name}` | том fsaverage «как есть» (3.5; фронт-граница пространств — `brain3d.ts`): белый список имён (`T1.mgz`, `seghead.mgz`, `lh.white`, `rh.white`), байты без перекодирования, ETag по отпечатку файлов (kind `volumes`); чужое имя — 404 до чтения файловой системы |
 | 38–39 | `GET /surface/contours`, `/surface/contours/{plane}/{mm}` | метаданные и контуры структур/полей среза (ETag; силуэт убран — слой «Границы мозга» рисует glass brain, см. `/surface/mri/mip`) |
 | 43 | `GET /brodmann-labels` | имена доступных полей Бродмана |
 | 44 | `GET /brain-surface` | устаревший алиас `/surface` |

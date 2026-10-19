@@ -313,7 +313,7 @@ export type LlmDecideProbeModelResult = Schemas['LlmDecideProbeModelOut']
 
 export type MriSliceRef = Schemas['MriSliceRef']
 
-/** Ссылка на тома fsaverage для 3D-вида Niivue — схема `MriVolumeRef` */
+/** Ссылка на тома fsaverage («как есть», ETag) — схема `MriVolumeRef` */
 export type MriVolumeRef = Schemas['MriVolumeRef']
 
 export type ContoursRef = Schemas['ContoursRef']

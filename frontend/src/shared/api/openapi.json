@@ -3100,7 +3100,7 @@
     },
     "/api/v1/surface/mri/volume/{name}": {
       "get": {
-        "summary": "Том fsaverage как есть (3D-вид Niivue, ETag)",
+        "summary": "Том fsaverage как есть (байты без перекодирования, ETag)",
         "description": "Файл тома/поверхности FreeSurfer без перекодирования (3.5, N33).\n\nИмя берётся только из белого словаря (``services/mri_volumes.py``): чужое\nимя — 404 **до** чтения файловой системы (path traversal невозможен),\nотсутствующий файл — 503, повторный запрос с тем же ``If-None-Match`` — 304.\nETag — отпечаток файлов томов (kind ``volumes`` в ``asset_versions``).",
         "operationId": "get_mri_volume_api_v1_surface_mri_volume__name__get",
         "parameters": [
@@ -20943,7 +20943,7 @@
           },
           "mri_volumes": {
             "$ref": "#/components/schemas/MriVolumeRef",
-            "description": "Тома fsaverage «как есть» для 3D-вида Niivue: URL, имена, affine T1"
+            "description": "Тома fsaverage «как есть»: URL, имена, affine T1 (граница пространств клиента)"
           },
           "contours": {
             "$ref": "#/components/schemas/ContoursRef",
@@ -21194,7 +21194,7 @@
           "names"
         ],
         "title": "MriVolumeRef",
-        "description": "Ссылка на тома fsaverage «как есть» (3D-вид Niivue, 3.5/N33).\n\nСервер отдаёт файлы без перекодирования (белый список имён, ETag по\nотпечатку файлов); ``affine`` — матрица ``T1.mgz`` (воксель → мировые\nкоординаты тома) для конвертации мм MNI координатам тома на клиенте."
+        "description": "Ссылка на тома fsaverage «как есть» (3.5/N33).\n\nСервер отдаёт файлы без перекодирования (белый список имён, ETag по\nотпечатку файлов); ``affine`` — матрица ``T1.mgz`` (воксель → мировые\nкоординаты тома) — граница пространств клиента (`brain3d.ts`): мм MNI и\nмировые мм fsaverage совпадают, но конвертация остаётся явной."
       },
       "PipelineInfo": {
         "properties": {

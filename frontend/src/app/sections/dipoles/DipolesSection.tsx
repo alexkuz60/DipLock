@@ -69,7 +69,7 @@ import {
 import { api } from '@/shared/api/client'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
-import { Brain3D } from './Brain3D'
+import { DipoleCube } from './DipoleCube'
 import { EloretaCard } from './EloretaCard'
 import { MriProjection } from './MriProjection'
 import { PlaybackFrameProvider } from './PlaybackFrame'
@@ -122,8 +122,6 @@ export function DipolesSection() {
   })
   const mri = meta.data?.mri_slices ?? null
   const contoursRef = meta.data?.contours ?? null
-  /** Ссылка на тома для 3D-вида (срез 3.5): `null` — вид показывает причину. */
-  const volumesRef = meta.data?.mri_volumes ?? null
 
   /**
    * Контуры атласа по срезу каждой плоскости (срез 3.9). Это **статические
@@ -194,6 +192,25 @@ export function DipolesSection() {
     [displayLayer, selectedEpochIndex],
   )
   /**
+   * Фокус 3D-вида «Куб» (срез 3.13): выделенная кликом точка — одна (красные
+   * линии проекции на стенки), иначе — пакет выбранной эпохи индикатора
+   * (линии цветом полосы каждой точки). Выделенная точка вне пакета эпохи в
+   * фокус не попадает: её на фигурах в этот момент нет.
+   */
+  const focusPoints = useMemo(() => {
+    const epochPoints =
+      selectedEpochIndex === null
+        ? null
+        : displayLayer.points.filter((point) => point.epochIndex === selectedEpochIndex)
+    if (selectedPointId !== null) {
+      const point = displayLayer.points.find((item) => item.id === selectedPointId)
+      if (point && (epochPoints === null || epochPoints.some((item) => item.id === point.id))) {
+        return [point]
+      }
+    }
+    return epochPoints ?? []
+  }, [displayLayer, selectedPointId, selectedEpochIndex])
+  /**
    * Выделенный диполь и его подпись живут в секции «Локализация» панели «Опции»
    * (`SelectedDipoleLine`, перенос 19.10.2026): рабочая область показывает только
    * фигуры и результат, поэтому здесь остаётся лишь синхронизация выделения с
@@ -228,17 +245,38 @@ export function DipolesSection() {
         масштабах — пропала бы та самая общая шкала мм/пиксель. Так коэффициент
         растяжения SVG (`колонка / ширина фигуры`) у всех трёх одинаков.
 
-        3D-вид (срез 3.5) — альтернатива проекциям, а не слой над ними: он
+        3D-вид «Куб» (срез 3.13) — альтернатива проекциям, а не слой над ними: он
         занимает ту же рабочую область, параметр `view3d` — отрисовка (расчёт не
-        запускает и не устаревает).
+        запускает и не устаревает). Провайдер кадра нужен и ему: анимация полос
+        (`BandFrame`) шлётся тем же контекстом, что и проекциям.
       */}
       {view3d ? (
-        <Brain3D
-          volumes={volumesRef}
-          layer={epochLayer}
-          cursor={projectionCursor}
-          onCursor={setProjectionCursor}
-        />
+        <PlaybackFrameProvider>
+          <DipoleCube
+            mri={mri}
+            slices={slices}
+            visibility={visibility}
+            layer={displayLayer}
+            focus={focusPoints}
+            cursor={projectionCursor}
+            onPickPoint={(point) => {
+              if (!point) {
+                clearSelectedPoint()
+                return
+              }
+              // Клик по точке в кубе — тот же выбор, что на проекциях:
+              // выделение диполя (синхронно с таблицей) и наводка срезов MNI
+              toggleSelectedPoint(point.id)
+              selectPoint(
+                point.position,
+                point.brodmannArea ?? null,
+                applyPointToSlices(point.position).orientations,
+                point.structure ?? null,
+              )
+            }}
+            dimmed={playbackActive}
+          />
+        </PlaybackFrameProvider>
       ) : (
         <PlaybackFrameProvider>
           <div className="flex min-h-0 flex-wrap items-start gap-4">
