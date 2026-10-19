@@ -5,7 +5,10 @@
  * сессии — полосы со своими точками (ключ «эпоха × поддиапазон»), сопоставление
  * по **нормированным** величинам (GOF между полосами не сравним — принцип 3
  * `docs/rules/dipoles.md`, в строке сопоставления его нет) и кластеры с
- * устойчивостью по поддиапазонам (С2).
+ * устойчивостью по поддиапазонам (С2). Прогон всегда идёт по **всему каталогу**
+ * полос (`freq_bands` + `functional_bands` из `/meta`): выбор полос для прогона
+ * из UI убран, чекбоксы «Полосы в анимации и облаке» управляют только
+ * отображением.
  *
  * Здесь — только чистые функции (форма запроса, выбор активной полосы,
  * сборка `DipoleScanResult` одной полосы для существующей отрисовки):
@@ -25,10 +28,12 @@ import type {
   DipoleScanResult,
 } from '@/shared/api/types'
 
-/** Минимум полос пакета: одиночный расчёт живёт в `POST …/dipoles`. */
-export const BATCH_MIN_BANDS = 2
-/** Лимит полос одного прогона (серверный `dipole_batch_max_bands`). */
-export const BATCH_MAX_BANDS = 8
+/**
+ * Лимит полос одного прогона (серверный `dipole_batch_max_bands`): покрывает весь
+ * каталог полос (7 октавных + 6 функциональных = 13) с запасом — пакет всегда
+ * считает каталог целиком.
+ */
+export const BATCH_MAX_BANDS = 16
 
 export type DipoleBatchFormInput = {
   /** Ключи полос (`alpha`, `mu`, …) в порядке прогона */
@@ -89,6 +94,7 @@ export function scanResultOfBand(
     notch_hz: batch.notch_hz ?? null,
     n_epochs_total: band.n_epochs_total ?? 0,
     n_epochs_used: band.n_epochs_used ?? band.n_points,
+    bad_epoch_indexes: band.bad_epoch_indexes ?? [],
     grid_mm: batch.grid_mm,
     points: band.points ?? [],
     warnings: band.warnings ?? [],

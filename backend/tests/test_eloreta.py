@@ -133,10 +133,21 @@ def _params(epoch_index: int = 0, halfwin_ms: float = 0.0) -> EloretaParams:
     )
 
 
+def _kept_epoch_index(recording) -> int:
+    """Сеточный номер первой выжившей эпохи записи `_alpha_edf`.
+
+    `epoch_index` — номер эпохи нарезки **включая отброшенные BAD_** (сетка
+    drop_log, «ключ связи с диполями»): края фильтра 1–40 Гц (BAD_edge) отбрасывают
+    первые эпохи синтетической 6-секундной записи, и «эпоха 0» в расчёт не входит.
+    """
+    scan = compute_dipole_scan(recording, settings, _params().scan)
+    return int(scan["points"][0]["epoch_index"])
+
+
 def test_eloreta_returns_peak_and_roi_not_full_maps(tmp_path, fake_pipeline):
     """Главный контракт п.5: пик + ROI-доли, никаких полных карт stc."""
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-eloreta")
-    result = run_eloreta(recording, settings, _params())
+    result = run_eloreta(recording, settings, _params(_kept_epoch_index(recording)))
 
     assert result["method"] == "eloreta"
     assert result["recording_id"] == "rec-eloreta"
@@ -200,7 +211,7 @@ def test_eloreta_without_atlas_keeps_peak_and_warns(tmp_path, fake_pipeline, mon
 
     monkeypatch.setattr(atlas_contours, "load_volumes", _boom)
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-eloreta-no-atlas")
-    result = run_eloreta(recording, settings, _params())
+    result = run_eloreta(recording, settings, _params(_kept_epoch_index(recording)))
 
     assert result["peak"]["mni_mm"] == pytest.approx([-60.0, 0.0, 0.0])
     # Атрибуция пика живёт отдельным вызовом — она не упала
@@ -215,9 +226,10 @@ def test_eloreta_job_flow(client, tmp_path, fake_pipeline):
     from tests.test_dipole_scanner import _wait_finished
 
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-eloreta-job")
+    epoch_index = _kept_epoch_index(recording)
     created = client.post(
         f"{_PREFIX}/recordings/{recording.recording_id}/eloreta",
-        data={"epoch_index": 1, "band_min": 1, "band_max": 40, "epoch_length_ms": 1000},
+        data={"epoch_index": epoch_index, "band_min": 1, "band_max": 40, "epoch_length_ms": 1000},
     )
     assert created.status_code == 202, created.text
     job_id = created.json()["job_id"]
@@ -228,7 +240,7 @@ def test_eloreta_job_flow(client, tmp_path, fake_pipeline):
 
     body = client.get(status["result_url"]).json()
     assert body["method"] == "eloreta"
-    assert body["epoch_index"] == 1
+    assert body["epoch_index"] == epoch_index
     assert len(body["peak"]["mni_mm"]) == 3
     assert body["roi"]
     # Результат чужого вида задачи этой записью не отдаётся
@@ -253,7 +265,9 @@ def test_eloreta_form_window_is_validated(client, tmp_path, fake_pipeline):
     assert "halfwin_ms" in too_wide.json()["detail"]
 
     limit = settings.dipole_refine_halfwin_max_ms
-    created = client.post(url, data={"epoch_index": 0, "halfwin_ms": limit})
+    created = client.post(
+        url, data={"epoch_index": _kept_epoch_index(recording), "halfwin_ms": limit},
+    )
     assert created.status_code == 202, created.text
     status = _wait_finished(client, created.json()["job_id"])
     assert status["status"] == "succeeded", status
@@ -291,8 +305,12 @@ def test_eloreta_reuses_forward_inverse_operators(tmp_path, fake_pipeline, monke
     monkeypatch.setattr(eloreta_module, "_get_covariance", lambda cfg: object())
     eloreta_module.clear_operator_cache()
 
-    run_eloreta(recording, settings, _params(0))
-    run_eloreta(recording, settings, _params(1))  # другая эпоха — те же операторы
+    # Две разные выжившие эпохи (сеточные номера включая BAD) — те же операторы
+    scan = compute_dipole_scan(recording, settings, _params().scan)
+    first = int(scan["points"][0]["epoch_index"])
+    second = int(scan["points"][1]["epoch_index"])
+    run_eloreta(recording, settings, _params(first))
+    run_eloreta(recording, settings, _params(second))  # другая эпоха — те же операторы
 
     assert counters["forward"] == 1
     assert counters["inverse"] == 1

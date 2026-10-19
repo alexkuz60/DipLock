@@ -240,12 +240,64 @@ def test_slice_endpoint_rejects_bad_request(client, fake_volume, path):
     assert "detail" in response.json()
 
 
+def test_mip_takes_maximum_along_normal_axis():
+    """Glass brain — максимум яркости вдоль оси проекции, а не один срез."""
+    # gray[x, y, z]: значения подобраны, чтобы максимум по каждой оси был узнаваем
+    gray = np.array([[[0, 1], [2, 3]], [[4, 5], [6, 7]]], dtype=np.uint8)
+    volume = ms.MriVolume(
+        gray=gray, alpha=np.full((2, 2, 2), 255, dtype=np.uint8), version="t",
+    )
+
+    # sagittal: нормаль x, горизонталь y (+1), вертикаль z (+1 → строки вниз)
+    mip_gray, _ = volume.mip("sagittal")
+    assert np.array_equal(mip_gray, np.array([[5, 7], [4, 6]], dtype=np.uint8))
+    # axial: нормаль z, вертикаль y (+1), горизонталь x (−1 → столбцы зеркалом)
+    mip_gray, _ = volume.mip("axial")
+    assert np.array_equal(mip_gray, np.array([[7, 3], [5, 1]], dtype=np.uint8))
+    # coronal: нормаль y, вертикаль z (+1), горизонталь x (−1)
+    mip_gray, _ = volume.mip("coronal")
+    assert np.array_equal(mip_gray, np.array([[7, 3], [6, 2]], dtype=np.uint8))
+
+
+def test_mip_matches_slice_layout_for_axis_invariant_volume(fake_volume):
+    """MIP устроена как срез: та же раскладка столбцов/строк UI.
+
+    Том-«линейка» не меняется вдоль оси нормали аксиальной плоскости, поэтому
+    проекция обязана совпасть с любым её срезом — раскладку переворотов ловит
+    именно это равенство.
+    """
+    mip_gray, mip_alpha = fake_volume.mip("axial")
+    slice_gray, slice_alpha = fake_volume.slice("axial", 10)
+
+    assert np.array_equal(mip_gray, slice_gray)
+    assert np.array_equal(mip_alpha, slice_alpha)
+
+
+def test_mip_endpoint_serves_png_with_etag(client, fake_volume):
+    """MIP отдаётся PNG с ETag; неизвестная плоскость — 404."""
+    response = client.get(f"{_PREFIX}/surface/mri/mip/axial.png")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert "max-age" in response.headers["cache-control"]
+
+    cached = client.get(
+        f"{_PREFIX}/surface/mri/mip/axial.png",
+        headers={"If-None-Match": response.headers["etag"]},
+    )
+    assert cached.status_code == 304
+
+    assert client.get(f"{_PREFIX}/surface/mri/mip/oblique.png").status_code == 404
+
+
 def test_meta_exposes_mri_slice_ref(client):
     """`/meta` даёт версию и базовый URL срезов — UI строит ссылки на картинки сам."""
     body = client.get(f"{_PREFIX}/meta").json()
 
     ref = body["mri_slices"]
     assert ref["slice_url"] == f"{_PREFIX}/surface/mri/slice"
+    assert ref["mip_url"] == f"{_PREFIX}/surface/mri/mip"
     assert ref["spacing_mm"] == ms.MRI_SPACING_MM
     assert ref["version"] == ms.asset_version(settings)
 

@@ -29,6 +29,7 @@ import {
   normalizedToPx,
   planeAxisLabels,
   type MniPoint2,
+  type PixelPoint,
   type ProjectionPlane,
 } from './mriProjections'
 import { sliceImageMm } from './mriSlices'
@@ -75,12 +76,13 @@ export function contourPointToNormalized(
 }
 
 /** Контур метки как атрибут `d` для `<path>` (заливка по правилу even-odd). */
-export function contourPathPx(
+/** Замкнутые халлы (мм MNI по осям плоскости) → SVG-путь в пикселях фигуры. */
+export function hullsPathPx(
   plane: ProjectionPlane,
-  shape: ContourShape,
+  hulls: number[][][],
   padding = PROJECTION_PADDING,
 ): string {
-  return shape.hulls
+  return hulls
     .map((hull) => {
       // Pydantic отдаёт пары как обычные массивы — tuple-тип восстанавливаем
       const points = hull
@@ -92,6 +94,75 @@ export function contourPathPx(
       return `M ${points} Z`
     })
     .join(' ')
+}
+
+export function contourPathPx(
+  plane: ProjectionPlane,
+  shape: ContourShape,
+  padding = PROJECTION_PADDING,
+): string {
+  return hullsPathPx(plane, shape.hulls as unknown as number[][][], padding)
+}
+
+/**
+ * Замкнутые халлы → **плавный** SVG-путь (замкнутый сплайн Катмулла—Рома
+ * кубическими Безье через все опорные точки).
+ *
+ * Силуэт коры приходит с трассировки растровой маски 1 мм, поэтому ломаная
+ * «лестничная»; границы мозга (слой «Границы мозга», как обводка glass brain
+ * у nilearn) рисуются гладкой линией — данные ассета не меняются, сглаживание
+ * относится только к отрисовке. Контуры анатомии остаются полигональными
+ * (`hullsPathPx`): у структур среза углы — честная форма, а не артефакт растра.
+ */
+export function smoothHullsPathPx(
+  plane: ProjectionPlane,
+  hulls: number[][][],
+  padding = PROJECTION_PADDING,
+): string {
+  return hulls
+    .map((hull) =>
+      smoothClosedPath(
+        hull.map((point) =>
+          normalizedToPx(
+            contourPointToNormalized(plane, point as [number, number]),
+            plane,
+            padding,
+          ),
+        ),
+      ),
+    )
+    .filter((path) => path.length > 0)
+    .join(' ')
+}
+
+/**
+ * Замкнутый сплайн через точки (Катмулл—Ром → кубические Безье). Кривая
+ * проходит через каждую опорную точку, концы замыкаются по кругу. Контур
+ * короче трёх точек сгладить нельзя — откат на ломаную.
+ */
+function smoothClosedPath(points: PixelPoint[]): string {
+  const format = (point: PixelPoint) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`
+  if (points.length < 3) {
+    return points.length > 0 ? `M ${points.map(format).join(' L ')} Z` : ''
+  }
+  const count = points.length
+  const segments: string[] = []
+  for (let index = 0; index < count; index += 1) {
+    const previous = points[(index - 1 + count) % count]
+    const start = points[index]
+    const end = points[(index + 1) % count]
+    const next = points[(index + 2) % count]
+    const controlIn: PixelPoint = {
+      x: start.x + (end.x - previous.x) / 6,
+      y: start.y + (end.y - previous.y) / 6,
+    }
+    const controlOut: PixelPoint = {
+      x: end.x - (next.x - start.x) / 6,
+      y: end.y - (next.y - start.y) / 6,
+    }
+    segments.push(`C ${format(controlIn)} ${format(controlOut)} ${format(end)}`)
+  }
+  return `M ${format(points[0])} ${segments.join(' ')} Z`
 }
 
 /** Попадание точки фигуры в **один** полигон (алгоритм трассировки луча). */

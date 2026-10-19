@@ -1196,6 +1196,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/surface/mri/mip/outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Силуэт коры для слоя «Границы мозга» (контур, ETag)
+         * @description Замкнутые контуры силуэта коры по плоскостям (мм MNI).
+         *
+         *     Слой «Границы мозга» рисует **только** эту обводку (доводка 19.10.2026:
+         *     растровая MIP-подложка убрана — анатомию показывают слои среза МРТ,
+         *     структур и полей): контур считается из коркового меша ``*.pial`` — те же
+         *     границы мозга, что даёт ``silhouette=True`` у MNE, а не контур маски тома.
+         *     Статичен для версии ассета ``silhouette``; недоступные данные fsaverage —
+         *     503, повторный запрос с тем же ``If-None-Match`` — 304.
+         */
+        get: operations["get_mri_mip_outline_api_v1_surface_mri_mip_outline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/surface/mri/mip/{plane}.png": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Glass-brain MIP проекции (PNG, ETag)
+         * @description PNG проекции мозга целиком (MIP яркости тома, серый + альфа).
+         *
+         *     Статичная картинка вида (сверху/сбоку/сзади): максимум яркости ``T1`` вдоль
+         *     оси проекции внутри маски мозга — любая анатомия любого среза укладывается
+         *     в её границы. Самостоятельный ассет: слой «Границы мозга» с 19.10.2026
+         *     рисует только векторную обводку силуэта (``/mip/outline``), без растровой
+         *     подложки. Версия в ETag — версия тома (код MIP от тома не зависит).
+         *     Неизвестная плоскость — 404, недоступный том — 503, повторный запрос с тем
+         *     же ``If-None-Match`` — 304.
+         */
+        get: operations["get_mri_mip_api_v1_surface_mri_mip__plane__png_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/surface/mri/volume/{name}": {
         parameters: {
             query?: never;
@@ -7069,11 +7124,6 @@ export interface components {
             structures?: components["schemas"]["ContourShapeOut"][];
             /** Areas */
             areas?: components["schemas"]["ContourShapeOut"][];
-            /**
-             * Head
-             * @description Контуры силуэта головы (маска `seghead.mgz`) — замкнутые полигоны в мм MNI по осям плоскости; `null` — ассета нет (UI рисует условную фикстуру), `[]` — на срезе нет вокселей головы
-             */
-            head?: number[][][] | null;
         };
         /**
          * ContoursOut
@@ -7347,6 +7397,11 @@ export interface components {
             n_epochs_total?: number | null;
             /** N Epochs Used */
             n_epochs_used?: number | null;
+            /**
+             * Bad Epoch Indexes
+             * @description Отброшенные эпохи полосы (сетка drop_log); у полос разные краевые буферы фильтра (BAD_edge), поэтому список свой у каждой полосы
+             */
+            bad_epoch_indexes?: number[];
             /** Points */
             points?: components["schemas"]["DipoleBatchPointOut"][];
             /** Warnings */
@@ -7357,7 +7412,10 @@ export interface components {
          * @description Точка пакета (B6): точка быстрого расчёта + вердикт КД полями точки.
          */
         DipoleBatchPointOut: {
-            /** Epoch Index */
+            /**
+             * Epoch Index
+             * @description Номер эпохи нарезки (0-based) **включая отброшенные BAD_** — позиция в drop_log; он же ключ связи с таблицей эпох БД
+             */
             epoch_index: number;
             /**
              * Time Ms
@@ -7745,7 +7803,10 @@ export interface components {
          *     на сферической модели головы — без BEM и без `mne.fit_dipole`.
          */
         DipoleScanPointOut: {
-            /** Epoch Index */
+            /**
+             * Epoch Index
+             * @description Номер эпохи нарезки (0-based) **включая отброшенные BAD_** — позиция в drop_log; он же ключ связи с таблицей эпох БД
+             */
             epoch_index: number;
             /**
              * Time Ms
@@ -7861,6 +7922,11 @@ export interface components {
              * @description Сколько эпох прошло reject-фильтр
              */
             n_epochs_used: number;
+            /**
+             * Bad Epoch Indexes
+             * @description Номера отброшенных эпох (сетка drop_log с непустой причиной: BAD_ или TOO_SHORT); индикатор эпох UI и таймлайн нумеруют эпохи так же
+             */
+            bad_epoch_indexes?: number[];
             /**
              * Grid Mm
              * @description Шаг объёмной сетки поиска, мм
@@ -9590,6 +9656,24 @@ export interface components {
             contours: components["schemas"]["ContoursRef"];
         };
         /**
+         * MipOutlineOut
+         * @description Контур силуэта коры — внешние границы мозга на проекциях (мм MNI).
+         */
+        MipOutlineOut: {
+            /**
+             * Version
+             * @description Версия ассета `silhouette` — для ETag
+             */
+            version: string;
+            /**
+             * Outlines
+             * @description Замкнутые контуры силуэта по плоскостям (axial/sagittal/coronal): мм MNI по осям плоскости, как в контурах среза; источник — корковая поверхность fsaverage `*.pial`
+             */
+            outlines: {
+                [key: string]: number[][][];
+            };
+        };
+        /**
          * MriPlaneOut
          * @description Плоскость срезов МРТ: ось наведения, диапазон значений и число срезов.
          */
@@ -9625,6 +9709,11 @@ export interface components {
              * @description Базовый URL срезов: ``/slice/{plane}/{mm}.png``
              */
             slice_url: string;
+            /**
+             * Mip Url
+             * @description Базовый URL glass-brain MIP (статичный вид мозга целиком): ``/mip/{plane}.png``
+             */
+            mip_url: string;
             /**
              * Spacing Mm
              * @description Шаг сетки срезов, мм
@@ -13202,6 +13291,70 @@ export interface operations {
             path: {
                 plane: string;
                 mm: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mri_mip_outline_api_v1_surface_mri_mip_outline_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MipOutlineOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mri_mip_api_v1_surface_mri_mip__plane__png_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
+                plane: string;
             };
             cookie?: never;
         };

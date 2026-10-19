@@ -288,7 +288,20 @@ PSD, запуск спектра только по кнопке; `dipoles/Dipole
 `tests/test_spectral.py`
 (мощность в свой ритм, топокарта RGBA-палитрой MNE с прозрачностью вне контура, ETag/304, `None` вместо `NaN` в JSON,
 роуты) и `tests/test_dipole_scanner.py` (сетка-шар, возврат синтетического диполя с точностью шага,
-одна точка на эпоху, прогресс по эпохам, роуты)); срез 4 — таблица локализации
+одна точка на эпоху, прогресс по эпохам, роуты)); срез 3.12 — индикатор эпох/диполей и пакетный
+расчёт (`lib/epochStrip.test.ts`: ячейки «эпоха × готовность/BAD/полосы», подписи BAD-серий,
+предзаливка прогресса; `dipoles/EpochDipoleStrip.test.tsx`: ячейка на эпоху включая BAD, клик
+выбирает эпоху и перематывает кадр, кольцо кадра, предзаливка; `dipoles/MriProjection.test.tsx`:
+«Границы мозга» — glass brain картинкой MIP + белая обводка силуэта коры (статична, без
+референса тома слой пуст); `lib/mriSlices.test.ts`: URL MIP и обводки; backend
+`tests/test_mri_slices.py`: MIP = максимум вдоль оси проекции с раскладкой среза, роут
+PNG/ETag/304; `tests/test_brain_silhouette.py`: силуэт = проекция меша (куб → bbox
+квадрата), загрузка именно `*.pial`, роут обводки JSON с ETag/304; `state/dipoleCalc.test.ts`:
+`runBatch` по всем полосам каталога, `toggleSelectedEpoch`, отмена `cancelBatch`;
+`lib/dipoleCalcModel.test.ts`: отбрасывание устаревших полей формы фильтра, отпечаток без полосы;
+`lib/urlState.test.ts` + `app/UrlSync.test.tsx`: `?band=` игнорируется; backend —
+`tests/test_dipole_scanner.py` (сеточная нумерация эпох включая BAD, `bad_epoch_indexes`) и
+`tests/test_dipole_refine.py` (сеточный номер эпохи, ошибка по отброшенной эпохе)); срез 4 — таблица локализации
 (`shared/lib/tableRows.test.ts`: все точки результата включая точки без MNI, «—» вместо нулей и
 `NaN`, сортировка по эпохе в обе стороны, порядок строк одной эпохи, состав и видимость колонок;
 `state/tableParams.test.ts`: направление сортировки, скрытие колонок, «Показать все»/сброс и

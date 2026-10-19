@@ -58,6 +58,22 @@ export function mriSliceUrl(
   return `${ref.slice_url}/${plane}/${mm}.png?v=${ref.version}`
 }
 
+/**
+ * URL glass-brain MIP (проекция мозга целиком, слой «Границы мозга»): статична
+ * для версии ассета — не зависит от среза, поэтому в URL только плоскость.
+ */
+export function mriMipUrl(ref: MriSliceRef, plane: ProjectionPlane): string {
+  return `${ref.mip_url}/${plane}.png?v=${ref.version}`
+}
+
+/**
+ * URL обводки glass brain (силуэт коры `*.pial` всех плоскостей, мм MNI):
+ * контур как у MNE `silhouette=True`; статичен для версии ассета.
+ */
+export function mriMipOutlineUrl(ref: MriSliceRef): string {
+  return `${ref.mip_url}/outline?v=${ref.version}`
+}
+
 /** Прямоугольник картинки в пикселях фигуры: срез накрывает всю плоскость. */
 export function mriSliceRect(
   plane: ProjectionPlane,

@@ -111,6 +111,18 @@ def _params(
     )
 
 
+def _kept_epoch_index(recording) -> int:
+    """Сеточный номер первой выжившей эпохи записи `_alpha_edf`.
+
+    `epoch_index` — номер эпохи нарезки **включая отброшенные BAD_** (сетка
+    drop_log, «ключ связи с диполями»): края фильтра 1–40 Гц (BAD_edge, ядро
+    ≈ ±1.65 с) отбрасывают первые эпохи синтетической 6-секундной записи, и
+    «эпоха 0» нарезки в расчёт не входит.
+    """
+    scan = compute_dipole_scan(recording, settings, _params().scan)
+    return int(scan["points"][0]["epoch_index"])
+
+
 def test_refine_flips_moment_to_match_sign_ref(tmp_path, fake_fit):
     """Срез 3.11: знак «стало» сверяется с моментом заменяемой точки.
 
@@ -211,7 +223,7 @@ def test_refine_keeps_grid_estimate_when_free_fit_fails(tmp_path, failing_free_f
     """Сбой свободного фита не уносит задачу: остаётся оценка узла на BEM (1.5)."""
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-fallback")
 
-    result = refine_dipole_point(recording, settings, _params(0))
+    result = refine_dipole_point(recording, settings, _params(_kept_epoch_index(recording)))
 
     assert result["free_fit"] is False
     assert result["grid_gof_bem"] == pytest.approx(0.5)
@@ -233,7 +245,7 @@ def test_refine_reports_error_when_both_fits_fail(tmp_path, monkeypatch):
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-both-fail")
 
     with pytest.raises(DipoleScanError, match="Точный фитинг не выполнен"):
-        refine_dipole_point(recording, settings, _params(0))
+        refine_dipole_point(recording, settings, _params(_kept_epoch_index(recording)))
 
 
 def test_refine_epoch_out_of_range_is_clear_error(tmp_path, fake_fit):
@@ -251,6 +263,17 @@ def test_refine_without_bem_explains_itself(tmp_path, monkeypatch):
     monkeypatch.setattr(dipole_scanner, "_get_bem", no_bem)
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-nobem")
     with pytest.raises(DipoleScanError, match="BEM-решение fsaverage"):
+        refine_dipole_point(recording, settings, _params(_kept_epoch_index(recording)))
+
+
+def test_refine_bad_epoch_is_clear_error(tmp_path, fake_fit):
+    """Отброшенная BAD_ эпоха — понятная ошибка, а не чужой кусок записи.
+
+    Сеточная нумерация: «эпоха №1» здесь — позиция в drop_log, и если она
+    отброшена (BAD_edge у края фильтра), уточнять нечего.
+    """
+    recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-bad")
+    with pytest.raises(DipoleScanError, match="Эпохи №1 нет"):
         refine_dipole_point(recording, settings, _params(0))
 
 
@@ -259,9 +282,10 @@ def test_refine_job_flow(client, tmp_path, fake_fit):
     from tests.test_dipole_scanner import _wait_finished
 
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-job")
+    epoch_index = _kept_epoch_index(recording)
     created = client.post(
         f"{_PREFIX}/recordings/{recording.recording_id}/dipole_refine",
-        data={"epoch_index": 1, "band_min": 1, "band_max": 40, "epoch_length_ms": 1000},
+        data={"epoch_index": epoch_index, "band_min": 1, "band_max": 40, "epoch_length_ms": 1000},
     )
     assert created.status_code == 202, created.text
     job_id = created.json()["job_id"]
@@ -274,7 +298,7 @@ def test_refine_job_flow(client, tmp_path, fake_fit):
     assert result.status_code == 200, result.text
     body = result.json()
     assert body["method"] == "bem_fit"
-    assert body["epoch_index"] == 1
+    assert body["epoch_index"] == epoch_index
     assert len(body["fast_head_coords"]) == 3
     assert 0.0 <= body["point"]["gof"] <= 1.0
     assert body["shift_mm"] >= 0.0
@@ -316,7 +340,9 @@ def test_refine_form_window_is_validated(client, tmp_path, fake_fit):
 
     # Предел конфига принимается, и окно доезжает до результата
     limit = settings.dipole_refine_halfwin_max_ms
-    created = client.post(url, data={"epoch_index": 0, "halfwin_ms": limit})
+    created = client.post(
+        url, data={"epoch_index": _kept_epoch_index(recording), "halfwin_ms": limit},
+    )
     assert created.status_code == 202, created.text
     status = _wait_finished(client, created.json()["job_id"])
     assert status["status"] == "succeeded", status
@@ -338,7 +364,7 @@ def test_refine_default_window_is_peak_and_meta_declares_cost(client, tmp_path, 
     recording = _register(tmp_path, _alpha_edf(tmp_path), "rec-refine-default-window")
     created = client.post(
         f"{_PREFIX}/recordings/{recording.recording_id}/dipole_refine",
-        data={"epoch_index": 0},
+        data={"epoch_index": _kept_epoch_index(recording)},
     )
     status = _wait_finished(client, created.json()["job_id"])
     body = client.get(status["result_url"]).json()

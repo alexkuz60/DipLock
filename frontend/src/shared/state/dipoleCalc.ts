@@ -1,12 +1,14 @@
 /**
- * Состояние раздела «Диполи» (срез 3.4): выделенный диполь, пороги отображения
- * (GOF % — основной, момент нА·м — дополнительный), окно
- * частот FFT-графика, открытая выдвижная панель и результаты задач.
+ * Состояние раздела «Диполи» (срез 3.4 + пакетный сценарий): выделенный диполь,
+ * выделенная эпоха индикатора, пороги отображения (GOF % — основной, момент нА·м —
+ * дополнительный), окно частот FFT-графика, открытая выдвижная панель и результаты задач.
  *
  * Правило раздела то же, что в EDF (`docs/ui.md`): правка параметра **ничего не
- * запускает**. Расчёт стартует только кнопкой (`POST /recordings/{id}/dipoles`),
- * спектр — отдельной кнопкой (`…/spectrum`), а параметры лишь помечают, что
- * результат устарел.
+ * запускает**. Расчёт стартует только кнопкой в шапке и всегда считает **пакет
+ * по всем полосам каталога** (`POST /recordings/{id}/dipole_batch`): одиночный
+ * расчёт по всему спектру убран — усреднённые диполи эпох по широкой полосе
+ * «среднюю температуру по больнице» дают, а не локализацию ритма. Спектр —
+ * отдельной кнопкой (`…/spectrum`), параметры лишь помечают, что результат устарел.
  *
  * Что здесь, а что нет (разрезка 17.09.2026):
  * - **домен** — параметры расчёта и их дефолты, рамки контролов, формы запросов,
@@ -20,37 +22,30 @@
  *   диполя считаются из результата чистыми функциями (`shared/lib/spectrum.ts`,
  *   `shared/lib/dipolePoints.ts`).
  *
- * Полоса фильтра выбирается формой в панели раздела (срез 3.6): пресеты δ…γ
- * приходят из `/meta`, есть «свой диапазон», «одиночная частота» (f ± bw/2) и
- * «без фильтра». Хранится только **полоса** — пресет выводится из неё
- * (`shared/lib/calcFilter.ts`), поэтому подпись формы не может разойтись с тем,
- * что уйдёт в задачу. Форма живёт здесь, а не в `edfParams`: расчёт диполей не
- * должен меняться «незаметно» от правок предподготовки записи.
- *
+ * Полоса фильтра одиночного расчёта убрана вместе с ним (секция «Фильтр
+ * расчёта» панели): пакет фильтруется своими поддиапазонами (`dipoleBatch`), в
+ * форме остаются notch, длина эпохи, шаг сетки и метод PSD. Устаревшие
+ * сохранённые поля формы просто игнорируются — хранить/переносить их незачем.
  * Персистится только набор параметров и предпочтений просмотра (окно частот):
- * результаты задач и выделенный диполь относятся к конкретной записи и после
- * перезагрузки страницы бессмысленны.
+ * результаты задач и выделения относятся к конкретной записи и после перезагрузки
+ * страницы бессмысленны.
  *
  * Воспроизведение траектории (срез 3.7) — тоже состояние **просмотра**, но с
- * командой из шапки: `playback` хранит идущее воспроизведение, скорость (×1/×2/×4),
+ * командой из шапки: `playback` хранит идущее воспроизведение, скорость,
  * номер эпохи и счётчик пользовательских переходов (`seekSeq` — как `navRequest.seq`
  * в EDF, чтобы часы не проигрывали одну команду дважды). Непрерывное время кадра
  * здесь **не** живёт: его ведут часы раздела (`PlaybackFrame.tsx`), а в стор уходит
  * только смена эпохи — кадры 60 раз в секунду не должны перерисовывать облако точек.
+ * Покадровые команды «<»/«>» убраны: кадр перематывается кликом по ячейке
+ * индикатора эпох (`EpochDipoleStrip`), и тот же клик выбирает пакет диполей
+ * своей эпохи (`selectedEpochIndex`).
  */
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api, apiErrorText } from '@/shared/api/client'
 import {
-  BANDWIDTH_RANGE,
-  SINGLE_FREQ_RANGE,
-  bandForPreset,
   clamp,
-  filterPresetOf,
-  normalizeFilterBand,
   normalizeNotchHz,
-  singleFreqBand,
-  type CalcFilterPresetId,
 } from '@/shared/lib/calcFilter'
 import {
   CALC_PARAM_DEFAULTS,
@@ -58,7 +53,6 @@ import {
   GRID_MM_RANGE,
   PLAYBACK_DEFAULTS,
   THRESHOLD_NAM_RANGE,
-  buildDipoleForm,
   buildSpectrumForm,
   buildRefineForm,
   calcJobFromStatus,
@@ -71,12 +65,9 @@ import {
 } from '@/shared/lib/dipoleCalcModel'
 import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
 import {
-  BATCH_MAX_BANDS,
-  BATCH_MIN_BANDS,
   buildDipoleBatchForm,
   scanResultOfBand,
 } from '@/shared/lib/dipoleBatch'
-import { recommendedEpochLengthMs, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import { canPlayback, clampEpochIndex, normalizePlaybackSpeed } from '@/shared/lib/playback'
 import type { DipoleBatchResult, DipoleRefineResult, DipoleScanResult, EloretaResult, SpectrumResult } from '@/shared/api/types'
@@ -113,11 +104,15 @@ export type DipoleCalcState = {
    * выбор в одной, синхронизация в трёх. Сессионное состояние, не персистится.
    */
   selectedPointId: string | null
+  /**
+   * Выбранная эпоха индикатора эпох (`EpochDipoleStrip`, клик по ячейке): в
+   * проекциях показывается **пакет диполей** этой эпохи (точки всех отображаемых
+   * полос), повторный клик снимает выбор. Номер — сетка нарезки включая BAD.
+   */
+  selectedEpochIndex: number | null
   /** Кадр воспроизведения траектории: играет/пауза, скорость, эпоха (срез 3.7) */
   playback: PlaybackState
   params: CalcParams
-  /** Задача быстрого расчёта диполей (прогресс/ошибка) */
-  job: CalcJob | null
   /** Результат расчёта диполей (точки MNI) */
   result: DipoleScanResult | null
   /**
@@ -128,10 +123,8 @@ export type DipoleCalcState = {
   batch: DipoleBatchResult | null
   /** Задача пакета поддиапазонов (прогресс/ошибка) */
   batchJob: CalcJob | null
-  /** Текст последней ошибки пакета — отдельно от ошибки одиночного расчёта */
+  /** Текст последней ошибки расчёта (пакет — единственный расчёт диполей) */
   batchError: string | null
-  /** Выбор полос формы пакета (ключи `freq_bands`/`functional_bands` из `/meta`) */
-  batchBandKeys: string[]
   /**
    * Активная полоса пакета: её точки показывают проекции, playback и таблица
    * (`result` держит скан активной полосы — прежняя отрисовка работает без правок).
@@ -149,8 +142,6 @@ export type DipoleCalcState = {
   spectrumJob: CalcJob | null
   /** Результат спектра (диапазоны + ссылки на топокарты) */
   spectrum: SpectrumResult | null
-  /** Текст последней ошибки расчёта диполей — для панели */
-  error: string | null
   /**
    * Текст последней ошибки спектра — **отдельно** от ошибки расчёта: иначе
    * панель объясняла бы сбой диполей словами «спектр не рассчитан».
@@ -191,14 +182,18 @@ export type DipoleCalcState = {
   /** Повторный клик по выделенной точке снимает выделение (одна кнопка на два состояния) */
   toggleSelectedPoint: (id: string) => void
   clearSelectedPoint: () => void
+  /**
+   * Выбор эпохи индикатора (клик по ячейке): пакет диполей эпохи в проекциях +
+   * перемотка кадра анимации на эту эпоху. Повторный клик снимает выбор.
+   */
+  toggleSelectedEpoch: (epochIndex: number) => void
+  clearSelectedEpoch: () => void
   /** Play/pause кадра воспроизведения: без результата ничего не запускает */
   togglePlayback: () => void
   /** Пауза без снятия кадра (конец записи, уход из раздела) */
   pausePlayback: () => void
   /** Скорость воспроизведения: значение приводится к 1/2/4 */
   setPlaybackSpeed: (speed: number) => void
-  /** Покадрово: ставит на паузу и сдвигает кадр на `delta` эпох (с зажимом) */
-  stepPlaybackEpoch: (delta: number) => void
   /** Перевод кадра на конкретную эпоху (ставит на паузу) */
   seekPlaybackEpoch: (epochIndex: number) => void
   /** Снять кадр воспроизведения: облако диполей возвращается в обычный вид */
@@ -209,39 +204,16 @@ export type DipoleCalcState = {
   setGridMm: (value: number) => void
   /** Метод PSD спектра (N17): только задача спектра, диполи не пересчитываются */
   setPsdMethod: (value: 'welch' | 'multitaper') => void
-  /**
-   * Выбор пресета фильтра: полоса пресета — данные (ритмы идут из `/meta`).
-   *
-   * `autoLength` — авто-длина эпохи (п.4): при смене пресета длина
-   * подставляется по полосе («короче для высоких», правило ≥ 2 периодов и
-   * N ≥ 3C — `shared/lib/epochRules.ts`). Параметр необязателен: без него
-   * (нет списка длин из `/meta`) длина не меняется; ручная правка после
-   * подстановки остаётся до следующей смены пресета.
-   */
-  setFilterPreset: (
-    preset: CalcFilterPresetId,
-    freqBands: Record<string, number[]>,
-    functionalBands?: Record<string, number[]>,
-    autoLength?: { lengths: readonly number[]; signal?: EpochSignalInfo },
-  ) => void
-  /** Полоса фильтра числом (поля «свой диапазон»): границы нормализуются */
-  setFilterBand: (band: readonly number[] | null) => void
   /** Сетевой фильтр 50/60 Гц (`null` — выключен) */
   setNotchHz: (value: number | null) => void
-  /** Одиночная частота: полоса пересчитывается как f ± bw/2 */
-  setSingleFreq: (value: number) => void
-  /** Ширина полосы одиночной частоты: полоса пересчитывается как f ± bw/2 */
-  setBandwidth: (value: number) => void
-  /** Быстрый расчёт диполей по кнопке (202 + поллинг + результат) */
-  runCalculation: (recordingId: string | null) => Promise<void>
-  /** Выбор полос формы пакета (порядок сохраняется; дубли снимаются) */
-  setBatchBandKeys: (keys: string[]) => void
   /**
-   * Прогон по набору поддиапазонов (С1) по кнопке: набор результатов вместо
+   * Прогон по всем полосам каталога (С1) по кнопке: набор результатов вместо
    * одного (`batch`), активная полоса — первая из набора; `result` становится
-   * сканом активной полосы (проекции/таблица/подписи — без правок).
+   * сканом активной полосы (проекции/таблица/подписи — без правок). `bandKeys` —
+   * все ключи `freq_bands`/`functional_bands` из `/meta` (выбор полос в UI убран:
+   * пакет всегда считает весь каталог).
    */
-  runBatch: (recordingId: string | null) => Promise<void>
+  runBatch: (recordingId: string | null, bandKeys: string[]) => Promise<void>
   /** Смена активной полосы пакета: `result` = скан её точек, кадр снимается */
   setActiveBand: (bandKey: string) => void
   /** Переключить полосу в анимации/облаке (чекбокс панели пакета) */
@@ -250,8 +222,8 @@ export type DipoleCalcState = {
   setPlaybackBandKeys: (bandKeys: string[]) => void
   /** Расчёт спектра по кнопке: числа PSD + топокарты диапазонов */
   runSpectrum: (recordingId: string | null) => Promise<void>
-  /** Отмена идущего быстрого расчёта (3.2): DELETE на сервере + локальный статус */
-  cancelCalculation: () => void
+  /** Отмена идущего расчёта пакета (3.2): DELETE на сервере + локальный статус */
+  cancelBatch: () => void
   /** Отмена идущего расчёта спектра (3.2) */
   cancelSpectrum: () => void
   /**
@@ -284,19 +256,17 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       amplitudeThresholdNam: 0,
       fftRangeHz: null,
       selectedPointId: null,
+      selectedEpochIndex: null,
       playback: { ...PLAYBACK_DEFAULTS },
       params: { ...CALC_PARAM_DEFAULTS },
-      job: null,
       result: null,
       batch: null,
       batchJob: null,
       batchError: null,
-      batchBandKeys: [],
       activeBandKey: null,
       playbackBandKeys: [],
       spectrumJob: null,
       spectrum: null,
-      error: null,
       spectrumError: null,
       refineJob: null,
       refiningEpoch: null,
@@ -321,6 +291,29 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       toggleSelectedPoint: (id) =>
         set((state) => ({ selectedPointId: state.selectedPointId === id ? null : id })),
       clearSelectedPoint: () => set({ selectedPointId: null }),
+      // Клик по ячейке индикатора: выбор пакета диполей эпохи + перемотка кадра
+      // (команда `seekSeq`, чтобы часы проиграли переход). Повторный клик — снять.
+      toggleSelectedEpoch: (epochIndex) =>
+        set((state) => {
+          const next = state.selectedEpochIndex === epochIndex ? null : epochIndex
+          if (next === null) return { selectedEpochIndex: null }
+          const total = state.result?.n_epochs_total ?? 0
+          return {
+            selectedEpochIndex: next,
+            ...(total > 0
+              ? {
+                  playback: {
+                    ...state.playback,
+                    playing: false,
+                    active: true,
+                    epochIndex: clampEpochIndex(next, total),
+                    seekSeq: state.playback.seekSeq + 1,
+                  },
+                }
+              : {}),
+          }
+        }),
+      clearSelectedEpoch: () => set({ selectedEpochIndex: null }),
 
       togglePlayback: () => {
         const { result, playback } = get()
@@ -352,20 +345,6 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         ),
       setPlaybackSpeed: (speed) =>
         set((state) => ({ playback: { ...state.playback, speed: normalizePlaybackSpeed(speed) } })),
-      stepPlaybackEpoch: (delta) =>
-        set((state) => {
-          const total = state.result?.n_epochs_total ?? 0
-          if (total <= 0) return {}
-          return {
-            playback: {
-              ...state.playback,
-              playing: false,
-              active: true,
-              epochIndex: clampEpochIndex(state.playback.epochIndex + delta, total),
-              seekSeq: state.playback.seekSeq + 1,
-            },
-          }
-        }),
       seekPlaybackEpoch: (epochIndex) =>
         set((state) => {
           const total = state.result?.n_epochs_total ?? 0
@@ -401,137 +380,19 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       // Окно уточнения — только варианты списка: произвольное число здесь значило
       // бы «случайные 40 секунд счёта», а не выбор точности (шаг 1.5)
       setRefineHalfwinMs: (value) => set({ refineHalfwinMs: normalizeRefineHalfwin(value) }),
-      setFilterPreset: (preset, freqBands, functionalBands = {}, autoLength) =>
-        set((state) => {
-          const filterBandHz = bandForPreset(state.params, preset, freqBands, functionalBands)
-          // Авто-длина (п.4): смена пресета подставляет кратчайшую длину,
-          // прошедшую обе половины правила (периоды полосы + N ≥ 3C по записи).
-          // «Без фильтра» (полосы нет) и пустой список длин — длину не трогаем;
-          // ручная правка после подстановки живёт до следующей смены пресета.
-          const auto = autoLength
-            ? recommendedEpochLengthMs(filterBandHz?.[0] ?? null, autoLength.lengths, autoLength.signal)
-            : null
-          return {
-            params: {
-              ...state.params,
-              filterPreset: preset,
-              filterBandHz,
-              ...(auto !== null ? { epochLengthMs: auto } : {}),
-            },
-          }
-        }),
-      // Полосу правят поля «своего диапазона»: выбор становится «своим», а если
-      // границы совпали (полоса пустая) — фильтра нет вовсе
-      setFilterBand: (band) =>
-        set((state) => {
-          const filterBandHz = normalizeFilterBand(band)
-          return {
-            params: {
-              ...state.params,
-              filterBandHz,
-              filterPreset: filterBandHz === null ? 'none' : 'custom',
-            },
-          }
-        }),
       setNotchHz: (value) =>
         set((state) => ({ params: { ...state.params, notchHz: normalizeNotchHz(value) } })),
-      // Частота и ширина одиночной частоты — одно целое с её полосой: полоса
-      // пересчитывается сразу, иначе поля показывали бы одно, а задача получала
-      // другое (поля видны только в пресете «одиночная частота», где это и ждут).
-      setSingleFreq: (value) =>
-        set((state) => {
-          const singleFreqHz = clamp(value, SINGLE_FREQ_RANGE)
-          return {
-            params: {
-              ...state.params,
-              filterPreset: 'single',
-              singleFreqHz,
-              filterBandHz:
-                singleFreqBand(singleFreqHz, state.params.bandwidthHz) ?? state.params.filterBandHz,
-            },
-          }
-        }),
-      setBandwidth: (value) =>
-        set((state) => {
-          const bandwidthHz = clamp(value, BANDWIDTH_RANGE)
-          return {
-            params: {
-              ...state.params,
-              filterPreset: 'single',
-              bandwidthHz,
-              filterBandHz:
-                singleFreqBand(state.params.singleFreqHz, bandwidthHz) ?? state.params.filterBandHz,
-            },
-          }
-        }),
 
-      runCalculation: async (recordingId) => {
+      runBatch: async (recordingId, bandKeys) => {
         if (!recordingId) return
-        const params = get().params
-        const token = calcRunToken.next()
-        const isCurrent = () => calcRunToken.isCurrent(token)
-        set({
-          job: runningJob(),
-          error: null,
-        })
-        try {
-          const created = await api.dipoles.start(recordingId, buildDipoleForm(params))
-          // id задачи — сразу после 202: отмена работает и до первого опроса (3.2)
-          set({ job: { ...(get().job ?? runningJob()), jobId: created.job_id } })
-          await waitForJob(created.job_id, isCurrent, (status) =>
-            set({ job: calcJobFromStatus(status) }),
-          )
-          if (!isCurrent()) return
-          const result = await api.dipoles.result(recordingId, created.job_id)
-          if (!isCurrent()) return
-          // Новый результат — новый кадр воспроизведения: прежняя эпоха относилась
-          // к другой нарезке (номер эпохи без результата ничего не значит)
-          set({
-            result,
-            job: succeededJob(get().job),
-            // Одиночный расчёт затирает набор пакета (С1): показывать «смесь»
-            // одного результата и чужого набора было бы враньём
-            batch: null,
-            batchJob: null,
-            activeBandKey: null,
-            playbackBandKeys: [],
-            // Уточнения привязаны к нарезке прежнего результата — новая нарезка
-            // делает их чужими (как и кадр воспроизведения ниже)
-            refinedPoints: {},
-            refineJob: null,
-            refiningEpoch: null,
-            refineError: null,
-            // eLORETA — та же нарезка: результаты прежней становятся чужими
-            eloretaResults: {},
-            eloretaJob: null,
-            eloretaEpochIndex: null,
-            eloretaError: null,
-            playback: {
-              ...get().playback,
-              playing: false,
-              active: false,
-              epochIndex: 0,
-              seekSeq: 0,
-            },
-          })
-        } catch (error) {
-          if (isCancelled(error) || !isCurrent()) return
-          set({ job: failedJob(get().job, apiErrorText(error)), error: apiErrorText(error) })
-        }
-      },
-
-      setBatchBandKeys: (keys) =>
-        set({ batchBandKeys: [...new Set(keys)].slice(0, BATCH_MAX_BANDS) }),
-
-      runBatch: async (recordingId) => {
-        if (!recordingId) return
-        const { batchBandKeys, params } = get()
-        if (batchBandKeys.length < BATCH_MIN_BANDS) {
-          set({
-            batchError: `Пакету нужны минимум ${BATCH_MIN_BANDS} полосы: выберите набор`,
-          })
+        // Пакет всегда считает весь каталог полос («Расчёт пакета» вместо
+        // одиночного расчёта): дубли ключей снимаются, порядок — как в каталоге.
+        const keys = [...new Set(bandKeys)]
+        if (keys.length === 0) {
+          set({ batchError: 'Каталог полос пуст: нет данных /meta для пакета' })
           return
         }
+        const params = get().params
         const token = calcRunToken.next()
         const isCurrent = () => calcRunToken.isCurrent(token)
         set({ batchJob: runningJob(), batchError: null })
@@ -539,7 +400,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           const created = await api.dipoleBatch.start(
             recordingId,
             buildDipoleBatchForm({
-              bandKeys: batchBandKeys,
+              bandKeys: keys,
               epochLengthMs: params.epochLengthMs,
               gridMm: params.gridMm,
               notchHz: params.notchHz,
@@ -547,6 +408,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
               referenceChannels: null,
             }),
           )
+          // id задачи — сразу после 202: отмена работает и до первого опроса (3.2)
           set({ batchJob: { ...(get().batchJob ?? runningJob()), jobId: created.job_id } })
           await waitForJob(created.job_id, isCurrent, (status) =>
             set({ batchJob: calcJobFromStatus(status) }),
@@ -565,7 +427,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             // Проекции/таблица/подписи читают `result` — кладём в него скан
             // активной полосы набора (та же нарезка, свои точки)
             result: first ? scanResultOfBand(batch, first) : null,
-            // Уточнения/eLORETA/кадр привязаны к прежней нарезке — снимаются
+            // Уточнения/eLORETA/кадр/выбор эпохи привязаны к прежней нарезке —
+            // снимаются (новая нарезка делает их чужими)
             refinedPoints: {},
             refineJob: null,
             refiningEpoch: null,
@@ -575,6 +438,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             eloretaEpochIndex: null,
             eloretaError: null,
             selectedPointId: null,
+            selectedEpochIndex: null,
             playback: {
               ...get().playback,
               playing: false,
@@ -602,6 +466,7 @@ export const useDipoleCalc = create<DipoleCalcState>()(
             result: scanResultOfBand(batch, band),
             // Прежние выделение/уточнения/кадр относились к точкам другой полосы
             selectedPointId: null,
+            selectedEpochIndex: null,
             refinedPoints: {},
             refiningEpoch: null,
             refineError: null,
@@ -728,11 +593,11 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         }
       },
 
-      cancelCalculation: () => {
-        const job = get().job
+      cancelBatch: () => {
+        const job = get().batchJob
         if (job === null || job.status !== 'running' || !job.jobId) return
         cancelRemoteJob(job.jobId, calcRunToken)
-        set({ job: { ...job, status: 'cancelled' } })
+        set({ batchJob: { ...job, status: 'cancelled' } })
       },
 
       cancelSpectrum: () => {
@@ -746,7 +611,6 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         // Отменяем поллинг: ответы прежних задач не должны трогать новое состояние
         calcRunToken.cancel()
         set({
-          job: null,
           result: null,
           // Набор пакета (С1) живёт с результатом — сбрасывается вместе с ним
           batch: null,
@@ -756,7 +620,6 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           playbackBandKeys: [],
           spectrumJob: null,
           spectrum: null,
-          error: null,
           spectrumError: null,
           refineJob: null,
           refiningEpoch: null,
@@ -766,8 +629,10 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           eloretaEpochIndex: null,
           eloretaResults: {},
           eloretaError: null,
-          // Выделенный диполь жил в результате задачи — вместе с ним он исчезает
+          // Выделенный диполь и выбранная эпоха жили в результате задачи — вместе
+          // с ним они исчезают
           selectedPointId: null,
+          selectedEpochIndex: null,
           // Кадр воспроизведения привязан к нарезке эпох результата: вместе с ним
           // он снимается, а скорость остаётся (предпочтение просмотра)
           playback: { ...get().playback, playing: false, active: false, epochIndex: 0, seekSeq: 0 },
@@ -793,12 +658,6 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         const stored = (persisted ?? {}) as Partial<DipoleCalcState>
         const storedParams = (stored.params ?? {}) as Partial<CalcParams>
         const merged = { ...current.params, ...storedParams }
-        // Состояние до среза 3.6 не знало пресета: выводим его из сохранённой
-        // полосы, а не подставляем «широкий» к любой полосе (иначе список
-        // называл бы ритмом не то, что уйдёт в расчёт)
-        if (storedParams.filterPreset === undefined) {
-          merged.filterPreset = filterPresetOf(merged, {})
-        }
         return {
           ...current,
           view: stored.view ?? current.view,
@@ -810,11 +669,13 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           // не было): приводим к списку вариантов, а не отправляем в форму как есть
           refineHalfwinMs: normalizeRefineHalfwin(stored.refineHalfwinMs),
           selectedPointId: null,
+          selectedEpochIndex: null,
           // Кадр воспроизведения — сессионное состояние: он не персистится, и после
           // перезагрузки страницы его нет (как и результата задачи) — берём дефолт
           playback: { ...PLAYBACK_DEFAULTS },
-          // Старые сохранённые параметры не знают полей формы фильтра (срез 3.6),
-          // а в числах мог оказаться мусор: приводим их к правилам контролов
+          // В числах старых сохранённых параметров мог оказаться мусор, а поля
+          // формы фильтра одиночного расчёта удалены: `normalizeCalcParams`
+          // приводит всё к правилам контролов, устаревшее просто отбрасывается
           params: normalizeCalcParams(merged),
         }
       },

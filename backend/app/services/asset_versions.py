@@ -55,7 +55,9 @@ SURFACE_STAMP_RELATIVE: tuple[str, ...] = (
 # Том МРТ на MNI-сетке (``/surface/mri``, срезы PNG).
 # 2 — выборка узлов сетки берёт строку обратной матрицы по оси вокселей (у
 # коронарной укладки T1 оси y и z были перепутаны, срез показывал не ту анатомию).
-MRI_GRID_VERSION = 2
+# 3 — добавлен glass-brain MIP (`/surface/mri/mip/{plane}.png`, срез 3.12, доводка):
+#     проекция мозга целиком для слоя «Границы мозга», считается из того же тома.
+MRI_GRID_VERSION = 3
 MRI_SPACING_MM = 1.0
 # Границы MNI-сетки: объём мозга с мозжечком и стволом по маске ``brainmask``
 # (интеграционный тест сверяет их с реальным томом). Это же — границы фигур на
@@ -90,7 +92,10 @@ MRI_VOLUMES_STAMP_RELATIVE: tuple[str, ...] = (
 # Объёмы меток и контуры структур/полей Бродмана (``/surface/contours``).
 # 2 — разметки полушарий разведены по id (в annot обоих полушарий id совпадают).
 # 3 — к объёмам добавлен силуэт головы ``seghead.mgz`` (контур головы, 3.5).
-CONTOUR_VERSION = 3
+# 4 — силуэт (головы, затем границ мозга) убран из контуров совсем: слой
+#     «Границы мозга» рисует статичные виды мозга целиком на стороне UI
+#     (``frontend/src/shared/lib/brainViews.ts``, 3.12, доводка).
+CONTOUR_VERSION = 4
 # Шаг сетки контуров: тот же, что у срезов МРТ (контур обязан совпасть с картинкой).
 CONTOUR_SPACING_MM = MRI_SPACING_MM
 # Упрощение контура, мм: сетка 1 мм даёт точку на пиксель, для отрисовки и
@@ -108,11 +113,23 @@ CONTOUR_STAMP_RELATIVE: tuple[str, ...] = (
     "fsaverage/mri/aparc+aseg.mgz",
     "fsaverage/mri/lh.ribbon.mgz",
     "fsaverage/mri/rh.ribbon.mgz",
-    "fsaverage/mri/seghead.mgz",
     "fsaverage/label/lh.PALS_B12_Brodmann.annot",
     "fsaverage/label/rh.PALS_B12_Brodmann.annot",
     "fsaverage/surf/lh.white",
     "fsaverage/surf/rh.white",
+)
+
+# Силуэт коры для обводки glass brain (``/surface/mri/mip/outline``, срез 3.12,
+# доводка 18.10.2026). Источник — наружная корковая поверхность ``*.pial``: её
+# проекция даёт границы мозга с извилинами (как ``silhouette=True`` у MNE).
+# Регистрационная сфера ``*.sphere`` не используется: силуэт сферы — круг.
+SILHOUETTE_VERSION = 1
+SILHOUETTE_SPACING_MM = 1.0
+# Упрощение контура силуэта, мм: тот же смысл, что у ``CONTOUR_SIMPLIFY_MM``.
+SILHOUETTE_SIMPLIFY_MM = 0.6
+SILHOUETTE_STAMP_RELATIVE: tuple[str, ...] = (
+    "fsaverage/surf/lh.pial",
+    "fsaverage/surf/rh.pial",
 )
 
 
@@ -167,7 +184,7 @@ ASSET_SPECS: dict[str, AssetSpec] = {
         version=CONTOUR_VERSION,
         params={
             "subject": "fsaverage",
-            "source": "aparc+aseg.mgz + ribbon.mgz + seghead.mgz",
+            "source": "aparc+aseg.mgz + ribbon.mgz",
             "spacing_mm": CONTOUR_SPACING_MM,
             "simplify_mm": CONTOUR_SIMPLIFY_MM,
             "min_area_mm2": MIN_SHAPE_AREA_MM2,
@@ -175,6 +192,18 @@ ASSET_SPECS: dict[str, AssetSpec] = {
             "area_id_offset": dict(CONTOUR_AREA_ID_OFFSET),
         },
         stamp_files=CONTOUR_STAMP_RELATIVE,
+    ),
+    "silhouette": AssetSpec(
+        kind="silhouette",
+        title="Силуэт коры для обводки glass brain",
+        version=SILHOUETTE_VERSION,
+        params={
+            "subject": "fsaverage",
+            "source": "surf/lh.pial + surf/rh.pial",
+            "spacing_mm": SILHOUETTE_SPACING_MM,
+            "simplify_mm": SILHOUETTE_SIMPLIFY_MM,
+        },
+        stamp_files=SILHOUETTE_STAMP_RELATIVE,
     ),
     "volumes": AssetSpec(
         kind="volumes",

@@ -37,11 +37,11 @@ describe('панель раздела «Диполи»', () => {
       amplitudeThresholdNam: 0,
       fftRangeHz: null,
       selectedPointId: null,
-      job: null,
+      batchJob: null,
       result: null,
       spectrumJob: null,
       spectrum: null,
-      error: null,
+      batchError: null,
       spectrumError: null,
       view: 'none',
     })
@@ -57,7 +57,7 @@ describe('панель раздела «Диполи»', () => {
     await user.click(checkbox)
 
     expect(useDipoleParams.getState().params.layerVisibility.brodmann).toBe(false)
-    expect(screen.getByLabelText('Силуэт головы')).toBeChecked()
+    expect(screen.getByLabelText('Границы мозга')).toBeChecked()
   })
 
   it('включает слой реального среза МРТ отдельно от схемы среза', async () => {
@@ -222,125 +222,35 @@ describe('панель раздела «Диполи»', () => {
     expect(useDipoleCalc.getState().params.epochLengthMs).toBe(1000)
   })
 
-  it('выбирает полосу пресетами: диапазоны ритмов приходят из /meta (срез 3.6)', async () => {
-    const user = userEvent.setup()
-    const fetchSpy = mockApiFetch()
+  it('формы полосы фильтра больше нет: пакет фильтруется своими полосами (срез 3.6 убран)', async () => {
     renderWithProviders(<DipolesPanel />)
 
-    const select = await screen.findByLabelText('Фильтр расчёта')
-    // Подпись несёт границы с сервера — UI их не выдумывает
+    // Одиночный расчёт по всему спектру убран: пресеты δ…γ, «одиночная частота»
+    // и «свой диапазон» жили только под него
+    expect(screen.queryByLabelText('Фильтр расчёта')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Одиночная частота')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Полоса от')).not.toBeInTheDocument()
     expect(
-      await screen.findByRole('option', { name: 'α/низкий β — альфа/низкий бета 8–16 Гц' }),
+      screen.getByText(/Пакет диполей считается по всем полосам каталога/),
     ).toBeInTheDocument()
-    // Функциональные ритмы — отдельная группа пунктов (фаза A)
-    expect(
-      screen.getByRole('option', { name: 'μ — мю 8–13 Гц' }),
-    ).toBeInTheDocument()
-
-    await user.selectOptions(select, 'alpha')
-
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([8, 16])
-    // Выбор пресета — не запуск: из запросов только метаданные
-    const urls = fetchSpy.mock.calls.map(([input]) => String(input))
-    expect(urls.every((url) => url.includes('/meta'))).toBe(true)
   })
 
-  it('считает одиночную частоту полосой f ± bw/2 (срез 3.6)', async () => {
+  it('ставит сетевой фильтр отдельно от полос пакета (срез 3.6)', async () => {
     const user = userEvent.setup()
     renderWithProviders(<DipolesPanel />)
 
-    await user.selectOptions(await screen.findByLabelText('Фильтр расчёта'), 'single')
-
-    // По умолчанию 7.83 Гц и ширина 0.5 Гц — полоса 7.6–8.1 Гц, и об этом сказано в итоге
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([7.6, 8.1])
-    expect(
-      screen.getByText(
-        'В расчёт уйдёт: одиночная частота 7.83 Гц (полоса 7.6–8.1 Гц, ширина 0.5 Гц) · без сетевого фильтра',
-      ),
-    ).toBeInTheDocument()
-
-    const freq = screen.getByLabelText('Одиночная частота')
-    await user.clear(freq)
-    await user.type(freq, '10')
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([9.8, 10.3])
-
-    const width = screen.getByLabelText('Ширина полосы')
-    await user.clear(width)
-    await user.type(width, '1')
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([9.5, 10.5])
-  })
-
-  it('правит свой диапазон и сам ставит границы по возрастанию (срез 3.6)', async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<DipolesPanel />)
-
-    await user.selectOptions(await screen.findByLabelText('Фильтр расчёта'), 'custom')
-
-    const from = screen.getByLabelText('Полоса от')
-    const to = screen.getByLabelText('Полоса до')
-    await user.clear(from)
-    await user.type(from, '15')
-    await user.clear(to)
-    await user.type(to, '5')
-
-    // Поля можно заполнять в любом порядке: полоса всё равно 5–15 Гц
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([5, 15])
-  })
-
-  it('держит «свой диапазон» открытым, даже если числа совпали с пресетом (срез 3.6)', async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<DipolesPanel />)
-
-    const select = await screen.findByLabelText('Фильтр расчёта')
-    await user.selectOptions(select, 'custom')
-
-    // Полоса по умолчанию (0.5–128 Гц) совпадает с «широким» пресетом: список не
-    // должен «отскакивать» назад и прятать поля, иначе свою полосу не ввести
-    expect(useDipoleCalc.getState().params.filterPreset).toBe('custom')
-    expect(select).toHaveValue('custom')
-    expect(screen.getByLabelText('Полоса от')).toHaveValue(0.5)
-    expect(screen.getByLabelText('Полоса до')).toHaveValue(128)
-
-    // Правка поля переводит полосу и остаётся «своим диапазоном»
-    const to = screen.getByLabelText('Полоса до')
-    await user.clear(to)
-    await user.type(to, '35')
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([0.5, 35])
-    expect(useDipoleCalc.getState().params.filterPreset).toBe('custom')
-  })
-
-  it('показывает выбор пользователя, а не догадку по числам (срез 3.6)', async () => {
-    // Выбран «свой диапазон» с границами альфа-ритма: список показывает выбор,
-    // а поля — те же числа (иначе непонятно, почему поля исчезли)
-    useDipoleCalc.setState({
-      params: { ...CALC_PARAM_DEFAULTS, filterPreset: 'custom', filterBandHz: [8, 13] },
-    })
-    renderWithProviders(<DipolesPanel />)
-
-    expect(await screen.findByLabelText('Фильтр расчёта')).toHaveValue('custom')
-    expect(screen.getByLabelText('Полоса от')).toHaveValue(8)
-    expect(screen.getByLabelText('Полоса до')).toHaveValue(13)
-  })
-
-  it('выключает полосовой фильтр и ставит сетевой отдельно (срез 3.6)', async () => {
-    const user = userEvent.setup()
-    renderWithProviders(<DipolesPanel />)
-
-    await user.selectOptions(await screen.findByLabelText('Фильтр расчёта'), 'none')
-    expect(useDipoleCalc.getState().params.filterBandHz).toBeNull()
-
-    await user.selectOptions(screen.getByLabelText('Сетевой фильтр'), '50')
+    await user.selectOptions(await screen.findByLabelText('Сетевой фильтр'), '50')
     expect(useDipoleCalc.getState().params.notchHz).toBe(50)
 
     expect(
-      screen.getByText('В расчёт уйдёт: без полосового фильтра · сетевой фильтр 50 Гц'),
+      screen.getByText(/Пакет диполей считается по всем полосам каталога/),
     ).toBeInTheDocument()
   })
 
-  it('помечает результат устаревшим, если полоса изменилась после расчёта (срез 3.6)', () => {
+  it('помечает результат устаревшим, если параметры изменились после расчёта (срез 3.6)', () => {
     useDipoleCalc.setState({
       result: dipoleScanResultFixture(),
-      params: { ...CALC_PARAM_DEFAULTS, filterBandHz: [8, 13] },
+      params: { ...CALC_PARAM_DEFAULTS, notchHz: 50 },
     })
     renderWithProviders(<DipolesPanel />)
 
@@ -397,22 +307,6 @@ describe('панель раздела «Диполи»', () => {
     expect(urls.filter((url) => !url.includes('/meta'))).toEqual([])
   })
 
-  it('авто-длина: смена пресета полосы подставляет длину эпохи (п.4)', async () => {
-    const user = userEvent.setup()
-    const fetchSpy = mockApiFetch()
-    renderWithProviders(<DipolesPanel />)
-
-    await waitFor(() => expect(screen.getByLabelText('Длина эпохи')).not.toBeDisabled())
-    await user.selectOptions(screen.getByLabelText('Фильтр расчёта'), 'alpha')
-
-    // ≥ 2 периодов 8 Гц → кратчайшая из списка /meta = 250 мс («короче для высоких»)
-    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(250)
-    expect(screen.getByLabelText('Длина эпохи')).toHaveValue('250')
-    // Подстановка — правка, а не запуск: по-прежнему только метаданные
-    const urls = fetchSpy.mock.calls.map(([input]) => String(input))
-    expect(urls.every((url) => url.includes('/meta'))).toBe(true)
-  })
-
   it('две половины правила (≥ 2 периодов и ≥ 3C) видны у длины эпохи (п.4)', async () => {
     // Запись: 10 каналов монтажа при 100 Гц → 3C = 30 отсчётов → минимум 300 мс
     useEdfRecording.setState({ recording: { ...recordingFixture, sfreq: 100 } })
@@ -421,9 +315,13 @@ describe('панель раздела «Диполи»', () => {
     renderWithProviders(<DipolesPanel />)
 
     const warnings = await screen.findByTestId('epoch-rule-warnings')
-    // Широкая полоса расчёта 0.5–128 Гц: 250 мс < 2 периодов (минимум 2000 мс)
-    expect(warnings).toHaveTextContent('двух периодов нижней частоты полосы')
     // 250 мс при 100 Гц = 25 отсчётов — меньше 3C (3 × 10 = 30 отсчётов)
     expect(warnings).toHaveTextContent('3 × 10 = 30 отсчётов')
+    // Медленная полоса каталога (δ 0.5 Гц, нормировка на 1 Гц): 250 мс < 2 периодов
+    // (минимум 2000 мс) — правило читается по самой медленной полосе пакета и
+    // дожидается каталога из `/meta`
+    await waitFor(() =>
+      expect(warnings).toHaveTextContent('двух периодов нижней частоты полосы'),
+    )
   })
 })

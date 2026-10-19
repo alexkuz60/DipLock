@@ -44,7 +44,7 @@ import {
 export type DipoleLayerId =
   | 'mri'
   | 'anatomy'
-  | 'head'
+  | 'brain'
   | 'mni'
   | 'brodmann'
   | 'dipoles'
@@ -56,7 +56,7 @@ export type DipoleLayerId =
 export const DIPOLE_LAYERS: DipoleLayerId[] = [
   'mri',
   'anatomy',
-  'head',
+  'brain',
   'mni',
   'brodmann',
   'dipoles',
@@ -68,7 +68,7 @@ export const DIPOLE_LAYERS: DipoleLayerId[] = [
 export const DIPOLE_LAYER_LABELS: Record<DipoleLayerId, string> = {
   mri: 'Срез МРТ (T1)',
   anatomy: 'Анатомические структуры',
-  head: 'Силуэт головы',
+  brain: 'Границы мозга',
   mni: 'Срезы MNI',
   brodmann: 'Поля Бродмана',
   dipoles: 'Точки диполей',
@@ -81,7 +81,8 @@ export const DIPOLE_LAYER_HINTS: Record<DipoleLayerId, string> = {
   mri: 'Реальный срез тома fsaverage: картинка квантуется шагом 1 мм, снаружи мозга прозрачна',
   anatomy:
     'Реальные структуры атласа aparc+aseg (кора, подкорка, желудочки): контуры приходят с сервера, метка подсвечивается и называется под курсором',
-  head: 'Силуэт головы с сервера (маска seghead.mgz): реальный контур кожи на срезе; без ассета слой пуст',
+  brain:
+    'Статичная белая обводка внешнего силуэта мозга (кора fsaverage, как обводка glass brain у nilearn): только внешние границы, одинаковые для любых срезов; внутреннюю анатомию показывают слои среза МРТ, структур и полей Бродмана',
   mni: 'Координатная сетка MNI (оси AC–PC) и линии секущих плоскостей',
   brodmann:
     'Поля Бродмана из атласа: разметка производная (метка ближайшей вершины коры), контуры приходят с сервера; без ассета слой пуст',
@@ -107,7 +108,7 @@ export const DIPOLE_PARAM_DEFAULTS = {
   layerVisibility: {
     mri: true,
     anatomy: true,
-    head: true,
+    brain: true,
     mni: true,
     brodmann: true,
     dipoles: true,

@@ -298,6 +298,18 @@ def test_compute_dipole_scan_drops_epochs_by_stage_annotations(tmp_path):
     assert any(
         "Отброшено эпох аннотациями BAD_" in w for w in with_zone["warnings"]
     )
+    # Сеточная нумерация («ключ связи с диполями»): точки нумеруются позициями в
+    # drop_log включая отброшенные, а bad_epoch_indexes — сетка отброшенных;
+    # вместе выжившие и отброшенные покрывают всю нарезку без пересечений.
+    for result in (plain, with_zone):
+        total = result["n_epochs_total"]
+        bad = result["bad_epoch_indexes"]
+        used = {point["epoch_index"] for point in result["points"]}
+        assert bad == sorted(bad)
+        assert used.isdisjoint(bad)
+        assert used | set(bad) == set(range(total))
+    # Зона на выжившей эпохе добавляет ровно одну отброшенную на её позиции
+    assert len(with_zone["bad_epoch_indexes"]) == len(plain["bad_epoch_indexes"]) + 1
 
 
 def test_align_moment_sign_flips_to_anchor_orientation():

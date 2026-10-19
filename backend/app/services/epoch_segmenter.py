@@ -245,6 +245,21 @@ def bad_coverage_text(
     return ", ".join(text for _, text in sorted(parts, reverse=True)) or "зон нет"
 
 
+def kept_epoch_selection(epochs: mne.Epochs) -> list[int]:
+    """Сеточные номера выживших эпох по порядку (позиция строки → номер нарезки).
+
+    Нумерация эпох в проекте — **сеточная**: номер среди всех созданных эпох,
+    включая отброшенные ``BAD_`` (позиция в ``drop_log``; он же ``epoch_index``
+    таблицы ``epochs`` — «ключ связи с диполями»). В объекте MNE лежат только
+    прошедшие reject (``get_data()``), поэтому строка данных ``pos`` соответствует
+    эпохе нарезки ``selection[pos]``. Без этого перевода точки диполей
+    нумеровались бы «сжато» и разъезжались с БД и таймлайном воспроизведения.
+    """
+    if epochs.selection is not None:
+        return [int(index) for index in epochs.selection]
+    return list(range(len(epochs.drop_log)))
+
+
 def epoch_records(
     epochs: mne.Epochs,
     events: np.ndarray,
@@ -270,8 +285,8 @@ def epoch_records(
     """
     sfreq = float(epochs.info["sfreq"])
     drop_log = list(epochs.drop_log)
-    selection = list(epochs.selection) if epochs.selection is not None else list(range(len(drop_log)))
     # Позиция эпохи среди прошедших reject — индекс в массивах мощностей.
+    selection = kept_epoch_selection(epochs)
     position = {epoch_index: pos for pos, epoch_index in enumerate(selection)}
     powers = band_powers or {}
 

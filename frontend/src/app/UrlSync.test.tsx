@@ -62,8 +62,8 @@ describe('UrlSync (3.2б)', () => {
       </MemoryRouter>,
     )
 
-    // band и срезы применяются синхронно в эффекте первого рендера
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([8, 13])
+    // Срезы применяются синхронно в эффекте первого рендера; устаревший `band`
+    // (полоса фильтра одиночного расчёта) в ссылке просто игнорируется
     expect(useDipoleParams.getState().params.slices.axial).toBe(12)
     // Запись открывается паспортом из реестра (async)
     await waitFor(() => expect(metaSpy).toHaveBeenCalledWith('rec-1'))
@@ -136,14 +136,14 @@ describe('UrlSync (3.2б)', () => {
       </MemoryRouter>,
     )
 
-    // недефолтная полоса появляется в URL
+    // недефолтный срез появляется в URL
     act(() => {
-      useDipoleCalc.getState().setFilterBand([8, 13])
+      useDipoleParams.getState().setSlice('axial', 12)
     })
     act(() => {
       vi.advanceTimersByTime(300)
     })
-    expect(currentQuery().get('band')).toBe('8-13')
+    expect(currentQuery().get('slice')).toContain('axial:12')
 
     // смена секции: Link убирает search из адреса…
     act(() => {
@@ -157,7 +157,7 @@ describe('UrlSync (3.2б)', () => {
     })
     const location = screen.getByTestId('location').textContent ?? ''
     expect(location).toContain('/eeg')
-    expect(currentQuery().get('band')).toBe('8-13')
+    expect(currentQuery().get('slice')).toContain('axial:12')
   })
 
   it('закрытие записи убирает rec из URL', async () => {

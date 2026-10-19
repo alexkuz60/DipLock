@@ -322,6 +322,8 @@ export type ContourShape = Schemas['ContourShapeOut']
 
 export type ContourSlice = Schemas['ContourSliceOut']
 
+export type MipOutline = Schemas['MipOutlineOut']
+
 /**
  * Результат расчёта спектрограммы канала (`GET /recordings/{id}/spectrogram/{job}`).
  *

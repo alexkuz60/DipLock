@@ -26,11 +26,11 @@ describe('выдвижная панель раздела «Диполи»', () =
       fftRangeHz: null,
       selectedPointId: null,
       params: { ...CALC_PARAM_DEFAULTS },
-      job: null,
+      batchJob: null,
       result: null,
       spectrumJob: null,
       spectrum: null,
-      error: null,
+      batchError: null,
       spectrumError: null,
     })
     useEdfRecording.setState({ recording: null })
@@ -214,7 +214,7 @@ describe('выдвижная панель раздела «Диполи»', () =
 
   it('ошибка расчёта диполей не выдаётся за ошибку спектра', () => {
     // Общий текст ошибки объяснял бы сбой диполей словами «спектр не рассчитан»
-    useDipoleCalc.setState({ view: 'fft', error: 'Ни одной эпохи не удалось локализовать' })
+    useDipoleCalc.setState({ view: 'fft', batchError: 'Ни одной эпохи не удалось локализовать' })
     renderWithProviders(<DipolesDrawer />)
 
     expect(screen.queryByText('Ни одной эпохи не удалось локализовать')).not.toBeInTheDocument()

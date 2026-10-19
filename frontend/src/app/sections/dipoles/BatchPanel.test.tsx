@@ -1,13 +1,15 @@
 /**
  * Тесты панели «Пакет поддиапазонов» (С1/С2).
  *
- * Правило раздела: правка выбора полос **ничего не запускает** (из запросов
- * возможны только статические `/meta`), считает кнопка. Результат — набор:
- * чипы полос переключают активную (её точки показывают проекции/таблица), в
- * сопоставлении — только нормированные величины (колонки GOF нет — принцип 3),
- * кластеры показаны с устойчивостью по поддиапазонам.
+ * Прогон всегда идёт по всему каталогу кнопкой «Рассчитать пакет» в шапке — в
+ * панели выбора полос прогона, чипов полос и кнопки запуска нет (правка
+ * **ничего не запускает**, из запросов возможны только статические `/meta`).
+ * Результат — набор: активная полоса (для таблицы) выбирается в разделе
+ * «Таблица локализации», здесь — чекбоксы отображения, сопоставление только
+ * нормированными величинами (колонки GOF нет — принцип 3) и кластеры с
+ * устойчивостью по поддиапазонам.
  */
-import { screen, waitFor } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CALC_PARAM_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
@@ -26,54 +28,38 @@ describe('панель «Пакет поддиапазонов»', () => {
       batch: null,
       batchJob: null,
       batchError: null,
-      batchBandKeys: [],
       activeBandKey: null,
       playbackBandKeys: [],
       result: null,
-      job: null,
     })
     useEdfRecording.setState({ recording: recordingFixture })
   })
 
-  it('правка выбора полос ничего не запускает; кнопка ждёт минимум две полосы', async () => {
-    const user = userEvent.setup()
+  it('без результата объясняет запуск из шапки и не делает запросов', async () => {
     const fetchSpy = mockApiFetch()
     renderWithProviders(<BatchPanel />)
 
-    await waitFor(() => expect(screen.getByLabelText(/alpha/)).toBeInTheDocument())
-    const button = screen.getByRole('button', { name: 'Считать пакет' })
-    expect(button).toBeDisabled()
-
-    await user.click(screen.getByLabelText(/alpha/))
-    // Правка — ни одного запроса (из запросов возможны только статические /meta)
-    const posts = fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST')
-    expect(posts).toHaveLength(0)
-    expect(button).toBeDisabled() // одной полосы пакету мало
-
-    await user.click(screen.getByLabelText(/beta/))
-    expect(button).toBeEnabled()
-    expect(useDipoleCalc.getState().batchBandKeys).toEqual(['alpha', 'beta'])
     expect(
-      fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST'),
-    ).toHaveLength(0)
+      screen.getByText(/Прогон идёт по всем полосам каталога кнопкой «Рассчитать пакет»/),
+    ).toBeInTheDocument()
+    // Ни чекбоксов полос прогона, ни кнопки запуска здесь больше нет
+    expect(screen.queryByRole('button', { name: 'Считать пакет' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
-  it('считает пакет по кнопке и показывает набор: чипы полос и сопоставление', async () => {
-    const user = userEvent.setup()
-    mockApiFetch()
+  it('показывает набор: чекбоксы отображения и сопоставление', async () => {
+    useDipoleCalc.setState({
+      batch: dipoleBatchResultFixture(),
+      activeBandKey: 'alpha',
+      playbackBandKeys: ['alpha', 'beta'],
+    })
     renderWithProviders(<BatchPanel />)
 
-    await waitFor(() => expect(screen.getByLabelText(/alpha/)).toBeInTheDocument())
-    await user.click(screen.getByLabelText(/alpha/))
-    await user.click(screen.getByLabelText(/beta/))
-    await user.click(screen.getByRole('button', { name: 'Считать пакет' }))
-
-    await waitFor(() =>
-      expect(useDipoleCalc.getState().batch?.bands).toHaveLength(2),
-    )
-    // Чипы полос: активная — первая полоса набора
-    expect(screen.getByRole('button', { name: 'alpha (8–13 Гц)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'beta (13–30 Гц)' })).toBeInTheDocument()
+    // Секция «Полосы прогона» (чипы) удалена вместе с выбором полос прогона:
+    // полосу таблицы выбирает сама таблица, здесь — только отображение
+    expect(screen.queryByRole('button', { name: 'alpha (8–13 Гц)' })).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'alpha' })).toBeInTheDocument()
     expect(useDipoleCalc.getState().activeBandKey).toBe('alpha')
     // Сопоставление: нормированные величины подписаны процентами
     expect(screen.getByText('Сопоставление полос')).toBeInTheDocument()
@@ -83,7 +69,6 @@ describe('панель «Пакет поддиапазонов»', () => {
   it('в сопоставлении нет колонки GOF — GOF между полосами не сравним', async () => {
     useDipoleCalc.setState({
       batch: dipoleBatchResultFixture(),
-      batchBandKeys: ['alpha', 'beta'],
       activeBandKey: 'alpha',
     })
     renderWithProviders(<BatchPanel />)
@@ -97,28 +82,23 @@ describe('панель «Пакет поддиапазонов»', () => {
     expect(headers).toContain('RIV') // единственный кросс-полосной фильтр доверия
   })
 
-  it('переключение чипа меняет активную полосу и точки в result', async () => {
-    const user = userEvent.setup()
+  it('переключение активной полосы — забота таблицы: панель её не трогает', async () => {
     useDipoleCalc.setState({
       batch: dipoleBatchResultFixture(),
-      batchBandKeys: ['alpha', 'beta'],
       activeBandKey: 'alpha',
     })
     renderWithProviders(<BatchPanel />)
 
-    await user.click(screen.getByRole('button', { name: 'beta (13–30 Гц)' }))
-
-    const state = useDipoleCalc.getState()
-    expect(state.activeBandKey).toBe('beta')
-    // Проекции/таблица читают `result` — в нём скан активной полосы
-    expect(state.result?.filter_band_hz).toEqual([13, 30])
+    // Ни чипов, ни списка полос в панели нет — активную полосу меняет только
+    // «Полоса таблицы» в разделе «Таблица локализации»
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+    expect(useDipoleCalc.getState().activeBandKey).toBe('alpha')
   })
 
   it('чекбоксы полос управляют анимацией и облаком: от всех до одной', async () => {
     const user = userEvent.setup()
     useDipoleCalc.setState({
       batch: dipoleBatchResultFixture(),
-      batchBandKeys: ['alpha', 'beta'],
       activeBandKey: 'alpha',
       playbackBandKeys: ['alpha', 'beta'],
     })
@@ -141,7 +121,6 @@ describe('панель «Пакет поддиапазонов»', () => {
   it('показывает кластеры с паспортом нормировки и устойчивостью по поддиапазонам', () => {
     useDipoleCalc.setState({
       batch: dipoleBatchResultFixture(),
-      batchBandKeys: ['alpha', 'beta'],
       activeBandKey: 'alpha',
     })
     renderWithProviders(<BatchPanel />)

@@ -15,14 +15,8 @@
  * подсветка диполя — `shared/lib/spectrum.ts`, `shared/lib/dipolePoints.ts`.
  */
 import {
-  BANDWIDTH_RANGE,
-  SINGLE_FREQ_RANGE,
   clamp,
-  filterPresetIsValid,
-  filterPresetOf,
-  normalizeFilterBand,
   normalizeNotchHz,
-  type CalcFilterPresetId,
 } from '@/shared/lib/calcFilter'
 import { DEFAULT_PLAYBACK_SPEED, type PlaybackSpeed } from '@/shared/lib/playback'
 import type {
@@ -66,27 +60,15 @@ export const PLAYBACK_DEFAULTS: PlaybackState = {
 }
 
 /**
- * Параметры расчёта: то, что уходит в задачу быстрого расчёта диполей и в задачу
- * спектра. Хранятся только **данные** — подписи контролов выводятся из них
- * (`shared/lib/calcFilter.ts`), поэтому форма и запрос не могут разойтись.
+ * Параметры расчёта: то, что уходит в задачу пакета диполей и в задачу
+ * спектра. Хранятся только **данные** — подписи контролов выводятся из них,
+ * поэтому форма и запрос не могут разойтись.
+ *
+ * Полоса фильтра сюда больше не входит: одиночный расчёт по всему спектру
+ * убран, а пакет фильтруется своими поддиапазонами (`shared/lib/dipoleBatch`).
  */
 export type CalcParams = {
-  /**
-   * Выбор пользователя в списке «Фильтр расчёта»: пресет диапазона (δ…γ из
-   * `/meta`), «одиночная частота», «свой диапазон» или «без фильтра».
-   */
-  filterPreset: CalcFilterPresetId
-  /**
-   * Полоса фильтра, Гц; `null` — без фильтра. **То, что уходит в задачу**
-   * (`band_min`/`band_max`) и входит в отпечаток результата; пересчитывается
-   * каждым сеттером формы (`shared/lib/calcFilter.ts`).
-   */
-  filterBandHz: [number, number] | null
   notchHz: number | null
-  /** Одиночная частота, Гц: полосу считает `singleFreqBand` (f ± bw/2) */
-  singleFreqHz: number
-  /** Ширина полосы вокруг одиночной частоты, Гц */
-  bandwidthHz: number
   epochLengthMs: number
   /** Шаг объёмной сетки поиска диполей, мм */
   gridMm: number
@@ -99,14 +81,7 @@ export type CalcParams = {
 }
 
 export const CALC_PARAM_DEFAULTS: CalcParams = {
-  filterPreset: 'band_1_40',
-  filterBandHz: [0.5, 128],
   notchHz: null,
-  // Значения одиночной частоты — заготовка формы: 7.83 Гц (частота Шумана) с
-  // полосой ±0.25 Гц. Ширина по умолчанию та же, что у предподготовки записи
-  // (`settings.default_single_freq_bandwidth_hz`), иначе формы расходились бы.
-  singleFreqHz: 7.83,
-  bandwidthHz: 0.5,
   epochLengthMs: 1000,
   gridMm: 7,
   // Дефолт — Welch: привычный метод прежних расчётов. Для коротких эпох
@@ -168,19 +143,6 @@ export function calcJobSummary(job: CalcJob | null): string {
   if (job.epochsTotal > 0) parts.push(`эпох ${job.epochsDone} из ${job.epochsTotal}`)
   parts.push(`${Math.round(job.progress * 100)} %`)
   return parts.join(' · ')
-}
-
-/** Форма запроса быстрого расчёта диполей: параметры идут как есть, без догадок. */
-export function buildDipoleForm(params: CalcParams): FormData {
-  const form = new FormData()
-  if (params.filterBandHz) {
-    form.set('band_min', String(params.filterBandHz[0]))
-    form.set('band_max', String(params.filterBandHz[1]))
-  }
-  if (params.notchHz) form.set('notch_hz', String(params.notchHz))
-  form.set('epoch_length_ms', String(params.epochLengthMs))
-  form.set('grid_mm', String(params.gridMm))
-  return form
 }
 
 /**
@@ -355,10 +317,8 @@ export function epochIndexOfPointId(pointId: string | null): number | null {
 /** Форма запроса спектра: полоса та же, что у расчёта диполей (один источник). */
 export function buildSpectrumForm(params: CalcParams): FormData {
   const form = new FormData()
-  if (params.filterBandHz) {
-    form.set('band_min', String(params.filterBandHz[0]))
-    form.set('band_max', String(params.filterBandHz[1]))
-  }
+  // Без band_min/band_max: полоса фильтра одиночного расчёта убрана, спектр
+  // считается по всему измеренному диапазону записи
   if (params.notchHz) form.set('notch_hz', String(params.notchHz))
   form.set('epoch_length_ms', String(params.epochLengthMs))
   form.set('psd_method', params.psdMethod)
@@ -375,14 +335,14 @@ export function buildSpectrumForm(params: CalcParams): FormData {
  * «посчитано на этих настройках».
  */
 function signatureOf(parts: {
-  band: [number, number] | null
   notchHz: number | null
   epochLengthMs: number
   gridMm: number
 }): string {
-  const band = parts.band ? `${parts.band[0]}-${parts.band[1]}` : 'none'
+  // Полоса фильтра в отпечатке больше не живёт: одиночный расчёт убран, а у
+  // пакета своя полоса у каждой точки (`result.filter_band_hz` — полоса активной
+  // полосы пакета, а не параметр формы). Иначе «устарел» горел бы всегда.
   return [
-    band,
     parts.notchHz ?? 'none',
     parts.epochLengthMs,
     parts.gridMm,
@@ -392,7 +352,6 @@ function signatureOf(parts: {
 /** Отпечаток параметров из панели расчёта. */
 export function calcSignature(params: CalcParams): string {
   return signatureOf({
-    band: params.filterBandHz,
     notchHz: params.notchHz,
     epochLengthMs: params.epochLengthMs,
     gridMm: params.gridMm,
@@ -401,9 +360,7 @@ export function calcSignature(params: CalcParams): string {
 
 /** Отпечаток параметров, с которыми реально посчитан результат задачи (эхо сервера). */
 export function resultSignature(result: DipoleScanResult): string {
-  const band = result.filter_band_hz
   return signatureOf({
-    band: band && band.length === 2 ? [band[0], band[1]] : null,
     notchHz: result.notch_hz ?? null,
     epochLengthMs: result.epoch_length_ms,
     gridMm: result.grid_mm,
@@ -417,30 +374,14 @@ export function resultMatchesParams(result: DipoleScanResult, params: CalcParams
 
 /**
  * Параметры расчёта в целостном виде: сохранённые в localStorage значения могут
- * быть из другой версии UI (без полей формы фильтра) или содержать мусор — и то
- * и другое приводится к правилам контролов, а не уходит в задачу как есть.
+ * быть из другой версии UI или содержать мусор — и то, и другое приводится к
+ * правилам контролов, а не уходит в задачу как есть. Устаревшие поля (форма
+ * фильтра одиночного расчёта) при этом **отбрасываются**: хранить/переносить
+ * их незачем.
  */
 export function normalizeCalcParams(params: CalcParams): CalcParams {
-  const filterBandHz = normalizeFilterBand(params.filterBandHz)
-  const storedPreset = filterPresetIsValid(params.filterPreset) ? params.filterPreset : 'custom'
-  // Пара «пресет + полоса» должна быть непротиворечивой: пустая полоса — только у
-  // «без фильтра», а непустая не может стоять у него же. Пресет при этом берём из
-  // полосы (`filterPresetOf` без метаданных: «широкий» 0.5–128 узнаётся сам, полоса
-  // одиночной частоты → «одиночная», иначе «свой диапазон» — его поля покажут эти числа).
-  const filterPreset =
-    filterBandHz === null
-      ? 'none'
-      : storedPreset === 'none'
-        ? filterPresetOf({ ...params, filterBandHz }, {})
-        : storedPreset
-
   return {
-    ...params,
-    filterPreset,
-    filterBandHz,
     notchHz: normalizeNotchHz(params.notchHz),
-    singleFreqHz: clamp(params.singleFreqHz, SINGLE_FREQ_RANGE),
-    bandwidthHz: clamp(params.bandwidthHz, BANDWIDTH_RANGE),
     epochLengthMs: Math.round(params.epochLengthMs),
     gridMm: clamp(params.gridMm, GRID_MM_RANGE),
     // Из сохранённых параметров может придти всё что угодно, а метод обязан

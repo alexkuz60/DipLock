@@ -24,15 +24,13 @@ import { useDipoleParams } from '@/shared/state/dipoleParams'
 const SYNC_DEBOUNCE_MS = 250
 
 /** Ключи, которыми владеет синхронизация (чужие query-параметры не трогаем). */
-const SHARED_KEYS = ['rec', 'band', 'slice'] as const
+const SHARED_KEYS = ['rec', 'slice'] as const
 
 /** Текущее «зеркало»: что сторы хотели бы видеть в URL. */
 function currentSharedState(): SharedUrlState {
   const recording = useEdfRecording.getState().recording
-  const band = useDipoleCalc.getState().params.filterBandHz
   return {
     rec: recording?.recording_id ?? null,
-    band: band === null ? null : [band[0], band[1]],
     slices: useDipoleParams.getState().params.slices,
   }
 }
@@ -55,7 +53,6 @@ export function UrlSync() {
     appliedRef.current = true
     const shared = parseSharedUrl(locationRef.current.search)
     if (shared.rec) void openRecordingById(shared.rec)
-    if (shared.band) useDipoleCalc.getState().setFilterBand(shared.band)
     if (shared.slices) {
       const { setSlice } = useDipoleParams.getState()
       for (const plane of PROJECTION_PLANES) {

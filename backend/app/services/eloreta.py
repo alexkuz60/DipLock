@@ -37,6 +37,7 @@ from app.services.dipole_scanner import (
     channel_positions,
     montage_sparse_warning,
 )
+from app.services.epoch_segmenter import kept_epoch_selection
 from app.services.fsaverage_assets import src_path
 
 logger = logging.getLogger(__name__)
@@ -154,10 +155,18 @@ def run_eloreta(
     n_epochs = len(epochs)
     if n_epochs == 0:
         raise EloretaError("После reject-фильтра не осталось эпох — нечего локализовать")
-    if not 0 <= params.epoch_index < n_epochs:
+    # `epoch_index` — номер эпохи нарезки **включая отброшенные BAD_** (сетка
+    # `drop_log`, как у точек быстрого расчёта): строка данных живёт по сжатому
+    # порядку выживших, поэтому номер переводится в позицию через `selection`.
+    row = {
+        grid: pos for pos, grid in enumerate(kept_epoch_selection(epochs))
+    }.get(params.epoch_index)
+    if row is None:
         raise EloretaError(
-            f"Эпохи №{params.epoch_index + 1} нет: в нарезке быстрого расчёта их {n_epochs}. "
-            "eLORETA привязан к той нарезке — если параметры менялись, пересчитайте диполи"
+            f"Эпохи №{params.epoch_index + 1} нет: в нарезке быстрого расчёта "
+            f"{n_epochs} прошедших reject из {len(epochs.drop_log)} (отброшенные "
+            "BAD_ в расчёт не входят). eLORETA привязан к той нарезке — если "
+            "параметры менялись, пересчитайте диполи"
         )
 
     # Порядок выборки — как в compute_dipole_scan/refine: матрица электродов,
@@ -169,7 +178,7 @@ def run_eloreta(
     data = epochs.get_data()[:, used_index, :]
     times = epochs.times
     gfp = np.sqrt(np.mean(data ** 2, axis=1))
-    sample = int(np.argmax(gfp[params.epoch_index]))
+    sample = int(np.argmax(gfp[row]))
 
     warnings: list[str] = []
     sparse = montage_sparse_warning(len(used_channels), cfg)
@@ -184,7 +193,7 @@ def run_eloreta(
     sel = [raw.ch_names.index(name) for name in used_channels]
     info = mne.pick_info(raw.info, sel)
     evoked = mne.EvokedArray(
-        data[params.epoch_index][:, lo:hi], info,
+        data[row][:, lo:hi], info,
         tmin=float(times[lo]), nave=1, verbose=False,
     )
 

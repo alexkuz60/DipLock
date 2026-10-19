@@ -12,11 +12,11 @@
  * слои только рисуют переданное. Порядок слоёв в `<svg>` задаёт сборка.
  *
  * Слои снизу вверх (порядок и подписи — в `shared/state/dipoleParams.ts`):
- * `mri` → `anatomy` → `head` → `mni` → `brodmann` → `vectors` → `dipoles`;
+ * `mri` → `anatomy` → `brain` → `mni` → `brodmann` → `vectors` → `dipoles`;
  * анимация кадра (`playback`) и перекрестие живут в `MriProjectionParts.tsx`.
  */
-import type { ContourShape } from '@/shared/api/types'
-import { contourPathPx } from '@/shared/lib/atlasContours'
+import type { ContourShape, MipOutline } from '@/shared/api/types'
+import { contourPathPx, smoothHullsPathPx } from '@/shared/lib/atlasContours'
 import {
   dipolePointTitle,
   type DipoleDotVisual,
@@ -129,39 +129,40 @@ export function AnatomyLayer({
 }
 
 /**
- * Силуэт головы на срезе: **реальный контур** `seghead.mgz` (срез 3.5). Условная
- * фикстура-эллипс удалена (17.10.2026): без ассета слой честно пуст.
- *
- * Проп `polygons` — уже посчитанные точки в пикселях (см. `MriProjection`):
- * пустой массив (`null` ассета и «на срезе нет вокселей») — слой не рисуется,
- * иначе — полигоны контура (могут быть несколько: даже-нечётная заливка
- * корректно вычитает дырки).
+ * Границы мозга на проекции: **только внешний силуэт коры** — статичная белая
+ * обводка, одинаковая для любых срезов (срез 3.12, доводка 19.10.2026).
+ * Растровая MIP-подложка убрана: внутреннюю анатомию показывают свои слои
+ * (срез МРТ, структуры, поля Бродмана), а этот слой отвечает только за внешний
+ * контур — как белая обводка glass brain у nilearn. Источник контура —
+ * корковый меш `*.pial` fsaverage (как `silhouette=True` у MNE), контракт
+ * `/surface/mri/mip/outline`; цвет — цвет переднего плана, поэтому в тёмной
+ * теме контур белый. Контур приходит с растровой сетки 1 мм, поэтому рисуется
+ * **плавной** замкнутой кривой (`smoothHullsPathPx`, сплайн Катмулла—Рома),
+ * а не «лестничной» ломаной. Без данных обводки слой честно пуст.
  */
-export function HeadLayer({
+export function BrainLayer({
   plane,
   visibility,
-  polygons,
+  outline,
 }: {
   plane: ProjectionPlane
   visibility: Record<DipoleLayerId, boolean>
-  /** Полигоны в пикселях фигуры (строки «x,y x,y …»); пусто — не рисуем */
-  polygons: string[]
+  /** Силуэт коры (мм MNI): единственное содержимое слоя */
+  outline: MipOutline | null
 }) {
-  if (!layerVisible(visibility, 'head') || polygons.length === 0) return null
+  if (!layerVisible(visibility, 'brain')) return null
+  const hulls = outline?.outlines[plane] ?? null
+  if (!hulls || hulls.length === 0) return null
   return (
-    <g data-testid={`layer-head-${plane}`}>
-      {polygons.map((points, index) => (
-        <polygon
-          key={index}
-          points={points}
-          fill="var(--color-mri-outline)"
-          fillOpacity={0.07}
-          stroke="var(--color-mri-outline)"
-          strokeOpacity={0.75}
-          strokeWidth={1.2}
-          fillRule="evenodd"
-        />
-      ))}
+    <g data-testid={`layer-brain-${plane}`}>
+      <path
+        d={smoothHullsPathPx(plane, hulls)}
+        fill="none"
+        stroke="var(--color-fg-0)"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
     </g>
   )
 }

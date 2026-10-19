@@ -65,7 +65,7 @@ from app.services.dipole_fitter import (
     point_riv,
     whitened_riv,
 )
-from app.services.epoch_segmenter import segment_epochs
+from app.services.epoch_segmenter import kept_epoch_selection, segment_epochs
 from app.services.prepared_signal import prepared_raw
 from app.services.recordings import Recording
 from app.services.spectral import channel_positions
@@ -564,6 +564,13 @@ def compute_dipole_scan(
     )
     data = epochs.get_data()[:, used_index, :]  # (n_epochs, n_ch, n_times), В
     n_epochs = data.shape[0]
+    # Сеточная нумерация эпох (`kept_epoch_selection`): `epoch_index` точки —
+    # номер эпохи нарезки **включая отброшенные BAD_** (позиция в `drop_log`), а
+    # не порядковый номер среди выживших. Иначе точки разъезжаются с таблицей
+    # `epochs` («ключ связи с диполями», `epoch_records`) и с таймлайном
+    # воспроизведения (эпоха = floor(t / длина эпохи)).
+    selection = kept_epoch_selection(epochs)
+    bad_epoch_indexes = [index for index, entry in enumerate(epochs.drop_log) if entry]
     grid_m = candidate_grid(params.grid_mm)
 
     warnings: list[str] = []
@@ -610,11 +617,14 @@ def compute_dipole_scan(
     # RIV (2.6/N23): отбеливатель по in-band ковариации шума — один на запись
     # (полоса у всех эпох одна). `None` — данных мало, RIV остаётся пустым.
     whitener = epochs_whitener(data)
-    for epoch_index in range(n_epochs):
-        sample = peak_index[epoch_index]
+    for pos in range(n_epochs):
+        # `pos` — строка данных (только выжившие эпохи), `epoch_index` — номер
+        # эпохи нарезки включая отброшенные (сетка `drop_log`, см. выше).
+        epoch_index = selection[pos]
+        sample = peak_index[pos]
         try:
             fit = scan_point_fast(
-                kernel, data[epoch_index, :, sample], whitener,
+                kernel, data[pos, :, sample], whitener,
             )
         except DipoleScanError as exc:
             warnings.append(f"Эпоха {epoch_index + 1}: {exc}")
@@ -645,8 +655,8 @@ def compute_dipole_scan(
         })
         report(
             "scan",
-            message=f"Диполи: {epoch_index + 1} из {n_epochs}",
-            epochs_done=epoch_index + 1,
+            message=f"Диполи: {pos + 1} из {n_epochs}",
+            epochs_done=pos + 1,
             epochs_total=n_epochs,
         )
 
@@ -702,6 +712,7 @@ def compute_dipole_scan(
         "notch_hz": params.notch_hz,
         "n_epochs_total": len(epochs.drop_log),
         "n_epochs_used": n_epochs,
+        "bad_epoch_indexes": bad_epoch_indexes,
         "grid_mm": params.grid_mm,
         "points": points,
         "warnings": warnings,
@@ -801,10 +812,18 @@ def refine_dipole_point(
     n_epochs = len(epochs)
     if n_epochs == 0:
         raise DipoleScanError("После reject-фильтра не осталось эпох — нечего уточнять")
-    if not 0 <= params.epoch_index < n_epochs:
+    # `epoch_index` — номер эпохи нарезки **включая отброшенные BAD_** (сетка
+    # `drop_log`, как у точек быстрого расчёта): строка данных живёт по сжатому
+    # порядку выживших, поэтому номер переводится в позицию через `selection`.
+    row = {
+        grid: pos for pos, grid in enumerate(kept_epoch_selection(epochs))
+    }.get(params.epoch_index)
+    if row is None:
         raise DipoleScanError(
-            f"Эпохи №{params.epoch_index + 1} нет: в нарезке быстрого расчёта их {n_epochs}. "
-            "Уточнение привязано к той нарезке — если параметры менялись, пересчитайте диполи"
+            f"Эпохи №{params.epoch_index + 1} нет: в нарезке быстрого расчёта "
+            f"{n_epochs} прошедших reject из {len(epochs.drop_log)} (отброшенные "
+            "BAD_ в расчёт не входят). Уточнение привязано к той нарезке — если "
+            "параметры менялись, пересчитайте диполи"
         )
     # Тот же порядок выборки, что в compute_dipole_scan: сначала матрица
     # электродов (каналы с позициями), потом данные по ним — иначе индекс
@@ -814,7 +833,7 @@ def refine_dipole_point(
     data = epochs.get_data()[:, used_index, :]  # (n_epochs, n_ch, n_times), В
     times = epochs.times
     gfp = np.sqrt(np.mean(data ** 2, axis=1))  # (n_epochs, n_times)
-    sample = int(np.argmax(gfp[params.epoch_index]))
+    sample = int(np.argmax(gfp[row]))
     # RIV (2.6/N23): отбеливатель по in-band ковариации шума — общий для
     # быстрого узла и обоих BEM-фитов ниже (одна нарезка — одна полоса).
     whitener = epochs_whitener(data)
@@ -823,7 +842,7 @@ def refine_dipole_point(
         positions_m.shape, scan.grid_mm, MIN_SENSOR_DISTANCE_MM / 1000.0,
     )
     fast_fit = scan_point_fast(
-        kernel, data[params.epoch_index, :, sample], whitener,
+        kernel, data[row, :, sample], whitener,
     )
     fast_pos_m, fast_gof = fast_fit.position_m, fast_fit.gof
 
@@ -850,7 +869,7 @@ def refine_dipole_point(
     sel = [raw.ch_names.index(name) for name in used_channels]
     info = mne.pick_info(raw.info, sel)
     evoked = mne.EvokedArray(
-        data[params.epoch_index][:, lo:hi], info,
+        data[row][:, lo:hi], info,
         tmin=float(times[lo]), nave=1, verbose=False,
     )
     n_jobs = int(cfg.dipole_refine_n_jobs or -1)

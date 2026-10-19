@@ -19,6 +19,7 @@ import type {
   BundleResult,
   CompareResult,
   ContourSlice,
+  MipOutline,
   DipoleBatchResult,
   DipolePoint,
   DipoleRefineResult,
@@ -307,6 +308,12 @@ export const api = {
    * версия ассета уезжает в `?v=`, чтобы браузер не закэшировал старые контуры.
    */
   contourSlice: (url: string, signal?: AbortSignal) => request<ContourSlice>(url, { signal }),
+
+  /**
+   * Обводка glass brain (контур силуэта всех плоскостей, мм MNI).
+   * URL собирает `shared/lib/mriSlices.ts` — версия ассета в `?v=`.
+   */
+  mipOutline: (url: string, signal?: AbortSignal) => request<MipOutline>(url, { signal }),
 
   /** Запуск анализа фоновой задачей (основной вход для UI). */
   createAnalysisJob: (form: FormData, signal?: AbortSignal) =>

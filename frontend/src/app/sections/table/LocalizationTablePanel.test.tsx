@@ -27,7 +27,7 @@ describe('панель раздела «Таблица локализации»'
     useDipoleCalc.setState({
       params: { ...CALC_PARAM_DEFAULTS },
       result: null,
-      error: null,
+      batchError: null,
     })
     useEdfRecording.setState({ recording: null })
     vi.stubGlobal('fetch', mockApiFetch())

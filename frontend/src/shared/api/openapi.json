@@ -2999,6 +2999,105 @@
         }
       }
     },
+    "/api/v1/surface/mri/mip/outline": {
+      "get": {
+        "summary": "Силуэт коры для слоя «Границы мозга» (контур, ETag)",
+        "description": "Замкнутые контуры силуэта коры по плоскостям (мм MNI).\n\nСлой «Границы мозга» рисует **только** эту обводку (доводка 19.10.2026:\nрастровая MIP-подложка убрана — анатомию показывают слои среза МРТ,\nструктур и полей): контур считается из коркового меша ``*.pial`` — те же\nграницы мозга, что даёт ``silhouette=True`` у MNE, а не контур маски тома.\nСтатичен для версии ассета ``silhouette``; недоступные данные fsaverage —\n503, повторный запрос с тем же ``If-None-Match`` — 304.",
+        "operationId": "get_mri_mip_outline_api_v1_surface_mri_mip_outline_get",
+        "parameters": [
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MipOutlineOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/surface/mri/mip/{plane}.png": {
+      "get": {
+        "summary": "Glass-brain MIP проекции (PNG, ETag)",
+        "description": "PNG проекции мозга целиком (MIP яркости тома, серый + альфа).\n\nСтатичная картинка вида (сверху/сбоку/сзади): максимум яркости ``T1`` вдоль\nоси проекции внутри маски мозга — любая анатомия любого среза укладывается\nв её границы. Самостоятельный ассет: слой «Границы мозга» с 19.10.2026\nрисует только векторную обводку силуэта (``/mip/outline``), без растровой\nподложки. Версия в ETag — версия тома (код MIP от тома не зависит).\nНеизвестная плоскость — 404, недоступный том — 503, повторный запрос с тем\nже ``If-None-Match`` — 304.",
+        "operationId": "get_mri_mip_api_v1_surface_mri_mip__plane__png_get",
+        "parameters": [
+          {
+            "name": "plane",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plane"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/surface/mri/volume/{name}": {
       "get": {
         "summary": "Том fsaverage как есть (3D-вид Niivue, ETag)",
@@ -16053,27 +16152,6 @@
             },
             "type": "array",
             "title": "Areas"
-          },
-          "head": {
-            "anyOf": [
-              {
-                "items": {
-                  "items": {
-                    "items": {
-                      "type": "number"
-                    },
-                    "type": "array"
-                  },
-                  "type": "array"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Head",
-            "description": "Контуры силуэта головы (маска `seghead.mgz`) — замкнутые полигоны в мм MNI по осям плоскости; `null` — ассета нет (UI рисует условную фикстуру), `[]` — на срезе нет вокселей головы"
           }
         },
         "type": "object",
@@ -16553,6 +16631,14 @@
             ],
             "title": "N Epochs Used"
           },
+          "bad_epoch_indexes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Bad Epoch Indexes",
+            "description": "Отброшенные эпохи полосы (сетка drop_log); у полос разные краевые буферы фильтра (BAD_edge), поэтому список свой у каждой полосы"
+          },
           "points": {
             "items": {
               "$ref": "#/components/schemas/DipoleBatchPointOut"
@@ -16585,7 +16671,8 @@
         "properties": {
           "epoch_index": {
             "type": "integer",
-            "title": "Epoch Index"
+            "title": "Epoch Index",
+            "description": "Номер эпохи нарезки (0-based) **включая отброшенные BAD_** — позиция в drop_log; он же ключ связи с таблицей эпох БД"
           },
           "time_ms": {
             "type": "number",
@@ -17462,7 +17549,8 @@
         "properties": {
           "epoch_index": {
             "type": "integer",
-            "title": "Epoch Index"
+            "title": "Epoch Index",
+            "description": "Номер эпохи нарезки (0-based) **включая отброшенные BAD_** — позиция в drop_log; он же ключ связи с таблицей эпох БД"
           },
           "time_ms": {
             "type": "number",
@@ -17700,6 +17788,14 @@
             "type": "integer",
             "title": "N Epochs Used",
             "description": "Сколько эпох прошло reject-фильтр"
+          },
+          "bad_epoch_indexes": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Bad Epoch Indexes",
+            "description": "Номера отброшенных эпох (сетка drop_log с непустой причиной: BAD_ или TOO_SHORT); индикатор эпох UI и таймлайн нумеруют эпохи так же"
           },
           "grid_mm": {
             "type": "number",
@@ -20896,6 +20992,39 @@
         "title": "MetaResponse",
         "description": "GET /api/v1/meta — версия схемы, окружение и параметры (для UI и provenance)."
       },
+      "MipOutlineOut": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Версия ассета `silhouette` — для ETag"
+          },
+          "outlines": {
+            "additionalProperties": {
+              "items": {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Outlines",
+            "description": "Замкнутые контуры силуэта по плоскостям (axial/sagittal/coronal): мм MNI по осям плоскости, как в контурах среза; источник — корковая поверхность fsaverage `*.pial`"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "outlines"
+        ],
+        "title": "MipOutlineOut",
+        "description": "Контур силуэта коры — внешние границы мозга на проекциях (мм MNI)."
+      },
       "MriPlaneOut": {
         "properties": {
           "axis": {
@@ -20938,6 +21067,11 @@
             "title": "Slice Url",
             "description": "Базовый URL срезов: ``/slice/{plane}/{mm}.png``"
           },
+          "mip_url": {
+            "type": "string",
+            "title": "Mip Url",
+            "description": "Базовый URL glass-brain MIP (статичный вид мозга целиком): ``/mip/{plane}.png``"
+          },
           "spacing_mm": {
             "type": "number",
             "title": "Spacing Mm",
@@ -20948,6 +21082,7 @@
         "required": [
           "version",
           "slice_url",
+          "mip_url",
           "spacing_mm"
         ],
         "title": "MriSliceRef",

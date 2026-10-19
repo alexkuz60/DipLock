@@ -293,6 +293,7 @@ def run_dipole_batch(
                 },
                 "n_epochs_total": None,
                 "n_epochs_used": None,
+                "bad_epoch_indexes": [],
                 "points": [],
                 "warnings": [str(exc)],
             })
@@ -324,6 +325,9 @@ def run_dipole_batch(
             "kd_basis": kd_basis,
             "n_epochs_total": scan_result.get("n_epochs_total"),
             "n_epochs_used": scan_result.get("n_epochs_used"),
+            # Сетка отброшенных эпох своя у каждой полосы: краевой буфер BAD_edge
+            # зависит от ядра фильтра полосы (одна длина эпохи на прогон, п.7).
+            "bad_epoch_indexes": scan_result.get("bad_epoch_indexes") or [],
             "points": enriched,
             "warnings": band_warnings,
         })

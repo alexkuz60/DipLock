@@ -22,7 +22,7 @@ import {
   type ProjectionPlane,
 } from '@/shared/lib/mriProjections'
 import { MRI_SLICE_UNAVAILABLE } from '@/shared/lib/mriSlices'
-import type { MriSliceRef } from '@/shared/api/types'
+import type { MipOutline, MriSliceRef } from '@/shared/api/types'
 import {
   DIPOLE_ARROW_PX,
   DIPOLE_DOT_GROWTH_PX,
@@ -57,6 +57,7 @@ function visible(overrides: Partial<Record<DipoleLayerId, boolean>> = {}) {
 const MRI_REF: MriSliceRef = {
   version: 'v1',
   slice_url: '/api/v1/surface/mri/slice',
+  mip_url: '/api/v1/surface/mri/mip',
   spacing_mm: 1,
 }
 
@@ -151,9 +152,9 @@ describe('проекция мозга', () => {
   })
 
   it('рисует включённые слои и убирает выключенные', () => {
-    renderProjection('axial', { visibility: visible({ head: false, brodmann: false }) })
+    renderProjection('axial', { visibility: visible({ brain: false, brodmann: false }) })
 
-    expect(screen.queryByTestId('layer-head-axial')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('layer-brain-axial')).not.toBeInTheDocument()
     expect(screen.queryByTestId('layer-brodmann-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('layer-mni-axial')).toBeInTheDocument()
     expect(screen.getByTestId('layer-dipoles-axial')).toBeInTheDocument()
@@ -892,48 +893,61 @@ describe('контуры атласа в проекции', () => {
 })
 
 /**
- * Силуэт головы (срез 3.5): реальные полигоны `head` из ответа контуров.
- * Условная фикстура-эллипс удалена (17.10.2026): `null` ассета и пустой список
- * (на срезе нет вокселей) оба означают «слой не рисуется».
+ * Границы мозга (срез 3.12, доводка 19.10.2026): только статичная белая
+ * обводка внешнего силуэта коры, плавной линией, без MIP-подложки (анатомию
+ * показывают свои слои) и независимо от среза.
  */
-describe('силуэт головы в проекции', () => {
-  /** Реальный контур: квадрат в мм MNI по осям аксиальной плоскости. */
-  const HEAD_HULLS = [
-    [
-      [-70, -90],
-      [70, -90],
-      [70, 60],
-      [-70, 60],
-    ],
-  ]
+describe('границы мозга в проекции', () => {
+  /** Контур силуэта: квадрат в мм MNI по осям каждой плоскости. */
+  const OUTLINE: MipOutline = {
+    version: 'v1',
+    outlines: {
+      axial: [[[-70, -90], [70, -90], [70, 60], [-70, 60]]],
+      sagittal: [[[-90, -70], [60, -70], [60, 70], [-90, 70]]],
+      coronal: [[[-70, -70], [70, -70], [70, 70], [-70, 70]]],
+    },
+  }
 
-  it('рисует реальный контур head из ответа контуров', () => {
-    renderProjection('axial', { contours: contourSliceFixture({ head: HEAD_HULLS }) })
+  it('рисует только белую обводку силуэта — плавной линией, без картинки', () => {
+    renderProjection('axial', { mri: MRI_REF, mipOutline: OUTLINE })
 
-    const layer = screen.getByTestId('layer-head-axial')
-    const polygon = layer.querySelector('polygon')
-    expect(polygon).not.toBeNull()
-    // Полигон содержит углы квадрата (в пикселях), а не фикстурный эллипс
-    expect(polygon?.getAttribute('points')).toContain(',')
-    expect(polygon).toHaveAttribute('fill-rule', 'evenodd')
+    const layer = screen.getByTestId('layer-brain-axial')
+    // MIP-подложки больше нет: внутреннюю анатомию показывают свои слои
+    expect(layer.querySelector('image')).toBeNull()
+    // Обводка — контур силуэта цветом переднего плана (в тёмной теме — белый)
+    const outline = layer.querySelector('path')
+    expect(outline).not.toBeNull()
+    expect(outline).toHaveAttribute('stroke', 'var(--color-fg-0)')
+    expect(outline).toHaveAttribute('fill', 'none')
+    // Плавная линия: замкнутый сплайн (кривые Безье), а не «лестничная» ломаная
+    const d = outline?.getAttribute('d') ?? ''
+    expect(d).toMatch(/^M [\d.]+ [\d.]+/)
+    expect(d).toContain(' C ')
+    expect(d).not.toContain(' L ')
   })
 
-  it('пустой список head — на срезе нет вокселей головы: слой не рисуется', () => {
-    renderProjection('axial', { contours: contourSliceFixture({ head: [] }) })
+  it('не зависит от среза и контуров: силуэт мозга целиком, свой у каждой плоскости', () => {
+    renderProjection('sagittal', {
+      mri: MRI_REF,
+      mipOutline: OUTLINE,
+      contours: contourSliceFixture(),
+    })
 
-    expect(screen.queryByTestId('layer-head-axial')).not.toBeInTheDocument()
+    const outline = screen.getByTestId('layer-brain-sagittal').querySelector('path')
+    expect(outline).not.toBeNull()
+    expect(outline?.getAttribute('d')).toMatch(/^M [\d.]+ [\d.]+/)
   })
 
-  it('head: null (ассета seghead нет) — условной фикстуры нет, слой пуст', () => {
-    renderProjection('axial', { contours: contourSliceFixture({ head: null }) })
+  it('без данных обводки и выключенный слой — вида нет', () => {
+    renderProjection('coronal', { mri: MRI_REF })
+    expect(screen.queryByTestId('layer-brain-coronal')).not.toBeInTheDocument()
 
-    expect(screen.queryByTestId('layer-head-axial')).not.toBeInTheDocument()
-  })
-
-  it('без контуров вовсе (null) — слой силуэта тоже пуст', () => {
-    renderProjection('axial')
-
-    expect(screen.queryByTestId('layer-head-axial')).not.toBeInTheDocument()
+    renderProjection('coronal', {
+      mri: MRI_REF,
+      mipOutline: OUTLINE,
+      visibility: visible({ brain: false }),
+    })
+    expect(screen.queryByTestId('layer-brain-coronal')).not.toBeInTheDocument()
   })
 })
 

@@ -4,9 +4,10 @@
  * Раздел показывает **геометрию и результат**: реальный срез T1 (картинка с
  * сервера), силуэт головы, схему среза MNI, поля Бродмана и точки диполей из
  * результата задачи (быстрый режим, `shared/lib/dipolePoints.ts`). Расчёт идёт
- * **только по кнопке в шапке** (`POST /recordings/{id}/dipoles`), правка
- * параметров панели ничего не запускает — она лишь скрывает/показывает уже
- * посчитанные точки (пороги отображения: GOF % и момент нА·м) и наводит срезы.
+ * **только по кнопке в шапке** (`POST /recordings/{id}/dipole_batch`, все полосы
+ * каталога), правка параметров панели ничего не запускает — она лишь
+ * скрывает/показывает уже посчитанные точки (пороги отображения: GOF % и момент
+ * нА·м) и наводит срезы.
  *
  * Запросы раздела: `/meta` за ссылками на статику (срезы МРТ и контуры атласа) и —
  * по кнопке — задачи расчёта. Пороги отображения («GOF ≥ X %» — основной,
@@ -33,8 +34,10 @@
  *
  * **Пояснений в рабочей области нет** (поправка ручной проверки): абзац о том, как
  * читать фигуры, переехал в диалог «Справка» (`DipolesHelpDialog`, кнопка в
- * тулс-хедере). Рабочая область показывает данные — геометрию, результат и
- * полосу состояния с числами; объяснения читаются по запросу и не съедают экран.
+ * тулс-хедере). Числа живут в элементах тулс-хедера и панели «Опции» — рабочая
+ * область показывает только данные (геометрию и результат), объяснения читаются
+ * по запросу и не съедают экран. Готовность/BAD/выбор эпох — второй ряд шапки
+ * (`EpochDipoleStrip`): клик по ячейке показывает пакет диполей своей эпохи.
  *
  * Воспроизведение траектории (срез 3.7) — режим **просмотра**: часы кадра
  * (`PlaybackFrame.tsx`) идут по сетке эпох результата и интерполируют позицию и
@@ -49,25 +52,19 @@ import {
   PROJECTION_PLANES,
   applyPointToSlices,
   projectionBox,
-  slicesSummary,
 } from '@/shared/lib/mriProjections'
 import {
-  CONTOURS_METHOD_HINT,
   contourSliceUrl,
-  contourSummary,
 } from '@/shared/lib/atlasContours'
+import { mriMipOutlineUrl } from '@/shared/lib/mriSlices'
 import { batchDipoleLayer } from '@/shared/lib/dipoleBatch'
 import {
   type DisplayThresholds,
   dipoleLayerFromScan,
-  dipoleLayerStatus,
   dipolePointTitle,
   emptyDipoleLayer,
-  hiddenByThreshold,
   withOverlapCounts,
   thresholdDipoleLayer,
-  thresholdsActive,
-  thresholdsLabel,
 } from '@/shared/lib/dipolePoints'
 import { api } from '@/shared/api/client'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
@@ -141,12 +138,14 @@ export function DipolesSection() {
   /**
    * Контуры атласа по срезу каждой плоскости (срез 3.9). Это **статические
    * ассеты**, а не обработка: запросы идут только когда слои структур/полей/
-   * силуэта головы включены (силуэт — поле `head` того же ответа, срез 3.5),
-   * срез квантуется к сетке атласа, а версия ассета — ключ кэша
-   * браузера. Пустой ответ — «на срезе метки нет», и он не подменяется фикстурой.
+   * Контуры запрашиваются, когда включён хотя бы один слой, который из них
+   * рисуется (анатомия, поля Бродмана); слой «Границы мозга» статичен и
+   * контуров не ждёт (срез 3.12, доводка), срез квантуется к сетке атласа,
+   * а версия ассета — ключ кэша браузера. Пустой ответ — «на срезе метки нет»,
+   * и он не подменяется фикстурой.
    */
   const contoursEnabled =
-    contoursRef !== null && (visibility.anatomy || visibility.brodmann || visibility.head)
+    contoursRef !== null && (visibility.anatomy || visibility.brodmann)
   const contourQueries = useQueries({
     queries: PROJECTION_PLANES.map((plane) => ({
       queryKey: ['contours', plane, slices[plane], contoursRef?.version ?? 'none'],
@@ -157,26 +156,15 @@ export function DipolesSection() {
       retry: false,
     })),
   })
-  const contoursMissing = contoursEnabled && contourQueries.some((query) => query.isError)
-  const contoursLoading = contoursEnabled && contourQueries.some((query) => query.isLoading)
-  const contoursCount = contourQueries.reduce(
-    (total, query) => {
-      const summary = contourSummary(query.data ?? null)
-      return { structures: total.structures + summary.structures, areas: total.areas + summary.areas }
-    },
-    { structures: 0, areas: 0 },
-  )
-  /**
-   * Подпись структуры под выбранной точкой: хранится её **id** (метка состояния —
-   * машиночитаемая), а показывается человеческое имя из того среза, где структура
-   * нашлась. Если срезы уехали и структуры на них нет — честно показываем id.
-   */
-  const selectedStructureLabel = selection.structure
-    ? ((contourQueries
-        .flatMap((query) => query.data?.structures ?? [])
-        .find((shape) => shape.id === selection.structure)?.label) ?? selection.structure)
-    : null
-
+  /** Обводка glass brain (слой «Границы мозга»): силуэт коры `*.pial` по плоскостям. */
+  const mipOutlineQuery = useQuery({
+    queryKey: ['mip-outline', mri?.version ?? 'none'],
+    queryFn: ({ signal }: { signal: AbortSignal }) =>
+      api.mipOutline(mriMipOutlineUrl(mri as NonNullable<typeof mri>), signal),
+    enabled: visibility.brain && mri !== null,
+    staleTime: 300_000,
+    retry: false,
+  })
   /**
    * Слой диполей из результата задачи. У пакета (С1) облако — точки **всех
    * отмеченных полос** (`playbackBandKeys`) в полосных цветах (п.1.4 17.10.2026);
@@ -205,18 +193,25 @@ export function DipolesSection() {
    * векторы и анимация от этого не меняются — это производное число для отрисовки.
    */
   const displayLayer = useMemo(() => withOverlapCounts(visibleLayer), [visibleLayer])
-  const hidden = hiddenByThreshold(layer, thresholds)
   /**
-   * Точки без MNI (fsaverage недоступен) — по **исходному** числу точок того же
-   * набора (у пакета — сумма только отмеченных полос, иначе счётчик врал бы про
-   * снятые чекбоксы).
+   * Выбранная эпоха индикатора эпох (3.3, `EpochDipoleStrip`): проекции и 3D
+   * показывают **пакет диполей** этой эпохи — точки всех отображаемых полос
+   * одним слоем. Выбор — состояние просмотра (расчёт не запускает и не
+   * устаревает), снимается повторным кликом по ячейке.
    */
-  const rawPointCount = batch
-    ? (batch.bands ?? [])
-        .filter((band) => playbackBandKeys.includes(band.band_key))
-        .reduce((total, band) => total + (band.points?.length ?? 0), 0)
-    : (result?.points?.length ?? 0)
-  const mniMissing = rawPointCount > 0 && layer.points.length < rawPointCount
+  const selectedEpochIndex = useDipoleCalc((state) => state.selectedEpochIndex)
+  const epochLayer = useMemo(
+    () =>
+      selectedEpochIndex === null
+        ? displayLayer
+        : {
+            ...displayLayer,
+            points: displayLayer.points.filter(
+              (point) => point.epochIndex === selectedEpochIndex,
+            ),
+          },
+    [displayLayer, selectedEpochIndex],
+  )
   /**
    * Выделенный диполь ищем в **полном** слое, а не в отфильтрованном порогами:
    * пороги отображения управляют только отрисовкой, и уже выделенная точка не должна
@@ -241,60 +236,6 @@ export function DipolesSection() {
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusPill tone={visibleLayer.points.length ? 'ok' : 'neutral'}>
-          {dipoleLayerStatus(visibleLayer)}
-        </StatusPill>
-        {result ? (
-          <StatusPill tone="accent" title={`Метод расчёта: ${result.method}`}>
-            {`Быстрый режим, сетка ${result.grid_mm} мм · эпох ${result.n_epochs_used} из ${result.n_epochs_total}`}
-          </StatusPill>
-        ) : null}
-        {hidden > 0 ? (
-          <StatusPill tone="warn">{`Скрыто порогами «${thresholdsLabel(thresholds)}»: ${hidden}`}</StatusPill>
-        ) : null}
-        {thresholdsActive(thresholds) ? (
-          <StatusPill tone="neutral">{`Пороги отображения: ${thresholdsLabel(thresholds)}`}</StatusPill>
-        ) : null}
-        {mniMissing ? (
-          <StatusPill tone="warn">
-            Часть точек без MNI (fsaverage недоступен) — на проекции не попадают
-          </StatusPill>
-        ) : null}
-        <StatusPill tone="accent">Срезы: {slicesSummary(slices)}</StatusPill>
-        <StatusPill tone={mri ? 'ok' : meta.isLoading ? 'neutral' : 'warn'}>
-          {mri
-            ? `МРТ: срез T1, сетка ${mri.spacing_mm} мм`
-            : meta.isLoading
-              ? 'МРТ: запрашиваю метаданные…'
-              : 'МРТ: метаданные недоступны'}
-        </StatusPill>
-        {selection.area ? (
-          <StatusPill tone="ok">Поле под точкой: {selection.area}</StatusPill>
-        ) : null}
-        {selectedStructureLabel ? (
-          <StatusPill tone="accent" title="Структура атласа aparc+aseg под выбранной точкой">
-            {`Структура под точкой: ${selectedStructureLabel}`}
-          </StatusPill>
-        ) : null}
-        {/*
-          Контуры атласа — статический ассет: подпись говорит, сколько меток пришло
-          на текущие срезы, и честно молчит о производности BA-разметки (подсказка).
-        */}
-        <StatusPill
-          tone={contoursMissing || contoursRef === null ? 'warn' : contoursLoading ? 'neutral' : 'ok'}
-          title={CONTOURS_METHOD_HINT}
-        >
-          {contoursRef === null
-            ? 'Контуры атласа: метаданные недоступны'
-            : contoursMissing
-              ? 'Контуры атласа недоступны'
-              : contoursLoading
-                ? 'Контуры атласа: запрашиваю срезы…'
-                : `Атлас: структур ${contoursCount.structures}, полей ${contoursCount.areas}`}
-        </StatusPill>
-      </div>
-
       {/*
         Выделенный диполь: клик по точке в любой проекции выделяет его во всех
         трёх. Строка нужна, чтобы у выбора была читаемая подпись (а не только
@@ -345,7 +286,7 @@ export function DipolesSection() {
       {view3d ? (
         <Brain3D
           volumes={volumesRef}
-          layer={displayLayer}
+          layer={epochLayer}
           cursor={projectionCursor}
           onCursor={setProjectionCursor}
         />
@@ -358,12 +299,13 @@ export function DipolesSection() {
                 plane={plane}
                 slices={slices}
                 visibility={visibility}
-                points={displayLayer}
+                points={epochLayer}
                 gridMm={result?.grid_mm ?? 0}
                 dimmed={playbackActive}
                 selectedArea={selection.area}
                 selectedStructure={selection.structure}
                 contours={contourQueries[index]?.data ?? null}
+                mipOutline={mipOutlineQuery.data ?? null}
                 selectedPointId={selectedPointId}
                 onSelectPoint={(id) => (id ? toggleSelectedPoint(id) : clearSelectedPoint())}
                 reference={selection.point}

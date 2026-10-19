@@ -7,11 +7,9 @@
  * zustand. Состояние и действия — `shared/state/dipoleCalc.test.ts`.
  */
 import { describe, expect, it } from 'vitest'
-import { BANDWIDTH_RANGE, SINGLE_FREQ_RANGE } from '@/shared/lib/calcFilter'
 import {
   CALC_PARAM_DEFAULTS,
   REFINE_HALFWIN_OPTIONS,
-  buildDipoleForm,
   buildRefineForm,
   epochIndexOfPointId,
   buildSpectrumForm,
@@ -37,93 +35,52 @@ function formEntries(form: FormData): Record<string, string> {
 }
 
 describe('домен расчёта диполей: формы, отпечатки и нормализация', () => {
-  it('собирает формы задач из параметров: без выдуманных значений', () => {
-    expect(formEntries(buildDipoleForm(CALC_PARAM_DEFAULTS))).toEqual({
-      band_min: '0.5',
-      band_max: '128',
-      epoch_length_ms: '1000',
-      grid_mm: '7',
-    })
-    // Спектр считается с той же полосой, но без шага сетки (он не нужен PSD);
-    // метод PSD уходит только спектру (N17)
+  it('собирает форму спектра из параметров: без выдуманных значений', () => {
+    // Спектр считается по всему диапазону записи (полоса фильтра одиночного
+    // расчёта убрана), без шага сетки (он не нужен PSD); метод PSD — только
+    // спектру (N17)
     expect(formEntries(buildSpectrumForm(CALC_PARAM_DEFAULTS))).toEqual({
-      band_min: '0.5',
-      band_max: '128',
       epoch_length_ms: '1000',
       psd_method: 'welch',
     })
     expect(formEntries(buildSpectrumForm({ ...CALC_PARAM_DEFAULTS, psdMethod: 'multitaper' }))).toEqual({
-      band_min: '0.5',
-      band_max: '128',
       epoch_length_ms: '1000',
       psd_method: 'multitaper',
     })
   })
 
-  it('кладёт выбранную полосу и сетевой фильтр в формы обеих задач (срез 3.6)', () => {
-    const params: CalcParams = { ...CALC_PARAM_DEFAULTS, filterBandHz: [8, 13], notchHz: 50 }
+  it('кладёт сетевой фильтр в форму спектра (срез 3.6)', () => {
+    const params: CalcParams = { ...CALC_PARAM_DEFAULTS, notchHz: 50 }
 
-    expect(formEntries(buildDipoleForm(params))).toMatchObject({
-      band_min: '8',
-      band_max: '13',
-      notch_hz: '50',
-    })
-    // Спектр и диполи считаются на одной полосе: иначе топокарты и точки были бы из разных расчётов
     expect(formEntries(buildSpectrumForm(params))).toMatchObject({
-      band_min: '8',
-      band_max: '13',
       notch_hz: '50',
     })
-    // «Без фильтра» — отсутствие пары границ, а не «0–0»
-    expect(formEntries(buildDipoleForm({ ...params, filterBandHz: null }))).not.toHaveProperty(
-      'band_min',
+    // «Без фильтра» — отсутствие значения, а не «0»
+    expect(formEntries(buildSpectrumForm({ ...params, notchHz: null }))).not.toHaveProperty(
+      'notch_hz',
     )
   })
 
-  it('нормализует параметры расчёта перед использованием (срез 3.6)', () => {
+  it('нормализует параметры расчёта и отбрасывает устаревшие поля формы фильтра', () => {
     const params = normalizeCalcParams({
       ...CALC_PARAM_DEFAULTS,
-      // «Без фильтра» с непустой полосой и числа вне границ контролов
-      filterPreset: 'none',
-      filterBandHz: [20, 5],
+      // Поля удалённой формы фильтра одиночного расчёта — их место не в задаче
+      ...( { filterPreset: 'none', filterBandHz: [20, 5], singleFreqHz: 999, bandwidthHz: 0 } as object),
       notchHz: 55,
-      singleFreqHz: 999,
-      bandwidthHz: 0,
       gridMm: 50,
       epochLengthMs: 500.4,
-    })
+    } as CalcParams)
 
-    expect(params.filterBandHz).toEqual([5, 20])
     expect(params.notchHz).toBe(50)
-    expect(params.singleFreqHz).toBe(SINGLE_FREQ_RANGE[1])
-    expect(params.bandwidthHz).toBe(BANDWIDTH_RANGE[0])
     expect(params.gridMm).toBe(20)
     expect(params.epochLengthMs).toBe(500)
-    // Пресет восстановлен из полосы: полосу с такими границами задают руками
-    expect(params.filterPreset).toBe('custom')
-  })
-
-  it('сводит полосу и пресет: пустая полоса — только у «без фильтра» (срез 3.6)', () => {
-    const noFilter = normalizeCalcParams({
-      ...CALC_PARAM_DEFAULTS,
-      filterBandHz: null,
+    // Устаревшие поля просто отброшены: хранить/переносить их незачем
+    expect(params).toEqual({
+      notchHz: 50,
+      gridMm: 20,
+      epochLengthMs: 500,
+      psdMethod: CALC_PARAM_DEFAULTS.psdMethod,
     })
-    expect(noFilter.filterPreset).toBe('none')
-
-    const wide = normalizeCalcParams({
-      ...CALC_PARAM_DEFAULTS,
-      filterPreset: 'none',
-      filterBandHz: [0.5, 128],
-    })
-    expect(wide.filterPreset).toBe('band_1_40')
-
-    // Неизвестный пресет (сохранённый другой версией UI) не ломает форму
-    const unknown = normalizeCalcParams({
-      ...CALC_PARAM_DEFAULTS,
-      filterPreset: 'gamma_2' as never,
-      filterBandHz: [5, 20],
-    })
-    expect(unknown.filterPreset).toBe('custom')
   })
 
   it('переводит статус задачи сервера в состояние панели', () => {
@@ -140,14 +97,14 @@ describe('домен расчёта диполей: формы, отпечатк
     const result = dipoleScanResultFixture()
 
     // Результат фикстуры посчитан на параметрах по умолчанию: сетка 7 мм,
-    // полоса 0.5–128 Гц (широкий), reject 150 мкВ — расхождения быть не должно
+    // длина эпохи 1000 мс — расхождения быть не должно. Полоса фильтра в
+    // отпечатке не живёт: у пакета своя полоса у каждой точки, а не у формы
     expect(resultSignature(result)).toBe(calcSignature(CALC_PARAM_DEFAULTS))
     expect(resultMatchesParams(result, CALC_PARAM_DEFAULTS)).toBe(true)
 
     // Правка любого параметра расчёта делает старый результат «посчитанным
     // на других настройках»: таблица обязана об этом сказать, а не молчать
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, gridMm: 12 })).toBe(false)
-    expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, filterBandHz: null })).toBe(false)
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, notchHz: 50 })).toBe(false)
     expect(resultMatchesParams(result, { ...CALC_PARAM_DEFAULTS, epochLengthMs: 500 })).toBe(false)
   })

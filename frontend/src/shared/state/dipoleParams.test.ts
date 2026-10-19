@@ -82,14 +82,14 @@ describe('состояние раздела «Диполи»', () => {
 
   it('сбрасывает срезы с точкой и возвращает всё по умолчанию', () => {
     useDipoleParams.getState().setSlice('axial', 40)
-    useDipoleParams.getState().setLayerVisible('head', false)
+    useDipoleParams.getState().setLayerVisible('brain', false)
     useDipoleParams.getState().selectPoint({ x: 0, y: 0, z: 40 }, 'BA6', {})
 
     useDipoleParams.getState().resetSlices()
     expect(useDipoleParams.getState().params.slices).toEqual(defaultSlices())
     expect(useDipoleParams.getState().selection).toEqual(EMPTY_SELECTION)
     // Слои — предпочтения просмотра, сброс срезов их не трогает
-    expect(useDipoleParams.getState().params.layerVisibility.head).toBe(false)
+    expect(useDipoleParams.getState().params.layerVisibility.brain).toBe(false)
 
     useDipoleParams.getState().resetAll()
     expect(useDipoleParams.getState().params.layerVisibility).toEqual(

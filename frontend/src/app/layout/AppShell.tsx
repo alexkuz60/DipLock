@@ -36,6 +36,8 @@ export type AppShellProps = {
   actions?: ReactNode
   /** Вторичные действия тулс-хедера (у правого края) */
   headerExtra?: ReactNode
+  /** Второй ряд тулс-хедера (полоса на всю ширину основной области) */
+  headerStrip?: ReactNode
   /** Выдвижная панель раздела: полоса между тулс-хедером и рабочей областью */
   drawer?: ReactNode
   /** Содержимое правого сайдбара */
@@ -49,6 +51,7 @@ export function AppShell({
   titleAfter,
   actions,
   headerExtra,
+  headerStrip,
   drawer,
   panel,
 }: AppShellProps) {
@@ -107,6 +110,7 @@ export function AppShell({
             titleAfter={titleAfter}
             actions={actions}
             secondary={headerExtra}
+            strip={headerStrip}
           />
         ) : null}
         {/*

@@ -199,6 +199,30 @@ class MriVolume:
         gray, alpha = self.slice(plane, index)
         return encode_png_gray8(gray, alpha), actual_mm
 
+    def mip(self, plane: str) -> tuple[np.ndarray, np.ndarray]:
+        """Glass-brain MIP: максимум яркости вдоль оси нормали (раскладка UI).
+
+        Раскладка та же, что у :meth:`slice` (столбцы — горизонтальная ось,
+        ``[0, 0]`` — верхний левый угол фигуры). Проекция показывает мозг
+        **целиком** с анатомической текстурой внутри: любая анатомия любого
+        среза по построению укладывается в её границы (срез 3.12). Ассет
+        самостоятельный: слой «Границы мозга» с 19.10.2026 рисует только
+        векторную обводку силуэта, без растровой подложки.
+        """
+        normal_pos = _AXIS_POS[PLANE_AXIS[plane]]
+        gray = np.transpose(np.max(self.gray, axis=normal_pos))
+        alpha = np.transpose(np.max(self.alpha, axis=normal_pos))
+        if PLANE_VERTICAL_SIGN[plane] == 1:
+            gray, alpha = gray[::-1], alpha[::-1]
+        if PLANE_HORIZONTAL_SIGN[plane] == -1:
+            gray, alpha = gray[:, ::-1], alpha[:, ::-1]
+        return gray.copy(), alpha.copy()
+
+    def mip_png(self, plane: str) -> bytes:
+        """PNG glass-brain MIP (серый + альфа) в раскладке проекций UI."""
+        gray, alpha = self.mip(plane)
+        return encode_png_gray8(gray, alpha)
+
 
 @dataclass(frozen=True)
 class _MriCtx:
@@ -431,11 +455,24 @@ def slice_png(settings: Settings, plane: str, mm: float) -> tuple[bytes, str, fl
     return data, volume.version, actual_mm
 
 
+def mip_png(settings: Settings, plane: str) -> tuple[bytes, str]:
+    """PNG glass-brain MIP проекции + версия ассета.
+
+    Неизвестная плоскость — ``ValueError`` (роут отдаёт 404): список плоскостей
+    объявлен контрактом, и «на всякий случай» рисовать нечего.
+    """
+    if plane not in PLANES:
+        raise ValueError(f"Неизвестная плоскость проекции: {plane!r} (есть {', '.join(PLANES)})")
+    volume = load_volume(_MriCtx.from_settings(settings))
+    return volume.mip_png(plane), volume.version
+
+
 def slice_ref(settings: Settings) -> dict[str, Any]:
-    """Ссылка на срезы для ``/meta``: версия, базовый URL, шаг сетки (без тома)."""
+    """Ссылка на срезы для ``/meta``: версия, базовые URL, шаг сетки (без тома)."""
     return {
         "version": asset_version(settings),
         "slice_url": f"{settings.api_prefix}/surface/mri/slice",
+        "mip_url": f"{settings.api_prefix}/surface/mri/mip",
         "spacing_mm": MRI_SPACING_MM,
     }
 

@@ -31,12 +31,12 @@ export function DipolesOverviewArticle() {
       <WikiTable head={['Элемент', 'Что делает']}>
         <tr className="border-b border-border">
           <td className="px-3 py-2 font-medium whitespace-nowrap text-fg-0">
-            Рассчитать диполи
+            Рассчитать пакет
           </td>
           <td className="px-3 py-2">
-            Ставит задачу расчёта (значок связанных узлов); во время работы показывает прогресс по
-            этапам и эпохам «эпох N из M» и кнопку отмены. Без загруженной записи кнопка
-            выключена с подсказкой «сначала загрузите EDF».
+            Ставит задачу пакетного расчёта по всем полосам каталога (значок связанных узлов); во
+            время работы показывает прогресс по этапам и эпохам «эпох N из M» и кнопку отмены. Без
+            загруженной записи кнопка выключена с подсказкой «сначала загрузите EDF».
           </td>
         </tr>
         <tr className="border-b border-border">
@@ -86,8 +86,8 @@ export function DipolesOverviewArticle() {
         <tr className="border-b border-border">
           <td className="px-3 py-2 font-medium whitespace-nowrap text-fg-0">Кластер кадра</td>
           <td className="px-3 py-2">
-            Play/pause (<Kbd>Space</Kbd>), покадрово ‹ ›, скорость ×0.25…×4, «Снять кадр» —
-            воспроизведение траектории,{' '}
+            Play/pause (<Kbd>Space</Kbd>), скорость ×0.25…×4, «Снять кадр» — воспроизведение
+            траектории; кадр перематывается кликом по ячейке индикатора эпох (второй ряд шапки),{' '}
             <WikiLink to="dipole-playback">отдельная статья</WikiLink>.
           </td>
         </tr>
@@ -159,9 +159,11 @@ export function DipolesOverviewArticle() {
           </td>
         </tr>
         <tr className="border-b border-border">
-          <td className="px-3 py-2 font-medium whitespace-nowrap text-fg-0">Силуэт головы</td>
+          <td className="px-3 py-2 font-medium whitespace-nowrap text-fg-0">Границы мозга</td>
           <td className="px-3 py-2">
-            Реальный контур кожи (seghead.mgz); без ассета — условная фикстура.
+            Статичная белая обводка внешнего силуэта коры fsaverage (как в glass brain
+            nilearn): только внешние границы мозга, плавной линией и одинаковые для любых
+            срезов. Внутреннюю анатомию показывают срез МРТ, структуры и поля Бродмана.
           </td>
         </tr>
         <tr className="border-b border-border">

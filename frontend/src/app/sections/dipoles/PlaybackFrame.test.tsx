@@ -168,13 +168,13 @@ describe('часы воспроизведения траектории', () => {
     expect(frameText()).toBe('3000|0.000|2-60')
   })
 
-  it('переносит кадр по команде «покадрово» и ставится на паузу', () => {
+  it('переносит кадр по команде перемотки (клик по ячейке индикатора) и ставится на паузу', () => {
     setResult({ playing: true })
     renderClock()
 
     advance(500)
     act(() => {
-      useDipoleCalc.getState().stepPlaybackEpoch(2)
+      useDipoleCalc.getState().seekPlaybackEpoch(2)
     })
 
     // Часы увидели команду (`seekSeq`) и встали на начало новой эпохи

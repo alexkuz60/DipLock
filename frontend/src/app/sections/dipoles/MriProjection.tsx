@@ -57,8 +57,8 @@
  *
  * Условные фигуры первой версии удалены (17.10.2026): эллипсы схемы среза
  * (`demoSliceStructures`) и эллипс-силуэт головы (`demoHeadContours`) больше не
- * рисуются — анатомию и границу головы показывают только реальные ассеты
- * (срез МРТ, контуры атласа, `seghead.mgz`), и без них слои честно пусты.
+ * рисуются — анатомию и границу мозга показывают только реальные ассеты
+ * (срез МРТ, контуры атласа, маска `aparc+aseg`), и без них слои честно пусты.
  *
  * Компонент **не управляет состоянием раздела**: срезы, видимость слоёв,
  * ссылка на срезы МРТ и референс-точка приходят пропсами из `DipolesSection`, а
@@ -72,7 +72,6 @@ import {
   PROJECTION_PADDING,
   coordsLabel,
   mniToNormalized,
-  normalizedToPx,
   planeEdgeLabels,
   planeGridLines,
   pointFromProjectionClick,
@@ -90,8 +89,8 @@ import {
 // удалены (17.10.2026): панель закрыта реальными срезами/контурами атласа, и
 // модуль-заглушка `mriDemoShapes.ts` удалён целиком.
 import { MRI_SLICE_UNAVAILABLE, mriSliceRect, mriSliceUrl } from '@/shared/lib/mriSlices'
-import { contourPointToNormalized, shapeAtPoint } from '@/shared/lib/atlasContours'
-import type { ContourSlice, MriSliceRef } from '@/shared/api/types'
+import { shapeAtPoint } from '@/shared/lib/atlasContours'
+import type { ContourSlice, MipOutline, MriSliceRef } from '@/shared/api/types'
 import {
   DIPOLE_DOT_STROKE_PX,
   DIPOLE_RAY_STROKE_PX,
@@ -112,7 +111,7 @@ import {
   AnatomyLayer,
   BrodmannLayer,
   DipoleDotsLayer,
-  HeadLayer,
+  BrainLayer,
   MniLayer,
   MriLayer,
   VectorLayer,
@@ -172,6 +171,12 @@ export type MriProjectionProps = {
    * рисуется: раздел не догадывается о версии тома сам, её объявляет сервер.
    */
   mri?: MriSliceRef | null
+  /**
+   * Обводка силуэта коры (контур всех плоскостей, мм MNI) — статичные белые
+   * границы мозга: единственное содержимое слоя «Границы мозга» (без
+   * MIP-подложки, доводка 19.10.2026).
+   */
+  mipOutline?: MipOutline | null
   /** Клик по срезу: точка MNI в плоскости среза + поле и структура под кликом */
   onPick?: (point: MniVector, area: string | null, structure: string | null) => void
   className?: string
@@ -195,6 +200,7 @@ export function MriProjection({
   cursor = null,
   onCursorChange,
   mri = null,
+  mipOutline = null,
   onPick,
   className,
   style,
@@ -254,27 +260,6 @@ export function MriProjection({
   const mriShown = mriHref !== null && mriHref !== failedHref
   const mriFailed = mriHref !== null && mriHref === failedHref
   const imageRect = mriSliceRect(plane)
-
-  /**
-   * Силуэт головы: **реальные** полигоны `head` из ответа контуров (срез 3.5).
-   * Условная фикстура-эллипс удалена (17.10.2026): `null` ассета и «на срезе нет
-   * вокселей головы» теперь оба означают «слой пуст» — подменять их нечем и не
-   * нужно (как у полей Бродмана: без ассета — честная пустота).
-   */
-  const headHulls = contours?.head ?? null
-  const headPolygons = useMemo(() => {
-    if (headHulls === null) return []
-    return headHulls
-      .map((hull) =>
-        hull
-          .map((point) =>
-            normalizedToPx(contourPointToNormalized(plane, point as [number, number]), plane),
-          )
-          .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
-          .join(' '),
-      )
-      .filter((points) => points.length > 0)
-  }, [plane, headHulls])
 
   /**
    * Контуры атласа: `null` — ассета нет (слои анатомии/полей пусты); пустой
@@ -452,7 +437,9 @@ export function MriProjection({
           selectedStructure={selectedStructure}
         />
 
-        <HeadLayer plane={plane} visibility={visibility} polygons={headPolygons} />
+        {/* Границы мозга: только статичная белая обводка силуэта коры
+            (без MIP-подложки, доводка 19.10.2026) */}
+        <BrainLayer plane={plane} visibility={visibility} outline={mipOutline} />
 
         <MniLayer
           plane={plane}

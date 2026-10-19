@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { PROJECTION_PADDING, PROJECTION_PLANES, normalizedToPx, projectionBox } from './mriProjections'
 import {
   MRI_SLICE_UNAVAILABLE,
+  mriMipUrl,
   mriSliceRect,
   mriSliceUrl,
   sliceImageMm,
@@ -19,6 +20,7 @@ import {
 const REF = {
   version: 'abc123',
   slice_url: '/api/v1/surface/mri/slice',
+  mip_url: '/api/v1/surface/mri/mip',
   spacing_mm: 1,
 }
 
@@ -46,6 +48,11 @@ describe('ссылки на срезы МРТ', () => {
     )
     // Дробный срез UI и целый срез тома дают одну картинку — один ключ кэша
     expect(mriSliceUrl(REF, 'sagittal', 12.4)).toBe(mriSliceUrl(REF, 'sagittal', 12))
+  })
+
+  it('собирает URL glass-brain MIP: статичен для версии ассета', () => {
+    expect(mriMipUrl(REF, 'axial')).toBe('/api/v1/surface/mri/mip/axial.png?v=abc123')
+    expect(mriMipUrl(REF, 'sagittal')).toBe('/api/v1/surface/mri/mip/sagittal.png?v=abc123')
   })
 
   it('прямоугольник картинки совпадает с плоскостью фигуры', () => {

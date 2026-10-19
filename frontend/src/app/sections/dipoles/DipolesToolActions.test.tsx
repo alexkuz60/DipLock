@@ -1,11 +1,11 @@
 /**
- * Тесты тулс-хедера раздела «Диполи» (срез 3.4).
+ * Тесты тулс-хедера раздела «Диполи» (срез 3.4 + пакетный сценарий).
  *
- * Проверяется правило «обработка — только по кнопке»: расчёт запускается
- * нажатием и показывается прогрессом по эпохам, пороги отображения
- * («GOF ≥ X %» и «Момент диполя ≥ X нАм») правят
- * отображение (без единого запроса), а кнопки панелей лишь открывают одну
- * выдвижную панель за раз.
+ * Проверяется правило «обработка — только по кнопке»: расчёт пакета (все полосы
+ * каталога) запускается нажатием и показывается прогрессом по эпохам, пороги
+ * отображения («GOF ≥ X %» и «Момент диполя ≥ X нАм») правят отображение (без
+ * единого запроса), а кнопки панелей лишь открывают одну выдвижную панель за раз.
+ * Покадровые кнопки «<»/«>» убраны: кадр перематывает индикатор эпох.
  */
 import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -40,11 +40,11 @@ describe('тулс-хедер раздела «Диполи»', () => {
       amplitudeThresholdNam: 0,
       params: { ...CALC_PARAM_DEFAULTS },
       playback: { ...PLAYBACK_DEFAULTS },
-      job: null,
+      batchJob: null,
       result: null,
       spectrumJob: null,
       spectrum: null,
-      error: null,
+      batchError: null,
       spectrumError: null,
       refineJob: null,
       refiningEpoch: null,
@@ -64,7 +64,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     const fetchSpy = mockApiFetch()
     renderWithProviders(<DipolesToolHeaderActions />)
 
-    const button = screen.getByRole('button', { name: 'Рассчитать диполи' })
+    const button = screen.getByRole('button', { name: 'Рассчитать пакет' })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute('title', expect.stringContaining('загрузите EDF'))
 
@@ -72,28 +72,28 @@ describe('тулс-хедер раздела «Диполи»', () => {
     expect(stateCalls(fetchSpy)).toEqual([])
   })
 
-  it('запускает расчёт кнопкой: задача, поллинг и точки в состоянии', async () => {
+  it('запускает расчёт пакета кнопкой: задача, поллинг и набор в состоянии', async () => {
     const user = userEvent.setup()
     useEdfRecording.setState({ recording: recordingFixture })
     const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
     renderWithProviders(<DipolesToolHeaderActions />)
 
-    await user.click(screen.getByRole('button', { name: 'Рассчитать диполи' }))
+    await user.click(screen.getByRole('button', { name: 'Рассчитать пакет' }))
 
     const urls = stateCalls(fetchSpy).map(
       ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
     )
-    expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/dipoles')
-    expect(useDipoleCalc.getState().result?.points).toHaveLength(4)
+    expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/dipole_batch')
+    expect(useDipoleCalc.getState().batch?.bands?.length).toBeGreaterThan(0)
     // Кнопка меняет подпись: результат есть — предлагается пересчёт
-    expect(screen.getByRole('button', { name: 'Пересчитать диполи' })).toBeInTheDocument()
-    expect(screen.getByText('Быстрый режим: 4 точек')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Пересчитать пакет' })).toBeInTheDocument()
+    expect(screen.getByText(/Быстрый режим: \d+ точек/)).toBeInTheDocument()
   })
 
   it('показывает прогресс по эпохам, пока задача идёт', () => {
     useEdfRecording.setState({ recording: recordingFixture })
     useDipoleCalc.setState({
-      job: {
+      batchJob: {
         status: 'running',
         progress: 0.5,
         message: 'Диполи: 2 из 4',
@@ -105,7 +105,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     })
     renderWithProviders(<DipolesToolHeaderActions />)
 
-    const bar = screen.getByRole('progressbar', { name: 'Прогресс расчёта диполей' })
+    const bar = screen.getByRole('progressbar', { name: 'Прогресс расчёта пакета' })
     expect(bar).toHaveAttribute('aria-valuenow', '50')
     expect(screen.getByText('эпох 2/4')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Расчёт…' })).toBeDisabled()
@@ -115,7 +115,7 @@ describe('тулс-хедер раздела «Диполи»', () => {
     const user = userEvent.setup()
     useEdfRecording.setState({ recording: recordingFixture })
     useDipoleCalc.setState({
-      job: {
+      batchJob: {
         status: 'running',
         progress: 0.5,
         message: 'Диполи: 2 из 4',
@@ -134,9 +134,9 @@ describe('тулс-хедер раздела «Диполи»', () => {
     await user.click(screen.getByRole('button', { name: /Отменить/ }))
 
     expect(cancelSpy).toHaveBeenCalledWith('job-d1')
-    expect(useDipoleCalc.getState().job?.status).toBe('cancelled')
+    expect(useDipoleCalc.getState().batchJob?.status).toBe('cancelled')
     expect(
-      screen.queryByRole('progressbar', { name: 'Прогресс расчёта диполей' }),
+      screen.queryByRole('progressbar', { name: 'Прогресс расчёта пакета' }),
     ).toBeNull()
   })
 
@@ -161,24 +161,25 @@ describe('тулс-хедер раздела «Диполи»', () => {
     expect(stateCalls(fetchSpy)).toEqual([])
   })
 
-  it('отправляет полосу и сетевой фильтр из панели в задачу (срез 3.6)', async () => {
+  it('отправляет сетевой фильтр и параметры панели в задачу пакета (срез 3.6)', async () => {
     const user = userEvent.setup()
     useEdfRecording.setState({ recording: recordingFixture })
     useDipoleCalc.setState({
-      params: { ...CALC_PARAM_DEFAULTS, filterPreset: 'alpha', filterBandHz: [8, 13], notchHz: 50 },
+      params: { ...CALC_PARAM_DEFAULTS, notchHz: 50 },
     })
     const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
     renderWithProviders(<DipolesToolHeaderActions />)
 
-    await user.click(screen.getByRole('button', { name: 'Рассчитать диполи' }))
+    await user.click(screen.getByRole('button', { name: 'Рассчитать пакет' }))
 
-    // Полоса формы фильтров уходит в задачу как band_min/band_max — не «где-то
-    // в состоянии, но не в запросе»
+    // Прогон шлёт все полосы каталога и параметры — не «где-то в состоянии,
+    // но не в запросе»
     const [, init] = stateCalls(fetchSpy)[0]
     const form = init?.body as FormData
-    expect(form.get('band_min')).toBe('8')
-    expect(form.get('band_max')).toBe('13')
+    expect(String(form.get('bands')).split(',').length).toBeGreaterThan(2)
     expect(form.get('notch_hz')).toBe('50')
+    expect(form.get('epoch_length_ms')).toBe('1000')
+    expect(form.get('grid_mm')).toBe('7')
   })
 
   it('кнопки панелей открывают одну выдвижную панель за раз', async () => {
@@ -201,22 +202,21 @@ describe('тулс-хедер раздела «Диполи»', () => {
    * нечем — кнопки выключены.
    */
   it('выключает кнопки кадра без расчёта', async () => {
-    const user = userEvent.setup()
     const fetchSpy = mockApiFetch()
     renderWithProviders(<DipolesToolHeaderActions />)
 
     expect(screen.getByRole('button', { name: 'Воспроизведение траектории' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Предыдущая эпоха' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Следующая эпоха' })).toBeDisabled()
+    // Покадровых кнопок «<»/«>» больше нет: кадр перематывает индикатор эпох
+    expect(screen.queryByRole('button', { name: 'Предыдущая эпоха' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Следующая эпоха' })).not.toBeInTheDocument()
     // Снимать нечего: кнопки снятия кадра и подписи кадра нет вовсе
     expect(screen.queryByRole('button', { name: 'Снять кадр' })).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Следующая эпоха' }))
     expect(useDipoleCalc.getState().playback.epochIndex).toBe(0)
     expect(stateCalls(fetchSpy)).toEqual([])
   })
 
-  it('играет, шагает покадрово и меняет скорость — без запросов к серверу', async () => {
+  it('играет и меняет скорость — без запросов к серверу', async () => {
     const user = userEvent.setup()
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
     const fetchSpy = mockApiFetch()
@@ -228,12 +228,11 @@ describe('тулс-хедер раздела «Диполи»', () => {
     const pause = screen.getByRole('button', { name: 'Пауза воспроизведения' })
     expect(pause).toHaveClass('bg-accent-soft')
 
-    await user.click(screen.getByRole('button', { name: 'Следующая эпоха' }))
-    // Покадровый шаг ставит на паузу: кадр остаётся на выбранной эпохе
+    // Пауза останавливает воспроизведение, кадр остаётся на своей эпохе
+    await user.click(pause)
     expect(useDipoleCalc.getState().playback).toMatchObject({
       playing: false,
       active: true,
-      epochIndex: 1,
     })
 
     // Скорость — выпадающим списком (поправка ручной проверки: экономия места в хедере)

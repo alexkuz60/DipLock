@@ -17,7 +17,9 @@ import {
   contourSummary,
   shapeAtPoint,
   shapeContainsPoint,
+  smoothHullsPathPx,
 } from './atlasContours'
+import { normalizedToPx } from './mriProjections'
 import type { ContourShape, ContoursRef } from '@/shared/api/types'
 
 const REF: ContoursRef = {
@@ -135,6 +137,31 @@ describe('геометрия контура', () => {
     )
     expect(shapeAtPoint(shapes, 'axial', contourPointToNormalized('axial', [70, 70]))).toBeNull()
     expect(shapeAtPoint([], 'axial', inside)).toBeNull()
+  })
+
+  it('собирает плавный путь силуэта: сплайн через точки, без углов ломаной', () => {
+    const path = smoothHullsPathPx('axial', [
+      [
+        [-40, -40],
+        [40, -40],
+        [40, 40],
+        [-40, 40],
+      ],
+    ])
+
+    expect(path.startsWith('M ')).toBe(true)
+    expect(path.endsWith('Z')).toBe(true)
+    // Замкнутый сплайн Катмулла—Рома: каждый из 4 сегментов — кубическая Безье
+    expect(path.match(/C /g)).toHaveLength(4)
+    expect(path).not.toContain(' L ')
+    // Кривая проходит через опорные точки: старт пути — первая точка контура
+    const start = normalizedToPx(contourPointToNormalized('axial', [-40, -40]), 'axial')
+    expect(path.startsWith(`M ${start.x.toFixed(2)} ${start.y.toFixed(2)}`)).toBe(true)
+  })
+
+  it('терпит вырожденный контур короче трёх точек (откат на ломаную)', () => {
+    expect(smoothHullsPathPx('axial', [[[-40, 0], [40, 0]]])).toContain(' L ')
+    expect(smoothHullsPathPx('axial', [[]])).toBe('')
   })
 
   it('считает метки среза и терпит отсутствие данных', () => {

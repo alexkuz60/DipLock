@@ -894,7 +894,23 @@ class MriSliceRef(BaseModel):
 
     version: str = Field(description="Версия ассета — для кэша картинок и ETag")
     slice_url: str = Field(description="Базовый URL срезов: ``/slice/{plane}/{mm}.png``")
+    mip_url: str = Field(
+        description="Базовый URL glass-brain MIP (статичный вид мозга целиком): ``/mip/{plane}.png``"
+    )
     spacing_mm: float = Field(description="Шаг сетки срезов, мм")
+
+
+class MipOutlineOut(BaseModel):
+    """Контур силуэта коры — внешние границы мозга на проекциях (мм MNI)."""
+
+    version: str = Field(description="Версия ассета `silhouette` — для ETag")
+    outlines: dict[str, list[list[list[float]]]] = Field(
+        description=(
+            "Замкнутые контуры силуэта по плоскостям (axial/sagittal/coronal): "
+            "мм MNI по осям плоскости, как в контурах среза; источник — "
+            "корковая поверхность fsaverage `*.pial`"
+        )
+    )
 
 
 class MriVolumeRef(BaseModel):
@@ -962,14 +978,6 @@ class ContourSliceOut(BaseModel):
     )
     structures: list[ContourShapeOut] = Field(default_factory=list)
     areas: list[ContourShapeOut] = Field(default_factory=list)
-    head: list[list[list[float]]] | None = Field(
-        default=None,
-        description=(
-            "Контуры силуэта головы (маска `seghead.mgz`) — замкнутые полигоны "
-            "в мм MNI по осям плоскости; `null` — ассета нет (UI рисует условную "
-            "фикстуру), `[]` — на срезе нет вокселей головы"
-        ),
-    )
 
 
 class ContoursRef(BaseModel):
@@ -1224,7 +1232,12 @@ class DipoleScanPointOut(BaseModel):
     на сферической модели головы — без BEM и без `mne.fit_dipole`.
     """
 
-    epoch_index: int
+    epoch_index: int = Field(
+        description=(
+            "Номер эпохи нарезки (0-based) **включая отброшенные BAD_** — позиция "
+            "в drop_log; он же ключ связи с таблицей эпох БД"
+        ),
+    )
     time_ms: float = Field(description="Время пика GFP внутри эпохи, мс")
     head_coords: list[float] = Field(description="Позиция в системе координат головы, мм")
     mni_coords: list[float] | None = Field(
@@ -1315,6 +1328,13 @@ class DipoleScanResult(BaseModel):
     notch_hz: float | None = None
     n_epochs_total: int = Field(description="Сколько эпох нарезано (включая отброшенные)")
     n_epochs_used: int = Field(description="Сколько эпох прошло reject-фильтр")
+    bad_epoch_indexes: list[int] = Field(
+        default_factory=list,
+        description=(
+            "Номера отброшенных эпох (сетка drop_log с непустой причиной: BAD_ "
+            "или TOO_SHORT); индикатор эпох UI и таймлайн нумеруют эпохи так же"
+        ),
+    )
     grid_mm: float = Field(description="Шаг объёмной сетки поиска, мм")
     points: list[DipoleScanPointOut] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
@@ -2190,6 +2210,13 @@ class DipoleBandRunOut(BaseModel):
     kd_basis: KdBasisOut = Field(description="Базис КД полосы (С0)")
     n_epochs_total: int | None = None
     n_epochs_used: int | None = None
+    bad_epoch_indexes: list[int] = Field(
+        default_factory=list,
+        description=(
+            "Отброшенные эпохи полосы (сетка drop_log); у полос разные краевые "
+            "буферы фильтра (BAD_edge), поэтому список свой у каждой полосы"
+        ),
+    )
     points: list[DipoleBatchPointOut] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 

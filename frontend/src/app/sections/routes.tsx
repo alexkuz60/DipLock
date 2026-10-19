@@ -19,6 +19,7 @@ import { DipolesDrawer } from './dipoles/DipolesDrawer'
 import { DipolesPanel } from './dipoles/DipolesPanel'
 import { DipolesSection } from './dipoles/DipolesSection'
 import { DipolesToolHeaderActions } from './dipoles/DipolesToolActions'
+import { EpochDipoleStrip } from './dipoles/EpochDipoleStrip'
 import { HomeSection } from './HomeSection'
 import { ServerStatusSection } from './ServerStatusSection'
 import { SettingsSection } from './SettingsSection'
@@ -60,6 +61,8 @@ type SectionModule = {
   ToolActions?: ComponentType
   /** Вторичные контролы тулс-хедера (правый край, перед кнопкой панели) */
   HeaderExtra?: ComponentType
+  /** Второй ряд тулс-хедера (полоса на всю ширину основной области) */
+  HeaderStrip?: ComponentType
   /** Выдвижная панель раздела (полоса между шапкой и рабочей областью) */
   Drawer?: ComponentType
 }
@@ -82,6 +85,7 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
     Component: DipolesSection,
     Panel: DipolesPanel,
     ToolActions: DipolesToolHeaderActions,
+    HeaderStrip: EpochDipoleStrip,
     Drawer: DipolesDrawer,
   },
   table: { Component: LocalizationTableSection, Panel: LocalizationTablePanel },
@@ -113,7 +117,7 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
 /** Раздел внутри каркаса: тулс-хедер + рабочая область + панель опций. */
 export function SectionRoute({ id }: { id: SectionId }) {
   const section = getSection(id)
-  const { Component, Panel, TitleBefore, TitleAfter, ToolActions, HeaderExtra, Drawer } =
+  const { Component, Panel, TitleBefore, TitleAfter, ToolActions, HeaderExtra, HeaderStrip, Drawer } =
     SECTION_MODULES[id]
 
   return (
@@ -123,6 +127,7 @@ export function SectionRoute({ id }: { id: SectionId }) {
       titleAfter={TitleAfter ? <TitleAfter /> : undefined}
       actions={ToolActions ? <ToolActions /> : undefined}
       headerExtra={HeaderExtra ? <HeaderExtra /> : undefined}
+      headerStrip={HeaderStrip ? <HeaderStrip /> : undefined}
       drawer={Drawer ? <Drawer /> : undefined}
       panel={Panel ? <Panel /> : undefined}
     >

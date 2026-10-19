@@ -9,7 +9,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   BATCH_MAX_BANDS,
-  BATCH_MIN_BANDS,
   bandLabel,
   bandRunOf,
   bandTagOf,
@@ -41,9 +40,10 @@ describe('помощники пакета поддиапазонов', () => {
     expect(form.get('reference_channels')).toBeNull()
   })
 
-  it('держит рамки набора: минимум полос и лимит прогона', () => {
-    expect(BATCH_MIN_BANDS).toBe(2)
-    expect(BATCH_MAX_BANDS).toBeGreaterThanOrEqual(2)
+  it('держит рамки набора: лимит полос прогона покрывает каталог', () => {
+    // Каталог — 7 октавных + 6 функциональных = 13 полос; лимит сервера
+    // (`dipole_batch_max_bands`) обязан их покрывать — прогон идёт по всему каталогу
+    expect(BATCH_MAX_BANDS).toBeGreaterThanOrEqual(13)
   })
 
   it('находит полосу по ключу и честно отвечает null на чужой', () => {

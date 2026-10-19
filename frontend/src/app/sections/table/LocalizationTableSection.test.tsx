@@ -17,7 +17,7 @@ import { CALC_PARAM_DEFAULTS, type CalcJob } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { TABLE_PARAM_DEFAULTS, useTableParams } from '@/shared/state/tableParams'
-import { dipoleScanResultFixture, recordingFixture } from '@/test/fixtures'
+import { dipoleScanResultFixture, dipoleBatchResultFixture, recordingFixture } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { LocalizationTableSection } from './LocalizationTableSection'
@@ -51,11 +51,11 @@ describe('раздел «Таблица локализации»', () => {
       params: { ...CALC_PARAM_DEFAULTS },
       gofThresholdPercent: 0,
       amplitudeThresholdNam: 0,
-      job: null,
+      batchJob: null,
       result: null,
       spectrumJob: null,
       spectrum: null,
-      error: null,
+      batchError: null,
       spectrumError: null,
       refineJob: null,
       refiningEpoch: null,
@@ -78,7 +78,7 @@ describe('раздел «Таблица локализации»', () => {
 
   it('без результата показывает состояние задачи, а не пустую таблицу', () => {
     useEdfRecording.setState({ recording: recordingFixture })
-    useDipoleCalc.setState({ job: job() })
+    useDipoleCalc.setState({ batchJob: job() })
     renderWithProviders(<LocalizationTableSection />)
 
     expect(screen.getByText('Расчёт диполей не выполнен')).toBeInTheDocument()
@@ -88,7 +88,7 @@ describe('раздел «Таблица локализации»', () => {
 
   it('показывает ошибку расчёта, когда результата нет', () => {
     useEdfRecording.setState({ recording: recordingFixture })
-    useDipoleCalc.setState({ error: 'Запись не найдена или уже удалена' })
+    useDipoleCalc.setState({ batchError: 'Запись не найдена или уже удалена' })
     renderWithProviders(<LocalizationTableSection />)
 
     expect(
@@ -109,6 +109,27 @@ describe('раздел «Таблица локализации»', () => {
     expect(screen.getByText('Сортировка: по номеру эпохи (возрастание)')).toBeInTheDocument()
     // Раздел сам ничего не запрашивает: результат уже в состоянии
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('полоса таблицы выбирается списком: активная полоса и точки result меняются (3.12)', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      batch: dipoleBatchResultFixture(),
+      activeBandKey: 'alpha',
+    })
+    renderWithProviders(<LocalizationTableSection />)
+
+    const select = screen.getByLabelText('Полоса таблицы')
+    expect(select).toHaveValue('alpha')
+
+    await user.selectOptions(select, 'beta')
+
+    const state = useDipoleCalc.getState()
+    expect(state.activeBandKey).toBe('beta')
+    // Проекции/таблица читают `result` — в нём скан активной полосы
+    expect(state.result?.filter_band_hz).toEqual([13, 30])
   })
 
   it('показывает кавет редкого монтажа из предупреждений результата', () => {

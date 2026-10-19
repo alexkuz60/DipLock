@@ -1,10 +1,12 @@
 /**
- * Тесты состояния расчёта раздела «Диполи» (срез 3.4).
+ * Тесты состояния расчёта раздела «Диполи» (срез 3.4 + пакетный сценарий).
  *
- * Главное, что проверяется: расчёт запускается **только вызовом действия**
- * (кнопкой), уходит на сервер задачей с поллингом прогресса, а параметры
- * (порог «КД», шаг сетки, длина эпохи) правятся без единого запроса и с зажимом
- * в рамки контролов. Результат «Сбросить» убирает, параметры — нет.
+ * Главное, что проверяется: расчёт (пакет по всем полосам каталога) запускается
+ * **только вызовом действия** (кнопкой), уходит на сервер задачей с поллингом
+ * прогресса, а параметры (порог «КД», шаг сетки, длина эпохи) правятся без
+ * единого запроса и с зажимом в рамки контролов. Результат «Сбросить» убирает,
+ * параметры — нет. Одиночный расчёт по всему спектру убран — устаревших веток
+ * и их данных не храним.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/shared/api/client'
@@ -26,16 +28,23 @@ function resetState() {
     amplitudeThresholdNam: 0,
     fftRangeHz: null,
     selectedPointId: null,
+    selectedEpochIndex: null,
     playback: { ...PLAYBACK_DEFAULTS },
     params: { ...CALC_PARAM_DEFAULTS },
-    job: null,
     result: null,
+    batch: null,
+    batchJob: null,
+    batchError: null,
+    activeBandKey: null,
+    playbackBandKeys: [],
     spectrumJob: null,
     spectrum: null,
-    error: null,
     spectrumError: null,
   })
 }
+
+/** Все полосы каталога: так «Рассчитать пакет» шлёт их в прогон (форма задачи). */
+const CATALOG_BANDS = ['delta', 'theta', 'alpha', 'beta']
 
 describe('состояние расчёта диполей', () => {
   beforeEach(() => {
@@ -112,31 +121,8 @@ describe('состояние расчёта диполей', () => {
     expect(useDipoleCalc.getState().params.gridMm).toBe(20)
   })
 
-  it('правит полосу и сетевой фильтр без запросов (срез 3.6)', () => {
+  it('правит сетевой фильтр без запросов (срез 3.6)', () => {
     const fetchSpy = mockApiFetch()
-
-    // Полоса нормализуется: границы по возрастанию, «пустая» полоса — без фильтра
-    useDipoleCalc.getState().setFilterBand([13, 8])
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([8, 13])
-    // Правка полосы руками — это «свой диапазон», а не подмена выбранного ритма
-    expect(useDipoleCalc.getState().params.filterPreset).toBe('custom')
-    useDipoleCalc.getState().setFilterBand([8, 8])
-    expect(useDipoleCalc.getState().params.filterBandHz).toBeNull()
-    expect(useDipoleCalc.getState().params.filterPreset).toBe('none')
-
-    // Пресет берёт полосу из метаданных сервера, а не из таблицы в коде UI
-    useDipoleCalc.getState().setFilterPreset('alpha', { alpha: [8, 13] })
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([8, 13])
-    expect(useDipoleCalc.getState().params.filterPreset).toBe('alpha')
-    useDipoleCalc.getState().setFilterPreset('none', { alpha: [8, 13] })
-    expect(useDipoleCalc.getState().params.filterBandHz).toBeNull()
-
-    // Одиночная частота: полоса пересчитывается как f ± bw/2
-    useDipoleCalc.getState().setSingleFreq(10)
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([9.8, 10.3])
-    expect(useDipoleCalc.getState().params.filterPreset).toBe('single')
-    useDipoleCalc.getState().setBandwidth(1)
-    expect(useDipoleCalc.getState().params.filterBandHz).toEqual([9.5, 10.5])
 
     // Сетевой фильтр — только 50/60 Гц (список и состояние не разъезжаются)
     useDipoleCalc.getState().setNotchHz(55)
@@ -148,51 +134,19 @@ describe('состояние расчёта диполей', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('авто-длина: смена пресета подставляет длину, ручная правка не блокируется (п.4)', () => {
-    const freqBands = { delta: [0.5, 2], theta: [4, 8], alpha: [8, 16] }
-    const auto = { lengths: [250, 500, 1000, 2000] }
-
-    // α: ≥ 2 периодов 8 Гц = 250 мс — кратчайшая подходящая («короче для высоких»)
-    useDipoleCalc.getState().setFilterPreset('alpha', freqBands, {}, auto)
-    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(250)
-
-    // Ручная правка после подстановки живёт — контрол не «залипает»
-    useDipoleCalc.getState().setEpochLengthMs(1000)
-    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(1000)
-
-    // Следующая смена пресета снова подставляет: θ (4 Гц) → 500 мс
-    useDipoleCalc.getState().setFilterPreset('theta', freqBands, {}, auto)
-    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(500)
-
-    // «Без фильтра» — полосы нет: авто-подстановки не происходит
-    useDipoleCalc.getState().setFilterPreset('none', freqBands, {}, auto)
-    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(500)
-
-    // Без списка длин (метаданные не переданы) длина тоже остаётся прежней
-    useDipoleCalc.getState().setFilterPreset('alpha', freqBands)
-    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(500)
-  })
-
-  it('авто-длина учитывает N ≥ 3C по записи — подставляется длина, прошедшая обе половины', () => {
-    // 60 каналов при 250 Гц: 3C = 180 отсчётов → 720 мс; период α просит 250
-    useDipoleCalc.getState().setFilterPreset(
-      'alpha',
-      { alpha: [8, 16] },
-      {},
-      { lengths: [250, 500, 750, 1000, 2000], signal: { sfreq: 250, nChannels: 60 } },
-    )
-    expect(useDipoleCalc.getState().params.epochLengthMs).toBe(750)
-  })
-
-  it('поднимает параметры прежней версии UI с дефолтами формы фильтра (срез 3.6)', async () => {
-    // Так выглядело сохранённое состояние до среза 3.6: полей одиночной частоты нет
+  it('отбрасывает устаревшие поля формы фильтра из прежней версии UI', async () => {
+    // Так выглядело сохранённое состояние с формой фильтра одиночного расчёта:
+    // она удалена, и её поля просто не переносятся — хранить устаревшее незачем
     localStorage.setItem(
       'diplock.dipoleCalc',
       JSON.stringify({
         state: {
           params: {
+            filterPreset: 'alpha',
             filterBandHz: [8, 13],
-            notchHz: null,
+            singleFreqHz: 7.83,
+            bandwidthHz: 0.5,
+            notchHz: 50,
             epochLengthMs: 500,
             gridMm: 9,
           },
@@ -203,38 +157,40 @@ describe('состояние расчёта диполей', () => {
     await useDipoleCalc.persist.rehydrate()
 
     const params = useDipoleCalc.getState().params
-    expect(params.filterBandHz).toEqual([8, 13])
-    expect(params.epochLengthMs).toBe(500)
-    // Полей не было — они берут значения по умолчанию, а не `undefined`
-    expect(params.singleFreqHz).toBe(CALC_PARAM_DEFAULTS.singleFreqHz)
-    expect(params.bandwidthHz).toBe(CALC_PARAM_DEFAULTS.bandwidthHz)
-    // Пресета тоже не было: он выводится из полосы (1–40 → «широкий», здесь — «свой»),
-    // а не берётся дефолтный и не называет эти границы чужим ритмом
-    expect(params.filterPreset).toBe('custom')
+    expect(params).toEqual({
+      notchHz: 50,
+      epochLengthMs: 500,
+      gridMm: 9,
+      psdMethod: CALC_PARAM_DEFAULTS.psdMethod,
+    })
   })
 
   it('не запускает расчёт без записи (кнопка в шапке выключена)', async () => {
     const fetchSpy = mockApiFetch()
-    await useDipoleCalc.getState().runCalculation(null)
+    await useDipoleCalc.getState().runBatch(null, CATALOG_BANDS)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('проводит расчёт задачей: 202 → поллинг → результат', async () => {
+  it('проводит расчёт пакета задачей: 202 → поллинг → результат', async () => {
     const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
 
-    await useDipoleCalc.getState().runCalculation('rec-1')
+    await useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
 
     const urls = fetchSpy.mock.calls.map(
       ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
     )
-    expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/dipoles')
+    expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/dipole_batch')
     expect(urls.some((url) => url.startsWith('GET /api/v1/jobs/'))).toBe(true)
-    expect(urls.some((url) => url.startsWith('GET /api/v1/recordings/rec-1/dipoles/'))).toBe(true)
+    expect(
+      urls.some((url) => url.startsWith('GET /api/v1/recordings/rec-1/dipole_batch/')),
+    ).toBe(true)
 
     const state = useDipoleCalc.getState()
+    expect(state.batch?.bands).toHaveLength(2)
+    expect(state.batchJob?.status).toBe('succeeded')
+    expect(state.batchError).toBeNull()
+    // `result` — скан активной полосы набора: проекции/таблица работают без правок
     expect(state.result?.method).toBe('fast_grid')
-    expect(state.job?.status).toBe('succeeded')
-    expect(state.error).toBeNull()
   })
 
   it('показывает прогресс по эпохам, пока задача идёт', async () => {
@@ -262,10 +218,10 @@ describe('состояние расчёта диполей', () => {
       return originalFetch(input as RequestInfo, init)
     }) as typeof fetch
 
-    await useDipoleCalc.getState().runCalculation('rec-1')
+    await useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
 
     expect(polls).toBeGreaterThanOrEqual(2)
-    expect(useDipoleCalc.getState().job?.epochsTotal).toBe(4)
+    expect(useDipoleCalc.getState().batchJob?.epochsTotal).toBe(4)
   })
 
   it('сообщает ошибку задачи и не подменяет результат прежним', async () => {
@@ -276,21 +232,22 @@ describe('состояние расчёта диполей', () => {
     }
     mockApiFetch({ calcJob: failed })
 
-    await useDipoleCalc.getState().runCalculation('rec-1')
+    await useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
 
     const state = useDipoleCalc.getState()
-    expect(state.job?.status).toBe('failed')
-    expect(state.error).toBe('Ни одной эпохи не удалось локализовать')
+    expect(state.batchJob?.status).toBe('failed')
+    expect(state.batchError).toBe('Ни одной эпохи не удалось локализовать')
     expect(state.result).toBeNull()
+    expect(state.batch).toBeNull()
   })
 
   it('показывает понятный текст отказа запуска (404 записи)', async () => {
     mockApiFetch({ calcStartFails: true })
 
-    await useDipoleCalc.getState().runCalculation('rec-1')
+    await useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
 
-    expect(useDipoleCalc.getState().error).toBe('Запись не найдена или уже удалена')
-    expect(useDipoleCalc.getState().job?.status).toBe('failed')
+    expect(useDipoleCalc.getState().batchError).toBe('Запись не найдена или уже удалена')
+    expect(useDipoleCalc.getState().batchJob?.status).toBe('failed')
   })
 
   it('держит ошибки расчёта и спектра раздельно', async () => {
@@ -302,7 +259,7 @@ describe('состояние расчёта диполей', () => {
 
     const state = useDipoleCalc.getState()
     expect(state.spectrumError).toBe('Запись не найдена или уже удалена')
-    expect(state.error).toBeNull()
+    expect(state.batchError).toBeNull()
     expect(state.spectrumJob?.status).toBe('failed')
   })
 
@@ -325,7 +282,7 @@ describe('состояние расчёта диполей', () => {
     const jobSpy = vi.spyOn(api, 'job').mockImplementationOnce(() => stale.promise)
     mockApiFetch({ calcJob: calcJobFixture })
 
-    const pending = useDipoleCalc.getState().runCalculation('rec-1')
+    const pending = useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
     await vi.waitFor(() => expect(jobSpy).toHaveBeenCalledTimes(1))
     useDipoleCalc.getState().reset()
     stale.resolve(calcJobFixture)
@@ -333,9 +290,9 @@ describe('состояние расчёта диполей', () => {
 
     // Отменённый запуск не вернул ни задачу, ни результат (поллинг бросил отмену)
     const state = useDipoleCalc.getState()
-    expect(state.job).toBeNull()
+    expect(state.batchJob).toBeNull()
     expect(state.result).toBeNull()
-    expect(state.error).toBeNull()
+    expect(state.batchError).toBeNull()
   })
 
   it('«Сбросить расчёт» убирает результаты, но сохраняет параметры и панель', () => {
@@ -345,6 +302,7 @@ describe('состояние расчёта диполей', () => {
       result: dipoleScanResultFixture(),
       spectrum: spectrumResultFixture(),
       selectedPointId: '0-120',
+      selectedEpochIndex: 2,
     })
 
     useDipoleCalc.getState().reset()
@@ -352,13 +310,14 @@ describe('состояние расчёта диполей', () => {
     const state = useDipoleCalc.getState()
     expect(state.result).toBeNull()
     expect(state.spectrum).toBeNull()
-    expect(state.error).toBeNull()
+    expect(state.batchError).toBeNull()
     expect(state.spectrumError).toBeNull()
     expect(state.view).toBe('fft')
     expect(state.amplitudeThresholdNam).toBe(25)
     expect(state.params).toEqual(CALC_PARAM_DEFAULTS)
-    // Выделенный диполь жил в результате задачи — вместе с ним он исчезает
+    // Выделенные диполь и эпоха жили в результате задачи — вместе с ним они исчезают
     expect(state.selectedPointId).toBeNull()
+    expect(state.selectedEpochIndex).toBeNull()
   })
 
   it('персистит окно частот, но не выделенный диполь (срез 3.5)', () => {
@@ -433,24 +392,28 @@ describe('кадр воспроизведения в состоянии расч
     expect(useDipoleCalc.getState().playback).toMatchObject({ playing: true, epochIndex: 0 })
   })
 
-  it('шагает покадрово с зажимом и ставит на паузу, а сдвиг часов счётчик не двигает', () => {
+  it('клик по ячейке индикатора выбирает эпоху и перематывает кадр (3.3/3.4)', () => {
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
 
-    useDipoleCalc.getState().stepPlaybackEpoch(1)
+    // Выбор эпохи: пакет диполей её эпохи + кадр анимации встаёт на неё же
+    useDipoleCalc.getState().toggleSelectedEpoch(1)
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(1)
     expect(useDipoleCalc.getState().playback).toMatchObject({
       playing: false,
       active: true,
       epochIndex: 1,
     })
 
-    // За краем записи номер стоит на месте, но команда всё равно новая: повторный
-    // клик по «покадрово» на границе обязан быть виден часам (счётчик `seekSeq`)
+    // Команда перемотки — новая для часов: счётчик переходов растёт
     const seq = useDipoleCalc.getState().playback.seekSeq
-    useDipoleCalc.getState().stepPlaybackEpoch(-9)
-    expect(useDipoleCalc.getState().playback.epochIndex).toBe(0)
+    useDipoleCalc.getState().toggleSelectedEpoch(3)
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(3)
+    expect(useDipoleCalc.getState().playback.epochIndex).toBe(3)
     expect(useDipoleCalc.getState().playback.seekSeq).toBe(seq + 1)
 
-    useDipoleCalc.getState().stepPlaybackEpoch(99)
+    // Повторный клик по той же ячейке снимает выбор, кадр остаётся на месте
+    useDipoleCalc.getState().toggleSelectedEpoch(3)
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBeNull()
     expect(useDipoleCalc.getState().playback.epochIndex).toBe(3)
 
     // Сдвиг часов: кадр меняется, а счётчик команд — нет (это не команда)
@@ -508,11 +471,11 @@ describe('кадр воспроизведения в состоянии расч
       playback: { playing: true, speed: 1, epochIndex: 2, seekSeq: 3, active: true },
     })
 
-    await useDipoleCalc.getState().runCalculation('rec-1')
+    await useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
 
     // Номер эпохи без своего результата ничего не значит: новая нарезка — новый кадр
     expect(useDipoleCalc.getState().playback).toEqual(PLAYBACK_DEFAULTS)
-    expect(useDipoleCalc.getState().result?.points).toHaveLength(4)
+    expect(useDipoleCalc.getState().batch?.bands?.length).toBeGreaterThan(0)
   })
 
   it('не персистит кадр воспроизведения (только параметры и предпочтения)', () => {
@@ -573,7 +536,7 @@ describe('отмена расчёта (3.2)', () => {
     localStorage.clear()
     resetState()
     useDipoleCalc.setState({
-      job: {
+      batchJob: {
         status: 'running',
         progress: 0.5,
         message: 'Поиск по сетке',
@@ -597,15 +560,15 @@ describe('отмена расчёта (3.2)', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it('cancelCalculation: DELETE быстрому расчёту + локальный cancelled, спектр не тронут', () => {
+  it('cancelBatch: DELETE расчёту пакета + локальный cancelled, спектр не тронут', () => {
     const cancelSpy = vi
       .spyOn(api, 'jobCancel')
       .mockResolvedValue({ ...jobFixture, status: 'cancelled' })
 
-    useDipoleCalc.getState().cancelCalculation()
+    useDipoleCalc.getState().cancelBatch()
 
     expect(cancelSpy).toHaveBeenCalledWith('job-c1')
-    expect(useDipoleCalc.getState().job?.status).toBe('cancelled')
+    expect(useDipoleCalc.getState().batchJob?.status).toBe('cancelled')
     expect(useDipoleCalc.getState().spectrumJob?.status).toBe('running')
   })
 
@@ -618,14 +581,16 @@ describe('отмена расчёта (3.2)', () => {
 
     expect(cancelSpy).toHaveBeenCalledWith('job-s1')
     expect(useDipoleCalc.getState().spectrumJob?.status).toBe('cancelled')
-    expect(useDipoleCalc.getState().job?.status).toBe('running')
+    expect(useDipoleCalc.getState().batchJob?.status).toBe('running')
   })
 
   it('без id задачи отмена не шлёт запрос — нечего останавливать', () => {
     const cancelSpy = vi.spyOn(api, 'jobCancel').mockResolvedValue(jobFixture)
-    useDipoleCalc.setState({ job: { ...useDipoleCalc.getState().job!, jobId: null } })
+    useDipoleCalc.setState({
+      batchJob: { ...useDipoleCalc.getState().batchJob!, jobId: null },
+    })
 
-    useDipoleCalc.getState().cancelCalculation()
+    useDipoleCalc.getState().cancelBatch()
 
     expect(cancelSpy).not.toHaveBeenCalled()
   })
@@ -639,10 +604,8 @@ describe('пакет поддиапазонов (С1)', () => {
       batch: null,
       batchJob: null,
       batchError: null,
-      batchBandKeys: [],
       activeBandKey: null,
       result: null,
-      job: null,
     })
   })
 
@@ -650,27 +613,29 @@ describe('пакет поддиапазонов (С1)', () => {
     vi.restoreAllMocks()
   })
 
-  it('не запускает пакет без набора полос: понятная ошибка, ни одного запроса', async () => {
+  it('не запускает пакет без полос каталога: понятная ошибка, ни одного запроса', async () => {
     const fetchSpy = mockApiFetch()
-    await useDipoleCalc.getState().runBatch('rec-1')
+    await useDipoleCalc.getState().runBatch('rec-1', [])
     expect(fetchSpy).not.toHaveBeenCalled()
-    expect(useDipoleCalc.getState().batchError).toMatch(/минимум 2 полосы/)
-
-    useDipoleCalc.getState().setBatchBandKeys(['alpha'])
-    await useDipoleCalc.getState().runBatch('rec-1')
-    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(useDipoleCalc.getState().batchError).toMatch(/Каталог полос пуст/)
   })
 
-  it('снимает дубли выбора и зажимает набор лимитом полос', () => {
-    useDipoleCalc.getState().setBatchBandKeys(['alpha', 'alpha', 'beta'])
-    expect(useDipoleCalc.getState().batchBandKeys).toEqual(['alpha', 'beta'])
+  it('шлёт в прогон все полосы каталога, снимая дубли ключей', async () => {
+    const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
+
+    await useDipoleCalc.getState().runBatch('rec-1', ['alpha', 'alpha', 'beta'])
+
+    const startCall = fetchSpy.mock.calls.find(([input, init]) =>
+      init?.method === 'POST' && String(input).endsWith('/dipole_batch'),
+    )
+    const form = startCall?.[1]?.body as FormData
+    expect(form.get('bands')).toBe('alpha,beta')
   })
 
   it('проводит пакет задачей: 202 → поллинг → набор результатов', async () => {
     const fetchSpy = mockApiFetch({ calcJob: calcJobFixture })
-    useDipoleCalc.getState().setBatchBandKeys(['alpha', 'beta'])
 
-    await useDipoleCalc.getState().runBatch('rec-1')
+    await useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
 
     const urls = fetchSpy.mock.calls.map(
       ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
@@ -692,9 +657,8 @@ describe('пакет поддиапазонов (С1)', () => {
 
   it('переключение полосы набора меняет result и снимает прежние выделение/кадр', async () => {
     mockApiFetch({ calcJob: calcJobFixture })
-    useDipoleCalc.getState().setBatchBandKeys(['alpha', 'beta'])
-    await useDipoleCalc.getState().runBatch('rec-1')
-    useDipoleCalc.setState({ selectedPointId: 'p-1' })
+    await useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
+    useDipoleCalc.setState({ selectedPointId: 'p-1', selectedEpochIndex: 2 })
 
     useDipoleCalc.getState().setActiveBand('beta')
 
@@ -703,21 +667,8 @@ describe('пакет поддиапазонов (С1)', () => {
     expect(state.result?.filter_band_hz).toEqual([13, 30])
     // Выделение и кадр относились к точкам прежней полосы — они сняты
     expect(state.selectedPointId).toBeNull()
+    expect(state.selectedEpochIndex).toBeNull()
     expect(state.playback.playing).toBe(false)
     expect(state.playback.epochIndex).toBe(0)
-  })
-
-  it('одиночный расчёт затирает набор: «смесь» результата и пакета не показываем', async () => {
-    mockApiFetch({ calcJob: calcJobFixture })
-    useDipoleCalc.getState().setBatchBandKeys(['alpha', 'beta'])
-    await useDipoleCalc.getState().runBatch('rec-1')
-    expect(useDipoleCalc.getState().batch).not.toBeNull()
-
-    await useDipoleCalc.getState().runCalculation('rec-1')
-
-    const state = useDipoleCalc.getState()
-    expect(state.batch).toBeNull()
-    expect(state.activeBandKey).toBeNull()
-    expect(state.result?.points).toHaveLength(4) // точки одиночного расчёта
   })
 })

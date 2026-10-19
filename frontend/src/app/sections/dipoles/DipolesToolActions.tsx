@@ -1,12 +1,14 @@
 /**
  * Тулс-хедер раздела «Диполи» (срез 3.4; воспроизведение — срез 3.7): запуск
- * расчёта, кадр траектории, пороги отображения («GOF ≥ X %» и «Момент ≥ X нАм»)
+ * **расчёта пакета** (все полосы каталога; одиночный расчёт по всему спектру
+ * убран), кадр траектории, пороги отображения («GOF ≥ X %» и «Момент ≥ X нАм»)
  * и выдвижные панели спектра.
  *
  * Правила, заложенные в разметке:
  *
  * * расчёт стартует **только кнопкой** — правка порога или параметров ничего не
- *   запускает (как в EDF, `docs/ui.md`);
+ *   запускает (как в EDF, `docs/ui.md`); «Рассчитать пакет» шлёт прогон по всем
+ *   полосам `freq_bands`/`functional_bands` из `/meta`;
  * * пороги отображения (GOF % — основной, момент нА·м — дополнительный) —
  *   параметры **отображения**, а не расчёта: они скрывают слабые
  *   диполи на проекциях, но не меняют результат задачи, поэтому рядом стоит
@@ -16,11 +18,12 @@
  *   может идти десятки секунд, и видно, сколько осталось;
  * * без загруженной записи кнопка выключена с объяснением: расчёт идёт по файлу
  *   записи на сервере, а не по демо-сигналу;
- * * воспроизведение траектории (`PlaybackControls`) — тоже **команды**: play/pause,
- *   покадрово и скорость (выпадающим списком — экономия места в хедере) меняют
- *   состояние раздела, а сам кадр ведут часы в рабочей области
- *   (`PlaybackFrame.tsx`). Здесь же видно, какой кадр показан, и что
- *   интерполяция между эпохами — отображение, а не измерение.
+ * * воспроизведение траектории (`PlaybackControls`) — тоже **команды**: play/pause
+ *   и скорость (выпадающим списком — экономия места в хедере) меняют состояние
+ *   раздела, а сам кадр ведут часы в рабочей области (`PlaybackFrame.tsx`).
+ *   Покадровые кнопки «<»/«>» убраны: кадр перематывается кликом по ячейке
+ *   индикатора эпох (второй ряд шапки, `EpochDipoleStrip`) — там же видно, какой
+ *   кадр показан и что интерполяция между эпохами — отображение, а не измерение.
  *
  * Справа, у края полосы, живёт кнопка «Справка»: пояснения к проекциям, слоям,
  * расчёту и воспроизведению читают один-два раза за сеанс, поэтому они открываются
@@ -30,8 +33,6 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ChartColumn,
-  ChevronLeft,
-  ChevronRight,
   CircleHelp,
   Crosshair,
   Gauge,
@@ -69,7 +70,7 @@ const NO_RECORDING_HINT =
 
 /** Пояснение к выключенным кнопкам кадра, когда расчёта ещё нет */
 const NO_RESULT_HINT =
-  'Воспроизведение идёт по точкам результата: сначала нажмите «Рассчитать диполи».'
+  'Воспроизведение идёт по точкам результата: сначала нажмите «Рассчитать пакет».'
 
 /** Подсказка кнопки play: что именно происходит и как это считать */
 const PLAY_TOOLTIP =
@@ -77,10 +78,10 @@ const PLAY_TOOLTIP =
   'интерполируются между соседними эпохами (отображение, а не измерение). ' +
   '×1 — реальное время записи. Клавиша Space.'
 
-/** Прогресс задачи расчёта: полоса + подпись «этап · эпохи · проценты» + отмена (3.2). */
+/** Прогресс задачи расчёта пакета: полоса + подпись «этап · эпохи · проценты» + отмена (3.2). */
 export function CalcProgress({ className }: { className?: string }) {
-  const job = useDipoleCalc((state) => state.job)
-  const cancelCalculation = useDipoleCalc((state) => state.cancelCalculation)
+  const job = useDipoleCalc((state) => state.batchJob)
+  const cancelBatch = useDipoleCalc((state) => state.cancelBatch)
   if (job === null || job.status !== 'running') return null
 
   return (
@@ -89,7 +90,7 @@ export function CalcProgress({ className }: { className?: string }) {
         <div className="flex items-center gap-2">
           <div
             role="progressbar"
-            aria-label="Прогресс расчёта диполей"
+            aria-label="Прогресс расчёта пакета"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.round(job.progress * 100)}
@@ -108,13 +109,13 @@ export function CalcProgress({ className }: { className?: string }) {
           </span>
         </div>
       </Tooltip>
-      <CancelJobButton onCancel={cancelCalculation} />
+      <CancelJobButton onCancel={cancelBatch} />
     </div>
   )
 }
 
 /**
- * Кластер воспроизведения траектории (срез 3.7): play/pause, покадрово, скорость
+ * Кластер воспроизведения траектории (срез 3.7): play/pause, скорость
  * ×0.25/×0.5/×1/×2/×4 **выпадающим списком**, снятие кадра и подпись текущей эпохи.
  *
  * Скорость — список, а не ряд кнопок (поправка ручной проверки, 18.09.2026): пять
@@ -122,14 +123,15 @@ export function CalcProgress({ className }: { className?: string }) {
  * скорость редко и одним значением. Список — нативный `<select>` того же вида, что
  * «Канал» в ЭЭГ и «Масштаб» во вьюере, поэтому клавиатура и прокрутка системные.
  *
- * Здесь только **команды**: всё уходит в состояние раздела, а кадр ведут часы
- * рабочей области (`PlaybackFrame.tsx`) — прямых «ручек» у проекций нет.
+ * Покадровые кнопки «<»/«>» убраны: кадр перематывается кликом по ячейке
+ * индикатора эпох (`EpochDipoleStrip`, второй ряд шапки). Здесь только
+ * **команды**: всё уходит в состояние раздела, а кадр ведут часы рабочей области
+ * (`PlaybackFrame.tsx`) — прямых «ручек» у проекций нет.
  */
 export function PlaybackControls() {
   const result = useDipoleCalc((state) => state.result)
   const playback = useDipoleCalc((state) => state.playback)
   const togglePlayback = useDipoleCalc((state) => state.togglePlayback)
-  const stepPlaybackEpoch = useDipoleCalc((state) => state.stepPlaybackEpoch)
   const setPlaybackSpeed = useDipoleCalc((state) => state.setPlaybackSpeed)
   const clearPlaybackFrame = useDipoleCalc((state) => state.clearPlaybackFrame)
 
@@ -153,20 +155,6 @@ export function PlaybackControls() {
         active={playback.playing}
         disabled={!canPlay}
         onClick={togglePlayback}
-      />
-      <IconButton
-        icon={<ChevronLeft className="size-5" />}
-        label="Предыдущая эпоха"
-        tooltip="Покадрово назад: кадр встаёт на предыдущую эпоху и воспроизведение ставится на паузу"
-        disabled={!canPlay}
-        onClick={() => stepPlaybackEpoch(-1)}
-      />
-      <IconButton
-        icon={<ChevronRight className="size-5" />}
-        label="Следующая эпоха"
-        tooltip="Покадрово вперёд: кадр встаёт на следующую эпоху и воспроизведение ставится на паузу"
-        disabled={!canPlay}
-        onClick={() => stepPlaybackEpoch(1)}
       />
 
       {/*
@@ -211,7 +199,7 @@ export function PlaybackControls() {
 
 export function DipolesToolHeaderActions() {
   const recording = useEdfRecording((state) => state.recording)
-  const job = useDipoleCalc((state) => state.job)
+  const batchJob = useDipoleCalc((state) => state.batchJob)
   const result = useDipoleCalc((state) => state.result)
   const view = useDipoleCalc((state) => state.view)
   // Вид рабочей области (срез 3.5): отрисовка, параметр вне STAGE_PARAM_KEYS
@@ -222,7 +210,7 @@ export function DipolesToolHeaderActions() {
   const setGofThreshold = useDipoleCalc((state) => state.setGofThreshold)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const toggleView = useDipoleCalc((state) => state.toggleView)
-  const runCalculation = useDipoleCalc((state) => state.runCalculation)
+  const runBatch = useDipoleCalc((state) => state.runBatch)
   const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
   const refineJob = useDipoleCalc((state) => state.refineJob)
   const refiningEpoch = useDipoleCalc((state) => state.refiningEpoch)
@@ -243,7 +231,14 @@ export function DipolesToolHeaderActions() {
   })
   const [helpOpen, setHelpOpen] = useState(false)
 
-  const running = job?.status === 'running'
+  // Каталог полос пакета: прогон всегда идёт по всем ключам `freq_bands` +
+  // `functional_bands` (выбор полос для прогона из UI убран, «Расчёт пакета»)
+  const catalogBandKeys = [
+    ...Object.keys(meta.data?.freq_bands ?? {}),
+    ...Object.keys(meta.data?.functional_bands ?? {}),
+  ]
+
+  const running = batchJob?.status === 'running'
   const canRun = recording !== null && !running
 
   const selectedEpoch = epochIndexOfPointId(selectedPointId)
@@ -267,27 +262,27 @@ export function DipolesToolHeaderActions() {
           : `Уточнить эпоху ${selectedEpoch + 1}: точный фитинг на BEM fsaverage, окно ${refineHalfwinLabel(refineHalfwinMs)}. ${refineCost}`
 
   const runTooltip = running
-    ? `Расчёт идёт: ${calcJobSummary(job)}`
-    : job?.status === 'failed'
-      ? `Рассчитать заново — прошлый запуск завершился ошибкой: ${job.error}`
+    ? `Расчёт пакета идёт: ${calcJobSummary(batchJob)}`
+    : batchJob?.status === 'failed'
+      ? `Рассчитать заново — прошлый запуск завершился ошибкой: ${batchJob.error}`
       : recording === null
         ? NO_RECORDING_HINT
         : result
-          ? `Пересчитать диполи: точек ${result.points?.length ?? 0}, сетка ${result.grid_mm} мм`
-          : 'Рассчитать диполи быстро: одна точка на эпоху в пике GFP, перебор сетки узлов'
+          ? `Пересчитать пакет диполей: полос ${catalogBandKeys.length}, сетка ${result.grid_mm} мм`
+          : `Рассчитать пакет диполей по всем полосам каталога (${catalogBandKeys.length}): одна точка на эпоху в пике GFP на каждую полосу`
 
   return (
     <>
-      {/* Иконка — связанные узлы сетки (Share2): быстрый расчёт — это перебор
+      {/* Иконка — связанные узлы сетки (Share2): расчёт — это перебор
           узлов; треугольник play уже занят кнопкой воспроизведения анимации
           (поправка ручной проверки, 19.09.2026) */}
       <IconButton
         icon={running ? <Loader2 className="size-5 animate-spin" /> : <Share2 className="size-5" />}
-        label={running ? 'Расчёт…' : result ? 'Пересчитать диполи' : 'Рассчитать диполи'}
+        label={running ? 'Расчёт…' : result ? 'Пересчитать пакет' : 'Рассчитать пакет'}
         tooltip={runTooltip}
         title={runTooltip}
         disabled={!canRun}
-        onClick={() => void runCalculation(recording?.recording_id ?? null)}
+        onClick={() => void runBatch(recording?.recording_id ?? null, catalogBandKeys)}
       />
 
       <CalcProgress />

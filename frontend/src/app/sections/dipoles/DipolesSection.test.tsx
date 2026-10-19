@@ -5,7 +5,7 @@
  * запускает** (расчёт — отдельная задача; из запросов допустимы только
  * метаданные), а клик по проекции наводит все три среза на выбранную точку.
  */
-import { fireEvent, screen } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -71,25 +71,25 @@ describe('рабочая область раздела «Диполи»', () => 
       fftRangeHz: null,
       selectedPointId: null,
       playback: { ...PLAYBACK_DEFAULTS },
-      job: null,
+      batchJob: null,
       result: null,
       spectrumJob: null,
       spectrum: null,
-      error: null,
+      batchError: null,
       spectrumError: null,
       view: 'none',
     })
     vi.stubGlobal('fetch', mockApiFetch())
   })
 
-  it('показывает три проекции и честный статус пустого слоя диполей', () => {
+  it('показывает три проекции и честно держит пустой слой диполей', () => {
     renderWithProviders(<DipolesSection />)
 
     expect(screen.getByTestId('projection-axial')).toBeInTheDocument()
     expect(screen.getByTestId('projection-sagittal')).toBeInTheDocument()
     expect(screen.getByTestId('projection-coronal')).toBeInTheDocument()
-    expect(screen.getByText('Расчёт диполей не подключён — слой пуст')).toBeInTheDocument()
-    expect(screen.getByText(/Срезы: z = 0\.0 мм · x = 0\.0 мм · y = 0\.0 мм/)).toBeInTheDocument()
+    // Слой пуст — точек нет; числа живут в шапке и панели «Опции», а не здесь
+    expect(screen.queryAllByTestId(/^dipole-dot-/)).toHaveLength(0)
   })
 
   it('держит общий экранный масштаб: колонки пропорциональны ширинам фигур', () => {
@@ -131,18 +131,15 @@ describe('рабочая область раздела «Диполи»', () => 
     }
   })
 
-  it('попадание в поле Бродмана подписывается в полосе состояния', () => {
+  it('попадание в поле Бродмана сохраняется в выборе раздела', () => {
     renderWithProviders(<DipolesSection />)
     const svg = stubFigure('axial')
     // BA17 (затылочное поле) лежит в аксиальном срезе ниже центра фигуры
     fireEvent.click(svg, { clientX: 160, clientY: 250 })
 
-    const area = useDipoleParams.getState().selection.area
-    if (area) {
-      expect(screen.getByText(`Поле под точкой: ${area}`)).toBeInTheDocument()
-    } else {
-      expect(screen.queryByText(/Поле под точкой:/)).not.toBeInTheDocument()
-    }
+    // Числа и подписи живут в панели «Опции»; рабочая область хранит выбор
+    expect(useDipoleParams.getState().selection.point).not.toBeNull()
+    expect(screen.queryByText(/Поле под точкой:/)).not.toBeInTheDocument()
   })
 
   it('просит только статические ассеты и никогда не запускает обработку', async () => {
@@ -155,7 +152,11 @@ describe('рабочая область раздела «Диполи»', () => 
 
     // Контуры атласа (срез 3.9) — статические ассеты: дожидаемся, что запросы
     // действительно ушли, иначе проверка «только статика» была бы о времени.
-    expect(await screen.findByText('Контуры атласа недоступны')).toBeInTheDocument()
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([path]) => String(path).includes('/surface/contours')),
+      ).toBe(true),
+    )
 
     const paths = fetchMock.mock.calls.map(([path]) => String(path))
     expect(paths.every((path) => staticAsset(path))).toBe(true)
@@ -172,10 +173,9 @@ describe('рабочая область раздела «Диполи»', () => 
       'href',
       '/api/v1/surface/mri/slice/sagittal/0.png?v=mri12345678',
     )
-    expect(screen.getByText('МРТ: срез T1, сетка 1 мм')).toBeInTheDocument()
   })
 
-  it('без метаданных слой МРТ не рисуется и статус честный', async () => {
+  it('без метаданных слой МРТ не рисуется', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -185,7 +185,6 @@ describe('рабочая область раздела «Диполи»', () => 
     renderWithProviders(<DipolesSection />)
 
     expect(screen.queryByTestId('layer-mri-axial')).not.toBeInTheDocument()
-    expect(await screen.findByText('МРТ: метаданные недоступны')).toBeInTheDocument()
   })
 
   it('рисует точки из результата расчёта и подчиняется порогам отображения (срез 3.4)', () => {
@@ -198,12 +197,9 @@ describe('рабочая область раздела «Диполи»', () => 
     for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
       expect(screen.getAllByTestId(new RegExp(`^dipole-dot-${plane}-`))).toHaveLength(2)
     }
-    expect(screen.getByText('Точек диполей: 2')).toBeInTheDocument()
-    expect(screen.getByText('Скрыто порогами «момент ≥ 60 нАм»: 1')).toBeInTheDocument()
-    expect(screen.getByText(/Быстрый режим, сетка 7 мм · эпох 4 из 4/)).toBeInTheDocument()
-    expect(
-      screen.getByText('Часть точек без MNI (fsaverage недоступен) — на проекции не попадают'),
-    ).toBeInTheDocument()
+    // Результат задачи не тронут: точки остаются в нём, скрытых порогом — 1 из 3
+    const result = useDipoleCalc.getState().result
+    expect(result?.points).toHaveLength(4)
   })
 
   it('считает порог по слою, а не по задаче, и снимается нулём', () => {
@@ -212,8 +208,11 @@ describe('рабочая область раздела «Диполи»', () => 
 
     // Порог выше всех амплитуд: ни одной точки, но расчёт на месте
     expect(screen.queryAllByTestId(/^dipole-dot-axial-/)).toHaveLength(0)
-    expect(screen.getByText('Скрыто порогами «момент ≥ 200 нАм»: 3')).toBeInTheDocument()
-    expect(screen.getByText(/Быстрый режим, сетка 7 мм/)).toBeInTheDocument()
+    expect(useDipoleCalc.getState().result?.points).toHaveLength(4)
+
+    // Порог, снятый нулём, возвращает все точки слоя
+    act(() => useDipoleCalc.setState({ amplitudeThresholdNam: 0 }))
+    expect(screen.getAllByTestId(/^dipole-dot-axial-/).length).toBeGreaterThan(0)
   })
 
   /**
@@ -480,8 +479,9 @@ describe('рабочая область раздела «Диполи»', () => 
 
     expect(await screen.findByTestId('anatomy-axial-Left-Thalamus-Proper')).toBeInTheDocument()
     expect(screen.getByTestId('area-axial-BA17-lh')).toBeInTheDocument()
-    // Мок отдаёт метки только для той плоскости, что в фикстуре (axial)
-    expect(screen.getByText('Атлас: структур 2, полей 1')).toBeInTheDocument()
+    // Счётчики структур/полей жили в инфо-строке и убраны с ней: атлас показан
+    // самими контурами, а выбор хранится в состоянии раздела
+    expect(screen.queryByText(/Атлас: структур/)).not.toBeInTheDocument()
 
     const paths = fetchMock.mock.calls.map(([path]) => String(path))
     expect(paths).toContain('/api/v1/surface/contours/axial/0?v=cont12345678')
@@ -491,6 +491,11 @@ describe('рабочая область раздела «Диполи»', () => 
     const at = normalizedToPx(mniToNormalized('axial', { x: -25, y: -25, z: 0 }), 'axial')
     fireEvent.click(svg, { clientX: at.x, clientY: at.y })
 
-    expect(await screen.findByText('Структура под точкой: таламус (слева)')).toBeInTheDocument()
+    // Клик по полигону кладёт id структуры в выбор (машиночитаемая метка);
+    // человеческое имя показывает панель «Опции»
+    await waitFor(() =>
+      expect(useDipoleParams.getState().selection.structure).toBe('Left-Thalamus-Proper'),
+    )
+    expect(useDipoleParams.getState().selection.point).not.toBeNull()
   })
 })

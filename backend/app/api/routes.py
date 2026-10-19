@@ -100,6 +100,7 @@ from app.schemas.analysis import (
     JobStatus,
     MainsOut,
     MetaResponse,
+    MipOutlineOut,
     MriSliceRef,
     MriSlicesOut,
     MriVolumeRef,
@@ -178,6 +179,9 @@ from app.services.audio_render.mix import (
     GAIN_MIN_DB,
 )
 from app.services.audio_render.rows import RENDER_VARIANTS
+from app.services.brain_silhouette import (
+    outlines as brain_silhouette_outlines,
+)
 from app.services.channel_mix import mixes_for
 from app.services.compare import cached_compare_topomap
 from app.services.filter_design import filter_response
@@ -191,6 +195,9 @@ from app.services.group_analysis import (
 from app.services.group_reports import ensure_compare_report, ensure_group_report
 from app.services.job_manager import job_manager, noop_progress
 from app.services.mains import mains_component
+from app.services.mri_slices import (
+    mip_png as mri_mip_png,
+)
 from app.services.mri_slices import (
     mri_meta,
 )
@@ -1856,6 +1863,67 @@ async def get_mri_slice(
         media_type="image/png",
         cache_control=CACHE_PUBLIC_WEEK,
         headers={"X-Mri-Slice-Mm": f"{actual_mm:g}"},
+    )
+
+
+@router.get(
+    "/surface/mri/mip/outline",
+    response_model=MipOutlineOut,
+    summary="Силуэт коры для слоя «Границы мозга» (контур, ETag)",
+)
+async def get_mri_mip_outline(
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """Замкнутые контуры силуэта коры по плоскостям (мм MNI).
+
+    Слой «Границы мозга» рисует **только** эту обводку (доводка 19.10.2026:
+    растровая MIP-подложка убрана — анатомию показывают слои среза МРТ,
+    структур и полей): контур считается из коркового меша ``*.pial`` — те же
+    границы мозга, что даёт ``silhouette=True`` у MNE, а не контур маски тома.
+    Статичен для версии ассета ``silhouette``; недоступные данные fsaverage —
+    503, повторный запрос с тем же ``If-None-Match`` — 304.
+    """
+    try:
+        payload = brain_silhouette_outlines(settings)
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
+
+    data = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return asset_response(data, str(payload["version"]), if_none_match=if_none_match)
+
+
+@router.get(
+    "/surface/mri/mip/{plane}.png",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+    summary="Glass-brain MIP проекции (PNG, ETag)",
+)
+async def get_mri_mip(
+    plane: str,
+    if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+) -> Response:
+    """PNG проекции мозга целиком (MIP яркости тома, серый + альфа).
+
+    Статичная картинка вида (сверху/сбоку/сзади): максимум яркости ``T1`` вдоль
+    оси проекции внутри маски мозга — любая анатомия любого среза укладывается
+    в её границы. Самостоятельный ассет: слой «Границы мозга» с 19.10.2026
+    рисует только векторную обводку силуэта (``/mip/outline``), без растровой
+    подложки. Версия в ETag — версия тома (код MIP от тома не зависит).
+    Неизвестная плоскость — 404, недоступный том — 503, повторный запрос с тем
+    же ``If-None-Match`` — 304.
+    """
+    try:
+        data, version = mri_mip_png(settings, plane)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
+
+    return asset_response(
+        data, f"{version}-{plane}-mip",
+        if_none_match=if_none_match,
+        media_type="image/png",
+        cache_control=CACHE_PUBLIC_WEEK,
     )
 
 

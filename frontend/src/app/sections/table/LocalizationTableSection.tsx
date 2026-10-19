@@ -44,14 +44,19 @@ import { filterBandText } from '@/shared/lib/calcFilter'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { Button } from '@/shared/ui/Button'
+import { SelectField } from '@/shared/ui/SelectField'
 import { LocalizationTable } from './LocalizationTable'
 
 export function LocalizationTableSection() {
   const recording = useEdfRecording((state) => state.recording)
 
   const result = useDipoleCalc((state) => state.result)
-  const job = useDipoleCalc((state) => state.job)
-  const error = useDipoleCalc((state) => state.error)
+  const job = useDipoleCalc((state) => state.batchJob)
+  const error = useDipoleCalc((state) => state.batchError)
+  /** Полосы набора: таблица показывает точки одной (активной) полосы */
+  const batchBands = useDipoleCalc((state) => state.batch?.bands ?? null)
+  const activeBandKey = useDipoleCalc((state) => state.activeBandKey)
+  const setActiveBand = useDipoleCalc((state) => state.setActiveBand)
   const gofThresholdPercent = useDipoleCalc((state) => state.gofThresholdPercent)
   const threshold = useDipoleCalc((state) => state.amplitudeThresholdNam)
   /** Пороги отображения проекций (в таблице они ничего не скрывают) */
@@ -150,7 +155,7 @@ export function LocalizationTableSection() {
         ) : null}
         {error ? <StatusPill tone="danger">{`Ошибка расчёта: ${error}`}</StatusPill> : null}
         <StatusPill tone="neutral">
-          Кнопка «Рассчитать диполи» — в шапке раздела «Диполи» (3)
+          Кнопка «Рассчитать пакет» — в шапке раздела «Диполи» (3)
         </StatusPill>
       </Placeholder>
     )
@@ -178,6 +183,18 @@ export function LocalizationTableSection() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3">
       <div className="flex flex-wrap items-center gap-2">
+        {batchBands && batchBands.length > 1 ? (
+          <SelectField
+            layout="inline"
+            label="Полоса таблицы"
+            value={activeBandKey ?? batchBands[0].band_key}
+            options={batchBands.map((band) => ({
+              value: band.band_key,
+              label: `${band.label} (${band.band_hz[0]}–${band.band_hz[1]} Гц)`,
+            }))}
+            onChange={setActiveBand}
+          />
+        ) : null}
         <StatusPill tone={stale ? 'warn' : 'ok'}>
           {stale
             ? 'Параметры расчёта изменены — результат не пересчитан'

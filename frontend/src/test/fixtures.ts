@@ -126,6 +126,7 @@ export const metaFixture: MetaResponse = {
   mri_slices: {
     version: 'mri12345678',
     slice_url: '/api/v1/surface/mri/slice',
+    mip_url: '/api/v1/surface/mri/mip',
     spacing_mm: 1,
   },
   mri_volumes: {
@@ -1322,6 +1323,8 @@ function batchBandRun(
     },
     n_epochs_total: 4,
     n_epochs_used: 4,
+    // Эпоха 3 отброшена (BAD): точек у неё нет — фикстура согласована
+    bad_epoch_indexes: [3],
     points: points.map((point, index) => ({ ...point, kd_passed: index < 2 })),
     warnings: [],
   }

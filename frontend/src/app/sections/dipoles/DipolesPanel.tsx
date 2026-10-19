@@ -51,14 +51,7 @@ import { useEdfRecording } from '@/shared/state/edfRecording'
 import { epochRuleWarnings, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { BatchPanel } from './BatchPanel'
 import {
-  BANDWIDTH_RANGE,
-  BAND_RANGE,
   NOTCH_OPTIONS,
-  SINGLE_FREQ_RANGE,
-  WIDE_FILTER_BAND,
-  filterPresetOf,
-  filterPresetOptions,
-  filterSummary,
   notchFromOption,
   notchOptionValue,
 } from '@/shared/lib/calcFilter'
@@ -84,7 +77,7 @@ export function DipolesPanel() {
   const resetAll = useDipoleParams((state) => state.resetAll)
 
   const calcParams = useDipoleCalc((state) => state.params)
-  const calcJob = useDipoleCalc((state) => state.job)
+  const batchJob = useDipoleCalc((state) => state.batchJob)
   const calcResult = useDipoleCalc((state) => state.result)
   const spectrum = useDipoleCalc((state) => state.spectrum)
   const gofThresholdPercent = useDipoleCalc((state) => state.gofThresholdPercent)
@@ -94,11 +87,7 @@ export function DipolesPanel() {
   const setPsdMethod = useDipoleCalc((state) => state.setPsdMethod)
   const setGofThreshold = useDipoleCalc((state) => state.setGofThreshold)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
-  const setFilterPreset = useDipoleCalc((state) => state.setFilterPreset)
-  const setFilterBand = useDipoleCalc((state) => state.setFilterBand)
   const setNotchHz = useDipoleCalc((state) => state.setNotchHz)
-  const setSingleFreq = useDipoleCalc((state) => state.setSingleFreq)
-  const setBandwidth = useDipoleCalc((state) => state.setBandwidth)
   const refineHalfwinMs = useDipoleCalc((state) => state.refineHalfwinMs)
   const setRefineHalfwinMs = useDipoleCalc((state) => state.setRefineHalfwinMs)
   const resetCalc = useDipoleCalc((state) => state.reset)
@@ -127,18 +116,20 @@ export function DipolesPanel() {
     }),
   )
 
-  // Диапазоны ритмов — тот же `/meta`, из которого берутся длины эпох: список
-  // пресетов не дублирует числа конфига сервера в коде UI
+  // Диапазоны ритмов — тот же `/meta`, из которого берутся длины эпох
   const freqBands = meta.data?.freq_bands ?? {}
   const functionalBands = meta.data?.functional_bands ?? {}
-  const presetOptions = filterPresetOptions(freqBands, functionalBands)
-  // Показываем выбор пользователя; если такого пункта в текущих метаданных нет
-  // (ритм убрали из конфига сервера), берём пресет по полосе — значение списка
-  // не должно «повисать» вне его пунктов
-  const filterPreset = presetOptions.some((option) => option.value === calcParams.filterPreset)
-    ? calcParams.filterPreset
-    : filterPresetOf(calcParams, freqBands, functionalBands)
-  const filterBand = calcParams.filterBandHz ?? WIDE_FILTER_BAND
+  /**
+   * Нижняя граница самой низкой полосы каталога: правило «≥ 2 периодов» для
+   * пакета читается по его медленной полосе (пакет всегда считает весь каталог,
+   * «Фильтр расчёта» убран). `null` — каталог ещё не пришёл, правило молчит.
+   */
+  const packageLoHz = (() => {
+    const lows = [...Object.values(freqBands), ...Object.values(functionalBands)]
+      .map((range) => range[0])
+      .filter((value) => Number.isFinite(value) && value > 0)
+    return lows.length > 0 ? Math.min(...lows) : null
+  })()
   // Результат посчитан на других параметрах: панель обязана сказать это явно,
   // а не выглядеть «актуальной» (та же подпись, что в таблице локализации)
   const staleResult = calcResult !== null && !resultMatchesParams(calcResult, calcParams)
@@ -240,16 +231,16 @@ export function DipolesPanel() {
         <div className="mb-2 flex flex-wrap gap-2">
           <StatusPill
             tone={
-              calcJob?.status === 'failed'
+              batchJob?.status === 'failed'
                 ? 'danger'
-                : calcJob?.status === 'running'
+                : batchJob?.status === 'running'
                   ? 'accent'
                   : calcResult
                     ? 'ok'
                     : 'neutral'
             }
           >
-            {calcJobSummary(calcJob)}
+            {calcJobSummary(batchJob)}
           </StatusPill>
           {calcResult ? (
             <StatusPill tone="neutral" title={`Метод: ${calcResult.method}`}>
@@ -267,63 +258,6 @@ export function DipolesPanel() {
         </div>
 
         <SelectField
-          label="Фильтр расчёта"
-          value={filterPreset}
-          options={presetOptions.map(({ value, label, group }) => ({ value, label, group }))}
-          onChange={(value) =>
-            setFilterPreset(value, freqBands, functionalBands, { lengths: epochLengths, signal })
-          }
-          hint="Полоса уходит в задачу как band_min/band_max. Диапазоны ритмов приходят с сервера (/meta), одиночная частота — узкая полоса f ± bw/2. Смена пресета подставляет длину эпохи по полосе (авто-длина, п.4). Правка ничего не запускает."
-        />
-        {filterPreset === 'single' ? (
-          <>
-            <NumberField
-              label="Одиночная частота"
-              value={calcParams.singleFreqHz}
-              min={SINGLE_FREQ_RANGE[0]}
-              max={SINGLE_FREQ_RANGE[1]}
-              step={0.01}
-              unit="Гц"
-              onChange={setSingleFreq}
-              hint="Например 7.83 Гц: полоса считается вокруг этой частоты как f ± bw/2."
-            />
-            <NumberField
-              label="Ширина полосы"
-              value={calcParams.bandwidthHz}
-              min={BANDWIDTH_RANGE[0]}
-              max={BANDWIDTH_RANGE[1]}
-              step={0.05}
-              unit="Гц"
-              onChange={setBandwidth}
-              hint="Ширина вокруг одиночной частоты: 0.5 Гц — как по умолчанию в предподготовке записи."
-            />
-          </>
-        ) : null}
-        {filterPreset === 'custom' ? (
-          <>
-            <NumberField
-              label="Полоса от"
-              value={filterBand[0]}
-              min={BAND_RANGE[0]}
-              max={BAND_RANGE[1]}
-              step={0.5}
-              unit="Гц"
-              onChange={(value) => setFilterBand([value, filterBand[1]])}
-              hint="Границы полосы: порядок полей не важен — границы встают по возрастанию."
-            />
-            <NumberField
-              label="Полоса до"
-              value={filterBand[1]}
-              min={BAND_RANGE[0]}
-              max={BAND_RANGE[1]}
-              step={0.5}
-              unit="Гц"
-              onChange={(value) => setFilterBand([filterBand[0], value])}
-              hint="Совпавшие границы значат «без фильтра»: полосу нулевой ширины задача не примет."
-            />
-          </>
-        ) : null}
-        <SelectField
           label="Сетевой фильтр"
           value={notchOptionValue(calcParams.notchHz)}
           options={NOTCH_OPTIONS}
@@ -331,7 +265,8 @@ export function DipolesPanel() {
           hint="50/60 Гц: подавляет наводку сети. Уходит в задачу как notch_hz."
         />
         <p className="mt-2 text-sm text-fg-2">
-          {`В расчёт уйдёт: ${filterSummary(calcParams, freqBands, functionalBands)}`}
+          Пакет диполей считается по всем полосам каталога (δ…high-γ и функциональные
+          ритмы из /meta): свою полосу фильтра выбирают полосы пакета, а не форма.
         </p>
 
         <SelectField
@@ -340,15 +275,16 @@ export function DipolesPanel() {
           options={epochOptions}
           disabled={epochLengths.length === 0}
           onChange={(value) => setEpochLengthMs(Number(value))}
-          hint="Длины эпох задаёт сервер (список нарезки): смена пресета полосы подставляет длину автоматически, ручная правка помечает расчёт устаревшим, но ничего не запускает."
+          hint="Длины эпох задаёт сервер (список нарезки): правка помечает расчёт устаревшим, но ничего не запускает."
         />
-        {/* Две половины правила читаются вместе: ≥ 2 периодов полосы (достоверность
-            пика) и ≥ 3C отсчётов (обратимость ковариации) — предупреждением, не запретом */}
+        {/* Две половины правила читаются вместе: ≥ 2 периодов медленной полосы
+            пакета (достоверность пика) и ≥ 3C отсчётов (обратимость ковариации) —
+            предупреждением, не запретом */}
         <WarnList
           testId="epoch-rule-warnings"
           items={epochRuleWarnings({
             lengthMs: calcParams.epochLengthMs,
-            bandLoHz: calcParams.filterBandHz?.[0] ?? null,
+            bandLoHz: packageLoHz,
             ...signal,
           })}
         />
@@ -435,8 +371,8 @@ export function DipolesPanel() {
           </Button>
         </div>
         <p className="mt-2 text-sm text-fg-2">
-          Расчёт запускается кнопкой в шапке раздела, спектр — кнопкой в панели «Топокарты ритмов»:
-          правка параметров здесь ничего не запускает.
+          Расчёт пакета запускается кнопкой «Рассчитать пакет» в шапке раздела, спектр —
+          кнопкой в панели «Топокарты ритмов»: правка параметров здесь ничего не запускает.
         </p>
         <p className="mt-2 text-sm text-fg-2">{dipoleLayerStatus(visibleLayer)}</p>
         {calcResult?.warnings?.length ? (

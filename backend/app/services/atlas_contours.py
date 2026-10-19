@@ -304,10 +304,12 @@ def _structure_names() -> dict[int, tuple[str, str]]:
 
 @dataclass(frozen=True)
 class ContourVolumes:
-    """Объёмы меток на MNI-сетке: структуры, поля Бродмана и силуэт головы.
+    """Объёмы меток на MNI-сетке: структуры и поля Бродмана.
 
-    ``head`` — маска ``seghead.mgz`` (``None`` — файла нет): она не участвует в
-    атрибуции точек, только в контуре головы на срезе.
+    Силуэт (головы, затем границ мозга) убран из контуров (3.12, доводка):
+    слой «Границы мозга» рисует **статичные виды** мозга целиком на стороне UI
+    (`frontend/src/shared/lib/brainViews.ts`), контурам среза он не чужой — он
+    ими не является.
     """
 
     structures: np.ndarray
@@ -318,7 +320,6 @@ class ContourVolumes:
     area_labels: dict[int, str]
     version: str
     spacing_mm: float = CONTOUR_SPACING_MM
-    head: np.ndarray | None = None
 
 
 # Допуск признака «вне мозга», мм: диагональ вокселя сетки 1 мм — 0.87 мм, поэтому
@@ -370,21 +371,6 @@ def _structure_volume(ctx: _ContourCtx) -> np.ndarray:
     image = cast("nib.MGHImage", nib.load(path))
     data = np.asanyarray(image.dataobj)
     return _resample_nearest(data, image.affine).astype(np.int16)
-
-
-def _head_volume(ctx: _ContourCtx) -> np.ndarray | None:
-    """Силуэт головы ``seghead.mgz`` на MNI-сетке 1 мм (``None`` — файла нет).
-
-    Том — бинарная маска кожи головы (uint8 0/1, коронарная укладка, как у
-    прочих томов fsaverage), поэтому выборка узлов та же, что у мозговых масок.
-    Отсутствующий файл не ошибка сборки: ассет собирается без силуэта, а ответ
-    по срезу честно отдаёт ``head: null`` (UI рисует условную фикстуру).
-    """
-    path = os.path.join(ctx.subjects_dir, "fsaverage/mri/seghead.mgz")
-    if not os.path.exists(path):
-        return None
-    image = cast("nib.MGHImage", nib.load(path))
-    return _resample_nearest(np.asanyarray(image.dataobj) > 0, image.affine)
 
 
 def _brodmann_volume(ctx: _ContourCtx) -> tuple[np.ndarray, dict[int, str]]:
@@ -451,13 +437,12 @@ def _brodmann_volume(ctx: _ContourCtx) -> tuple[np.ndarray, dict[int, str]]:
 
 def _read_cache(
     path: str,
-) -> tuple[np.ndarray, np.ndarray, dict[int, str], np.ndarray | None] | None:
+) -> tuple[np.ndarray, np.ndarray, dict[int, str]] | None:
     """Объёмы из дискового кэша (или ``None``, если кэша нет/он нечитаем).
 
-    Ключ ``head`` опционален: его нет, когда ``seghead.mgz`` отсутствовал на
-    сборке. Неоднозначности «файл появился после сборки» нет — появление файла
-    меняет отпечаток ассета (seghead входит в stamp), и кэш пересобирается под
-    новым именем.
+    Старый ключ ``head`` (силуэт головы ``seghead.mgz``, кэши версии ≤ 3) не
+    читается: силуэт границ мозга считается из ``structures``, а устаревший
+    архив пересобирается сменой ``CONTOUR_VERSION``.
     """
     if not os.path.exists(path):
         return None
@@ -469,11 +454,10 @@ def _read_cache(
                 int(key): str(name)
                 for key, name in json.loads(str(data["area_names"])).items()
             }
-            head = data["head"].astype(bool) if "head" in data.files else None
     except (OSError, KeyError, ValueError) as exc:
         logger.warning("Кэш контуров не прочитан (%s): %s", path, exc)
         return None
-    return structures, areas, names, head
+    return structures, areas, names
 
 
 def _write_cache(
@@ -481,7 +465,6 @@ def _write_cache(
     structures: np.ndarray,
     areas: np.ndarray,
     area_names: dict[int, str],
-    head: np.ndarray | None = None,
 ) -> None:
     """Атомарная запись кэша; сбой не критичен (кэш — только оптимизация).
 
@@ -495,8 +478,6 @@ def _write_cache(
         "areas": areas,
         "area_names": json.dumps(area_names),
     }
-    if head is not None:
-        payload["head"] = head.astype(np.uint8)
     np.savez_compressed(buffer, **payload)
     cache_write(path, buffer.getvalue(), label="Кэш контуров")
 
@@ -511,21 +492,20 @@ def load_volumes(ctx: _ContourCtx) -> ContourVolumes:
     if cached is None:
         structures = _structure_volume(ctx)
         areas, area_names = _brodmann_volume(ctx)
-        head = _head_volume(ctx)
-        _write_cache(path, structures, areas, area_names, head)
+        _write_cache(path, structures, areas, area_names)
         logger.info(
-            "Объёмы контуров построены (version=%s, структуры=dims %s, head=%s)",
-            version, structures.shape, "есть" if head is not None else "нет",
+            "Объёмы контуров построены (version=%s, структуры=dims %s)",
+            version, structures.shape,
         )
         journal.record(
             "asset-contours", "build",
             ms=(time.perf_counter() - started) * 1000.0,
             params_key=version, cache_hit=False,
             bytes_out=int(structures.nbytes + areas.nbytes),
-            note="структуры + поля Бродмана + силуэт головы",
+            note="структуры + поля Бродмана",
         )
     else:
-        structures, areas, area_names, head = cached
+        structures, areas, area_names = cached
         logger.info("Объёмы контуров взяты из кэша (version=%s)", version)
         journal.record(
             "asset-contours", "cache_read",
@@ -546,7 +526,6 @@ def load_volumes(ctx: _ContourCtx) -> ContourVolumes:
         area_names=area_names,
         area_labels={key: _area_label(name) for key, name in area_names.items()},
         version=version,
-        head=head,
     )
 
 
@@ -831,34 +810,6 @@ def _shape_payloads(
     return payloads
 
 
-def _head_payload(
-    volumes: ContourVolumes, plane: str, index: int
-) -> list[list[list[float]]] | None:
-    """Контуры силуэта головы на срезе (мм MNI) или ``None`` — ассета нет.
-
-    ``None`` (нет ``seghead.mgz``) и пустой список (на срезе нет ни одного
-    вокселя головы — например, самый верхний аксиальный срез) — разные вещи,
-    как у полей Бродмана: UI не подменяет одно другим.
-    """
-    if volumes.head is None:
-        return None
-    values = _slice_of(volumes.head, plane, index)
-    horizontal, vertical = PLANE_AXES[plane]
-    loops = trace_mask_contours(
-        values,
-        axis_grid(horizontal, CONTOUR_SPACING_MM),
-        axis_grid(vertical, CONTOUR_SPACING_MM),
-        simplify_mm=CONTOUR_SIMPLIFY_MM,
-    )
-    if not loops:
-        return []
-    return [
-        [[round(float(x), 1), round(float(y), 1)] for x, y in loop]
-        for loop in loops
-        if polygon_area_mm2(loop) >= MIN_SHAPE_AREA_MM2
-    ]
-
-
 def slice_contours(settings: Settings, plane: str, mm: float) -> dict[str, Any]:
     """Контуры одного среза: анатомические структуры и поля Бродмана (мм MNI).
 
@@ -888,7 +839,6 @@ def slice_contours(settings: Settings, plane: str, mm: float) -> dict[str, Any]:
         "areas": _shape_payloads(
             volumes.areas, plane, index, volumes.area_names, volumes.area_labels
         ),
-        "head": _head_payload(volumes, plane, index),
     }
 
 
