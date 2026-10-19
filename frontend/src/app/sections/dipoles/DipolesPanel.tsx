@@ -1,6 +1,7 @@
 /**
- * Панель опций раздела «Диполи» (срез 3.1): видимость слоёв проекций, срезы MNI
- * и референс-точка.
+ * Панель опций раздела «Диполи» (срез 3.1): видимость слоёв проекций, срезы MNI,
+ * референс-точка, секция «Локализация» (выделенный диполь и анатомия кадра,
+ * перенос из рабочей области 19.10.2026) и параметры расчёта.
  *
  * Панель только собирает выбор пользователя (zustand `dipoleParams`) и ничего не
  * запускает: расчёт диполей появится отдельной задачей по кнопке тулс-хедера
@@ -50,6 +51,8 @@ import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { epochRuleWarnings, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { BatchPanel } from './BatchPanel'
+import { PlaybackAnatomyLine } from './PlaybackAnatomyLine'
+import { SelectedDipoleLine } from './SelectedDipoleLine'
 import {
   NOTCH_OPTIONS,
   notchFromOption,
@@ -222,6 +225,19 @@ export function DipolesPanel() {
             Всё по умолчанию
           </Button>
         </div>
+      </Panel>
+
+      {/*
+        Секция «Локализация» (19.10.2026): подпись выделенного диполя с кнопкой
+        «Снять выделение» и анатомия кадра воспроизведения по отмеченным полосам
+        переехали сюда из рабочей области — она показывает только фигуры.
+      */}
+      <Panel
+        title="Локализация"
+        hint="Выделенный диполь и локализация кадра воспроизведения по отмеченным полосам: описание каждой полосы — отдельным абзацем. Анатомия — метки измеренной точки-якоря кадра: кадр между эпохами интерполирован (и замедлен через эпохи без диполя), анатомия — нет. Пока диполь не выбран и кадр не задействован, секция пуста."
+      >
+        <SelectedDipoleLine />
+        <PlaybackAnatomyLine />
       </Panel>
 
       <Panel

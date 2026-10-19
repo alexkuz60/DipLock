@@ -15,7 +15,7 @@ import {
   EMPTY_SELECTION,
   useDipoleParams,
 } from '@/shared/state/dipoleParams'
-import { CALC_PARAM_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
+import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { dipoleScanResultFixture, recordingFixture } from '@/test/fixtures'
@@ -37,7 +37,9 @@ describe('панель раздела «Диполи»', () => {
       amplitudeThresholdNam: 0,
       fftRangeHz: null,
       selectedPointId: null,
+      playback: { ...PLAYBACK_DEFAULTS },
       batchJob: null,
+      batch: null,
       result: null,
       spectrumJob: null,
       spectrum: null,
@@ -45,6 +47,26 @@ describe('панель раздела «Диполи»', () => {
       spectrumError: null,
       view: 'none',
     })
+  })
+
+  /**
+   * Секция «Локализация» (19.10.2026): подпись выделенного диполя с кнопкой
+   * «Снять выделение» и анатомия кадра воспроизведения переехали сюда из рабочей
+   * области — рабочая область показывает только фигуры.
+   */
+  it('секция «Локализация» показывает выделенный диполь и анатомию кадра', () => {
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      selectedPointId: '0-120',
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 0 },
+    })
+    renderWithProviders(<DipolesPanel />)
+
+    expect(screen.getByText(/Выделен диполь: Эпоха 1, 0.120 с/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Снять выделение' })).toBeInTheDocument()
+    // Анатомия кадра — абзацами секции: структура и поле своей эпохи из результата
+    expect(screen.getByText('Кадр: эпоха 1')).toBeInTheDocument()
+    expect(screen.getByText('таламус (слева), BA17-lh')).toBeInTheDocument()
   })
 
   it('переключает фоновые слои через состояние раздела', async () => {

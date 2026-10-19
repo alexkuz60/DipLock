@@ -6,7 +6,6 @@
  * метаданные), а клик по проекции наводит все три среза на выбранную точку.
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   PROJECTION_PLANES,
@@ -308,8 +307,9 @@ describe('рабочая область раздела «Диполи»', () => 
       expect(screen.getByTestId(`dipole-${plane}-1-140`)).toHaveAttribute('data-selected', 'false')
     }
     expect(useDipoleCalc.getState().selectedPointId).toBe('0-120')
-    // Подпись выбора: у подсветки на фигуре есть читаемый текст
-    expect(screen.getByText(/Выделен диполь: Эпоха 1, 0.120 с/)).toBeInTheDocument()
+    // Подпись выбора («Выделен диполь: …») живёт в секции «Локализация» панели
+    // «Опции» — рабочая область показывает только фигуры
+    expect(screen.queryByText(/Выделен диполь/)).not.toBeInTheDocument()
     // Выделенный диполь залит оранжево-жёлтым, остальные — белые кольца без заливки
     expect(screen.getByTestId('dipole-dot-sagittal-0-120')).toHaveAttribute(
       'fill',
@@ -326,38 +326,28 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(paths.every((path) => path.startsWith('/api/v1/meta'))).toBe(true)
   })
 
-  it('снимает выделение повторным кликом и кнопкой «Снять выделение»', async () => {
-    const user = userEvent.setup()
+  it('снимает выделение повторным кликом по выделенной точке', () => {
     useDipoleCalc.setState({ result: dipoleScanResultFixture() })
     renderWithProviders(<DipolesSection />)
 
     const dot1140 = screen.getByTestId('dipole-dot-axial-1-140')
-    fireEvent.click(screen.getByTestId('projection-svg-axial'), {
-      clientX: Number(dot1140.getAttribute('cx')),
-      clientY: Number(dot1140.getAttribute('cy')),
-    })
+    const clickAt = () =>
+      fireEvent.click(screen.getByTestId('projection-svg-axial'), {
+        clientX: Number(dot1140.getAttribute('cx')),
+        clientY: Number(dot1140.getAttribute('cy')),
+      })
+    clickAt()
     expect(screen.getByTestId('dipole-coronal-1-140')).toHaveAttribute('data-selected', 'true')
 
-    await user.click(screen.getByRole('button', { name: 'Снять выделение' }))
+    clickAt()
 
     expect(useDipoleCalc.getState().selectedPointId).toBeNull()
-    expect(screen.queryByText(/Выделен диполь:/)).not.toBeInTheDocument()
     for (const plane of ['axial', 'sagittal', 'coronal'] as const) {
       expect(screen.getByTestId(`dipole-${plane}-1-140`)).toHaveAttribute('data-selected', 'false')
     }
-  })
-
-  it('подсвечивает выделенный диполь и после подъёма порога «КД»', () => {
-    // Порог скрывает точку из отрисовки, но выделение не должно «теряться» в
-    // подписи: выбор сделан раньше, а порог — параметр отображения
-    useDipoleCalc.setState({
-      result: dipoleScanResultFixture(),
-      amplitudeThresholdNam: 500,
-      selectedPointId: '0-120',
-    })
-    renderWithProviders(<DipolesSection />)
-
-    expect(screen.getByText(/Выделен диполь: Эпоха 1, 0.120 с/)).toBeInTheDocument()
+    // Кнопка «Снять выделение» — в секции «Локализация» панели «Опции»
+    // (`SelectedDipoleLine.test.tsx`), в рабочей области её нет
+    expect(screen.queryByRole('button', { name: 'Снять выделение' })).not.toBeInTheDocument()
   })
 
   /**
@@ -387,9 +377,9 @@ describe('рабочая область раздела «Диполи»', () => 
     expect(screen.getByTestId('layer-playback-axial').querySelector('title')?.textContent).toContain(
       'Кадр воспроизведения: Эпоха 2',
     )
-    // Анатомия кадра (срез 3.7): структура и поле **своей** эпохи — из результата,
-    // без запроса (в фикстуре метки у всех точек одинаковы, поэтому «дальше» нет)
-    expect(screen.getByText('Кадр: эпоха 2 — таламус (слева), BA17-lh')).toBeInTheDocument()
+    // Анатомия кадра (срез 3.7) переехала в секцию «Локализация» панели «Опции»:
+    // рабочая область подписей не показывает (`PlaybackAnatomyLine.test.tsx`)
+    expect(screen.queryByText(/^Кадр: эпоха/)).not.toBeInTheDocument()
     // Кадр — чистая перерисовка: раздел по-прежнему просит только статику
     const paths = fetchSpy.mock.calls.map(([path]) => String(path))
     expect(paths.every((path) => staticAsset(path))).toBe(true)
@@ -402,8 +392,6 @@ describe('рабочая область раздела «Диполи»', () => 
 
     expect(screen.queryByTestId('layer-playback-axial')).not.toBeInTheDocument()
     expect(screen.getByTestId('dipole-dot-axial-0-120')).toHaveAttribute('stroke-opacity', '1')
-    // Кадра нет — и строки анатомии кадра тоже нет: подписывать нечего
-    expect(screen.queryByText(/^Кадр: эпоха/)).not.toBeInTheDocument()
   })
 
   it('рисует затухающий шлейф спиральных витков слоем «Спираль момента» (срез 3.11)', () => {

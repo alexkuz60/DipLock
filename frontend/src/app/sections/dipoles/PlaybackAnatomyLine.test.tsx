@@ -1,10 +1,13 @@
 /**
- * Тесты строки анатомии кадра воспроизведения (срез 3.7).
+ * Тесты описания анатомии кадра воспроизведения (срез 3.7; с 19.10.2026 — секция
+ * «Локализация» панели «Опции»).
  *
- * Проверяют обещание строки: она называет структуру и поле **той эпохи, на которой
+ * Проверяют обещание секции: она называет структуру и поле **той эпохи, на которой
  * стоит кадр**, показывает ближайшую смену только в непрерывной цепочке эпох и
  * молчит там, где данных нет (эпоха без диполя с MNI, кадр скрыт порогами отображения).
- * Ни одного запроса: анатомию сервер посчитал в результате, а строка лишь её читает.
+ * Описание каждой полосы (или одиночного расчёта) — **отдельным абзацем** шрифтом
+ * панели «Опции» (`text-sm`). Ни одного запроса: анатомию сервер посчитал в
+ * результате, а секция лишь её читает.
  */
 import { act, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -12,7 +15,7 @@ import type { DipoleScanPoint } from '@/shared/api/types'
 import { PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { DIPOLE_PARAM_DEFAULTS, useDipoleParams } from '@/shared/state/dipoleParams'
-import { dipoleScanResultFixture } from '@/test/fixtures'
+import { dipoleBatchResultFixture, dipoleScanResultFixture } from '@/test/fixtures'
 import { PlaybackAnatomyLine } from './PlaybackAnatomyLine'
 
 /** Точка результата: метки по умолчанию одни и те же — их и меняют тесты. */
@@ -66,16 +69,17 @@ function renderLine(
   return render(<PlaybackAnatomyLine />)
 }
 
-/** Строка с подписью анатомии измеренной точки: по ней ищется элемент строки. */
+/** Блок описания анатомии кадра: по нему ищется элемент секции. */
 function anatomyLine(): HTMLElement {
-  return screen.getByTitle(/Анатомия — метки измеренной точки/)
+  return screen.getByTestId('playback-anatomy')
 }
 
-describe('строка анатомии кадра воспроизведения', () => {
+describe('описание анатомии кадра воспроизведения', () => {
   beforeEach(() => {
     localStorage.clear()
     useDipoleCalc.setState({
       result: null,
+      batch: null,
       gofThresholdPercent: 0,
       amplitudeThresholdNam: 0,
       playback: { ...PLAYBACK_DEFAULTS },
@@ -86,10 +90,11 @@ describe('строка анатомии кадра воспроизведени�
   it('называет структуру и поле эпохи кадра из результата', () => {
     renderLine({ epochIndex: 0 })
 
-    expect(anatomyLine()).toHaveTextContent('Кадр: эпоха 1 — таламус (слева), BA17-lh')
+    expect(screen.getByText('Кадр: эпоха 1')).toBeInTheDocument()
+    expect(screen.getByText('таламус (слева), BA17-lh')).toBeInTheDocument()
   })
 
-  it('держит локацию и переход одной строкой: текст читается как одна фраза', () => {
+  it('пишет описание каждой полосы отдельным абзацем шрифтом панели «Опции»', () => {
     renderLine({
       epochIndex: 0,
       points: [
@@ -102,13 +107,32 @@ describe('строка анатомии кадра воспроизведени�
       ],
     })
 
-    const text = anatomyLine().textContent ?? ''
-    expect(text).toBe(
-      'Кадр: эпоха 1 — таламус (слева), BA17-lh · дальше: эпоха 3 (2.100 с) → ' +
+    // Локация и переход живут в абзаце своей полосы (одиночный расчёт — один абзац)
+    const paragraph = screen.getByText(
+      'таламус (слева), BA17-lh · дальше: эпоха 3 (2.100 с) → ' +
         'прецентральная извилина (слева), BA4-lh',
     )
-    // Одной строкой: перевода строки в разметке нет — подпись читается одной фразой
-    expect(text).not.toContain('\n')
+    expect(paragraph.tagName).toBe('P')
+    // Крупный шрифт (`text-lg`) убран с переносом в панель: текст — как в «Опциях»
+    expect(paragraph).toHaveClass('text-sm')
+    expect(screen.getByText('Кадр: эпоха 1')).toBeInTheDocument()
+  })
+
+  it('не дублирует текст абзацев тултипом: у секции нет title', () => {
+    renderLine({
+      epochIndex: 0,
+      points: [
+        scanPoint(0),
+        scanPoint(2, {
+          anatomical_structure: 'прецентральная извилина (слева)',
+          brodmann_area: 'BA4-lh',
+        }),
+      ],
+    })
+
+    // Тултип секции повторял текст абзацев (включая «дальше: …») и убран;
+    // общая фраза об анатомии живёт в подсказке секции панели
+    expect(anatomyLine()).not.toHaveAttribute('title')
   })
 
   it('следует за кадром: перевод на другую эпоху меняет подпись', () => {
@@ -122,15 +146,19 @@ describe('строка анатомии кадра воспроизведени�
         }),
       ],
     })
-    expect(anatomyLine()).toHaveTextContent('Кадр: эпоха 1 — таламус (слева), BA17-lh')
+    expect(screen.getByText('Кадр: эпоха 1')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'таламус (слева), BA17-lh · дальше: эпоха 2 (1.100 с) → прецентральная извилина (слева), BA4-lh',
+      ),
+    ).toBeInTheDocument()
 
     act(() => {
       useDipoleCalc.getState().seekPlaybackEpoch(1)
     })
 
-    expect(anatomyLine()).toHaveTextContent(
-      'Кадр: эпоха 2 — прецентральная извилина (слева), BA4-lh',
-    )
+    expect(screen.getByText('Кадр: эпоха 2')).toBeInTheDocument()
+    expect(screen.getByText('прецентральная извилина (слева), BA4-lh')).toBeInTheDocument()
   })
 
   it('показывает ближайшую смену анатомии в непрерывной цепочке эпох', () => {
@@ -161,7 +189,8 @@ describe('строка анатомии кадра воспроизведени�
       ],
     })
 
-    expect(anatomyLine()).toHaveTextContent('Кадр: эпоха 1 — таламус (слева), BA17-lh')
+    expect(screen.getByText('Кадр: эпоха 1')).toBeInTheDocument()
+    expect(anatomyLine()).toHaveTextContent('таламус (слева), BA17-lh · дальше:')
     // Смена меток за разрывом — реальная веха пути: кадр доедет туда
     // замедленным переходом (поправка владельца 17.10.2026)
     expect(anatomyLine()).toHaveTextContent('дальше: эпоха 3 (2.100 с)')
@@ -183,26 +212,40 @@ describe('строка анатомии кадра воспроизведени�
     // Кадр держит последнюю измеренную точку (эпоха 1) с её анатомией и честной
     // подписью разрыва (поправка владельца 17.10.2026: без «моргания», но и без
     // чужих меток — анатомия принадлежит своей измеренной точке)
+    expect(screen.getByText('Кадр: эпоха 2')).toBeInTheDocument()
     expect(
-      screen.getByText('Кадр: эпоха 2 — таламус (слева), BA17-lh (удержание: эпоха 2 без диполя)'),
+      screen.getByText('таламус (слева), BA17-lh (удержание: эпоха 2 без диполя)'),
     ).toBeInTheDocument()
   })
 
   it('не подписывает кадр, скрытый порогами отображения: подпись не должна спорить с картинкой', () => {
     renderLine({ epochIndex: 0, threshold: 100 })
 
-    expect(
-      screen.getByText('Кадр: эпоха 1 — скрыт порогами «момент ≥ 100 нАм»'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('Кадр: эпоха 1')).toBeInTheDocument()
+    expect(screen.getByText('скрыт порогами «момент ≥ 100 нАм»')).toBeInTheDocument()
   })
 
   it('скрывает кадр и по GOF-порогу (основной контур отбора)', () => {
     // gof точек фикстуры 0.91 → порог 95% прячет кадр
     renderLine({ epochIndex: 0, gofThreshold: 95 })
 
-    expect(
-      screen.getByText('Кадр: эпоха 1 — скрыт порогами «GOF ≥ 95 %»'),
-    ).toBeInTheDocument()
+    expect(screen.getByText('скрыт порогами «GOF ≥ 95 %»')).toBeInTheDocument()
+  })
+
+  it('описывает каждую полосу пакета отдельным абзацем', () => {
+    useDipoleCalc.setState({
+      batch: dipoleBatchResultFixture(),
+      playbackBandKeys: ['alpha', 'beta'],
+      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 0 },
+    })
+    render(<PlaybackAnatomyLine />)
+
+    const alpha = screen.getByText(/^alpha: /)
+    const beta = screen.getByText(/^beta: /)
+    expect(alpha.tagName).toBe('P')
+    expect(beta.tagName).toBe('P')
+    expect(alpha).not.toBe(beta)
+    expect(screen.getByText('Кадр: эпоха 1')).toBeInTheDocument()
   })
 
   it('не показывается, пока кадр не задействован', () => {

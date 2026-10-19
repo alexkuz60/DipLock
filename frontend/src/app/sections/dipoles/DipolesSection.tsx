@@ -25,7 +25,10 @@
  * Выделение диполя — тоже состояние **просмотра** (срез 3.5, поправка ручной
  * проверки): клик по точке в одной проекции подсвечивает её во всех трёх
  * (`selectedPointId` в `shared/state/dipoleCalc.ts`) **и** наводит срезы на её
- * позицию — срезы обязаны меняться при любом клике по фигуре.
+ * позицию — срезы обязаны меняться при любом клике по фигуре. Подпись выбора
+ * («Выделен диполь: …») и кнопка «Снять выделение» живут в секции «Локализация»
+ * панели «Опции» (`SelectedDipoleLine`), как и анатомия кадра
+ * (`PlaybackAnatomyLine`) — рабочая область не показывает подписей.
  *
  * Состояние — в zustand-срезах `shared/state/dipoleParams.ts` (слои, срезы,
  * референс-точка) и `shared/state/dipoleCalc.ts` (параметры расчёта, пороги
@@ -34,7 +37,8 @@
  *
  * **Пояснений в рабочей области нет** (поправка ручной проверки): абзац о том, как
  * читать фигуры, переехал в диалог «Справка» (`DipolesHelpDialog`, кнопка в
- * тулс-хедере). Числа живут в элементах тулс-хедера и панели «Опции» — рабочая
+ * тулс-хедере). Числа живут в элементах тулс-хедера и панели «Опции» (включая
+ * секцию «Локализация»: выделенный диполь и описание кадра) — рабочая
  * область показывает только данные (геометрию и результат), объяснения читаются
  * по запросу и не съедают экран. Готовность/BAD/выбор эпох — второй ряд шапки
  * (`EpochDipoleStrip`): клик по ячейке показывает пакет диполей своей эпохи.
@@ -57,31 +61,19 @@ import {
   contourSliceUrl,
 } from '@/shared/lib/atlasContours'
 import { mriMipOutlineUrl } from '@/shared/lib/mriSlices'
-import { batchDipoleLayer } from '@/shared/lib/dipoleBatch'
 import {
   type DisplayThresholds,
-  dipoleLayerFromScan,
-  dipolePointTitle,
-  emptyDipoleLayer,
   withOverlapCounts,
   thresholdDipoleLayer,
 } from '@/shared/lib/dipolePoints'
 import { api } from '@/shared/api/client'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
-import { Button } from '@/shared/ui/Button'
-import { StatusPill } from '@/shared/ui/StatusPill'
 import { Brain3D } from './Brain3D'
 import { EloretaCard } from './EloretaCard'
 import { MriProjection } from './MriProjection'
-import { PlaybackAnatomyLine } from './PlaybackAnatomyLine'
 import { PlaybackFrameProvider } from './PlaybackFrame'
-
-/**
- * Пустой слой диполей — общий объект на все рендеры: раздел не имитирует расчёт,
- * а постоянная ссылка не сбрасывает мемоизацию маркеров каждый рендер.
- */
-const EMPTY_DIPOLE_LAYER = emptyDipoleLayer()
+import { useDipoleLayer } from './useDipoleLayer'
 
 export function DipolesSection() {
   const slices = useDipoleParams((state) => state.params.slices)
@@ -93,8 +85,6 @@ export function DipolesSection() {
   const setProjectionCursor = useDipoleParams((state) => state.setProjectionCursor)
 
   const result = useDipoleCalc((state) => state.result)
-  const batch = useDipoleCalc((state) => state.batch)
-  const playbackBandKeys = useDipoleCalc((state) => state.playbackBandKeys)
   const minGofPercent = useDipoleCalc((state) => state.gofThresholdPercent)
   const minAmplitudeNaM = useDipoleCalc((state) => state.amplitudeThresholdNam)
   const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
@@ -166,19 +156,10 @@ export function DipolesSection() {
     retry: false,
   })
   /**
-   * Слой диполей из результата задачи. У пакета (С1) облако — точки **всех
-   * отмеченных полос** (`playbackBandKeys`) в полосных цветах (п.1.4 17.10.2026);
-   * одиночный расчёт — прежний слой своего результата. Результат не
-   * пересчитывается на клиенте: смена порогов отображения меняет только
-   * **отрисовку** (какие точки рисовать), поэтому слой строится из результата и
-   * фильтруется порогами отдельной чистой функцией. Пороги (GOF % — основной,
-   * момент нА·м — дополнительный) — параметры отображения, а «КД» (вердикт
-   * `kd_passed`) — параметр анализа (С0).
+   * Слой диполей — единый источник точек (`useDipoleLayer`): проекции и подпись
+   * выделенного диполя в секции «Локализация» описывают одни и те же точки.
    */
-  const layer = useMemo(() => {
-    if (batch) return batchDipoleLayer(batch, playbackBandKeys)
-    return result ? dipoleLayerFromScan(result) : EMPTY_DIPOLE_LAYER
-  }, [batch, playbackBandKeys, result])
+  const layer = useDipoleLayer()
   /** Пороги отображения — мемоизированный объект: от него зависит перерисовка */
   const thresholds: DisplayThresholds = useMemo(
     () => ({ minGofPercent, minAmplitudeNaM }),
@@ -213,50 +194,18 @@ export function DipolesSection() {
     [displayLayer, selectedEpochIndex],
   )
   /**
-   * Выделенный диполь ищем в **полном** слое, а не в отфильтрованном порогами:
-   * пороги отображения управляют только отрисовкой, и уже выделенная точка не должна
-   * «теряться» из подписи при подъёме порога.
+   * Выделенный диполь и его подпись живут в секции «Локализация» панели «Опции»
+   * (`SelectedDipoleLine`, перенос 19.10.2026): рабочая область показывает только
+   * фигуры и результат, поэтому здесь остаётся лишь синхронизация выделения с
+   * проекциями (`selectedPointId` → `data-selected` на кольцах).
    */
-  const selected = selectedPointId
-    ? (layer.points.find((point) => point.id === selectedPointId) ?? null)
-    : null
-  /**
-   * Кратность узла для подписи выделенного диполя берётся из слоя отрисовки (с
-   * учётом порога): если диполь скрыт порогом, числа диполей в узле не показываем —
-   * «1» было бы выдумкой, а «3» не совпало бы с картинкой.
-   */
-  const selectedOverlap = selected
-    ? displayLayer.points.find((point) => point.id === selected.id)?.overlapCount
-    : undefined
-  const selectedTitle = selected
-    ? dipolePointTitle(
-        selectedOverlap === undefined ? selected : { ...selected, overlapCount: selectedOverlap },
-      )
-    : ''
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
-      {/*
-        Выделенный диполь: клик по точке в любой проекции выделяет его во всех
-        трёх. Строка нужна, чтобы у выбора была читаемая подпись (а не только
-        подсветка на фигуре) и чтобы выделение можно было снять, не попав мышью
-        в ту же точку.
-      */}
-      {selected ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusPill tone="accent" title={selectedTitle}>
-            {`Выделен диполь: ${selectedTitle}`}
-          </StatusPill>
-          <Button onClick={clearSelectedPoint} title="Снять выделение со всех проекций">
-            Снять выделение
-          </Button>
-        </div>
-      ) : null}
-
-      {/* Анатомия кадра воспроизведения (срез 3.7): структура и поле кадра плюс
-          ближайшая смена. Строка подписана на номер эпохи из состояния, а не на
-          контекст кадра, поэтому облако при движении кадра не перерисовывается. */}
-      <PlaybackAnatomyLine />
+      {/* Подпись выделенного диполя («Выделен диполь: …» + «Снять выделение») и
+          анатомия кадра воспроизведения переехали в секцию «Локализация» панели
+          «Опции» (19.10.2026): рабочая область показывает только фигуры и
+          результат — eLORETA ниже и ряд проекций. */}
 
       {/* eLORETA (остаток B9): карточки посчитанных эпох — пик и ROI-доли.
           Порядок — по номеру эпохи; ошибки отдельной строкой (не карточкой). */}
