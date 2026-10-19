@@ -220,16 +220,6 @@ export function interpolatedPoint(
   }
 }
 
-/** Подпись кадра для шапки: эпоха, время её начала и скорость. */
-export function playbackSummary(
-  epochIndex: number,
-  totalEpochs: number,
-  timeSec: number,
-  speed: PlaybackSpeed,
-): string {
-  return `Кадр: эпоха ${epochIndex + 1} из ${totalEpochs} · ${timeSec.toFixed(2)} с · ×${speed}`
-}
-
 /** Анатомия диполя: структура `aparc+aseg` и поле Бродмана (уже нормализованные). */
 export type AnatomyLabels = PointAttribution
 

@@ -27,7 +27,6 @@ import {
   nextAnatomyChange,
   normalizePlaybackSpeed,
   playbackDurationMs,
-  playbackSummary,
   pointByEpoch,
   slerpUnit,
   trailSegments,
@@ -186,11 +185,6 @@ describe('кадр воспроизведения траектории', () => {
     const held = interpolatedPoint(map, 3, 0.5)
     expect(held?.epochIndex).toBe(2)
     expect(held?.position.x).toBeCloseTo(20, 6)
-  })
-
-  it('подписывает кадр эпохой, временем её начала и скоростью', () => {
-    expect(playbackSummary(2, 261, 1.005, 2)).toBe('Кадр: эпоха 3 из 261 · 1.00 с · ×2')
-    expect(playbackSummary(0, 4, 0, 1)).toBe('Кадр: эпоха 1 из 4 · 0.00 с · ×1')
   })
 
   /**

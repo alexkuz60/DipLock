@@ -1,20 +1,21 @@
 /**
- * Тесты полосной гаммы пакета (п.1, 17.10.2026): цвета red→violet и длины
- * векторов, обратно зависимые от частот полос.
+ * Тесты полосной гаммы пакета (п.1, 17.10.2026 + правка цветов 19.10.2026):
+ * якорные цвета каталога и длины векторов, обратно зависимые от частот полос.
  *
  * Проверяется то, на чём держится читаемость мультиполосной анимации: одна и та
- * же полоса всегда одного цвета (цвет — адрес полосы на фигуре), дельта — самый
- * длинный красный вектор, высокая гамма — самый короткий ярко-фиолетовый, а
- * «свои» диапазоны получают детерминированный цвет по своим границам.
+ * же полоса всегда одного цвета (цвет — адрес полосы на фигуре), δ/θ —
+ * оранжевый, θ — жёлтый, γ — синий, но светлее низких полос (видны на тёмном
+ * фоне), дельта — самый длинный красный вектор, высокая гамма — самый короткий
+ * фиолетовый, а «свои» диапазоны получают детерминированный цвет по границам.
  */
 import { describe, expect, it } from 'vitest'
 import {
-  BAND_COLOR_LIGHTNESS,
   BAND_COLOR_SATURATION,
   BAND_GAMMA_HZ_HI,
   BAND_GAMMA_HZ_LO,
-  BAND_HUE_HI,
-  BAND_HUE_LO,
+  BAND_HUE_ANCHORS,
+  BAND_LIGHTNESS_HI,
+  BAND_LIGHTNESS_LO,
   BAND_VECTOR_MAX_PX,
   BAND_VECTOR_MIN_PX,
   bandCenterHz,
@@ -34,11 +35,15 @@ const FREQ_BANDS: [string, number[]][] = [
   ['high_gamma', [64, 128]],
 ]
 
-/** Оттенок из строки `hsl(H, S%, L%)`. */
-function hueOf(color: string): number {
-  const match = /^hsl\(([-\d.]+), (\d+)%, (\d+)%\)$/.exec(color)
+/** Оттенок/светлота/насыщенность из строки `hsl(H, S%, L%)`. */
+function hslOf(color: string): { hue: number; saturation: number; lightness: number } {
+  const match = /^hsl\(([-\d.]+), ([\d.]+)%, ([\d.]+)%\)$/.exec(color)
   expect(match).not.toBeNull()
-  return Number(match?.[1])
+  return {
+    hue: Number(match?.[1]),
+    saturation: Number(match?.[2]),
+    lightness: Number(match?.[3]),
+  }
 }
 
 describe('полосная гамма пакета (цвета и длины векторов)', () => {
@@ -56,18 +61,38 @@ describe('полосная гамма пакета (цвета и длины в�
     expect(bandPosition([200, 400])).toBe(1)
   })
 
-  it('красит полосы гаммой от красного до ярко-фиолетового', () => {
-    expect(hueOf(bandColor([0.5, 2]))).toBeCloseTo(BAND_HUE_LO, 6)
-    expect(hueOf(bandColor([64, 128]))).toBeCloseTo(BAND_HUE_HI, 6)
+  it('красит каталожные полосы их целевыми цветами: δ/θ — оранжевый, θ — жёлтый, γ — синий светлее', () => {
+    // Якоря гаммы стоят в центрах полос каталога — цвет ровно якоря
+    expect(hslOf(bandColor([2, 4])).hue).toBeCloseTo(36, 6) // delta_theta — оранжевый
+    expect(hslOf(bandColor([4, 8])).hue).toBeCloseTo(60, 6) // theta — жёлтый
+    expect(hslOf(bandColor([32, 64])).hue).toBeCloseTo(215, 6) // gamma — синий
+    // gamma — синий, но светлее низких полос (правка 19.10.2026: диполи на
+    // тёмном фоне проекций читались хуже)
+    expect(hslOf(bandColor([32, 64])).lightness).toBeGreaterThan(
+      hslOf(bandColor([0.5, 2])).lightness,
+    )
+    expect(hslOf(bandColor([0.5, 2])).lightness).toBeCloseTo(BAND_LIGHTNESS_LO, 6)
+    expect(hslOf(bandColor([64, 128])).lightness).toBeCloseTo(BAND_LIGHTNESS_HI, 6)
+    // Вне гаммы светлота/оттенок зажимаются крайним якорем, а не «улетают»
+    expect(hslOf(bandColor([0.01, 0.02])).hue).toBeCloseTo(0, 6)
+    expect(hslOf(bandColor([200, 400])).hue).toBeCloseTo(275, 6)
+  })
+
+  it('ведёт оттенок монотонно по частоте и держит насыщенность постоянной', () => {
     // Оттенок растёт с частотой — полосы не «перемешиваются» в гамме
     for (let index = 1; index < FREQ_BANDS.length; index++) {
-      expect(hueOf(bandColor(FREQ_BANDS[index][1]))).toBeGreaterThan(
-        hueOf(bandColor(FREQ_BANDS[index - 1][1])),
+      expect(hslOf(bandColor(FREQ_BANDS[index][1])).hue).toBeGreaterThan(
+        hslOf(bandColor(FREQ_BANDS[index - 1][1])).hue,
       )
     }
-    // Яркость/насыщенность постоянные: различаются оттенком, а не светлотой
+    // Якоря упорядочены и по частоте, и по оттенку — гамма монотонна везде
+    for (let index = 1; index < BAND_HUE_ANCHORS.length; index++) {
+      expect(BAND_HUE_ANCHORS[index][0]).toBeGreaterThan(BAND_HUE_ANCHORS[index - 1][0])
+      expect(BAND_HUE_ANCHORS[index][1]).toBeGreaterThan(BAND_HUE_ANCHORS[index - 1][1])
+    }
+    // Насыщенность постоянная: полосы различаются оттенком и светлотой
     for (const [, bandHz] of FREQ_BANDS) {
-      expect(bandColor(bandHz)).toContain(`${BAND_COLOR_SATURATION}%, ${BAND_COLOR_LIGHTNESS}%`)
+      expect(hslOf(bandColor(bandHz)).saturation).toBe(BAND_COLOR_SATURATION)
     }
     // Детерминированность: цвет это адрес полосы, а не украшение
     expect(bandColor([8, 13])).toBe(bandColor([8, 13]))

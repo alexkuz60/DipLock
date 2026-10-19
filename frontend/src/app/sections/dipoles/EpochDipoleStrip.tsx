@@ -3,18 +3,24 @@
  *
  * Ряд интерактивных прямоугольников (высота 10 px, зазор 2 px, на всю ширину
  * основной области): по одной ячейке на эпоху нарезки **включая BAD**. Ячейка
- * совмещает четыре роли:
+ * совмещает роли:
  *
- * * **готовность расчёта** (3.1) — готовая заливается насыщеннее; во время
- *   пакетной задачи ряд предзаливается по `epochs_done`/`epochs_total`;
- * * **полосы пакета** (3.1) — вертикальные полоски в цветах гаммы полос
- *   (`bandColor`), готовая полоска — полный цвет, неготовая — бледная;
+ * * **готовность расчёта** (3.1) — готовая ячейка несёт заливку-микс, пустая
+ *   остаётся без заливки; во время пакетной задачи (в том числе перерасчёта)
+ *   прежняя раскраска **стирается**, и ряд предзаливается по
+ *   `epochs_done`/`epochs_total` — иначе прогресс не виден под старой заливкой;
+ * * **полосы пакета** (3.1) — микс цветов готовых полос (`bandColor`) на весь
+ *   прямоугольник ячейки: слои с прозрачностями `0.75 / n`, суммарная
+ *   непрозрачность ≤ 75% при любом числе полос; вертикальных полосок нет
+ *   (слишком тесные и крикливо-яркие);
  * * **BAD-эпохи** (3.2) — warn-цвет и номера серий под рядом («12» или
  *   «12–15»), тултип ячейки называет эпоху целиком;
- * * **выбор эпохи** (3.3) — клик по ячейке выбирает пакет диполей этой эпохи
- *   (рамка `outline` цвета акцента) и перематывает кадр анимации на неё же —
- *   так индикатор заменяет покадровые кнопки «<»/«>» (3.4): кадр анимации
- *   помечен белым кольцом, play/pause/stop и скорость остаются в шапке.
+ * * **текущая эпоха** (3.3/3.4) — одна **белая рамка** на выбор кликом и кадр
+ *   анимации: клик по ячейке выбирает пакет диполей своей эпохи и перематывает
+ *   кадр на неё же (так индикатор заменяет покадровые кнопки «<»/«>»), а в Плей
+ *   выделение **следует за кадром** — рамка едет по эпохам, и проекции показывают
+ *   пакет диполей той эпохи, где стоит анимация. На паузе рамка фиксируется;
+ *   play/pause и скорость остаются в шапке.
  *
  * Данные — чистые функции `shared/lib/epochStrip.ts`; компонент только рисует
  * и шлёт команды стора (`toggleSelectedEpoch`). Расчёт запускается кнопкой
@@ -31,7 +37,7 @@ import {
   stripProgressCells,
   type EpochStripBand,
   type EpochStripCell,
-  type EpochStripFill,
+  type EpochStripMixLayer,
 } from '@/shared/lib/epochStrip'
 import type { DipoleBatchResult } from '@/shared/api/types'
 import { cx } from '@/shared/ui/cx'
@@ -64,19 +70,20 @@ function stripBands(
     })
 }
 
-/** Полоски заливки ячейки: готовая — полный цвет, неготовая — бледная (α 0.22). */
-function CellFills({ fills }: { fills: readonly EpochStripFill[] }) {
-  if (fills.length === 0) return null
+/**
+ * Заливка-микс ячейки: слои цветов готовых полос поверх **всего** прямоугольника
+ * (вертикальных полосок нет). Непрозрачности посчитаны `epochStripCellMix` —
+ * суммарно не более 75% при любом числе слоёв.
+ */
+function CellMix({ mix }: { mix: readonly EpochStripMixLayer[] }) {
+  if (mix.length === 0) return null
   return (
-    <span aria-hidden className="flex h-full w-full">
-      {fills.map((fill) => (
+    <span aria-hidden className="absolute inset-0">
+      {mix.map((layer) => (
         <span
-          key={fill.bandKey}
-          className="h-full flex-1"
-          style={{
-            backgroundColor: fill.color,
-            opacity: fill.ready ? 1 : 0.22,
-          }}
+          key={layer.bandKey}
+          className="absolute inset-0"
+          style={{ backgroundColor: layer.color, opacity: layer.opacity }}
         />
       ))}
     </span>
@@ -84,20 +91,21 @@ function CellFills({ fills }: { fills: readonly EpochStripFill[] }) {
 }
 
 /**
- * Ячейка эпохи. Клик выбирает эпоху (3.3) и перематывает кадр (3.4); выбор
- * помечен рамкой акцента, кадр — белым кольцом (могут совпасть — это разные
- * рамки).
+ * Ячейка эпохи. Клик выбирает эпоху и перематывает кадр (3.3/3.4); текущая эпоха
+ * (выбор = кадр в Плей) помечена одной белой рамкой. Пока идёт задача, заливка
+ * стёрта и ячейка показывает только предзаливку прогресса.
  */
 function EpochCell({
   cell,
   selected,
-  frame,
+  fill,
   progress,
   onSelect,
 }: {
   cell: EpochStripCell
   selected: boolean
-  frame: boolean
+  /** Рисовать заливку/BAD: на время задачи раскраска стёрта (прогресс виден) */
+  fill: boolean
   /** Предзаливка идущей задачи (кликабельность сохраняется) */
   progress: boolean
   onSelect: (epochIndex: number) => void
@@ -114,19 +122,17 @@ function EpochCell({
       className={cx(
         'relative min-w-0 flex-1 cursor-pointer bg-bg-3 transition-colors',
         CELL_H,
-        selected ? 'outline outline-2 outline-offset-1 outline-accent' : '',
-        frame ? 'ring-2 ring-inset ring-fg-0' : '',
+        selected ? 'outline outline-2 outline-offset-1 outline-fg-0' : '',
       )}
     >
-      {cell.bad ? (
+      {!fill ? (
+        progress ? (
+          <span aria-hidden className="block h-full w-full bg-accent opacity-25" />
+        ) : null
+      ) : cell.bad ? (
         <span aria-hidden className="block h-full w-full bg-warn opacity-80" />
       ) : (
-        <>
-          <CellFills fills={cell.fills} />
-          {!cell.ready && progress ? (
-            <span aria-hidden className="block h-full w-full bg-accent opacity-25" />
-          ) : null}
-        </>
+        <CellMix mix={cell.mix} />
       )}
     </button>
   )
@@ -137,7 +143,6 @@ export function EpochDipoleStrip() {
   const result = useDipoleCalc((state) => state.result)
   const playbackBandKeys = useDipoleCalc((state) => state.playbackBandKeys)
   const batchJob = useDipoleCalc((state) => state.batchJob)
-  const playback = useDipoleCalc((state) => state.playback)
   const selectedEpochIndex = useDipoleCalc((state) => state.selectedEpochIndex)
   const toggleSelectedEpoch = useDipoleCalc((state) => state.toggleSelectedEpoch)
 
@@ -163,13 +168,15 @@ export function EpochDipoleStrip() {
             key={cell.epochIndex}
             cell={cell}
             selected={selectedEpochIndex === cell.epochIndex}
-            frame={playback.active && playback.epochIndex === cell.epochIndex}
+            fill={!running}
             progress={cell.epochIndex < progressCells}
             onSelect={toggleSelectedEpoch}
           />
         ))}
       </div>
-      {badRuns.length > 0 ? (
+      {/* Подписи BAD-серий — как и раскраска, о прошлом результате: на время
+          перерасчёта они стёрты, чтобы ряд читался как прогресс */}
+      {!running && badRuns.length > 0 ? (
         /* Номера BAD-серий под рядом («12» или «12–15»): одна подпись на серию,
            иначе числа соседних эпох на ширине ячейки налезают друг на друга */
         <div aria-hidden className="flex w-full gap-[2px]">

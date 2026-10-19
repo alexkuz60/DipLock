@@ -87,10 +87,11 @@ describe('тулс-хедер раздела «Диполи»', () => {
     expect(useDipoleCalc.getState().batch?.bands?.length).toBeGreaterThan(0)
     // Кнопка меняет подпись: результат есть — предлагается пересчёт
     expect(screen.getByRole('button', { name: 'Пересчитать пакет' })).toBeInTheDocument()
-    expect(screen.getByText(/Быстрый режим: \d+ точек/)).toBeInTheDocument()
+    // Пилюля «Быстрый режим: N точек» убрана (дубль индикатора эпох, 19.10.2026)
+    expect(screen.queryByText(/Быстрый режим: \d+ точек/)).not.toBeInTheDocument()
   })
 
-  it('показывает прогресс по эпохам, пока задача идёт', () => {
+  it('пока задача идёт, прогресс показывает индикатор эпох, а в шапке остаётся отмена (3.2)', () => {
     useEdfRecording.setState({ recording: recordingFixture })
     useDipoleCalc.setState({
       batchJob: {
@@ -105,13 +106,13 @@ describe('тулс-хедер раздела «Диполи»', () => {
     })
     renderWithProviders(<DipolesToolHeaderActions />)
 
-    const bar = screen.getByRole('progressbar', { name: 'Прогресс расчёта пакета' })
-    expect(bar).toHaveAttribute('aria-valuenow', '50')
-    expect(screen.getByText('эпох 2/4')).toBeInTheDocument()
+    // Полосы прогресса в шапке больше нет: её дублировал индикатор эпох
+    expect(screen.queryByRole('progressbar')).toBeNull()
     expect(screen.getByRole('button', { name: 'Расчёт…' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Отменить/ })).toBeInTheDocument()
   })
 
-  it('кнопка «Отменить» рядом с прогрессом шлёт DELETE и прячет полосу (3.2)', async () => {
+  it('кнопка «Отменить» шлёт DELETE и убирает себя вместе с идущей задачей (3.2)', async () => {
     const user = userEvent.setup()
     useEdfRecording.setState({ recording: recordingFixture })
     useDipoleCalc.setState({
@@ -135,9 +136,8 @@ describe('тулс-хедер раздела «Диполи»', () => {
 
     expect(cancelSpy).toHaveBeenCalledWith('job-d1')
     expect(useDipoleCalc.getState().batchJob?.status).toBe('cancelled')
-    expect(
-      screen.queryByRole('progressbar', { name: 'Прогресс расчёта пакета' }),
-    ).toBeNull()
+    expect(screen.queryByRole('button', { name: /Отменить/ })).toBeNull()
+    expect(screen.queryByRole('progressbar')).toBeNull()
   })
 
   it('пороги отображения меняют состояние и не делают запросов', async () => {
@@ -258,21 +258,23 @@ describe('тулс-хедер раздела «Диполи»', () => {
     expect(stateCalls(fetchSpy)).toEqual([])
   })
 
-  it('подписывает текущий кадр и снимает его отдельной кнопкой', async () => {
+  it('не дублирует кадр в шапке и снимает его кнопкой «Снять кадр»', async () => {
     const user = userEvent.setup()
     useDipoleCalc.setState({
       result: dipoleScanResultFixture(),
       playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 2 },
+      selectedEpochIndex: 2,
     })
     renderWithProviders(<DipolesToolHeaderActions />)
 
-    // Нарезка 1000 мс: третья эпоха начинается на 2.00 с
-    expect(screen.getByText('Кадр: эпоха 3 из 4 · 2.00 с · ×1')).toBeInTheDocument()
+    // Подпись «Кадр: эпоха … из …» убрана: позицию кадра показывает индикатор эпох
+    expect(screen.queryByText(/^Кадр: эпоха/)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Снять кадр' }))
 
     expect(useDipoleCalc.getState().playback).toMatchObject({ playing: false, active: false })
-    expect(screen.queryByText(/^Кадр: эпоха/)).not.toBeInTheDocument()
+    // «Снять кадр» убирает и выделение эпохи: облако диполей в полный вид
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBeNull()
   })
 
   /**

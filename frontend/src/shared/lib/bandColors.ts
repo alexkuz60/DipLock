@@ -8,11 +8,14 @@
  *
  * Две величины:
  *
- * * **Цвет полосы** — гамма от красного (дельта) до ярко-фиолетового (высокая
- *   гамма): оттенок HSL растёт с позицией полосы на лог-частотной оси. Границы
- *   берутся из `band_hz` точки/прогона (`DipoleBandRunOut`), поэтому «свои»
- *   диапазоны `custom:от-до` и функциональные ритмы получают детерминированный
- *   цвет по своим частотам — выбор чекбоксов на цвет не влияет.
+ * * **Цвет полосы** — гамма от красного (дельта) до фиолетового (высокая гамма)
+ *   через якоря каталога (правка 19.10.2026): δ/θ — оранжевый, θ — жёлтый,
+ *   γ — синий, но светлее (диполи читаются на тёмном фоне проекций). Оттенок и
+ *   светлота интерполируются по лог-частотной оси между якорями
+ *   (`BAND_HUE_ANCHORS`, `BAND_LIGHTNESS_ANCHORS`). Границы берутся из `band_hz`
+ *   точки/прогона (`DipoleBandRunOut`), поэтому «свои» диапазоны `custom:от-до`
+ *   и функциональные ритмы получают детерминированный цвет по своим частотам —
+ *   выбор чекбоксов на цвет не влияет.
  *
  * * **Длина вектора момента** обратно зависима от частот полосы: самые длинные
  *   у низкой дельты, самые короткие у высокой гаммы (`BAND_VECTOR_MAX_PX` …
@@ -24,14 +27,42 @@
  */
 
 /**
- * Оттенки гаммы HSL: 0° — красный (дельта), `BAND_HUE_HI` — ярко-фиолетовый
- * (высокая гамма). Яркость/насыщенность постоянные — полосы различаются
- * оттенком, а не светлотой (светлота на МРТ-подложке читается хуже).
+ * Якоря гаммы HSL: пары «центр-частота полосы, Гц → значение». Оттенок идёт
+ * красный (дельта) → оранжевый (δ/θ) → жёлтый (θ) → зелёный (α) →
+ * зелёно-голубой (β) → синий (γ) → фиолетовый (высокая γ); между якорями —
+ * линейная интерполяция по логарифму частоты (октавы идут равномерно), вне
+ * диапазона значение зажимается крайним. Якоря стоят в центрах полос каталога
+ * `freq_bands` (`core/config.py`), поэтому каталожные полосы получают ровно
+ * свои цвета (δ/θ — оранжевый, θ — жёлтый, γ — синий), а «свои» диапазоны —
+ * детерминированный промежуточный по своему центру.
  */
-export const BAND_HUE_LO = 0
-export const BAND_HUE_HI = 280
+export const BAND_HUE_ANCHORS: ReadonlyArray<readonly [number, number]> = [
+  [1.25, 0], // delta — красный
+  [3, 36], // delta_theta — оранжевый
+  [6, 60], // theta — жёлтый
+  [12, 110], // alpha — зелёный
+  [24, 165], // beta — зелёно-голубой
+  [48, 215], // gamma — синий
+  [96, 275], // high_gamma — фиолетовый
+]
+
+/**
+ * Светлота гаммы, %: у низких полос постоянная (`BAND_LIGHTNESS_LO`), к верхним
+ * растёт до `BAND_LIGHTNESS_HI` — тёмно-синие/фиолетовые диполи на тёмном фоне
+ * проекций читались хуже (правка 19.10.2026: «gamma — синий, но светлее»).
+ */
+export const BAND_LIGHTNESS_LO = 55
+export const BAND_LIGHTNESS_HI = 70
+
+export const BAND_LIGHTNESS_ANCHORS: ReadonlyArray<readonly [number, number]> = [
+  [1.25, BAND_LIGHTNESS_LO],
+  [24, BAND_LIGHTNESS_LO],
+  [48, 68],
+  [96, BAND_LIGHTNESS_HI],
+]
+
+/** Насыщенность гаммы, %: постоянная — полосы различаются оттенком и светлотой. */
 export const BAND_COLOR_SATURATION = 85
-export const BAND_COLOR_LIGHTNESS = 55
 
 /**
  * Опорные частоты гаммы, Гц: центры полос delta (0.5–2) и high_gamma (64–128) из
@@ -80,13 +111,43 @@ export function bandPosition(bandHz: readonly number[]): number {
 }
 
 /**
- * Цвет полосы в CSS-синтаксисе `hsl(H, S%, L%)`: красный → ярко-фиолетовый по
- * позиции (`bandPosition`). Функция чистая и детерминированная: одна и та же
- * полоса всегда одного цвета — цвет это адрес полосы на фигуре, а не украшение.
+ * Линейная интерполяция значения между якорями по **логарифму** центр-частоты:
+ * октавы занимают равные отрезки, вне диапазона якорей значение зажимается
+ * крайним. Не-числовая/неположительная частота — первый якорь (как зажатая
+ * позиция 0 у `bandPosition`).
+ */
+function piecewiseByLogHz(
+  centerHz: number,
+  anchors: ReadonlyArray<readonly [number, number]>,
+): number {
+  const first = anchors[0]
+  const last = anchors[anchors.length - 1]
+  if (!Number.isFinite(centerHz) || !(centerHz > 0)) return first[1]
+  if (centerHz <= first[0]) return first[1]
+  if (centerHz >= last[0]) return last[1]
+  for (let index = 1; index < anchors.length; index += 1) {
+    const [prevHz, prevValue] = anchors[index - 1]
+    const [nextHz, nextValue] = anchors[index]
+    if (centerHz <= nextHz) {
+      const lo = Math.log10(prevHz)
+      const t = (Math.log10(centerHz) - lo) / (Math.log10(nextHz) - lo)
+      return prevValue + (nextValue - prevValue) * t
+    }
+  }
+  return last[1]
+}
+
+/**
+ * Цвет полосы в CSS-синтаксисе `hsl(H, S%, L%)`: оттенок и светлота — по якорям
+ * гаммы (`BAND_HUE_ANCHORS`/`BAND_LIGHTNESS_ANCHORS`) от центра частот полосы.
+ * Функция чистая и детерминированная: одна и та же полоса всегда одного цвета —
+ * цвет это адрес полосы на фигуре, а не украшение.
  */
 export function bandColor(bandHz: readonly number[]): string {
-  const hue = BAND_HUE_LO + (BAND_HUE_HI - BAND_HUE_LO) * bandPosition(bandHz)
-  return `hsl(${hue.toFixed(1)}, ${BAND_COLOR_SATURATION}%, ${BAND_COLOR_LIGHTNESS}%)`
+  const center = bandCenterHz(bandHz)
+  const hue = piecewiseByLogHz(center, BAND_HUE_ANCHORS)
+  const lightness = piecewiseByLogHz(center, BAND_LIGHTNESS_ANCHORS)
+  return `hsl(${hue.toFixed(1)}, ${BAND_COLOR_SATURATION}%, ${lightness.toFixed(1)}%)`
 }
 
 /**

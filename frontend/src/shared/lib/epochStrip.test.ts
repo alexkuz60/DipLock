@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  STRIP_MIX_MAX_OPACITY,
+  epochStripCellMix,
   epochStripCells,
   epochStripCellTitle,
   stripProgressCells,
@@ -67,6 +69,38 @@ describe('индикатор эпох/диполей', () => {
     expect(epochStripCellTitle(cells[0])).toBe('Эпоха 1 · BAD — отброшена')
     expect(epochStripCellTitle(cells[1])).toBe('Эпоха 2 · диполи: α (8–16 Гц)')
     expect(epochStripCellTitle(cells[2])).toBe('Эпоха 3 · диполей нет')
+  })
+
+  it('заливка-микс: слой на готовую полосу, суммарная непрозрачность ровно 75%', () => {
+    const cells = epochStripCells(3, [
+      band('alpha', [0, 1], [], 'α'),
+      band('beta', [1], [], 'β'),
+      band('gamma', [1], [], 'γ'),
+    ])
+    // Эпоха 0: одна готовая полоса — её слой несёт всю непрозрачность микса
+    expect(cells[0].mix.map((layer) => layer.bandKey)).toEqual(['alpha'])
+    expect(cells[0].mix[0].opacity).toBeCloseTo(STRIP_MIX_MAX_OPACITY, 6)
+    // Эпоха 1: три готовые — доля каждого слоя делится поровну (0.75 / 3)
+    expect(cells[1].mix).toHaveLength(3)
+    const total = cells[1].mix.reduce((sum, layer) => sum + layer.opacity, 0)
+    expect(total).toBeCloseTo(STRIP_MIX_MAX_OPACITY, 6)
+    for (const layer of cells[1].mix) {
+      expect(layer.opacity).toBeCloseTo(STRIP_MIX_MAX_OPACITY / 3, 6)
+    }
+    // Эпоха 2: диполей нет — заливки нет (готовность читается «плотностью» микса)
+    expect(cells[2].mix).toEqual([])
+  })
+
+  it('BAD-полосы и неготовые в микс не входят', () => {
+    const cells = epochStripCells(2, [
+      band('alpha', [0], [1], 'α'),
+      band('beta', [], [1], 'β'),
+      band('gamma', [], [1], 'γ'),
+    ])
+    expect(cells[0].mix).toHaveLength(1) // готова только alpha
+    // Эпоха 1: все полосы отброшены — микса нет (ячейка BAD)
+    expect(cells[1].bad).toBe(true)
+    expect(epochStripCellMix(cells[1].fills)).toEqual([])
   })
 
   it('предзаливка задачи пропорциональна прогрессу по эпохам', () => {

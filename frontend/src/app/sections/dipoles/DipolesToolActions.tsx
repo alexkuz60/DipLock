@@ -13,9 +13,10 @@
  *   параметры **отображения**, а не расчёта: они скрывают слабые
  *   диполи на проекциях, но не меняют результат задачи, поэтому рядом стоит
  *   подпись со счётчиком скрытых точек;
- * * пока идёт задача, кнопка показывает прогресс по этапам и эпохам
- *   (`epochs_done`/`epochs_total`), а не «крутилку» без чисел: расчёт по эпохам
- *   может идти десятки секунд, и видно, сколько осталось;
+ * * пока идёт задача, прогресс показывает **индикатор эпох** (второй ряд шапки:
+ *   предзаливка по `epochs_done`/`epochs_total`, прежняя раскраска стёрта);
+ *   полоса прогресса в шапке убрана (правка 19.10.2026) — она дублировала
+ *   индикатор, рядом с кнопкой остаётся только «Отменить»;
  * * без загруженной записи кнопка выключена с объяснением: расчёт идёт по файлу
  *   записи на сервере, а не по демо-сигналу;
  * * воспроизведение траектории (`PlaybackControls`) — тоже **команды**: play/pause
@@ -24,6 +25,9 @@
  *   Покадровые кнопки «<»/«>» убраны: кадр перематывается кликом по ячейке
  *   индикатора эпох (второй ряд шапки, `EpochDipoleStrip`) — там же видно, какой
  *   кадр показан и что интерполяция между эпохами — отображение, а не измерение.
+ *   Подпись «Кадр: эпоха … из …» и пилюля «Быстрый режим: N точек» убраны
+ *   (правка 19.10.2026): они дублировали индикатор эпох; метка метода живёт в
+ *   панели расчёта и таблице локализации («Быстрый режим, сетка N мм»).
  *
  * Справа, у края полосы, живёт кнопка «Справка»: пояснения к проекциям, слоям,
  * расчёту и воспроизведению читают один-два раза за сеанс, поэтому они открываются
@@ -55,12 +59,10 @@ import {
 import { api } from '@/shared/api/client'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useDipoleParams } from '@/shared/state/dipoleParams'
-import { canPlayback, playbackSummary, PLAYBACK_SPEEDS } from '@/shared/lib/playback'
+import { canPlayback, PLAYBACK_SPEEDS } from '@/shared/lib/playback'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { IconButton } from '@/shared/ui/IconButton'
-import { StatusPill } from '@/shared/ui/StatusPill'
-import { Tooltip } from '@/shared/ui/Tooltip'
 import { cx } from '@/shared/ui/cx'
 import { DipolesHelpDialog } from './DipolesHelpDialog'
 
@@ -78,45 +80,9 @@ const PLAY_TOOLTIP =
   'интерполируются между соседними эпохами (отображение, а не измерение). ' +
   '×1 — реальное время записи. Клавиша Space.'
 
-/** Прогресс задачи расчёта пакета: полоса + подпись «этап · эпохи · проценты» + отмена (3.2). */
-export function CalcProgress({ className }: { className?: string }) {
-  const job = useDipoleCalc((state) => state.batchJob)
-  const cancelBatch = useDipoleCalc((state) => state.cancelBatch)
-  if (job === null || job.status !== 'running') return null
-
-  return (
-    <div className={cx('flex items-center gap-1', className)}>
-      <Tooltip label={calcJobSummary(job)}>
-        <div className="flex items-center gap-2">
-          <div
-            role="progressbar"
-            aria-label="Прогресс расчёта пакета"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(job.progress * 100)}
-            className="h-2 w-28 overflow-hidden rounded-full bg-bg-3"
-          >
-            <span
-              data-testid="calc-progress-fill"
-              className="block h-full rounded-full bg-accent transition-[width]"
-              style={{ width: `${Math.round(job.progress * 100)}%` }}
-            />
-          </div>
-          <span className="tnum hidden text-sm text-fg-2 xl:inline">
-            {job.epochsTotal > 0
-              ? `эпох ${job.epochsDone}/${job.epochsTotal}`
-              : `${Math.round(job.progress * 100)} %`}
-          </span>
-        </div>
-      </Tooltip>
-      <CancelJobButton onCancel={cancelBatch} />
-    </div>
-  )
-}
-
 /**
  * Кластер воспроизведения траектории (срез 3.7): play/pause, скорость
- * ×0.25/×0.5/×1/×2/×4 **выпадающим списком**, снятие кадра и подпись текущей эпохи.
+ * ×0.25/×0.5/×1/×2/×4 **выпадающим списком** и снятие кадра.
  *
  * Скорость — список, а не ряд кнопок (поправка ручной проверки, 18.09.2026): пять
  * кнопок занимали в хедере больше места, чем весь остальной кластер, а выбирают
@@ -126,7 +92,9 @@ export function CalcProgress({ className }: { className?: string }) {
  * Покадровые кнопки «<»/«>» убраны: кадр перематывается кликом по ячейке
  * индикатора эпох (`EpochDipoleStrip`, второй ряд шапки). Здесь только
  * **команды**: всё уходит в состояние раздела, а кадр ведут часы рабочей области
- * (`PlaybackFrame.tsx`) — прямых «ручек» у проекций нет.
+ * (`PlaybackFrame.tsx`) — прямых «ручек» у проекций нет. Подпись «Кадр: эпоха …
+ * из …» убрана (правка 19.10.2026): позицию кадра показывает белая рамка
+ * индикатора эпох, она же — выбор эпохи.
  */
 export function PlaybackControls() {
   const result = useDipoleCalc((state) => state.result)
@@ -136,13 +104,6 @@ export function PlaybackControls() {
   const clearPlaybackFrame = useDipoleCalc((state) => state.clearPlaybackFrame)
 
   const canPlay = canPlayback(result)
-  const epochLengthMs = result?.epoch_length_ms ?? 0
-  const frame = playbackSummary(
-    playback.epochIndex,
-    result?.n_epochs_total ?? 0,
-    (playback.epochIndex * epochLengthMs) / 1000,
-    playback.speed,
-  )
 
   return (
     <>
@@ -181,17 +142,12 @@ export function PlaybackControls() {
       </label>
 
       {playback.active ? (
-        <>
-          <IconButton
-            icon={<Square className="size-4" />}
-            label="Снять кадр"
-            tooltip="Убрать маркер кадра: облако диполей возвращается в обычный вид"
-            onClick={clearPlaybackFrame}
-          />
-          <StatusPill tone={playback.playing ? 'accent' : 'neutral'} title={PLAY_TOOLTIP}>
-            {frame}
-          </StatusPill>
-        </>
+        <IconButton
+          icon={<Square className="size-4" />}
+          label="Снять кадр"
+          tooltip="Убрать маркер кадра и выделение эпохи: облако диполей возвращается в обычный вид"
+          onClick={clearPlaybackFrame}
+        />
       ) : null}
     </>
   )
@@ -211,6 +167,7 @@ export function DipolesToolHeaderActions() {
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const toggleView = useDipoleCalc((state) => state.toggleView)
   const runBatch = useDipoleCalc((state) => state.runBatch)
+  const cancelBatch = useDipoleCalc((state) => state.cancelBatch)
   const selectedPointId = useDipoleCalc((state) => state.selectedPointId)
   const refineJob = useDipoleCalc((state) => state.refineJob)
   const refiningEpoch = useDipoleCalc((state) => state.refiningEpoch)
@@ -285,7 +242,10 @@ export function DipolesToolHeaderActions() {
         onClick={() => void runBatch(recording?.recording_id ?? null, catalogBandKeys)}
       />
 
-      <CalcProgress />
+      {/* Прогресс расчёта показывает индикатор эпох (второй ряд шапки); прежняя
+          полоса прогресса убрана (правка 19.10.2026) — от неё остаётся только
+          кнопка отмены идущей задачи (3.2) */}
+      {running ? <CancelJobButton onCancel={cancelBatch} /> : null}
 
       {/* «Уточнить» (F19): активна при выбранной на проекциях точке; на время
           BEM-фитинга внутри кнопки крутится спиннер */}
@@ -437,11 +397,9 @@ export function DipolesToolHeaderActions() {
         onClick={() => toggleView('explore')}
       />
 
-      {result ? (
-        <StatusPill tone="ok" title={`Метод: ${result.method}, сетка ${result.grid_mm} мм`}>
-          {`Быстрый режим: ${result.points?.length ?? 0} точек`}
-        </StatusPill>
-      ) : null}
+      {/* Пилюля «Быстрый режим: N точек» убрана (правка 19.10.2026): она
+          дублировала индикатор эпох; метка метода («Быстрый режим, сетка N мм»)
+          живёт в панели расчёта и таблице локализации */}
 
       {/* Распорка: «Справка» прижата к правому краю полосы действий */}
       <div className="flex-1" />

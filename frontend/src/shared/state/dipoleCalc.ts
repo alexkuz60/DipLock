@@ -105,9 +105,11 @@ export type DipoleCalcState = {
    */
   selectedPointId: string | null
   /**
-   * Выбранная эпоха индикатора эпох (`EpochDipoleStrip`, клик по ячейке): в
-   * проекциях показывается **пакет диполей** этой эпохи (точки всех отображаемых
-   * полос), повторный клик снимает выбор. Номер — сетка нарезки включая BAD.
+   * Текущая эпоха индикатора эпох (`EpochDipoleStrip`): она же белая рамка
+   * ячейки. Клик по ячейке выбирает эпоху и перематывает кадр на неё (повторный
+   * клик снимает выбор); в Плей выделение **следует за кадром** анимации, и в
+   * проекциях показывается **пакет диполей** текущей эпохи (точки всех
+   * отображаемых полос). Номер — сетка нарезки включая BAD.
    */
   selectedEpochIndex: number | null
   /** Кадр воспроизведения траектории: играет/пауза, скорость, эпоха (срез 3.7) */
@@ -194,11 +196,21 @@ export type DipoleCalcState = {
   pausePlayback: () => void
   /** Скорость воспроизведения: значение приводится к 1/2/4 */
   setPlaybackSpeed: (speed: number) => void
-  /** Перевод кадра на конкретную эпоху (ставит на паузу) */
+  /**
+   * Перевод кадра на конкретную эпоху (ставит на паузу): выделение переезжает
+   * на неё же — белая рамка индикатора и пакет диполей проекций следуют за кадром.
+   */
   seekPlaybackEpoch: (epochIndex: number) => void
-  /** Снять кадр воспроизведения: облако диполей возвращается в обычный вид */
+  /**
+   * Снять кадр воспроизведения: стоп + снятие выделения эпохи — облако диполей
+   * возвращается в полный (обычный) вид.
+   */
   clearPlaybackFrame: () => void
-  /** Сдвиг кадра **часами** воспроизведения (не команда: счётчик переходов не растёт) */
+  /**
+   * Сдвиг кадра **часами** воспроизведения (не команда: счётчик переходов не
+   * растёт). Выделение следует за кадром: в Плей белая рамка индикатора едет по
+   * эпохам вместе с анимацией.
+   */
   setPlaybackEpoch: (epochIndex: number) => void
   setEpochLengthMs: (value: number) => void
   setGridMm: (value: number) => void
@@ -349,26 +361,40 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         set((state) => {
           const total = state.result?.n_epochs_total ?? 0
           if (total <= 0) return {}
+          const next = clampEpochIndex(epochIndex, total)
           return {
             playback: {
               ...state.playback,
               playing: false,
               active: true,
-              epochIndex: clampEpochIndex(epochIndex, total),
+              epochIndex: next,
               seekSeq: state.playback.seekSeq + 1,
             },
+            // Перемотка = показать эту эпоху: белая рамка индикатора и пакет
+            // диполей проекций переезжают вместе с кадром
+            selectedEpochIndex: next,
           }
         }),
       clearPlaybackFrame: () =>
-        set((state) => ({ playback: { ...state.playback, playing: false, active: false } })),
+        set((state) => ({
+          playback: { ...state.playback, playing: false, active: false },
+          // «Снять кадр» убирает и выделение эпохи: облако диполей возвращается
+          // в полный вид (как обещает подсказка кнопки)
+          selectedEpochIndex: null,
+        })),
       setPlaybackEpoch: (epochIndex) =>
         set((state) => {
           const next = clampEpochIndex(epochIndex, state.result?.n_epochs_total ?? 0)
           // Часы пишут кадр на каждом переходе эпохи: при том же номере стор не
           // трогаем, иначе кадры 60 раз в секунду давали бы лишние перерисовки
-          return next === state.playback.epochIndex
-            ? {}
-            : { playback: { ...state.playback, epochIndex: next } }
+          if (next === state.playback.epochIndex) return {}
+          return {
+            playback: { ...state.playback, epochIndex: next },
+            // Выделение следует за кадром (правка 19.10.2026): белая рамка
+            // индикатора едет по эпохам в Плей, и проекции показывают пакет
+            // диполей той эпохи, где стоит анимация
+            selectedEpochIndex: next,
+          }
         }),
 
       setEpochLengthMs: (value) =>

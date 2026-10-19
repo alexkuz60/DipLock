@@ -1,9 +1,10 @@
 /**
  * Тесты индикатора эпох/диполей (`EpochDipoleStrip`, второй ряд шапки):
- * ячейка на эпоху нарезки включая BAD, готовность/полосные заливки, выбор эпохи
- * кликом (3.3) и индикатор кадра анимации (3.4).
+ * ячейка на эпоху нарезки включая BAD, заливка-микс готовых полос (суммарно ≤
+ * 75%), выбор эпохи кликом и белая рамка текущей эпохи (3.3/3.4) — она следует
+ * за кадром анимации в Плей. На время задачи раскраска стёрта и виден прогресс.
  */
-import { screen } from '@testing-library/react'
+import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
@@ -85,19 +86,45 @@ describe('индикатор эпох/диполей', () => {
     expect(useDipoleCalc.getState().playback.epochIndex).toBe(1)
   })
 
-  it('ячейка кадра анимации помечена кольцом (3.4)', () => {
+  it('белая рамка следует за кадром анимации в Плей (3.3/3.4)', () => {
     setBatchState()
     useDipoleCalc.setState({
-      playback: { ...PLAYBACK_DEFAULTS, active: true, epochIndex: 2 },
+      playback: { ...PLAYBACK_DEFAULTS, playing: true, active: true, epochIndex: 0 },
+      selectedEpochIndex: 0,
     })
     renderWithProviders(<EpochDipoleStrip />)
 
-    const cells = screen.getAllByTestId('epoch-strip-cell')
-    expect(cells[2].className).toContain('ring-2')
-    expect(cells[0].className).not.toContain('ring-2')
+    let cells = screen.getAllByTestId('epoch-strip-cell')
+    expect(cells[0].className).toContain('outline-fg-0')
+    expect(cells[2].className).not.toContain('outline-fg-0')
+
+    // Часы анимации сдвигают кадр (`setPlaybackEpoch`) — выделение переезжает
+    act(() => useDipoleCalc.getState().setPlaybackEpoch(2))
+
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(2)
+    cells = screen.getAllByTestId('epoch-strip-cell')
+    expect(cells[2].className).toContain('outline-fg-0')
+    expect(cells[0].className).not.toContain('outline-fg-0')
   })
 
-  it('во время задачи ряд предзаливается по прогрессу эпох (3.1)', () => {
+  it('заливает готовые ячейки миксом цветов полос на весь прямоугольник', () => {
+    setBatchState()
+    renderWithProviders(<EpochDipoleStrip />)
+
+    const cells = screen.getAllByTestId('epoch-strip-cell')
+    // Эпоха 2 (index 1): обе полосы готовы — два слоя, доля каждого 0.75 / 2
+    const layers = cells[1].querySelectorAll('span[style*="background-color"]')
+    expect(layers).toHaveLength(2)
+    for (const layer of layers) {
+      expect((layer as HTMLElement).className).toContain('absolute')
+      expect((layer as HTMLElement).style.opacity).toBe('0.375')
+    }
+    // Вертикальных сегментов-полосок больше нет (правка 19.10.2026)
+    expect(cells[1].querySelectorAll('span[class*="flex-1"]')).toHaveLength(0)
+  })
+
+  it('во время перерасчёта раскраска стёрта и ряд предзаливается по прогрессу (3.1)', () => {
+    setBatchState()
     useDipoleCalc.setState({
       batchJob: {
         status: 'running',
@@ -108,7 +135,6 @@ describe('индикатор эпох/диполей', () => {
         epochsTotal: 4,
         error: null,
       },
-      result: dipoleScanResultFixture(),
     })
     renderWithProviders(<EpochDipoleStrip />)
 
@@ -117,5 +143,11 @@ describe('индикатор эпох/диполей', () => {
     expect(cells).toHaveLength(4)
     expect(cells[0].querySelector('[class*="opacity-25"]')).not.toBeNull()
     expect(cells[3].querySelector('[class*="opacity-25"]')).toBeNull()
+    // Прежняя раскраска (микс готовых полос и BAD) стёрта: прогресс виден, а не
+    // прячется под слоем старых цветов (правка 19.10.2026)
+    expect(cells[1].querySelector('span[style*="background-color"]')).toBeNull()
+    expect(cells[3].querySelector('[class*="bg-warn"]')).toBeNull()
+    // Подписи BAD-серий на время перерасчёта тоже стёрты
+    expect(screen.queryByText('4')).not.toBeInTheDocument()
   })
 })
