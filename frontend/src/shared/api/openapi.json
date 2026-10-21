@@ -7509,6 +7509,134 @@
         }
       }
     },
+    "/api/v1/emolab/analyze": {
+      "post": {
+        "tags": [
+          "ЕмоЛаб"
+        ],
+        "summary": "Запустить анализ внешнего аудиотрека (wav/mp3) для прогноза эмо-реакции",
+        "description": "Приём внешнего аудиофайла и запуск его анализа (шаг 1 «ЕмоЛаб»).\n\nИз файла собираются данные прогноза: ФФТ-кадры «Эмо» (7 лучей полигона,\nсетка 2/3 с) и карты темпа/аккордов VAMP (Соник Аннотатор) — контракт\n``GET /emolab/{track_id}/emo``. Повторная загрузка того же содержимого\n(sha256) не пересчитывает: ответ сразу ``status=succeeded, cached=true``.\n400 — не wav/mp3, битый файл либо трек длиннее 30 мин; 413 — файл больше\nлимита загрузки.",
+        "operationId": "analyze_audio_track_api_v1_emolab_analyze_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_audio_track_api_v1_emolab_analyze_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmoAnalyzeOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/emolab/{track_id}/status": {
+      "get": {
+        "tags": [
+          "ЕмоЛаб"
+        ],
+        "summary": "Статус анализа аудиотрека (проценты и шаг, поллинг UI)",
+        "description": "Статус анализа: running (pct 0..1 + шаг) / succeeded / failed (404 — нет).",
+        "operationId": "emolab_track_status_api_v1_emolab__track_id__status_get",
+        "parameters": [
+          {
+            "name": "track_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Track Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmoTrackStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/emolab/{track_id}/emo": {
+      "get": {
+        "tags": [
+          "ЕмоЛаб"
+        ],
+        "summary": "Кадры радара «Эмо» аудиотрека: 7 лучей + карты темпа/аккордов",
+        "description": "Кадры анимации звезды-полигона (контракт рендера «Нейромузыки», v4).\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с; лучи — децибельная шкала громкости (``db_relative``,\n``db_floor`` −60 дБ). ``key_track`` — карта аккордов (VAMP Key Detector)\nдля вращения звезды, ``tempo_track`` — карта темпа (VAMP Tempo and Beat\nTracker) для темп-коррекции лучей; ``null`` — инструмент недоступен\n(best-effort, вращение/коррекция в UI нулевые).\n\n404 — трек не найден, 409 — анализ ещё идёт либо не удался.",
+        "operationId": "emolab_track_emo_api_v1_emolab__track_id__emo_get",
+        "parameters": [
+          {
+            "name": "track_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Track Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEmoOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/llm-router": {
       "get": {
         "tags": [
@@ -9484,6 +9612,20 @@
         "type": "object",
         "title": "BestFitDipole",
         "description": "Компактный лучший диполь эпохи — для таблицы локализации и БД."
+      },
+      "Body_analyze_audio_track_api_v1_emolab_analyze_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_analyze_audio_track_api_v1_emolab_analyze_post"
       },
       "Body_analyze_eeg_api_v1_analyze_post": {
         "properties": {
@@ -18039,6 +18181,122 @@
         "title": "EloretaRoiOut",
         "description": "Доля энергии eLORETA на структуре (от суммарной по эпохе)."
       },
+      "EmoAnalyzeOut": {
+        "properties": {
+          "track_id": {
+            "type": "string",
+            "title": "Track Id",
+            "description": "Идентификатор трека: sha256 содержимого файла (хвост 32 символов)"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "default": "running"
+          },
+          "cached": {
+            "type": "boolean",
+            "title": "Cached",
+            "description": "true — результат взят из дискового кэша (тот же файл уже проанализирован), расчёт не запускался, status сразу succeeded",
+            "default": false
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "description": "Имя исходного файла (как загрузил пользователь)",
+            "default": ""
+          },
+          "duration_s": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Duration S",
+            "description": "Длительность трека, с (из заголовка файла)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "track_id",
+          "duration_s"
+        ],
+        "title": "EmoAnalyzeOut",
+        "description": "Ответ ``POST /emolab/analyze`` (202): анализ запущен либо уже посчитан."
+      },
+      "EmoTrackStatus": {
+        "properties": {
+          "track_id": {
+            "type": "string",
+            "title": "Track Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage",
+            "description": "Текущий шаг, например «Карта темпа (VAMP)»"
+          },
+          "pct": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Pct",
+            "description": "Готовность 0..1"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Текст ошибки (status=failed)"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "default": ""
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S",
+            "description": "Длительность трека, с (из манифеста кэша; null пока идёт анализ)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "track_id",
+          "status",
+          "stage",
+          "pct"
+        ],
+        "title": "EmoTrackStatus",
+        "description": "``GET /emolab/{track_id}/status``: проценты и шаг анализа (поллинг UI)."
+      },
       "EpochOut": {
         "properties": {
           "session_id": {
@@ -23288,7 +23546,7 @@
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "Ключ диапазона из `freq_bands` (delta…gamma)"
+            "description": "Ключ диапазона из `freq_bands`/`functional_bands` (delta…high_gamma, mu…psi)"
           },
           "fmin": {
             "type": "number",
@@ -23414,7 +23672,7 @@
           "fmax"
         ],
         "title": "SpectrumBandOut",
-        "description": "Мощность одного ритма (δ…γ) с ссылкой на топокарту.\n\nМощность — **интеграл PSD по диапазону, мкВ²** (N15): физически сравнимая\nвеличина между диапазонами разной ширины (среднее PSD, мкВ²/Гц, таким не\nявляется). Топокарта диапазона строится тем же интегралом по каналам."
+        "description": "Мощность одного ритма (δ…high-γ, μ…ψ) со ссылкой на топокарту.\n\nМощность — **интеграл PSD по диапазону, мкВ²** (N15): физически сравнимая\nвеличина между диапазонами разной ширины (среднее PSD, мкВ²/Гц, таким не\nявляется). Топокарта диапазона строится тем же интегралом по каналам."
       },
       "SpectrumExploreLineOut": {
         "properties": {

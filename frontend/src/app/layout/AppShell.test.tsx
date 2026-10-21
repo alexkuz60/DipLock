@@ -204,22 +204,29 @@ describe('каркас приложения', () => {
 
     const column = shell?.querySelector(':scope > div')
     expect(column?.className).toContain('min-h-0')
-    expect(screen.getByRole('main')).toHaveClass('min-h-0')
+    // Рабочая область — абсолютная внутри обёртки `relative` (высота обёртки
+    // держится flex-цепочкой каркаса, а не содержимым)
+    expect(screen.getByRole('main')).toHaveClass('absolute', 'inset-0')
   })
 
-  it('показывает выдвижную панель раздела между шапкой и рабочей областью (срез 3.4)', () => {
-    // Панель — полоса каркаса (`drawer`), а не часть прокручиваемого контента:
-    // она объявлена в реестре разделов и появляется только у того раздела, у
-    // которого она есть
+  it('показывает выдвижную панель раздела окном поверх рабочей области (правка 20.10.2026)', () => {
+    // Панель — окно каркаса (`drawer`), перекрывающее рабочий вид проекций, а не
+    // полоса между шапкой и рабочей областью: открытие не отодвигает и не
+    // пересчитывает геометрию фигур (меньше отрисовки). Панель объявлена в
+    // реестре разделов и появляется только у того раздела, у которого она есть
     useDipoleCalc.setState({ view: 'topomap' })
 
     renderApp('/dipoles')
 
     const drawer = screen.getByTestId('dipoles-drawer')
     expect(drawer).toHaveAttribute('data-view', 'topomap')
-    // Сосед сверху — тулс-хедер, снизу — рабочая область: панель между ними
-    expect(drawer.previousElementSibling?.tagName).toBe('HEADER')
-    expect(drawer.nextElementSibling?.tagName).toBe('MAIN')
+    // Панель и рабочая область — соседи в одной обёртке рабочей области,
+    // панель лежит поверх (absolute, позже в DOM)
+    const workArea = screen.getByRole('main')
+    expect(drawer.parentElement).toBe(workArea.parentElement)
+    expect(workArea.parentElement?.className).toContain('relative')
+    expect(drawer.className).toContain('absolute')
+    expect(drawer.previousElementSibling?.tagName).toBe('MAIN')
   })
 
   it('не подсовывает открытую панель диполей разделам без панели', () => {

@@ -557,8 +557,9 @@ export const calcJobFixture: JobStatus = {
 export function spectrumResultFixture(
   overrides: Partial<SpectrumResult> = {},
 ): SpectrumResult {
-  // 7 базовых полос сетки (фаза A): γ частично внутри полосы фильтра 1–40 Гц —
-  // измерена, γ-high целиком вне её — «не измерено» (именно null, а не 0)
+  // 13 полос каталога (правка 20.10.2026): 7 базовых октавных (фаза A) + 6
+  // функциональных ритмов. γ-high целиком вне полосы фильтра 1–40 Гц —
+  // «не измерено» (именно null, а не 0), остальные измерены
   const bands: SpectrumBandOut[] = [
     { name: 'delta', fmin: 0.5, fmax: 2, power_uv2: 2.5, relative_power: 0.11,
       median_power_uv2: 2.4, q25_power_uv2: 2.1, q75_power_uv2: 2.8,
@@ -581,6 +582,26 @@ export function spectrumResultFixture(
     { name: 'high_gamma', fmin: 64, fmax: 128, power_uv2: null, relative_power: null,
       median_power_uv2: null, q25_power_uv2: null, q75_power_uv2: null,
       topomap_url: null },
+    // Функциональные ритмы (правка 20.10.2026): полосы пересекаются с базовыми,
+    // но каждая имеет свою мощность и топокарту
+    { name: 'mu', fmin: 8, fmax: 13, power_uv2: 5.2, relative_power: 0.23,
+      median_power_uv2: 5.0, q25_power_uv2: 4.6, q75_power_uv2: 5.7,
+      topomap_url: topomapUrl('mu') },
+    { name: 'sigma', fmin: 11, fmax: 16, power_uv2: 2.1, relative_power: 0.09,
+      median_power_uv2: 2.0, q25_power_uv2: 1.8, q75_power_uv2: 2.4,
+      topomap_url: topomapUrl('sigma') },
+    { name: 'kappa', fmin: 8, fmax: 12, power_uv2: 4.4, relative_power: 0.19,
+      median_power_uv2: 4.3, q25_power_uv2: 3.9, q75_power_uv2: 4.9,
+      topomap_url: topomapUrl('kappa') },
+    { name: 'tau', fmin: 8, fmax: 9, power_uv2: 1.8, relative_power: 0.08,
+      median_power_uv2: 1.7, q25_power_uv2: 1.5, q75_power_uv2: 2.0,
+      topomap_url: topomapUrl('tau') },
+    { name: 'lambda', fmin: 4, fmax: 5, power_uv2: 1.2, relative_power: 0.05,
+      median_power_uv2: 1.1, q25_power_uv2: 1.0, q75_power_uv2: 1.4,
+      topomap_url: topomapUrl('lambda') },
+    { name: 'psi', fmin: 35, fmax: 55, power_uv2: 0.12, relative_power: 0.01,
+      median_power_uv2: 0.1, q25_power_uv2: 0.1, q75_power_uv2: 0.2,
+      topomap_url: topomapUrl('psi') },
   ]
   return {
     recording_id: recordingFixture.recording_id,

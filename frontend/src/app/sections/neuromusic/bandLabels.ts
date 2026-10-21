@@ -29,6 +29,22 @@ export const BAND_ORDER: readonly string[] = [
 ]
 
 /**
+ * Частотные границы базовых полос `freq_bands` (`core/config.py`), Гц —
+ * дублирование каталога бэкенда для UI: цвета гаммы полос
+ * (`shared/lib/bandColors.ts` берут границы точек/прогонов диполей, а
+ * радар «Эмо» красит свои секторы по этим ключам без данных бэкенда).
+ */
+export const BAND_HZ: Record<string, readonly [number, number]> = {
+  delta: [0.5, 2],
+  delta_theta: [2, 4],
+  theta: [4, 8],
+  alpha: [8, 16],
+  beta: [16, 32],
+  gamma: [32, 64],
+  high_gamma: [64, 128],
+}
+
+/**
  * Сортировка ключей полос по возрастанию частоты (порядок сохраняется и для
  * неизвестных ключей — они уходят в конец, relative order гарантирован
  * стабильностью `Array.prototype.sort`).

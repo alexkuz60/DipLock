@@ -17,6 +17,7 @@ import {
   calcJobSummary,
   calcSignature,
   normalizeCalcParams,
+  normalizeCalcView,
   normalizeRefineHalfwin,
   refineCostHint,
   refineHalfwinLabel,
@@ -194,6 +195,20 @@ describe('окно уточнения (шаг 1.5): варианты, оценк
     )
     expect(refineTooltip(fallback)).toContain('Свободный фит не выполнен')
     expect(refineTooltip(dipoleRefineResultFixture({ halfwin_ms: 5 }))).toContain('±5 мс')
+  })
+})
+
+describe('normalizeCalcView: подъём сохранённого вида панели', () => {
+  it('пропускает известные виды и отбрасывает мусор хранилища', () => {
+    // Все четыре вида валидны (правка 20.10.2026 вернула `fft` — панель АЧХ
+    // снова собственная: в общей с топокартами график схлопывался по высоте);
+    // мусор не должен открывать несуществующее окно
+    expect(normalizeCalcView('fft')).toBe('fft')
+    expect(normalizeCalcView('topomap')).toBe('topomap')
+    expect(normalizeCalcView('explore')).toBe('explore')
+    expect(normalizeCalcView('none')).toBe('none')
+    expect(normalizeCalcView('histogram')).toBeNull()
+    expect(normalizeCalcView(undefined)).toBeNull()
   })
 })
 

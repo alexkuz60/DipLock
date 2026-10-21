@@ -433,8 +433,14 @@ export function tempoStepY(
  * `tempoStepY(bpm)` от оценки до следующей (hold-семантика сырых данных
  * Соник Аннотатора; после последней оценки — до конца окна), вертикальные
  * фронты смены темпа между ступенями. До первой оценки линии нет; `tempo_track`
- * пуст/`null` — ничего не рисуется. Шкала — авто min…max по всему треку
- * (решение владельца 09.10.2026: мелкие девиации темпа видны).
+ * пуст/`null` — ничего не рисуется. Шкала по умолчанию — авто min…max по
+ * всему треку (решение владельца 09.10.2026: мелкие девиации темпа видны).
+ *
+ * `stepY` (поправка владельца 21.10.2026, «ЕмоЛаб») — своя функция высоты
+ * ступени `(bpm, height)`: раздел передаёт `radarTempoStepY`
+ * (`neuromusic/tempoCorrection.ts`) — шкалу темпа радара (0 волны = 120 bpm,
+ * низ графика = 60, верх = 240), чтобы линия темпа над волной и метка темпа
+ * на радаре жили на одной вертикальной шкале.
  */
 export function drawTempoSteps(
   ctx: CanvasRenderingContext2D,
@@ -443,6 +449,7 @@ export function drawTempoSteps(
   width: number,
   height: number,
   theme: TrackerTheme,
+  stepY?: (bpm: number, height: number) => number,
 ): void {
   const range = tempoBpmRange(tempoTrack)
   if (!tempoTrack || !range || view.end <= view.start || !(width > 0)) return
@@ -461,7 +468,7 @@ export function drawTempoSteps(
     const x1 = timeToX(start, view, width)
     const x2 = timeToX(end, view, width)
     if (x2 <= x1) continue
-    const y = tempoStepY(current.bpm, range, height)
+    const y = stepY ? stepY(current.bpm, height) : tempoStepY(current.bpm, range, height)
     // Фронт смены темпа: вертикаль от прошлой ступени к текущей (не у края).
     if (lastY !== null && x1 > 0 && lastY !== y) {
       ctx.moveTo(x1, lastY)

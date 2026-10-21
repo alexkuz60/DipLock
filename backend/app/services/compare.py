@@ -966,8 +966,15 @@ def _delta_topomap_png(
     if len(positions) < 3:
         return None
     m = max(abs(value) for value in values.values()) or 1.0
+    # «Отсутствующие» датчики эталонной сетки — окружностью, как на картах
+    # мощности (правка 20.10.2026): картинки раздела и карты разности одного
+    # языка точек.
+    absent = {
+        name: xy for name, xy in channel_positions(cfg.standard_channels).items()
+        if name not in positions
+    }
     return topomap_png(
-        positions, values, cmap="RdBu_r", vlim=(-float(m), float(m)),
+        positions, values, cmap="RdBu_r", vlim=(-float(m), float(m)), absent=absent,
     )
 
 

@@ -112,7 +112,7 @@ audits/                # архив аудитов (версируется; ли
 ## НЕ коммитить
 
 `venv/`, `__pycache__/`, `.env`, `data/results/`, `*.db`, `data/llm_router.json` (API-ключи ИИ),
-`data/protocols/` (черновики приёмки до вердикта владельца), `audits/audit_dsh.md` и
+`data/protocols/` (черновики приёмки), `audits/audit_dsh.md` и
 `audits/audit_sol_61.md` (личные срезы владельца) — см. `.gitignore`. `.env` содержит локальные
 пути/настройки — шаблон: `backend/.env.example`.
 
@@ -133,6 +133,7 @@ audits/                # архив аудитов (версируется; ли
 | `docs/rules/api-jobs.md` | инвентарь роутов, «задача = job», ETag/304, ошибки |
 | `docs/rules/compare.md`, `docs/rules/group-analysis.md` | сравнение пары (B9); групповой анализ N>2 (4.7) |
 | `docs/rules/consilium.md` | Консилиум: Т1–Т6, модельный роутер ИИ |
+| `docs/rules/emolab.md` | «ЕмоЛаб»: аудиотрек, ФФТ/VAMP, звезда реакции |
 | `docs/rules/interviews.md` | беседа: аудио, стенограмма, микрофон |
 | `docs/rules/neuromusic.md`, `docs/rules/spatial-audio.md` | «Нейромузыка», пространственная обработка |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, «UI не запускает обработку» |

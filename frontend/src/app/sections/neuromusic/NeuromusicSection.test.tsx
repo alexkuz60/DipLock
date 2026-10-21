@@ -997,6 +997,49 @@ describe('Нейромузыка — раздел', () => {
     expect(dot?.getAttribute('y1')).toBe(dominant?.getAttribute('y2'))
   })
 
+  it('звезда в гамме полос «Диполей»: дуги секторов 1…7 и круги вершин ⌀10 px', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const chart = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'radial-chart',
+    )
+    const arcs = chart.querySelectorAll('[data-part="sector-arc"]')
+    expect(arcs).toHaveLength(7)
+    // Гамма `bandColors.ts`: δ — красный (hsl 0°), γ-high — розово-фиолетовый.
+    expect(arcs[0]?.getAttribute('stroke')).toBe('hsl(0.0, 85%, 55.0%)')
+    expect(arcs[6]?.getAttribute('stroke')).toBe('hsl(275.0, 85%, 70.0%)')
+    const dots = chart.querySelectorAll('[data-part="vertex-dot"]')
+    expect(dots).toHaveLength(7)
+    expect(dots[0]?.getAttribute('stroke')).toBe('hsl(0.0, 85%, 55.0%)')
+    expect(dots[0]?.getAttribute('stroke-width')).toBe('10')
+    expect(dots[6]?.getAttribute('stroke')).toBe('hsl(275.0, 85%, 70.0%)')
+  })
+
+  it('линия темпа над волной — на шкале темпа радара (0 волны = 120 bpm)', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    // Одна оценка 120/√2 bpm: шкала радара даёт y = 150 (высота 200, середина
+    // по логарифму от 2: 120 → 100, 60 → 200, 240 → 0); авто-шкала min…max
+    // рисовала бы середину 100 — такой y у ступени быть не должно.
+    const fetchMock = audioFetchMock(TRACKS, {
+      emo: {
+        ...EMO_PAYLOAD,
+        tempo_track: [{ t_sec: 0, bpm: 120 / Math.SQRT2 }],
+      },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    // Ступень темпа (moveTo/lineTo её горизонтали) — единственная линия на
+    // y=150: бабочка рисует от середины 100.5, позиционер — всю высоту 0…200.
+    await waitFor(() =>
+      expect(canvasCtx.moveTo.mock.calls.some(([, y]) => y === 150)).toBe(true),
+    )
+    expect(canvasCtx.lineTo.mock.calls.some(([, y]) => y === 150)).toBe(true)
+  })
+
   it('«Эмо»: кадры грузятся, полигон рисуется лучами первого слайда', async () => {
     useEdfRecording.setState({ recording: recordingFixture })
     const fetchMock = audioFetchMock()

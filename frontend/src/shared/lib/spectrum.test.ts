@@ -33,6 +33,7 @@ import {
   spectrumQueryString,
   spectrumSummary,
   spectrumWithinWindow,
+  topomapRows,
   topomapUrl,
 } from './spectrum'
 
@@ -387,5 +388,25 @@ describe('разведочный спектральный проход (С3)', (
     const order = sortedExploreLines(lines, 'power')
     expect(order.map((item) => item.freq_hz)).toEqual([8, 10])
     expect(lines.map((item) => item.freq_hz)).toEqual([8, 10])
+  })
+})
+
+describe('topomapRows: сетка топокарт ровно в два ряда (правка 20.10.2026)', () => {
+  const band = (name: string): SpectrumBandOut => ({ name, fmin: 1, fmax: 2 })
+
+  it('13 полос каталога — 7 октавных сверху, 6 функциональных снизу', () => {
+    const names = [
+      'delta', 'delta_theta', 'theta', 'alpha', 'beta', 'gamma', 'high_gamma',
+      'mu', 'sigma', 'kappa', 'tau', 'lambda', 'psi',
+    ]
+    const rows = topomapRows(names.map(band))
+    expect(rows).toHaveLength(2)
+    expect(rows[0].map((item) => item.name)).toEqual(names.slice(0, 7))
+    expect(rows[1].map((item) => item.name)).toEqual(names.slice(7))
+  })
+
+  it('пустой список — без рядов, одиночная полоса — один ряд', () => {
+    expect(topomapRows([])).toEqual([])
+    expect(topomapRows([band('alpha')])).toHaveLength(1)
   })
 })

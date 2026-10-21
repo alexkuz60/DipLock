@@ -37,6 +37,7 @@ import {
 } from '@/shared/lib/waveformView'
 import { useNeuromusic } from '@/shared/state/neuromusic'
 import { getActivePlayer, useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
+import { radarTempoStepY } from './tempoCorrection'
 import { buildTrackList } from './trackList'
 import { trackerTimeRef } from './trackerTimeRef'
 
@@ -276,6 +277,10 @@ export function WaveTracker({ renderId, tracks, emo = null }: WaveTrackerProps) 
           w,
           WAVE_HEIGHT_PX,
           theme,
+          // Шкала темпа радара (21.10.2026, как в «ЕмоЛаб»): 0 волны = 120 bpm,
+          // низ графика = 60, верх = 240 — высота линии совпадает с меткой
+          // темпа на радаре при одном bpm (`tempoCorrection.radarTempoStepY`).
+          radarTempoStepY,
         )
       }
     }

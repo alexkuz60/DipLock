@@ -378,14 +378,14 @@ export function DipolesToolHeaderActions() {
       <IconButton
         icon={<Grid2x2 className="size-5" />}
         label="Топокарты ритмов"
-        tooltip="Выдвижная панель: топокарты ритмов δ…γ (спектр считается по кнопке в панели)"
+        tooltip="Выдвижная панель поверх рабочего вида: топокарты всех ритмов δ…ψ (спектр считается кнопкой в панели)"
         active={view === 'topomap'}
         onClick={() => toggleView('topomap')}
       />
       <IconButton
         icon={<ChartColumn className="size-5" />}
         label="FFT-гистограмма"
-        tooltip="Выдвижная панель: средняя мощность ритмов и PSD по частотам"
+        tooltip="Выдвижная панель: средняя мощность ритмов и PSD по частотам (АЧХ, высота графика ~300 px)"
         active={view === 'fft'}
         onClick={() => toggleView('fft')}
       />

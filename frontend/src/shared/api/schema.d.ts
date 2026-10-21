@@ -2821,6 +2821,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/emolab/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Запустить анализ внешнего аудиотрека (wav/mp3) для прогноза эмо-реакции
+         * @description Приём внешнего аудиофайла и запуск его анализа (шаг 1 «ЕмоЛаб»).
+         *
+         *     Из файла собираются данные прогноза: ФФТ-кадры «Эмо» (7 лучей полигона,
+         *     сетка 2/3 с) и карты темпа/аккордов VAMP (Соник Аннотатор) — контракт
+         *     ``GET /emolab/{track_id}/emo``. Повторная загрузка того же содержимого
+         *     (sha256) не пересчитывает: ответ сразу ``status=succeeded, cached=true``.
+         *     400 — не wav/mp3, битый файл либо трек длиннее 30 мин; 413 — файл больше
+         *     лимита загрузки.
+         */
+        post: operations["analyze_audio_track_api_v1_emolab_analyze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/emolab/{track_id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Статус анализа аудиотрека (проценты и шаг, поллинг UI)
+         * @description Статус анализа: running (pct 0..1 + шаг) / succeeded / failed (404 — нет).
+         */
+        get: operations["emolab_track_status_api_v1_emolab__track_id__status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/emolab/{track_id}/emo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Кадры радара «Эмо» аудиотрека: 7 лучей + карты темпа/аккордов
+         * @description Кадры анимации звезды-полигона (контракт рендера «Нейромузыки», v4).
+         *
+         *     Окно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔
+         *     время k · 2/3 с; лучи — децибельная шкала громкости (``db_relative``,
+         *     ``db_floor`` −60 дБ). ``key_track`` — карта аккордов (VAMP Key Detector)
+         *     для вращения звезды, ``tempo_track`` — карта темпа (VAMP Tempo and Beat
+         *     Tracker) для темп-коррекции лучей; ``null`` — инструмент недоступен
+         *     (best-effort, вращение/коррекция в UI нулевые).
+         *
+         *     404 — трек не найден, 409 — анализ ещё идёт либо не удался.
+         */
+        get: operations["emolab_track_emo_api_v1_emolab__track_id__emo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router": {
         parameters: {
             query?: never;
@@ -3889,6 +3965,11 @@ export interface components {
             anatomical_roi?: string | null;
             /** Brodmann Area */
             brodmann_area?: string | null;
+        };
+        /** Body_analyze_audio_track_api_v1_emolab_analyze_post */
+        Body_analyze_audio_track_api_v1_emolab_analyze_post: {
+            /** File */
+            file: string;
         };
         /** Body_analyze_eeg_api_v1_analyze_post */
         Body_analyze_eeg_api_v1_analyze_post: {
@@ -8069,6 +8150,83 @@ export interface components {
             share: number;
         };
         /**
+         * EmoAnalyzeOut
+         * @description Ответ ``POST /emolab/analyze`` (202): анализ запущен либо уже посчитан.
+         */
+        EmoAnalyzeOut: {
+            /**
+             * Track Id
+             * @description Идентификатор трека: sha256 содержимого файла (хвост 32 символов)
+             */
+            track_id: string;
+            /**
+             * Status
+             * @default running
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed";
+            /**
+             * Cached
+             * @description true — результат взят из дискового кэша (тот же файл уже проанализирован), расчёт не запускался, status сразу succeeded
+             * @default false
+             */
+            cached: boolean;
+            /**
+             * Filename
+             * @description Имя исходного файла (как загрузил пользователь)
+             * @default
+             */
+            filename: string;
+            /**
+             * Duration S
+             * @description Длительность трека, с (из заголовка файла)
+             */
+            duration_s: number;
+        };
+        /**
+         * EmoTrackStatus
+         * @description ``GET /emolab/{track_id}/status``: проценты и шаг анализа (поллинг UI).
+         */
+        EmoTrackStatus: {
+            /** Track Id */
+            track_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed";
+            /**
+             * Stage
+             * @description Текущий шаг, например «Карта темпа (VAMP)»
+             */
+            stage: string;
+            /**
+             * Pct
+             * @description Готовность 0..1
+             */
+            pct: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Error
+             * @description Текст ошибки (status=failed)
+             */
+            error?: string | null;
+            /**
+             * Filename
+             * @default
+             */
+            filename: string;
+            /**
+             * Duration S
+             * @description Длительность трека, с (из манифеста кэша; null пока идёт анализ)
+             */
+            duration_s?: number | null;
+        };
+        /**
          * EpochOut
          * @description Эпоха сессии (``GET /sessions/{id}/epochs``): сетка + мощности полос.
          */
@@ -11082,7 +11240,7 @@ export interface components {
         };
         /**
          * SpectrumBandOut
-         * @description Мощность одного ритма (δ…γ) с ссылкой на топокарту.
+         * @description Мощность одного ритма (δ…high-γ, μ…ψ) со ссылкой на топокарту.
          *
          *     Мощность — **интеграл PSD по диапазону, мкВ²** (N15): физически сравнимая
          *     величина между диапазонами разной ширины (среднее PSD, мкВ²/Гц, таким не
@@ -11091,7 +11249,7 @@ export interface components {
         SpectrumBandOut: {
             /**
              * Name
-             * @description Ключ диапазона из `freq_bands` (delta…gamma)
+             * @description Ключ диапазона из `freq_bands`/`functional_bands` (delta…high_gamma, mu…psi)
              */
             name: string;
             /** Fmin */
@@ -16103,6 +16261,101 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ConsiliumStreamEvent"];
                     "text/event-stream": components["schemas"]["ConsiliumStreamEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analyze_audio_track_api_v1_emolab_analyze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_analyze_audio_track_api_v1_emolab_analyze_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmoAnalyzeOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    emolab_track_status_api_v1_emolab__track_id__status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                track_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmoTrackStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    emolab_track_emo_api_v1_emolab__track_id__emo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                track_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AudioEmoOut"];
                 };
             };
             /** @description Validation Error */

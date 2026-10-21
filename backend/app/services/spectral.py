@@ -119,8 +119,21 @@ SPECTRUM_MULTITAPER_BANDWIDTH_HZ = 4.0
 TOPO_SIZE = 128
 
 # Палитра топокарт: viridis — перцептивно равномерная, читается и при
-# дальтонизме, и в ч/б-копии; серый IDW заменён на неё (N32).
+# дальтонизме, и в ч/б-копии; серый IDW заменён на неё (N32). Гамма —
+# «обратная» по отношению к серой шкале (правка 20.10.2026): **более сильная
+# мощность — более светлый цвет** (жёлтый конец viridis), а не более тёмный.
 TOPO_CMAP = "viridis"
+
+# Точки датчиков на топокарте (правка 20.10.2026): белые, крупные — 5 px в
+# растре картинки. Реальные каналы записи — залитый круг; электроды эталонной
+# сетки монтажа, которых в записи нет (например запись без T7/T8), — окружность
+# того же размера: «пустое» место монтажа видно, но не выдаётся за измерение.
+TOPO_DOT_PX = 5.0
+TOPO_DOT_COLOR = "white"
+
+# Линии топокарты (изолинии интерполяции и контур головы) — светлые: на тёмных
+# зонах палитры тёмные линии не читались (правка 20.10.2026).
+TOPO_LINE_RGBA = (1.0, 1.0, 1.0, 0.55)
 
 
 class SpectrumError(ValueError):
@@ -161,10 +174,14 @@ def spectrum_signature(params: SpectrumParams, cfg: Settings, channels: Sequence
         f"method={params.psd_method}",
         ",".join(channels),
         ",".join(f"{name}:{cfg.freq_bands[name]}" for name in sorted(cfg.freq_bands)),
+        ",".join(f"{name}:{cfg.functional_bands[name]}" for name in sorted(cfg.functional_bands)),
         # v3: топокарта — mne.viz.plot_topomap (сферический сплайн + палитра,
         # N32) вместо серого IDW — картинки прежней отрисовки не отдаются даже
         # при тех же параметрах (v2 была смена метрики мощности на интеграл, N15).
-        "v3-topomap-mne",
+        # v4 (правка 20.10.2026): белые точки датчиков (залитый круг — реальные
+        # каналы, окружность — отсутствующие в записи), светлые изолинии —
+        # картинки прежней отрисовки в кэше не отдаются.
+        "v4-topomap-sensors",
     )).encode("utf-8"))
     return digest.hexdigest()[:16]
 
@@ -215,14 +232,18 @@ def channel_positions(channels: Sequence[str]) -> dict[str, np.ndarray]:
     return {}
 
 
-def _scalp_projection(positions: np.ndarray) -> np.ndarray:
+def _scalp_projection(positions: np.ndarray, radius: float | None = None) -> np.ndarray:
     """Плоскость скальпа: ортогональная проекция (x, y) головы, нормировка к [-1, 1].
 
     Нормировка по максимальному радиусу, а не по крайним значениям осей: так
     круг скальпа остаётся кругом, а его края совпадают с границей картинки.
+    ``radius`` — база нормировки для точек, рисуемых на той же картинке
+    («отсутствующие» датчики): без неё каждый набор масштабировался бы сам по
+    себе, и точки легли бы не на свои места монтажа.
     """
     xy = positions[:, :2]
-    radius = float(np.max(np.linalg.norm(xy, axis=1))) or 1.0
+    if radius is None:
+        radius = float(np.max(np.linalg.norm(xy, axis=1))) or 1.0
     return xy / radius
 
 
@@ -249,6 +270,7 @@ def head_map_positions(channels: Sequence[str]) -> dict[str, list[float]]:
 def topomap_png(
     positions: dict[str, np.ndarray], values: dict[str, float], size: int = TOPO_SIZE,
     cmap: str = TOPO_CMAP, vlim: tuple[float, float] | None = None,
+    absent: dict[str, np.ndarray] | None = None,
 ) -> bytes:
     """PNG топокарты: контур головы, палитра MNE, вне контура прозрачно.
 
@@ -259,6 +281,10 @@ def topomap_png(
     `services/compare.py`): дивергентная палитра со шкалой ``(-m, m)``, чтобы
     знак дельты читался цветом; по умолчанию — всё как у карт мощности
     (viridis, min..max своих значений).
+
+    ``absent`` — позиции электродов эталонной сетки монтажа, которых **нет** в
+    записи: они рисуются окружностью (без заливки), реальные каналы — залитым
+    кругом (правка 20.10.2026). Пустой/None — рисуются только реальные каналы.
     """
     if not positions:
         raise SpectrumError("Нет позиций каналов — топокарта не строится")
@@ -266,14 +292,25 @@ def topomap_png(
     if not names:
         raise SpectrumError("Нет мощностей для построения топокарты")
 
-    channel_xy = _scalp_projection(np.stack([positions[name] for name in names]))
+    stacked = np.stack([positions[name] for name in names])
+    radius = float(np.max(np.linalg.norm(stacked[:, :2], axis=1))) or 1.0
+    channel_xy = _scalp_projection(stacked, radius)
     data = np.asarray([values[name] for name in names], dtype=float)
-    return encode_png_rgba8(_render_topomap(channel_xy, data, size, cmap=cmap, vlim=vlim))
+    absent_map = absent or {}
+    absent_names = [name for name in absent_map if name not in positions]
+    absent_xy = (
+        _scalp_projection(np.stack([absent_map[name] for name in absent_names]), radius)
+        if absent_names else None
+    )
+    return encode_png_rgba8(_render_topomap(
+        channel_xy, data, size, cmap=cmap, vlim=vlim, absent_xy=absent_xy,
+    ))
 
 
 def _render_topomap(
     channel_xy: np.ndarray, data: np.ndarray, size: int,
     cmap: str = TOPO_CMAP, vlim: tuple[float, float] | None = None,
+    absent_xy: np.ndarray | None = None,
 ) -> np.ndarray:
     """Рендер `mne.viz.plot_topomap` в RGBA-массив формы (size, size, 4).
 
@@ -284,6 +321,12 @@ def _render_topomap(
     обрезано контуром ``outlines='head'``, а линии контура не клипуются).
     ``vlim=None`` — шкала min..max самих данных (карта мощности); для карты
     разности передаётся симметричная пара ``(-m, m)``.
+
+    Датчики MNE не рисует (``sensors=False``): точки ставятся своими после
+    отрисовки — белые, Ø ``TOPO_DOT_PX`` px, реальные каналы залитым кругом,
+    ``absent_xy`` (отсутствующие в записи) — окружностью. Изолинии и контур
+    головы перекрашиваются в ``TOPO_LINE_RGBA`` (светлые): у `plot_topomap` нет
+    параметра цвета линий, поэтому стилизуются уже нарисованные художники оси.
     """
     from matplotlib.backends.backend_agg import FigureCanvasAgg
     from matplotlib.figure import Figure
@@ -296,12 +339,55 @@ def _render_topomap(
     plot_topomap(
         data, channel_xy,
         axes=axes, show=False, cmap=cmap, res=size,
+        sensors=False,
         # Шкала каждого диапазона — свои min..max мощностей (как прежний IDW):
         # картинка показывает форму распределения, число — в подписи под ней.
         vlim=vlim if vlim is not None else (float(np.min(data)), float(np.max(data))),
     )
+    # Светлые изолинии и контур головы + белые точки датчиков (см. хелперы).
+    _lighten_topomap_lines(axes)
+    _draw_sensor_dots(axes, channel_xy, absent_xy, dpi=figure.dpi)
     canvas.draw()
     return np.asarray(canvas.buffer_rgba(), dtype=np.uint8).copy()
+
+
+def _lighten_topomap_lines(axes: Any) -> None:
+    """Светлые линии топокарты: изолинии интерполяции и контур головы.
+
+    `plot_topomap` не принимает цвет линий, поэтому перекрашиваются уже
+    нарисованные художники оси (Line2D-контуры, коллекции изолиний, патчи).
+    Слой точек датчиков добавляется **после** вызова — его стилизация здесь
+    не задевается.
+    """
+    for line in axes.lines:
+        line.set_color(TOPO_LINE_RGBA)
+    for collection in axes.collections:
+        collection.set_edgecolor(TOPO_LINE_RGBA)
+        collection.set_linewidth(0.6)
+    for patch in axes.patches:
+        patch.set_edgecolor(TOPO_LINE_RGBA)
+
+
+def _draw_sensor_dots(
+    axes: Any, channel_xy: np.ndarray, absent_xy: np.ndarray | None, dpi: float,
+) -> None:
+    """Белые точки датчиков поверх топокарты (правка 20.10.2026).
+
+    Ø ``TOPO_DOT_PX`` px в растре картинки (площадь маркера переводится из
+    пикселей в points² — единицы ``s`` у scatter). Реальные каналы записи —
+    залитый круг; ``absent_xy`` (электроды эталонной сетки без каналов в
+    записи) — окружность: сетка монтажа читается целиком, но пустое место не
+    выглядит измеренным.
+    """
+    dot_area = float(np.pi * (TOPO_DOT_PX * 72.0 / dpi / 2.0) ** 2)
+    if absent_xy is not None and len(absent_xy) > 0:
+        axes.scatter(
+            absent_xy[:, 0], absent_xy[:, 1], s=dot_area,
+            facecolors="none", edgecolors=TOPO_DOT_COLOR, linewidths=1.0,
+        )
+    axes.scatter(
+        channel_xy[:, 0], channel_xy[:, 1], s=dot_area, facecolors=TOPO_DOT_COLOR,
+    )
 
 
 
@@ -716,7 +802,13 @@ def compute_spectrum(
         freqs, psd, psd_mean, n_fft = _compute_psd(epochs, cfg, params)
         entry.note = f"method={params.psd_method}, n_fft={n_fft}, epoch={params.epoch_length_ms:g}ms"
     psd_ch_mean = np.mean(psd_mean, axis=0)
-    band_powers = _band_powers(freqs, psd_mean, cfg.freq_bands)
+    # Все частотные полосы каталога (правка 20.10.2026): базовые октавные +
+    # функциональные ритмы — числа и топокарты по всем полосам, а не только по
+    # октавной сетке. Разведочный проход остаётся на `cfg.freq_bands`:
+    # функциональные полосы пересекаются с базовыми (μ 8–13 внутри α 8–16), а
+    # разбиение «частота → своя полоса» обязано быть однозначным.
+    spectrum_bands: dict[str, tuple] = {**cfg.freq_bands, **cfg.functional_bands}
+    band_powers = _band_powers(freqs, psd_mean, spectrum_bands)
     # N16: медиана/квартили мощности диапазона по эпохам (куб PSD уже посчитан
     # в `_compute_psd`, поэтому разброс — почти бесплатный).
     df = float(freqs[1] - freqs[0]) if freqs.size > 1 else 1.0
@@ -724,7 +816,7 @@ def compute_spectrum(
     # «Полка» полосы (B4, С3): максимум мощности полосы по эпохам сессии —
     # нормировочная база X % КД и долей разведочного прохода.
     band_maxima: dict[str, float | None] = {}
-    for band_name, (fmin, fmax) in cfg.freq_bands.items():
+    for band_name, (fmin, fmax) in spectrum_bands.items():
         mask = (freqs >= fmin) & (freqs <= fmax)
         if not mask.any():
             epoch_stats[band_name] = None
@@ -740,7 +832,7 @@ def compute_spectrum(
     # С3 — разведочный спектральный проход: пик PSD каждого ритма (B4) и список
     # частот в нормированных единицах. Считается на уже готовом кубе PSD —
     # отдельного чтения записи не требует (вход выбора полос пакета С1).
-    psd_peaks = _band_psd_peaks(freqs, psd_ch_mean, cfg.freq_bands)
+    psd_peaks = _band_psd_peaks(freqs, psd_ch_mean, spectrum_bands)
     with journal.step("spectrum", "explore", params_key=signature, epochs=len(epochs)) as entry:
         explore = _explore_pass(
             freqs, psd, psd_ch_mean, cfg.freq_bands, band_maxima, psd_peaks, df,
@@ -784,10 +876,18 @@ def compute_spectrum(
         )
     if len(positions) < 3:
         warnings.append("Слишком мало каналов с позициями — топокарты не построены")
+    # «Отсутствующие» датчики (правка 20.10.2026): электроды эталонной сетки
+    # монтажа, которых нет среди каналов записи (как их показывает раздел ЭЭГ).
+    # На топокарте они — белые окружности: сетка монтажа читается целиком, а
+    # дырки в записи не выдаются за измеренные каналы.
+    absent = {
+        name: xy for name, xy in channel_positions(cfg.standard_channels).items()
+        if name not in positions
+    }
 
     report(
         "topomaps",
-        message=f"Топокарты диапазонов: {len(cfg.freq_bands)}",
+        message=f"Топокарты диапазонов: {len(spectrum_bands)}",
         epochs_done=len(epochs),
         epochs_total=len(epochs),
     )
@@ -796,12 +896,13 @@ def compute_spectrum(
     with journal.step(
         "spectrum", "topomaps", params_key=signature, epochs=len(epochs),
     ) as entry:
-        for name, (fmin, fmax) in cfg.freq_bands.items():
+        for name, (fmin, fmax) in spectrum_bands.items():
             url: str | None = None
             values = _channel_band_power(freqs, psd_mean, channels, fmin, fmax)
             if len(values) >= 3:
                 size = _write_topomap(
                     cfg, recording.recording_id, signature, name, positions, values,
+                    absent=absent,
                 )
                 written += size or 0
                 url = topomap_url(cfg, recording.recording_id, name)
@@ -826,13 +927,13 @@ def compute_spectrum(
             })
         entry.bytes_out = written or None
         entry.note = (
-            f"bands={len(cfg.freq_bands)}, "
+            f"bands={len(spectrum_bands)}, "
             f"written={sum(1 for band in bands_out if band['topomap_url'])}"
         )
 
     report(
         "done", 1.0,
-        message=f"Спектр готов: {len(freqs)} частот, {len(cfg.freq_bands)} диапазонов",
+        message=f"Спектр готов: {len(freqs)} частот, {len(spectrum_bands)} диапазонов",
         epochs_done=len(epochs),
         epochs_total=len(epochs),
     )
@@ -868,15 +969,17 @@ def _write_topomap(
     band: str,
     positions: dict[str, np.ndarray],
     values: dict[str, float],
+    absent: dict[str, np.ndarray] | None = None,
 ) -> int | None:
     """Строит и атомарно кладёт топокарту на диск; сбой кэша не критичен.
 
     Возвращает размер PNG (``None`` — картинка не построена): размер нужен
     журналу шагов, чтобы «топокарты 120 мс» можно было сверить с объёмом записи.
+    ``absent`` — позиции отсутствующих датчиков (см. `topomap_png`).
     """
     path = _topomap_path(cfg, recording_id, signature, band)
     try:
-        data = topomap_png(positions, values)
+        data = topomap_png(positions, values, absent=absent)
     except Exception as exc:  # сбой картинки (в т.ч. matplotlib) не валит задачу спектра
         logger.warning("Топокарта %s не построена: %s", band, exc)
         return None
@@ -893,7 +996,7 @@ def cached_topomap(
     картинку из уже показанного результата после перезапуска сервера — кэша в
     памяти нет, но посчитать картинку дешевле, чем отдать 404 на живую ссылку.
     """
-    if band not in cfg.freq_bands:
+    if band not in cfg.freq_bands and band not in cfg.functional_bands:
         raise SpectrumError(f"Неизвестный диапазон: {band!r}")
     channels = list(recording.meta.get("channels") or [])
     signature = spectrum_signature(params, cfg, channels)

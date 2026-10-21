@@ -25,6 +25,8 @@ import type {
   DipoleRefineResult,
   DipoleScanResult,
   EloretaResult,
+  EmoAnalyzeStart,
+  EmoTrackStatus,
   EvokedResult,
   FilterResponse,
   GroupAggregateIn,
@@ -294,6 +296,29 @@ export const api = {
    */
   audioEmo: (renderId: string, signal?: AbortSignal) =>
     request<AudioEmo>(`${API_PREFIX}/audio/render/${renderId}/emo`, { signal }),
+
+  /**
+   * «ЕмоЛаб» (шаг 1): загрузка внешнего аудиотрека (wav/mp3) → анализ
+   * (ФФТ-кадры «Эмо» + карты темпа/аккордов VAMP) — 202 + track_id.
+   * Повторная загрузка того же содержимого (sha256) — `cached: true`.
+   */
+  emolabAnalyze: (file: File, signal?: AbortSignal) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<EmoAnalyzeStart>(`${API_PREFIX}/emolab/analyze`, {
+      method: 'POST',
+      body: form,
+      signal,
+    })
+  },
+
+  /** Шаг и проценты анализа трека «ЕмоЛаб» (поллинг UI). */
+  emolabTrackStatus: (trackId: string, signal?: AbortSignal) =>
+    request<EmoTrackStatus>(`${API_PREFIX}/emolab/${trackId}/status`, { signal }),
+
+  /** Кадры «Эмо» аудиотрека «ЕмоЛаб» (контракт рендера «Нейромузыки», v4). */
+  emolabTrackEmo: (trackId: string, signal?: AbortSignal) =>
+    request<AudioEmo>(`${API_PREFIX}/emolab/${trackId}/emo`, { signal }),
 
   /** Каталог IR-пресетов для реверберации плеера (селект «Помещение»). */
   audioIrCatalog: (signal?: AbortSignal) =>

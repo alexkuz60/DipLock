@@ -195,7 +195,7 @@ export function NeuromusicSection() {
                 секции — правка владельца). */}
             <div className="flex h-full min-h-0">
               <div className="min-w-0 flex-1">
-                <RadialChart emo={emoQuery.data ?? null} />
+                <RadialChart emo={emoQuery.data ?? null} bandColors />
               </div>
               <EmoCounters emo={emoQuery.data ?? null} />
             </div>

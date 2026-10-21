@@ -118,6 +118,18 @@ export function spectrumQueryOf(result: SpectrumResult): SpectrumQuery {
   }
 }
 
+/**
+ * Ряды сетки топокарт — ровно два (правка 20.10.2026): панель растёт по
+ * высоте, размеры картинок не уменьшаются. Деление — пополам с бо́льшим
+ * первым рядом (13 полос каталога: 7 октавных сверху, 6 функциональных
+ * снизу), порядок полос сохраняется.
+ */
+export function topomapRows(bands: SpectrumBandOut[]): SpectrumBandOut[][] {
+  if (bands.length === 0) return []
+  const perRow = Math.ceil(bands.length / 2)
+  return [bands.slice(0, perRow), bands.slice(perRow)].filter((row) => row.length > 0)
+}
+
 /** Мощность для подписи: «—» вместо нуля там, где значение не измерено. */
 export function formatPower(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—'

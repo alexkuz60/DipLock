@@ -95,7 +95,9 @@ def test_compute_spectrum_puts_power_into_its_band(tmp_path):
         SpectrumParams(filter_band=(1, 40), epoch_length_ms=1000.0),
     )
 
-    assert [band["name"] for band in result["bands"]] == list(settings.freq_bands)
+    assert [band["name"] for band in result["bands"]] == (
+        list(settings.freq_bands) + list(settings.functional_bands)
+    )
     powers = {band["name"]: band["power_uv2"] for band in result["bands"]}
     assert powers["alpha"] > powers["delta"]
     assert powers["alpha"] > powers["beta"]
@@ -173,6 +175,92 @@ def test_topomap_png_is_circle_with_transparent_outside():
     assert len(colors) > 50, f"ожидалась палитра, найдено цветов: {len(colors)}"
 
 
+def test_topomap_styling_light_lines_and_white_dots():
+    """Изолинии — светлые, точки датчиков — белые Ø 5 px (правка 20.10.2026).
+
+    Реальные каналы — залитый круг, отсутствующие в записи (`absent`) —
+    окружность: стилизация живёт в хелперах `_lighten_topomap_lines`/
+    `_draw_sensor_dots`, и тест держит её язык одинаковым для всех картинок.
+    """
+    from matplotlib.figure import Figure
+
+    figure = Figure()
+    axes = figure.add_subplot()
+    (head_line,) = axes.plot([0.0, 1.0], [0.0, 1.0], color="black")
+    axes.contour(np.arange(4.0).reshape(2, 2))
+    assert len(axes.collections) == 1, "изолинии MNE — коллекция на осях"
+
+    spectral_mod._lighten_topomap_lines(axes)
+    assert head_line.get_color() == pytest.approx(spectral_mod.TOPO_LINE_RGBA)
+    assert np.asarray(axes.collections[0].get_edgecolor())[0] == pytest.approx(
+        spectral_mod.TOPO_LINE_RGBA,
+    )
+
+    channel_xy = np.array([[0.0, 0.0], [0.5, 0.5]])
+    absent_xy = np.array([[-0.5, -0.5]])
+    spectral_mod._draw_sensor_dots(axes, channel_xy, absent_xy, dpi=100.0)
+    absent_dots, real_dots = axes.collections[-2], axes.collections[-1]
+
+    # Залитый круг: белая заливка без прозрачности
+    real_face = np.asarray(real_dots.get_facecolor())[0]
+    assert real_face[:3] == pytest.approx((1.0, 1.0, 1.0))
+    assert real_face[3] == pytest.approx(1.0)
+    # Окружность: заливки нет (пустой facecolor или alpha 0), белый край
+    absent_face = np.asarray(absent_dots.get_facecolor())
+    assert absent_face.size == 0 or absent_face[0][3] == pytest.approx(0.0)
+    assert np.asarray(absent_dots.get_edgecolor())[0][:3] == pytest.approx((1.0, 1.0, 1.0))
+    # Размер точки — Ø 5 px картинки: из points² обратно в пиксели
+    area_pt2 = float(np.asarray(real_dots.get_sizes())[0])
+    diameter_px = 2.0 * (area_pt2 / float(np.pi)) ** 0.5 * 100.0 / 72.0
+    assert diameter_px == pytest.approx(spectral_mod.TOPO_DOT_PX)
+
+
+def test_topomap_png_white_dots_and_inverse_gamma():
+    """PNG: белые точки поверх палитры, «более сильное — более светлое» (20.10.2026).
+
+    Гамма проверяется пикселями: зона сильной мощности (верх, Fp1/Fp2 = 100)
+    обязана быть светлее зоны слабой (низ, P3/P4 = 1) — «обратная гамма»:
+    сильнее = светлее, а не темнее.
+    """
+    channels = list(settings.standard_channels[:8])
+    positions = channel_positions(channels)
+    values = {name: (100.0 if name in ("Fp1", "Fp2") else 1.0) for name in channels}
+    absent = channel_positions(["Oz"])
+
+    pixels = _decode_png(topomap_png(positions, values, absent=absent))["pixels"].astype(float)
+    size = pixels.shape[0]
+    opaque = pixels[:, :, 3] > 200
+    rgb = pixels[:, :, :3]
+
+    # Белые точки датчиков: чисто-белые непрозрачные пиксели (залитые круги
+    # 8 каналов + окружность отсутствующего Oz)
+    white = np.all(rgb >= 250, axis=2) & opaque
+    assert int(white.sum()) >= 8 * 8, f"белых точек мало: {int(white.sum())}"
+
+    luminance = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
+    top_zone = opaque.copy()
+    top_zone[size // 2:, :] = False
+    bottom_zone = opaque.copy()
+    bottom_zone[: size // 2, :] = False
+    lum_top = float(luminance[top_zone].mean())
+    lum_bottom = float(luminance[bottom_zone].mean())
+    assert lum_top > lum_bottom + 10, (
+        f"гамма не «обратная»: сильная зона lum={lum_top:.1f}, слабая lum={lum_bottom:.1f}"
+    )
+
+
+def test_topomap_route_serves_functional_band(client, tmp_path):
+    """Топокарта функционального ритма (μ) отдаётся, как и базовых полос (20.10.2026)."""
+    recording = _register(tmp_path, _alpha_edf(tmp_path))
+
+    response = client.get(
+        f"{_PREFIX}/recordings/{recording.recording_id}/spectrum/topomap/mu.png",
+        params={"band_min": 1, "band_max": 40, "epoch_length_ms": 1000},
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "image/png"
+
+
 def test_spectrum_job_flow(client, tmp_path):
     """202 → поллинг с прогрессом по эпохам → результат по `result_url`."""
     recording = _register(tmp_path, _alpha_edf(tmp_path))
@@ -197,7 +285,9 @@ def test_spectrum_job_flow(client, tmp_path):
     body = result.json()
     assert body["recording_id"] == recording.recording_id
     assert body["topomap_version"]
-    assert [band["name"] for band in body["bands"]] == list(settings.freq_bands)
+    assert [band["name"] for band in body["bands"]] == (
+        list(settings.freq_bands) + list(settings.functional_bands)
+    )
 
     # Топокарта диапазона: PNG + ETag, повторный запрос — 304
     query = {"band_min": 1, "band_max": 40, "epoch_length_ms": 1000}

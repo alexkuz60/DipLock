@@ -39,12 +39,10 @@ import {
   NeuromusicTitleIcon,
   NeuromusicToolActions,
 } from './neuromusic/NeuromusicToolActions'
-import {
-  EmoLabPanel,
-  EmoLabSection,
-  NeuroAudioPanel,
-  NeuroAudioSection,
-} from './Stubs'
+import { EmoLabPanel } from './emolab/EmoLabPanel'
+import { EmoLabSection } from './emolab/EmoLabSection'
+import { EmoLabTitleFile, EmoLabToolActions } from './emolab/EmoLabToolActions'
+import { NeuroAudioPanel, NeuroAudioSection } from './Stubs'
 import { getSection, type SectionId } from './registry'
 import { ConsiliumSection } from './consilium/ConsiliumSection'
 import { ConsiliumOptionsPanel } from './consilium/ConsiliumOptionsPanel'
@@ -99,7 +97,12 @@ const SECTION_MODULES: Record<SectionId, SectionModule> = {
     Panel: SummaryPanel,
     ToolActions: SummaryToolActions,
   },
-  emolab: { Component: EmoLabSection, Panel: EmoLabPanel },
+  emolab: {
+    Component: EmoLabSection,
+    Panel: EmoLabPanel,
+    TitleAfter: EmoLabTitleFile,
+    ToolActions: EmoLabToolActions,
+  },
   consilium: { Component: ConsiliumSection, Panel: ConsiliumOptionsPanel },
   neuroaudio: { Component: NeuroAudioSection, Panel: NeuroAudioPanel },
   neuromusic: {

@@ -159,7 +159,7 @@ export const SECTIONS: SectionConfig[] = [
     id: 'emolab',
     title: 'ЕмоЛаб — психоэмоциональный фон',
     shortTitle: 'ЕмоЛаб',
-    hint: 'ЕмоЛаб: анализ психоэмоционального фона (заглушка)',
+    hint: 'ЕмоЛаб: аудиотрек, карта темпа/аккордов, звезда реакции (шаг 1)',
     hotkey: '8',
     icon: Smile,
     route: '/emolab',

@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import type { AudioEmoFrame } from '@/shared/api/types'
-import { frameIndexAt, hopSeconds, interpolatedRays } from './emoRadar'
+import { frameIndexAt, hopSeconds, interpolatedRays, raysDbRange } from './emoRadar'
 
 /** Шаг кадра: 32000 / 48000 = 2/3 с (сетка синхронизации с плеером). */
 const HOP = 32000 / 48000
@@ -83,5 +83,24 @@ describe('emoRadar — интерполяция лучей', () => {
       expect(value).toBeGreaterThanOrEqual(0)
       expect(value).toBeLessThanOrEqual(100)
     })
+  })
+})
+
+describe('emoRadar — динамический диапазон лучей (raysDbRange)', () => {
+  it('−60…0 → −96…0: проценты сжимаются в 60/96 (тишина краев сохраняется)', () => {
+    expect(raysDbRange([0, 50, 100], -60, -96)).toEqual([0, 31.25, 62.5])
+  })
+
+  it('−60…0 → −40…0: проценты растягиваются в 60/40 с зажимом к 100', () => {
+    expect(raysDbRange([10, 50, 70, 100], -60, -40)).toEqual([15, 75, 100, 100])
+  })
+
+  it('та же шкала — копия с зажимом; негодные пороги — масштаб 1', () => {
+    expect(raysDbRange([10, 120, -5], -60, -60)).toEqual([10, 100, 0])
+    expect(raysDbRange([50], -60, 0)).toEqual([50])
+    expect(raysDbRange([50], 0, -60)).toEqual([50])
+    expect(raysDbRange([50], Number.NaN, -40)).toEqual([50])
+    // Не-числовые значения лучей — 0 (как у starPolygon).
+    expect(raysDbRange([Number.NaN, 10], -60, -40)).toEqual([0, 15])
   })
 })

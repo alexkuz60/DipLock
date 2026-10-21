@@ -69,10 +69,10 @@ describe('состояние расчёта диполей', () => {
     useDipoleCalc.getState().toggleView('topomap')
     expect(useDipoleCalc.getState().view).toBe('topomap')
 
-    useDipoleCalc.getState().toggleView('fft')
-    expect(useDipoleCalc.getState().view).toBe('fft')
+    useDipoleCalc.getState().toggleView('explore')
+    expect(useDipoleCalc.getState().view).toBe('explore')
 
-    useDipoleCalc.getState().toggleView('fft')
+    useDipoleCalc.getState().toggleView('explore')
     expect(useDipoleCalc.getState().view).toBe('none')
   })
 
@@ -272,7 +272,7 @@ describe('состояние расчёта диполей', () => {
       ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
     )
     expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/spectrum')
-    expect(useDipoleCalc.getState().spectrum?.bands).toHaveLength(7)
+    expect(useDipoleCalc.getState().spectrum?.bands).toHaveLength(13)
     expect(useDipoleCalc.getState().spectrumJob?.status).toBe('succeeded')
   })
 
@@ -297,7 +297,7 @@ describe('состояние расчёта диполей', () => {
 
   it('«Сбросить расчёт» убирает результаты, но сохраняет параметры и панель', () => {
     useDipoleCalc.setState({
-      view: 'fft',
+      view: 'topomap',
       amplitudeThresholdNam: 25,
       result: dipoleScanResultFixture(),
       spectrum: spectrumResultFixture(),
@@ -312,7 +312,7 @@ describe('состояние расчёта диполей', () => {
     expect(state.spectrum).toBeNull()
     expect(state.batchError).toBeNull()
     expect(state.spectrumError).toBeNull()
-    expect(state.view).toBe('fft')
+    expect(state.view).toBe('topomap')
     expect(state.amplitudeThresholdNam).toBe(25)
     expect(state.params).toEqual(CALC_PARAM_DEFAULTS)
     // Выделенные диполь и эпоха жили в результате задачи — вместе с ним они исчезают

@@ -10,6 +10,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.api.consilium import router as consilium_router
+from app.api.emolab import router as emolab_router
 from app.api.llm_router import router as llm_router_api
 from app.api.routes import router as api_router
 from app.core.config import settings
@@ -120,6 +121,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(api_router, prefix=settings.api_prefix)
 app.include_router(consilium_router, prefix=settings.api_prefix)
+app.include_router(emolab_router, prefix=settings.api_prefix)
 app.include_router(llm_router_api, prefix=settings.api_prefix)
 
 

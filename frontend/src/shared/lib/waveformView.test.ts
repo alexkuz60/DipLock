@@ -329,6 +329,30 @@ describe('waveformView — аннотации Соник Аннотатора', 
     expect(styles).toEqual([THEME.tempoLine])
   })
 
+  it('drawTempoSteps: своя функция высоты stepY («ЕмоЛаб») — ступени на её y', () => {
+    const { ctx, moves, lines, styles, raw } = fakeCtx()
+    const track = [
+      { t_sec: 0, bpm: 60 },
+      { t_sec: 2, bpm: 240 },
+    ]
+    // stepY задаёт высоту напрямую (60 → 190, 240 → 10 при высоте 200) —
+    // авто-шкала min…max (100…140 → 170/30) не используется.
+    const stepY = (bpm: number) => (bpm >= 240 ? 10 : 190)
+    drawTempoSteps(ctx, track, { start: 0, end: 4 }, 400, 200, THEME, stepY)
+    expect(moves).toEqual([
+      [0, 190],
+      [200, 190],
+      [200, 10],
+    ])
+    expect(lines).toEqual([
+      [200, 190],
+      [200, 10],
+      [400, 10],
+    ])
+    expect(raw.stroke).toHaveBeenCalledTimes(1)
+    expect(styles).toEqual([THEME.tempoLine])
+  })
+
   it('drawTempoSteps: окно обрезает ступени — слева hold входит, справа выходит', () => {
     const track = [
       { t_sec: 0, bpm: 100 },

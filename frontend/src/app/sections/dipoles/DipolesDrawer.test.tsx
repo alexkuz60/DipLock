@@ -52,8 +52,8 @@ describe('выдвижная панель раздела «Диполи»', () =
     // Мощность подписана рядом с картинкой; неизмеренная — «—», а не «0.00»
     expect(screen.getByText(/8–16 Гц · 12.50 мкВ² · 55 %/)).toBeInTheDocument()
     expect(screen.getByText(/64–128 Гц · — мкВ²/)).toBeInTheDocument()
-    // 7 полос сетки: у 6 картинки есть, у γ-high (вне полосы фильтра) — заглушка
-    expect(screen.getAllByTestId(/^topomap-(?!unavailable)/)).toHaveLength(7)
+    // 13 полос каталога: у 12 картинки есть, у γ-high (вне полосы фильтра) — заглушка
+    expect(screen.getAllByTestId(/^topomap-(?!unavailable)/)).toHaveLength(13)
     expect(screen.getAllByTestId(/^topomap-unavailable-/)).toHaveLength(1)
   })
 
@@ -74,11 +74,11 @@ describe('выдвижная панель раздела «Диполи»', () =
       ([input, init]) => `${init?.method ?? 'GET'} ${String(input)}`,
     )
     expect(urls[0]).toBe('POST /api/v1/recordings/rec-1/spectrum')
-    expect(await screen.findAllByAltText(/Топокарта/)).toHaveLength(6)
+    expect(await screen.findAllByAltText(/Топокарта/)).toHaveLength(12)
   })
 
   it('кнопка расчёта выключена без записи и объясняет причину', async () => {
-    useDipoleCalc.setState({ view: 'fft' })
+    useDipoleCalc.setState({ view: 'topomap' })
     renderWithProviders(<DipolesDrawer />)
 
     const button = screen.getByRole('button', { name: 'Рассчитать спектр' })
@@ -86,11 +86,29 @@ describe('выдвижная панель раздела «Диполи»', () =
     expect(button).toHaveAttribute('title', expect.stringContaining('загрузите EDF'))
   })
 
-  it('FFT: полосы по диапазонам и ломаная PSD', () => {
+  it('дублирует «Метод PSD» из сайдбара «Опции» рядом с кнопкой расчёта, без запросов', async () => {
+    const user = userEvent.setup()
+    const fetchSpy = mockApiFetch()
+    useDipoleCalc.setState({ view: 'topomap', spectrum: spectrumResultFixture() })
+    renderWithProviders(<DipolesDrawer />)
+
+    // Дубль на панели (правка 20.10.2026): Welch/Multitaper рядом с «Рассчитать
+    // спектр»; правка метода ничего не запускает — правило «расчёт по кнопке»
+    await user.click(screen.getByRole('button', { name: 'Multitaper' }))
+    expect(useDipoleCalc.getState().params.psdMethod).toBe('multitaper')
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('АЧХ: полосы по диапазонам и ломаная PSD', () => {
     useDipoleCalc.setState({ view: 'fft', spectrum: spectrumResultFixture() })
     renderWithProviders(<DipolesDrawer />)
 
     expect(screen.getByTestId('fft-histogram')).toBeInTheDocument()
+    // Высота графика фиксированная ~300 px, ширина — во всю панель (правка
+    // 20.10.2026: растяжение по высоте общей панели схлопывало график)
+    const chart = screen.getByRole('img', { name: /^FFT:/ })
+    expect(chart.getAttribute('height')).toBe('300')
+    expect(chart.getAttribute('width')).toBe('100%')
     for (const band of ['delta', 'delta_theta', 'theta', 'alpha', 'beta', 'gamma', 'high_gamma']) {
       expect(screen.getByTestId(`fft-bar-${band}`)).toBeInTheDocument()
     }
@@ -101,7 +119,7 @@ describe('выдвижная панель раздела «Диполи»', () =
     ).toBeInTheDocument()
   })
 
-  it('FFT: фон 1/f пунктиром и маркеры пиков над ним (specparam)', () => {
+  it('АЧХ: фон 1/f пунктиром и маркеры пиков над ним (specparam)', () => {
     useDipoleCalc.setState({ view: 'fft', spectrum: spectrumResultFixture() })
     renderWithProviders(<DipolesDrawer />)
 
@@ -204,7 +222,7 @@ describe('выдвижная панель раздела «Диполи»', () =
   })
 
   it('показывает ошибку спектра, если он так и не рассчитался', () => {
-    useDipoleCalc.setState({ view: 'fft', spectrumError: 'Данные fsaverage недоступны' })
+    useDipoleCalc.setState({ view: 'topomap', spectrumError: 'Данные fsaverage недоступны' })
     renderWithProviders(<DipolesDrawer />)
 
     // Плашка состояния и заголовок блока ошибки — оба про одно: спектра нет
@@ -214,7 +232,7 @@ describe('выдвижная панель раздела «Диполи»', () =
 
   it('ошибка расчёта диполей не выдаётся за ошибку спектра', () => {
     // Общий текст ошибки объяснял бы сбой диполей словами «спектр не рассчитан»
-    useDipoleCalc.setState({ view: 'fft', batchError: 'Ни одной эпохи не удалось локализовать' })
+    useDipoleCalc.setState({ view: 'topomap', batchError: 'Ни одной эпохи не удалось локализовать' })
     renderWithProviders(<DipolesDrawer />)
 
     expect(screen.queryByText('Ни одной эпохи не удалось локализовать')).not.toBeInTheDocument()

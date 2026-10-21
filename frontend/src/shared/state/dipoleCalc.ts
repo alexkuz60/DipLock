@@ -57,6 +57,7 @@ import {
   buildRefineForm,
   calcJobFromStatus,
   normalizeCalcParams,
+  normalizeCalcView,
   normalizeRefineHalfwin,
   type CalcJob,
   type CalcParams,
@@ -686,7 +687,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         const merged = { ...current.params, ...storedParams }
         return {
           ...current,
-          view: stored.view ?? current.view,
+          // Мусор из хранилища не открывает несуществующее окно панели
+          view: normalizeCalcView(stored.view) ?? current.view,
           // Старое хранилище не знало GOF-порога: берём дефолт «выключен»
           gofThresholdPercent: stored.gofThresholdPercent ?? current.gofThresholdPercent,
           amplitudeThresholdNam: stored.amplitudeThresholdNam ?? current.amplitudeThresholdNam,

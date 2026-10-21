@@ -15,6 +15,7 @@ import {
   formatTempoBpm,
   frameTempos,
   interpolatedTempo,
+  radarTempoStepY,
   tempoCorrectedRays,
   tempoKr,
   tempoY,
@@ -222,5 +223,24 @@ describe('formatTempoBpm — темп текстом для счётчика «�
     expect(formatTempoBpm(0)).toBe('—')
     expect(formatTempoBpm(-5)).toBe('—')
   })
+
+describe('radarTempoStepY — шкала темпа радара над волной плеера (ЕмоЛаб)', () => {
+  it('0 волны = 120 bpm, низ графика = 60, верх = 240 (логарифм от 2)', () => {
+    expect(radarTempoStepY(120, 200)).toBeCloseTo(100)
+    expect(radarTempoStepY(60, 200)).toBeCloseTo(200)
+    expect(radarTempoStepY(240, 200)).toBeCloseTo(0)
+    // Середины по логарифму: 120/√2 → 0.75·h, 120·√2 → 0.25·h.
+    expect(radarTempoStepY(120 / Math.SQRT2, 200)).toBeCloseTo(150)
+    expect(radarTempoStepY(120 * Math.SQRT2, 200)).toBeCloseTo(50)
+  })
+
+  it('вне 60…240 — зажим к границам графика; нет темпа — середина', () => {
+    expect(radarTempoStepY(30, 200)).toBeCloseTo(200)
+    expect(radarTempoStepY(480, 200)).toBeCloseTo(0)
+    expect(radarTempoStepY(null, 200)).toBeCloseTo(100)
+    expect(radarTempoStepY(0, 200)).toBeCloseTo(100)
+    expect(radarTempoStepY(Number.NaN, 200)).toBeCloseTo(100)
+  })
+})
 })
 })

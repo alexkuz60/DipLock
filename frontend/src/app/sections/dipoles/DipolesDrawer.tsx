@@ -1,24 +1,34 @@
 /**
- * Выдвижная панель раздела «Диполи» (срез 3.4): топокарты ритмов и FFT-гистограмма.
+ * Выдвижная панель раздела «Диполи» (срез 3.4; правка 20.10.2026): топокарты
+ * ритмов (все полосы каталога, 2 ряда) и АЧХ-график (средняя мощность ритмов +
+ * PSD по частотам) — **двумя панелями** с кнопками в шапке. График вернулся на
+ * собственную панель после неудачного слияния с топокартами: в общей панели он
+ * схлопывался по высоте до ~10 px; теперь его высота фиксированная ~300 px, а
+ * ширина — во всю панель (`FftHistogram` меряет ширину контейнера, как
+ * `TrackStack`).
  *
- * Живёт **между тулс-хедером и рабочей областью** (проп `drawer` у `AppShell`):
- * это обзорный слой «по записи», а не часть проекций — проекции остаются на
- * экране, а панель можно закрыть, не теряя расчёт. Открыта не более одной
- * панели за раз (`view` в сторе расчёта).
+ * Живёт **окном поверх рабочей области** (проп `drawer` у `AppShell`): панель
+ * перекрывает рабочий вид 3-х проекций сверху и тянется до нижнего края рабочей
+ * области, а не отодвигает проекции вниз — геометрия фигур не пересчитывается
+ * при открытии/закрытии (меньше отрисовки). Это обзорный слой «по записи», а не
+ * часть проекций: проекции остаются смонтированными под панелью, расчёт можно
+ * не терять. Открыта не более одной панели за раз (`view` в сторе расчёта).
  *
  * Спектр считается **только кнопкой** (правило раздела): панель показывает
  * результат, а кнопка «Рассчитать спектр» ставит задачу `POST …/spectrum` и
  * показывает её прогресс по этапам и эпохам. Правка параметров (длина эпохи,
- * порог reject в панели опций) ничего не запускает и **не пересчитывает** уже
+ * порог reject, метод PSD) ничего не запускает и **не пересчитывает** уже
  * показанный спектр: он относится к своим параметрам (показываем их в подписи),
- * а новый расчёт — снова по кнопке.
+ * а новый расчёт — снова по кнопке. Метод PSD (Welch/Multitaper) продублирован
+ * на панели из сайдбара «Опции» — рядом с кнопкой расчёта, чтобы не искать его
+ * в другом месте экрана.
  *
  * Картинка топокарты собирается из **результата** (`spectrumQueryOf`): полоса,
- * notch, длина эпохи и порог reject уходят в URL, потому что по ним сервер
+ * notch, длина эпохи и метод PSD уходят в URL, потому что по ним сервер
  * считает ETag. Иначе после смены фильтра браузер показал бы картинку прошлого
  * расчёта рядом с числами нового.
  *
- * Окно частот FFT-графика (срез 3.5) — параметр просмотра: панель передаёт его в
+ * Окно частот АЧХ-графика (срез 3.5) — параметр просмотра: панель передаёт его в
  * `FftHistogram` из состояния расчёта, и правка окна **ничего не запрашивает**.
  */
 import {
@@ -31,6 +41,7 @@ import { useEdfRecording } from '@/shared/state/edfRecording'
 import { spectrumMetrics, spectrumQueryOf, spectrumSummary } from '@/shared/lib/spectrum'
 import { CancelJobButton } from '@/shared/ui/CancelJobButton'
 import { IconButton } from '@/shared/ui/IconButton'
+import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { BandTopomaps } from './BandTopomaps'
@@ -45,7 +56,7 @@ const TITLES = {
 
 const HINTS = {
   topomap:
-    'Распределение мощности ритма по скальпу: картинку строит сервер (PNG), вне круга головы она прозрачна. Светлее — меньше мощность. Полоса фильтра берётся из формы панели «Расчёт диполей».',
+    'Распределение мощности ритма по скальпу: картинку строит сервер (PNG), вне круга головы она прозрачна. Светлее — сильнее мощность; белые точки — датчики монтажа: залитый круг — канал записи, окружность — электрод без канала в записи. Полоса фильтра берётся из формы панели «Расчёт диполей».',
   fft: 'Средняя мощность каждого ритма плюс PSD по частотам: по ним видно, на каком ритме сосредоточена энергия записи. Окно частот сужает график (кнопки ритмов или поля «от/до») — это просмотр уже посчитанных чисел, а не новый расчёт. Полоса самого расчёта задаётся фильтром в панели «Расчёт диполей».',
   explore:
     'Список отдельных частот с мощностью, плотностью и амплитудным диапазоном по эпохам в долях от «полки» своей полосы — вход для выбора узких поддиапазонов «Пакета поддиапазонов». Таблица показывает измерения: полосы выбирает исследователь, а не таблица.',
@@ -61,6 +72,10 @@ export function DipolesDrawer() {
   const setView = useDipoleCalc((state) => state.setView)
   const fftRangeHz = useDipoleCalc((state) => state.fftRangeHz)
   const setFftRange = useDipoleCalc((state) => state.setFftRange)
+  // Метод PSD — дубль из сайдбара «Опции»: правка ничего не запускает (правило
+  // раздела), но делает следующий расчёт спектра своим методом
+  const psdMethod = useDipoleCalc((state) => state.params.psdMethod)
+  const setPsdMethod = useDipoleCalc((state) => state.setPsdMethod)
   const recording = useEdfRecording((state) => state.recording)
 
   if (view === 'none') return null
@@ -72,7 +87,7 @@ export function DipolesDrawer() {
       aria-label={TITLES[view]}
       data-testid="dipoles-drawer"
       data-view={view}
-      className="shrink-0 border-b border-border bg-bg-1 px-4 py-3"
+      className="absolute inset-0 z-10 flex flex-col overflow-y-auto bg-bg-1 px-4 py-3"
     >
       <div className="mb-2 flex items-center gap-3">
         <h2 className="text-base font-semibold text-fg-0">{TITLES[view]}</h2>
@@ -82,6 +97,25 @@ export function DipolesDrawer() {
           <StatusPill tone="neutral">Спектр не рассчитан</StatusPill>
         )}
         <div className="ml-auto flex items-center gap-2">
+          {/* Метод PSD — рядом с кнопкой расчёта (дубль сайдбара «Опции») */}
+          <SegmentedControl
+            label="Метод PSD"
+            layout="inline"
+            value={psdMethod}
+            options={[
+              {
+                value: 'welch',
+                label: 'Welch',
+                title: 'Привычная оценка окном n_fft: хороша для эпох длиннее секунды',
+              },
+              {
+                value: 'multitaper',
+                label: 'Multitaper',
+                title: 'DPSS на всей эпохе: для коротких эпох (250–500 мс) даёт честное разрешение',
+              },
+            ]}
+            onChange={setPsdMethod}
+          />
           <IconButton
             icon={
               running ? (
@@ -94,12 +128,12 @@ export function DipolesDrawer() {
             tooltip={
               recording === null
                 ? 'Сначала загрузите EDF в разделе EDF — спектр считается по файлу записи'
-                : 'Запустить расчёт спектра по диапазонам (Welch PSD + топокарты)'
+                : `Запустить расчёт спектра по диапазонам (PSD ${psdMethod === 'multitaper' ? 'multitaper' : 'Welch'} + топокарты)`
             }
             title={
               recording === null
                 ? 'Сначала загрузите EDF в разделе EDF — спектр считается по файлу записи'
-                : 'Запустить расчёт спектра по диапазонам (Welch PSD + топокарты)'
+                : `Запустить расчёт спектра по диапазонам (PSD ${psdMethod === 'multitaper' ? 'multitaper' : 'Welch'} + топокарты)`
             }
             disabled={recording === null || running}
             onClick={() => void runSpectrum(recording?.recording_id ?? null)}
@@ -148,24 +182,28 @@ export function DipolesDrawer() {
             </p>
           ) : null}
           {view === 'topomap' ? (
+            /* Топокарты ритмов — ровно два ряда (правка 20.10.2026): картинки
+               не уменьшаются, панель растёт по высоте */
             <BandTopomaps spectrum={spectrum} query={spectrumQueryOf(spectrum)} />
-          ) : view === 'explore' ? (
-            spectrum.explore ? (
-              <ExploreTable explore={spectrum.explore} />
-            ) : (
-              // Результат задачи мог быть записан прошлой версией кода (без
-              // `explore`) — честное «не входит», а не пустая таблица
-              <p className="text-sm text-fg-2" data-testid="explore-missing">
-                Разведочный проход не входит в этот расчёт: пересчитайте спектр —
-                результат посчитан прошлой версией кода.
-              </p>
-            )
-          ) : (
+          ) : view === 'fft' ? (
+            /* АЧХ-гистограмма — собственная панель (правка 20.10.2026 вернула
+               её после слияния: в общей панели график схлопывался по высоте до
+               ~10 px); высота графика фиксированная ~300 px, ширина — во всю
+               панель (меряется по контейнеру, как в `TrackStack`) */
             <FftHistogram
               spectrum={spectrum}
               range={fftRangeHz ?? null}
               onRangeChange={setFftRange}
             />
+          ) : spectrum.explore ? (
+            <ExploreTable explore={spectrum.explore} className="min-h-0 flex-1" />
+          ) : (
+            // Результат задачи мог быть записан прошлой версией кода (без
+            // `explore`) — честное «не входит», а не пустая таблица
+            <p className="text-sm text-fg-2" data-testid="explore-missing">
+              Разведочный проход не входит в этот расчёт: пересчитайте спектр —
+              результат посчитан прошлой версией кода.
+            </p>
           )}
         </>
       )}

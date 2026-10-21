@@ -1009,14 +1009,16 @@ class ContoursOut(BaseModel):
 # --- Спектр по диапазонам (срез 3.4) ---
 
 class SpectrumBandOut(BaseModel):
-    """Мощность одного ритма (δ…γ) с ссылкой на топокарту.
+    """Мощность одного ритма (δ…high-γ, μ…ψ) со ссылкой на топокарту.
 
     Мощность — **интеграл PSD по диапазону, мкВ²** (N15): физически сравнимая
     величина между диапазонами разной ширины (среднее PSD, мкВ²/Гц, таким не
     является). Топокарта диапазона строится тем же интегралом по каналам.
     """
 
-    name: str = Field(description="Ключ диапазона из `freq_bands` (delta…gamma)")
+    name: str = Field(
+        description="Ключ диапазона из `freq_bands`/`functional_bands` (delta…high_gamma, mu…psi)"
+    )
     fmin: float
     fmax: float
     power_uv2: float | None = Field(

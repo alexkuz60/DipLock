@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { SummaryPanel } from './SummaryPanel'
 import { SummarySection } from './SummarySection'
 import { SummaryToolActions } from './SummaryToolActions'
-import { EmoLabSection, NeuroAudioSection } from '../Stubs'
+import { NeuroAudioSection } from '../Stubs'
 import { EMPTY_PASSPORT, useEdfRecording } from '@/shared/state/edfRecording'
 import { EDF_PARAM_DEFAULTS, useEdfParams } from '@/shared/state/edfParams'
 import { useSummaryReport } from '@/shared/state/summaryReport'
@@ -270,13 +270,6 @@ describe('раздел «Итоги»', () => {
 })
 
 describe('заглушки новых направлений', () => {
-  it('ЕмоЛаб показывает план раздела', () => {
-    mockApiFetch()
-    renderWithProviders(<EmoLabSection />)
-    expect(screen.getByText(/ЕмоЛаб — психоэмоциональный фон/)).toBeInTheDocument()
-    expect(screen.getByText(/Каталог маркеров аффективного фона/)).toBeInTheDocument()
-  })
-
   it('Нейроаудио показывает план раздела', () => {
     mockApiFetch()
     renderWithProviders(<NeuroAudioSection />)

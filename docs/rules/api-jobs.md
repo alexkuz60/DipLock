@@ -26,7 +26,7 @@
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 4 пути уровня приложения: `GET /`, `GET /ui/{path}`,
-  `GET /init-status`, `GET /health`. Итого **118 уникальных HTTP-путей** (полный
+  `GET /init-status`, `GET /health`. Итого **121 уникальный HTTP-путь** (полный
   инвентарь путей — начало этого файла).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/schema.d.ts` (`npm run gen:api`;
@@ -126,6 +126,19 @@
 `Cache-Control: private, no-store` обязателен; обрыв потока не ошибка — клиент
 дочитывает готовое поллингом; принадлежность — та же, что у раунда (чужое
 дело — 404).
+
+### Отдельный роутер «ЕмоЛаб» (шаг 1, 20.10.2026)
+
+`backend/app/api/emolab.py` подключён в main с тем же `settings.api_prefix`;
+работа — `services/emolab/` (анализ внешнего аудиотрека wav/mp3,
+`docs/rules/emolab.md`). Паттерн — рендер «Нейромузыки»: 202 + поллинг
+статуса, без job-системы (файл пользователя не привязан к записи).
+
+| Метод и путь (относительно `/api/v1`) | Назначение |
+|---|---|
+| `POST /emolab/analyze` | загрузка аудио (wav/mp3) → 202 `{track_id, status, cached, filename, duration_s}`; повтор того же содержимого (sha256 = `track_id`) — `cached=true`, `status=succeeded`; 400 — не wav/mp3, битый, длиннее 30 мин; 413 — > лимита загрузки |
+| `GET /emolab/{track_id}/status` | поллинг анализа: `{status, stage, pct, message, error, duration_s}`; после рестарта поднимается из манифеста диска |
+| `GET /emolab/{track_id}/emo` | кадры «Эмо» аудиотрека (**`AudioEmoOut` v4** — `frames`, `key_track`, `tempo_track`, контракт рендера «Нейромузыки»); 404 — нет, 409 — идёт/упал |
 
 ## Инвентарь эндпоинтов (87 в `routes.py`, порядок файла)
 

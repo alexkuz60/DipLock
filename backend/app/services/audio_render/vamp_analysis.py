@@ -45,6 +45,12 @@ TEMPO_SOURCE = "vamp:qm-vamp-plugins:qm-tempotracker:tempo"
 # Transform-файл Key Detector внутри ``settings.vamp_transforms_dir``.
 KEY_TRANSFORM_NAME = "qm-keydetector-key.n3"
 
+# Тот же Key Detector для входа 32000 Гц («ЕмоЛаб», моно-файл анализа):
+# плагин требует step/block 16384 при 32 кГц (в 32768/32768 он не инициализируется
+# — «differ from required»); фиксированный rate 32000 страхует от входа другой
+# частоты. Рендер «Нейромузыки» идёт общим трансформом выше (мастер 48 кГц).
+KEY_TRANSFORM_NAME_32K = "qm-keydetector-key-32k.n3"
+
 # Transform-файл Tempo and Beat Tracker (вывод ``tempo``) — там же.
 TEMPO_TRANSFORM_NAME = "qm-tempotracker-tempo.n3"
 
@@ -147,13 +153,20 @@ def parse_key_csv(text: str) -> list[dict[str, Any]]:
     return segments
 
 
-def key_track_from_wav(blob: bytes, cfg: Settings | None = None) -> list[dict[str, Any]] | None:
+def key_track_from_wav(
+    blob: bytes,
+    cfg: Settings | None = None,
+    transform_name: str = KEY_TRANSFORM_NAME,
+) -> list[dict[str, Any]] | None:
     """Тональность микса: WAV в байтах → сегменты ``key_track`` либо ``None``.
 
-    ``None`` — инструмент недоступен (см. ``_run_transform``): вызывающая
-    сторона оставляет вращение звезды нулевым (кадры «Эмо» без ``key_track``).
+    ``transform_name`` — transform-файл Key Detector: по умолчанию общий
+    (рендер «Нейромузыки», мастер 48 кГц); для моно-файла 32000 Гц «ЕмоЛаб»
+    передаётся :data:`KEY_TRANSFORM_NAME_32K` (step/block 16384 — требование
+    плагина при 32 кГц). ``None`` — инструмент недоступен (см. ``_run_transform``):
+    вызывающая сторона оставляет вращение звезды нулевым (кадры «Эмо» без ``key_track``).
     """
-    text = _run_transform(blob, KEY_TRANSFORM_NAME, cfg or settings)
+    text = _run_transform(blob, transform_name, cfg or settings)
     if text is None:
         return None
     return parse_key_csv(text)

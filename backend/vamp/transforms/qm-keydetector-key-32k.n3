@@ -1,0 +1,24 @@
+@prefix xsd:      <http://www.w3.org/2001/XMLSchema#> .
+@prefix vamp:     <http://purl.org/ontology/vamp/> .
+@prefix :         <#> .
+
+# Трансформ Key Detector для входа 32000 Гц («ЕмоЛаб»). Ловушка: плагин
+# диктует step/block ≈ 512 мс, приведённые к степени двойки, и отвергает
+# другие конфигурации («step/block sizes … differ from required …»):
+# при 32 кГц требуются 16384/16384 (при 44.1/48 кГц — 32768/32768, как в
+# общем qm-keydetector-key.n3 рендера «Нейромузыки»).
+:transform a vamp:Transform ;
+    vamp:plugin <http://vamp-plugins.org/rdf/plugins/qm-vamp-plugins#qm-keydetector> ;
+    vamp:sample_rate "32000"^^xsd:float ;
+    vamp:step_size "16384"^^xsd:int ;
+    vamp:block_size "16384"^^xsd:int ;
+    vamp:plugin_version """6""" ;
+    vamp:parameter_binding [
+        vamp:parameter [ vamp:identifier "length" ] ;
+        vamp:value "10"^^xsd:float ;
+    ] ;
+    vamp:parameter_binding [
+        vamp:parameter [ vamp:identifier "tuning" ] ;
+        vamp:value "440"^^xsd:float ;
+    ] ;
+    vamp:output <http://vamp-plugins.org/rdf/plugins/qm-vamp-plugins#qm-keydetector_output_key> .

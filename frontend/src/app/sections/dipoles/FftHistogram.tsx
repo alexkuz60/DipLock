@@ -18,6 +18,7 @@
  * остаются на месте и приглушаются: видно, что в запись входит ещё, а не только
  * выбранный ритм.
  */
+import { useEffect, useRef, useState } from 'react'
 import type { SpectrumResult } from '@/shared/api/types'
 import {
   clampFreqWindow,
@@ -35,12 +36,14 @@ import {
 import { Button } from '@/shared/ui/Button'
 import { cx } from '@/shared/ui/cx'
 
-/** Габариты области графика в единицах viewBox (масштабируется по ширине). */
-const CHART_WIDTH = 520
-const CHART_HEIGHT = 160
+/** Высота графика, px: фиксированная, а не растяжение панели (правка 20.10.2026). */
+const CHART_HEIGHT_PX = 300
 
 /** Место под подписи частот и названий ритмов под графиком, px viewBox. */
 const AXIS_HEIGHT = 30
+
+/** Стартовая ширина графика до первого замера контейнера (jsdom, первый кадр). */
+const CHART_WIDTH_DEFAULT = 520
 
 export type FftHistogramProps = {
   spectrum: SpectrumResult
@@ -60,6 +63,27 @@ export function FftHistogram({
   onRangeChange,
   className,
 }: FftHistogramProps) {
+  // График — во всю ширину панели, высота фиксированная ~300 px (правка
+  // 20.10.2026: растяжение по высоте общей панели схлопывало график до ~10 px).
+  // Ширина меряется по контейнеру тем же приёмом, что в `TrackStack`, а viewBox
+  // держится 1:1 в пикселях — масштаб единый и текст не растягивается.
+  const boxRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(CHART_WIDTH_DEFAULT)
+  useEffect(() => {
+    const element = boxRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver((entries) => {
+      const measured = Math.round(entries[0]?.contentRect.width ?? 0)
+      if (measured > 0) {
+        setWidth((previous) => (previous === measured ? previous : measured))
+      }
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const chartWidth = width
+  const chartHeight = CHART_HEIGHT_PX - AXIS_HEIGHT
+
   const full = freqRange(spectrum.freqs)
   // «Окно не выбрано» и «выбран весь диапазон» — разные состояния: подпись и
   // предупреждения про окно зависят от того, правил ли пользователь его вообще.
@@ -73,8 +97,8 @@ export function FftHistogram({
   const polyline = psdPolyline(
     shown.freqs,
     shown.power,
-    CHART_WIDTH,
-    CHART_HEIGHT,
+    chartWidth,
+    chartHeight,
     2,
     psdScale(spectrum.psd_mean_uv2),
   )
@@ -91,8 +115,8 @@ export function FftHistogram({
       ? psdPolyline(
           background.freqs,
           background.power,
-          CHART_WIDTH,
-          CHART_HEIGHT,
+          chartWidth,
+          chartHeight,
           2,
           psdScale(spectrum.psd_mean_uv2),
         )
@@ -105,7 +129,7 @@ export function FftHistogram({
           (peak) => peak.center_hz >= fMin - 1e-9 && peak.center_hz <= fMax + 1e-9,
         )
       : []
-  const barWidth = bars.length > 0 ? (CHART_WIDTH - 40) / bars.length : 0
+  const barWidth = bars.length > 0 ? (chartWidth - 40) / bars.length : 0
 
   return (
     <div className={cx('flex flex-col gap-2', className)} data-testid="fft-histogram">
@@ -165,16 +189,18 @@ export function FftHistogram({
           </Button>
         </div>
       ) : null}
-      <svg
-        role="img"
-        aria-label={`FFT: мощность ритмов по ${spectrum.freqs.length} частотам, ${spectrum.n_epochs} эпох`}
-        viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT + AXIS_HEIGHT}`}
-        className="h-48 w-full max-w-3xl"
-      >
+      <div ref={boxRef} className="w-full">
+        <svg
+          role="img"
+          aria-label={`FFT: мощность ритмов по ${spectrum.freqs.length} частотам, ${spectrum.n_epochs} эпох`}
+          viewBox={`0 0 ${chartWidth} ${CHART_HEIGHT_PX}`}
+          width="100%"
+          height={CHART_HEIGHT_PX}
+        >
         {/* Полосы по диапазонам: высота — доля от максимальной мощности. Вне окна
             полосы приглушаются, но остаются на месте — их видно «в масштабе». */}
         {bars.map((bar, index) => {
-          const height = bar.missing ? 0 : Math.max(2, bar.ratio * (CHART_HEIGHT - 20))
+          const height = bar.missing ? 0 : Math.max(2, bar.ratio * (chartHeight - 20))
           const x = 20 + index * barWidth + barWidth * 0.15
           return (
             <g
@@ -184,7 +210,7 @@ export function FftHistogram({
             >
               <rect
                 x={x}
-                y={CHART_HEIGHT - height}
+                y={chartHeight - height}
                 width={barWidth * 0.7}
                 height={height}
                 rx={3}
@@ -193,7 +219,7 @@ export function FftHistogram({
               />
               <text
                 x={x + barWidth * 0.35}
-                y={CHART_HEIGHT - height - 4}
+                y={chartHeight - height - 4}
                 textAnchor="middle"
                 fontSize={11}
                 fill="var(--color-fg-1)"
@@ -204,7 +230,7 @@ export function FftHistogram({
               </text>
               <text
                 x={x + barWidth * 0.35}
-                y={CHART_HEIGHT + 14}
+                y={chartHeight + 14}
                 textAnchor="middle"
                 fontSize={10}
                 fill="var(--color-fg-2)"
@@ -241,14 +267,14 @@ export function FftHistogram({
 
         {/* Пики над фоном: вертикальная метка центра + подпись частоты */}
         {shownPeaks.map((peak, index) => {
-          const x = psdX(peak.center_hz, fMin, fMax, CHART_WIDTH)
+          const x = psdX(peak.center_hz, fMin, fMax, chartWidth)
           return (
             <g key={`peak-${peak.center_hz}-${index}`} data-testid={`fft-peak-${index}`}>
               <line
                 x1={x}
                 y1={0}
                 x2={x}
-                y2={CHART_HEIGHT}
+                y2={chartHeight}
                 stroke="var(--color-accent)"
                 strokeWidth={1}
                 strokeDasharray="2 3"
@@ -271,18 +297,18 @@ export function FftHistogram({
         {/* Ось частот: границы и подпись единиц */}
         <line
           x1={0}
-          y1={CHART_HEIGHT}
-          x2={CHART_WIDTH}
-          y2={CHART_HEIGHT}
+          y1={chartHeight}
+          x2={chartWidth}
+          y2={chartHeight}
           stroke="var(--color-border)"
           strokeWidth={1}
         />
-        <text x={2} y={CHART_HEIGHT + 26} fontSize={10} fill="var(--color-fg-2)" className="tnum">
+        <text x={2} y={chartHeight + 26} fontSize={10} fill="var(--color-fg-2)" className="tnum">
           {fMin} Гц
         </text>
         <text
-          x={CHART_WIDTH - 2}
-          y={CHART_HEIGHT + 26}
+          x={chartWidth - 2}
+          y={chartHeight + 26}
           textAnchor="end"
           fontSize={10}
           fill="var(--color-fg-2)"
@@ -290,7 +316,8 @@ export function FftHistogram({
         >
           {fMax} Гц
         </text>
-      </svg>
+        </svg>
+      </div>
       <p className="text-sm text-fg-2" data-testid="fft-window-label">
         {freqWindowLabel(appliedWindow, full)}. Полосы — средняя мощность диапазона, синяя линия —
         PSD по частотам (логарифмическая шкала: иначе альфа-пик «съедает» график), пунктир — фон
