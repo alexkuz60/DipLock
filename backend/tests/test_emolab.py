@@ -21,8 +21,8 @@ from app.services.emolab import store, track_analysis, track_input
 
 _PREFIX = f"{settings.api_prefix}/emolab"
 
-# Фиксированные карты VAMP для мока (код 1 = C major, темп 120 bpm, сегмент A).
-KEY_SEGMENTS = [{"t_sec": 0.0, "key_code": 1, "label": "C major"}]
+# Фиксированные карты VAMP для мока (аккорд C, темп 120 bpm, сегмент A).
+KEY_SEGMENTS = [{"t_sec": 0.0, "key_code": 1, "label": "C"}]
 TEMPO_SEGMENTS = [{"t_sec": 0.0, "bpm": 120.0}]
 SEGMENT_SEGMENTS = [
     {"t_sec": 0.0, "segment_type": 1, "name": "A"},
@@ -47,7 +47,7 @@ def stub_vamp(monkeypatch):
     """VAMP «под рукой»: фиксированные карты темпа/аккордов без subprocess.
 
     Возвращает журнал вызовов: ключевой прогон обязан идти 32k-трансформом
-    (``KEY_TRANSFORM_NAME_32K`` — требование плагина при 32 кГц).
+    (``CHORD_TRANSFORM_NAME_32K`` — Chordino для моно 32 кГц, hop 0.1 с).
     """
     calls: dict[str, str | None] = {"key_transform": None}
 
@@ -137,7 +137,7 @@ def test_analysis_writes_cache_and_contract(stub_vamp, isolated_io):
     assert not cached
     state = _wait_track(track_id)
     assert state.status == "succeeded", state.error
-    assert stub_vamp["key_transform"] == vamp_analysis.KEY_TRANSFORM_NAME_32K
+    assert stub_vamp["key_transform"] == vamp_analysis.CHORD_TRANSFORM_NAME_32K
 
     manifest = store.load_manifest(settings, track_id)
     assert manifest is not None
@@ -329,9 +329,9 @@ def test_api_emo_gates_on_state(monkeypatch, client, isolated_io):
 def test_live_vamp_chain_on_32k_mono():
     """Реальный sonic-annotator по моно-файлу 32 кГц (вход VAMP «ЕмоЛаб»).
 
-    Ловушка шага 2: Key Detector требует step/block 16384 при 32 кГц — с общим
-    трансформом рендера (32768/32768) плагин не инициализируется и карта
-    аккордов молча пропадает (best-effort). Маркер ``integration``:
+    Ловушка hop (21.10.2026): Chordino при step 0.2 с «съедает» смены
+    аккордов — трансформ 32 кГц обязан идти с step 3200 (0.1 с); с другим
+    hop карта аккордов молча теряет смены (best-effort). Маркер ``integration``:
     пропускается без бинаря в ``tools/`` (в CI его нет).
     """
     if not os.path.isfile(settings.sonic_annotator_bin):
@@ -348,11 +348,12 @@ def test_live_vamp_chain_on_32k_mono():
     audio = track_input.decode_track(buffer.getvalue())
     wav = track_input.wav_bytes(audio)
     key = vamp_analysis.key_track_from_wav(
-        wav, settings, transform_name=vamp_analysis.KEY_TRANSFORM_NAME_32K,
+        wav, settings, transform_name=vamp_analysis.CHORD_TRANSFORM_NAME_32K,
     )
     tempo = vamp_analysis.tempo_track_from_wav(wav, settings)
     segments = vamp_analysis.segment_track_from_wav(wav, settings)
     assert key and all(1 <= seg["key_code"] <= 24 for seg in key)
+    assert all(seg["label"] for seg in key)  # точные имена аккордов Chordino
     assert tempo is not None and any(abs(seg["bpm"] - 120.0) < 5.0 for seg in tempo)
     assert segments is not None and len(segments) >= 1
     assert all(seg["name"] in "ABCDEFGH" for seg in segments)

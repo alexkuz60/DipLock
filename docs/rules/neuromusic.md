@@ -522,27 +522,33 @@ frontend — `emoRadar.test.ts` и три кейса «Эмо» в
 (каждый 1/7 круга) → **δ = 2π/84 = π/42 рад ≈ 4.2857°**:
 
 1. **Мажорные:** C = 0, C# = +1·δ, D = +2, D# = +3, E = +4, F = +5,
-   F# = +6 … до **+11** для B (код QM 1…12 → шаг = код−1).
+   F# = +6 … до **+11** для B (код тональности 1…12 → шаг = код−1).
 2. **Минорные:** Am = 0, Abm = −1·δ, Gm = −2, Gbm = −3, Fm = −4,
-   Fbm(=Em) = −5, Ebm = −6 … до **−11** для Bbm (код QM 13…24 → шаг
+   Fbm(=Em) = −5, Ebm = −6 … до **−11** для Bbm (код тональности 13…24 → шаг
    вниз по хроматическому ряду от A: `−((9 − (код−13)) mod 12)`).
 3. **Все доминанты считаются после вращения полигона** (кадровая,
    облако и суммарная).
 
-**Источник тональности** — VAMP Key Detector (QM Vamp Plugins) через
-**Sonic Annotator** (C4DM QMUL, отдельный GPL-процесс): transform
-`backend/vamp/transforms/qm-keydetector-key.n3` (зафиксированные параметры:
-step/block 32768, length 10, tuning 440) прогоняется по `master.wav`,
-CSV-вывод парсится в **`key_track`** `[{t_sec, key_code, label}]`
-(`services/audio_render/vamp_analysis.py`). Код 1…24 — источник истины,
-метка (может быть составной, «Eb / D# minor») — справочно. Инструмент
-недоступен/упал → `key_track: null`, вращение нулевое (лучи и доминанты
-как прежде), рендер и кадры не падают.
+**Источник карты аккордов** — **VAMP Chordino** (NNLS Chroma, M. Mauch; вывод
+`simplechord` «Chord Estimate») через **Sonic Annotator** (C4DM QMUL, отдельный
+GPL-процесс): transform `backend/vamp/transforms/chordino-simplechord.n3`
+(зафиксированные параметры: step 4800 = 0.1 с, block 24576; ловушка hop — при
+step 0.2 с HMM-сглаживание плагина «съедает» смены аккордов) прогоняется по
+`master.wav`, CSV-вывод парсится в **`key_track`** `[{t_sec, key_code, label}]`
+(`services/audio_render/vamp_analysis.py`). `label` — **точное имя аккорда**
+(«G7», «Dm6», «Ebm6», «Gaug»), `key_code` 1…24 — только корневая нота + лад
+для вращения (уточнения интервалов игнорируются: «C7» → C мажор, «Dm6» →
+D минор; dim → минор, aug/sus → мажор); «N» (нет аккорда) сегментом не
+становится. Замена QM Key Detector — 21.10.2026 (тот пропускал смены
+аккордов и ошибался в ладе; детали — `docs/rules/emolab.md` «Шаг 6»).
+Инструмент недоступен/упал → `key_track: null`, вращение нулевое (лучи и
+доминанты как прежде), рендер и кадры не падают.
 
 **Контракт:** `EMO_SCHEMA_VERSION` = **3** (кадры v2 отвергаются `parse_emo`
 → честная добивка из `master.wav`, как было v1→v2); `emo.json`/`GET …/emo`
 получили `key_track` + `key_source` (`AudioKeySegment` в
-`schemas/audio.py`).
+`schemas/audio.py`). Актуально: контракт **v6** (21.10.2026, карта аккордов
+— Chordino), кадры прошлых версий отвергаются `parse_emo` → пересчёт.
 
 **Динамика (решение владельца: «плавно, как лучи»):** угол каждого кадра —
 из активного сегмента `key_track` (последний с `t_sec ≤ t` кадра; до
@@ -626,7 +632,7 @@ whiten=0, alpha=0.9, inputtempo=120, constraintempo=0; **rate 44100** —
 шаг 512 при rate 48000 плагин отвергает — «Unsupported step size») прогоняется
 по `master.wav`, CSV-вывод парсится в **`tempo_track`** `[{t_sec, bpm}]`
 (`services/audio_render/vamp_analysis.py`, общий раннер `_run_transform` с
-Key Detector). Инструмент недоступен/упал → `tempo_track: null`, коррекция
+Chordino). Инструмент недоступен/упал → `tempo_track: null`, коррекция
 нулевая, рендер и кадры не падают.
 
 **Контракт:** `EMO_SCHEMA_VERSION` = **4** (кадры v3 отвергаются `parse_emo`

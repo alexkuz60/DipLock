@@ -2,7 +2,7 @@
  * Вращение звезды-полигона «Эмо» по тональности микса (спецификация владельца
  * 09.10.2026, `docs/rules/neuromusic.md` §«Эмо», «Вращение звезды»).
  *
- * Тональность сегмента микса — из VAMP Key Detector (`key_track` кадров
+ * Карта аккордов сегмента микса — из VAMP Chordino (`key_track` кадров
  * `GET /audio/render/{id}/emo`, `services/audio_render/vamp_analysis.py`).
  * Правила владельца:
  *

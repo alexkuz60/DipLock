@@ -42,34 +42,31 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Аккорд сегмента карты: метка QM Key Detector без слова лада
- * («C major» → «C», составная «Eb / D# minor» → «Eb / D#»); пустая метка —
- * код тональности.
+ * Аккорд сегмента карты: точное имя Chordino как есть («G7», «Dm6», «Ebm6»,
+ * «Gaug» — постановка 21.10.2026: в таблицу идут полные названия аккордов);
+ * пустая метка — код тональности.
  */
 function chordName(segment: AudioKeySegment): string {
-  const name = segment.label.replace(/\s+(major|minor)$/i, '').trim()
-  return name || `код ${segment.key_code}`
+  return segment.label.trim() || `код ${segment.key_code}`
 }
 
 /**
- * Тип аккорда (минор/мажор): код QM 1…12 — мажор, 13…24 — минор
- * (`AudioKeySegment`; код — источник вращения звезды), код вне 1…24 —
- * по метке, иначе прочерк.
+ * Тип аккорда (минор/мажор): код тональности 1…12 — мажор, 13…24 — минор
+ * (`AudioKeySegment`; код — корневая нота + лад, источник вращения звезды),
+ * код вне 1…24 — прочерк.
  */
 function chordType(segment: AudioKeySegment): string {
   const code = segment.key_code
   if (Number.isFinite(code) && code >= 1 && code <= 24) return code <= 12 ? 'мажор' : 'минор'
-  if (/minor/i.test(segment.label)) return 'минор'
-  if (/major/i.test(segment.label)) return 'мажор'
   return '—'
 }
 
-/** Таблица аккордов карты VAMP Key Detector: время, аккорд, тип (минор/мажор). */
+/** Таблица аккордов карты VAMP Chordino: время, аккорд, тип (минор/мажор). */
 function ChordTable({ keyTrack }: { keyTrack: readonly AudioKeySegment[] | null }) {
   if (!keyTrack || keyTrack.length === 0) {
     return (
       <p className="ui-list-row py-1 text-sm text-fg-2">
-        Нет данных — карта аккордов не рассчитана (VAMP Key Detector недоступен)
+        Нет данных — карта аккордов не рассчитана (VAMP Chordino недоступен)
       </p>
     )
   }
@@ -180,7 +177,7 @@ export function EmoLabPanel() {
         )}
       </Panel>
       <Panel title="Параметры анализа" hint="Шкала лучей звезды и карты VAMP (Соник Аннотатор)">
-        <InfoRow label="Карта аккордов" value="VAMP Key Detector" />
+        <InfoRow label="Карта аккордов" value="VAMP Chordino" />
         <ChordTable keyTrack={emo?.key_track ?? null} />
         <SelectField
           label="Динамический диапазон"

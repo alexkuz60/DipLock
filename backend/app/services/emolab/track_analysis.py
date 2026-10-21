@@ -10,11 +10,12 @@
   кадр звезды длится ровно **1 с** (уточнение владельца 20.10.2026: кадр =
   32000 сэмплов = 1 сек);
 * VAMP-плагины Соник Аннотатора — ``services/audio_render/vamp_analysis``:
-  карта темпа (Tempo and Beat Tracker), карта аккордов (Key Detector;
-  «аккорд» — термин UI для сегмента тональности) и сегментация трека
+  карта темпа (Tempo and Beat Tracker), карта аккордов (Chordino «Chord
+  Estimate» — точные имена аккордов; для звезды из них берётся только
+  корневая нота + лад) и сегментация трека
   (Segmenter — визуально-слуховой контроль, в расчётах не участвует).
 
-Контракт payload — тот же ``emo.json`` (``AudioEmoOut``, v5): кадры +
+Контракт payload — тот же ``emo.json`` (``AudioEmoOut``, v6): кадры +
 ``key_track`` + ``tempo_track`` + ``segment_track``, поэтому фронтенд-звезда-
 полигон «Нейромузыки» (вращение по аккордам, темп-коррекция лучей)
 переиспользуется без правок.
@@ -116,7 +117,7 @@ def _emo_cache_valid(cfg: Settings, track_id: str) -> bool:
     """Кэш-хит по делу: в кэше лежит ``emo.json`` текущей версии контракта.
 
     Файлы кэшей переживают перезапуск и смену контракта, а ``parse_emo``
-    отвергает старые версии (кадры v4 при контракте v5) — кэш с устаревшим
+    отвергает старые версии (кадры v5 при контракте v6) — кэш с устаревшим
     либо битым ``emo.json`` считается промахом и честно пересчитывается
     (иначе трек навсегда остался бы без данных нового контракта).
     """
@@ -179,9 +180,9 @@ def _run_analysis(state: TrackState, blob: bytes, cfg: Settings) -> None:
             state.stage, state.pct = "Декодирование аудио", 0.05
             audio = track_input.decode_track(blob)
             wav_blob = track_input.wav_bytes(audio)
-            state.stage, state.pct = "Карта аккордов (VAMP)", 0.25
+            state.stage, state.pct = "Карта аккордов (Chordino)", 0.25
             key_track = vamp_analysis.key_track_from_wav(
-                wav_blob, cfg, transform_name=vamp_analysis.KEY_TRANSFORM_NAME_32K,
+                wav_blob, cfg, transform_name=vamp_analysis.CHORD_TRANSFORM_NAME_32K,
             )
             state.stage, state.pct = "Карта темпа (VAMP)", 0.45
             tempo_track = vamp_analysis.tempo_track_from_wav(wav_blob, cfg)

@@ -260,10 +260,10 @@ describe('waveformView — аннотации Соник Аннотатора', 
   it('drawKeyLines: вертикали на начало сегментов; 0.0 и вне окна — без линий', () => {
     const { ctx, moves, lines, styles, raw } = fakeCtx()
     const track = [
-      { t_sec: 0, key_code: 1, label: 'C major' },
-      { t_sec: 1, key_code: 13, label: 'C minor' },
-      { t_sec: 3, key_code: 5, label: 'F major' },
-      { t_sec: 5, key_code: 8, label: 'Ab major' },
+      { t_sec: 0, key_code: 1, label: 'C' },
+      { t_sec: 1, key_code: 13, label: 'Cm' },
+      { t_sec: 3, key_code: 6, label: 'F' },
+      { t_sec: 5, key_code: 8, label: 'Gaug' },
     ]
     // Окно 0.5…3.5 с при ширине 300 px → 100 px/с: t=1 → x=50.5, t=3 → 250.5.
     drawKeyLines(ctx, track, { start: 0.5, end: 3.5 }, 300, 200, THEME)

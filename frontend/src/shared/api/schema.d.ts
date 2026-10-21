@@ -1808,7 +1808,7 @@ export interface paths {
          *     эпохами; нормировка лучей глобальная (максимум счётчиков всего микса =
          *     100 % R). Кадры читаются из ``emo.json`` кэша рендера; старые рендеры
          *     добиваются расчётом из ``master.wav`` (чтение вне event loop). Поле
-         *     ``key_track`` — тональность сегментов микса (VAMP Key Detector) для
+         *     ``key_track`` — карта аккордов микса (VAMP Chordino) для
          *     вращения звезды (``null`` — инструмент недоступен). 404 —
          *     рендер не найден, 409 — идёт/упал либо мастер недоступен.
          */
@@ -2877,11 +2877,12 @@ export interface paths {
         };
         /**
          * Кадры радара «Эмо» аудиотрека: 7 лучей + карты темпа/аккордов
-         * @description Кадры анимации звезды-полигона (контракт рендера «Нейромузыки», v5).
+         * @description Кадры анимации звезды-полигона (контракт рендера «Нейромузыки», v6).
          *
          *     Окно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔
          *     время k · 2/3 с; лучи — децибельная шкала громкости (``db_relative``,
-         *     ``db_floor`` −60 дБ). ``key_track`` — карта аккордов (VAMP Key Detector)
+         *     ``db_floor`` −60 дБ). ``key_track`` — карта аккордов (VAMP Chordino,
+         *     точные имена аккордов; для вращения звезды — корневая нота + лад)
          *     для вращения звезды, ``tempo_track`` — карта темпа (VAMP Tempo and Beat
          *     Tracker) для темп-коррекции лучей; ``segment_track`` — сегменты трека
          *     (VAMP Segmenter) для визуально-слухового контроля (таблица «Опций» и
@@ -3554,19 +3555,22 @@ export interface components {
          *     (``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта
          *     ``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из
          *     dB-лучей **после вращения полигона**. ``schema_version`` 3 (09.10.2026):
-         *     ``key_track`` — сегменты тональности микса (VAMP Key Detector) для
-         *     вращения звезды. ``schema_version`` 4 (09.10.2026): ``tempo_track`` —
+         *     ``key_track`` — сегменты тональности микса для вращения звезды.
+         *     ``schema_version`` 4 (09.10.2026): ``tempo_track`` —
          *     оценки темпа микса (VAMP Tempo and Beat Tracker) для темп-коррекции
          *     радара. ``schema_version`` 5 (21.10.2026): ``segment_track`` — сегменты
          *     трека (VAMP Segmenter, «ЕмоЛаб») для визуально-слухового контроля (в
-         *     расчётах не участвуют). Данные — из ``emo.json`` кэша рендера; рендеры
-         *     до среза «Эмо» добиваются расчётом из ``master.wav``.
+         *     расчётах не участвуют). ``schema_version`` 6 (21.10.2026): карта
+         *     аккордов — VAMP Chordino «Chord Estimate» взамен QM Key Detector:
+         *     ``label`` — точное имя аккорда («G7», «Ebm6»), ``key_code`` — только
+         *     корневая нота + лад для звезды. Данные — из ``emo.json`` кэша рендера;
+         *     рендеры до среза «Эмо» добиваются расчётом из ``master.wav``.
          */
         AudioEmoOut: {
             /**
              * Schema Version
-             * @description Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, 4 — + tempo_track, 5 — + segment_track)
-             * @default 5
+             * @description Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, 4 — + tempo_track, 5 — + segment_track, 6 — аккорды Chordino)
+             * @default 6
              */
             schema_version: number;
             /**
@@ -3622,12 +3626,12 @@ export interface components {
             frames: components["schemas"]["AudioEmoFrame"][];
             /**
              * Key Track
-             * @description Сегменты тональности микса (VAMP Key Detector) для вращения звезды: угол кадра — из активного сегмента, знак — мажор + (против часовой), минор − (по часовой); null — инструмент недоступен, вращение нулевое
+             * @description Карта аккордов микса (VAMP Chordino) для вращения звезды: угол кадра — из активного сегмента по корневой ноте + ладу, знак — мажор + (против часовой), минор − (по часовой); null — инструмент недоступен, вращение нулевое
              */
             key_track?: components["schemas"]["AudioKeySegment"][] | null;
             /**
              * Key Source
-             * @description Идентификатор источника key_track (vamp:qm-vamp-plugins:qm-keydetector:key)
+             * @description Идентификатор источника key_track (vamp:nnls-chroma:chordino:simplechord)
              */
             key_source?: string | null;
             /**
@@ -3717,26 +3721,29 @@ export interface components {
         };
         /**
          * AudioKeySegment
-         * @description Сегмент тональности микса (VAMP Key Detector, ``key_track`` кадров «Эмо»).
+         * @description Сегмент карты аккордов (VAMP Chordino, ``key_track`` кадров «Эмо»).
          *
-         *     ``key_code`` — числовой код QM Key Detector: 1…12 — мажор (C=1 … B=12),
-         *     13…24 — минор (Cm=13 … Bm=24); метка ``label`` справочная (может быть
-         *     составной, «Eb / D# minor»), для вращения звезды используется код.
+         *     ``label`` — точное имя аккорда от Chordino («C», «Am», «G7», «Dm6»,
+         *     «Ebm6», «Gaug»), заполняется в таблицу аккордов и оверлеи как есть.
+         *     ``key_code`` — код тональности для вращения звезды: **только корневая
+         *     нота + лад** (1…12 — мажор C…B, 13…24 — минор Cm…Bm); уточнения
+         *     интервалов в имени аккорда (7, 6, dim, aug …) игнорируются («C7» →
+         *     C мажор, «Dm6» → D минор). «N» (нет аккорда) сегментом не становится.
          */
         AudioKeySegment: {
             /**
              * T Sec
-             * @description Начало сегмента устойчивой тональности, с
+             * @description Начало сегмента аккорда, с
              */
             t_sec: number;
             /**
              * Key Code
-             * @description Код тональности QM: 1…12 мажор (C…B), 13…24 минор (Cm…Bm)
+             * @description Код тональности для звезды: корневая нота + лад, 1…12 мажор (C…B), 13…24 минор (Cm…Bm)
              */
             key_code: number;
             /**
              * Label
-             * @description Название тональности, например «B minor»
+             * @description Точное имя аккорда Chordino, например «G7», «Ebm6»
              */
             label: string;
         };

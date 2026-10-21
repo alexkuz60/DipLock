@@ -1190,10 +1190,10 @@ describe('Нейромузыка — раздел', () => {
     const withTracks: AudioEmo = {
       ...EMO_PAYLOAD,
       key_track: [
-        { t_sec: 0, key_code: 1, label: 'C major' },
-        { t_sec: 2, key_code: 13, label: 'C minor' },
+        { t_sec: 0, key_code: 1, label: 'C' },
+        { t_sec: 2, key_code: 22, label: 'Am' },
       ],
-      key_source: 'vamp:qm-vamp-plugins:qm-keydetector:key',
+      key_source: 'vamp:nnls-chroma:chordino:simplechord',
       tempo_track: [
         { t_sec: 0, bpm: 100 },
         { t_sec: 2, bpm: 140 },
@@ -1210,13 +1210,13 @@ describe('Нейромузыка — раздел', () => {
     )
     const keyCounter = within(counters).getByTestId('emo-counter-key')
     const tempoCounter = within(counters).getByTestId('emo-counter-tempo')
-    // Кадр 0: сегмент «C major», темп слайда 0 (100,0 — среднее оценок диапазона).
-    await waitFor(() => expect(keyCounter).toHaveTextContent('C major'))
+    // Кадр 0: сегмент «C», темп слайда 0 (100,0 — среднее оценок диапазона).
+    await waitFor(() => expect(keyCounter).toHaveTextContent('C'))
     expect(tempoCounter).toHaveTextContent('100,0 bpm')
 
-    // Позиция 2.0 с — кадр 3: сегмент «C minor», темп 140 (как у засечки радара).
+    // Позиция 2.0 с — кадр 3: сегмент «Am», темп 140 (как у засечки радара).
     playerMock.position = 2
-    await waitFor(() => expect(keyCounter).toHaveTextContent('C minor'), { timeout: 3000 })
+    await waitFor(() => expect(keyCounter).toHaveTextContent('Am'), { timeout: 3000 })
     expect(tempoCounter).toHaveTextContent('140,0 bpm')
   })
 

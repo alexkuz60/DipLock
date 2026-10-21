@@ -1,12 +1,14 @@
-"""VAMP-анализ аудио микса через Sonic Annotator (C4DM QMUL) — тональность, темп, сегменты.
+"""VAMP-анализ аудио микса через Sonic Annotator (C4DM QMUL) — аккорды, темп, сегменты.
 
 Единственная точка запуска внешнего инструмента в проекте: ``sonic-annotator``
 прогоняет зафиксированные transform-файлы (``vamp/transforms/*.n3``) по WAV и
 отдаёт CSV-таблицу признаков. Здесь три признака:
 
-* **Key Detector** — тональность сегмента (код 1…24 + метка) → ``key_track``;
-  потребитель — вращение звезды «Эмо» (``docs/rules/neuromusic.md`` §«Эмо»,
-  «Вращение звезды»);
+* **Chordino** (NNLS Chroma, вывод ``simplechord`` «Chord Estimate») — карта
+  аккордов трека → ``key_track`` ``[{t_sec, key_code, label}]``: ``label`` —
+  точное имя аккорда («G7», «Ebm6», «Gaug»), ``key_code`` — только корневая
+  нота + лад для вращения звезды «Эмо» (``docs/rules/neuromusic.md`` §«Эмо»,
+  «Вращение звезды»; уточнения интервалов игнорируются);
 * **Tempo and Beat Tracker** (вывод ``tempo``, «locked tempo estimates») →
   ``tempo_track`` ``[{t_sec, bpm}]``; потребитель — темп-коррекция радара
   «Эмо» (там же, «Темп-коррекция»);
@@ -33,6 +35,7 @@ import io
 import logging
 import math
 import os
+import re
 import subprocess
 import tempfile
 from typing import Any
@@ -41,8 +44,10 @@ from app.core.config import Settings, settings
 
 logger = logging.getLogger(__name__)
 
-# Источник трека тональности в контракте emo.json (``key_source``).
-KEY_SOURCE = "vamp:qm-vamp-plugins:qm-keydetector:key"
+# Источник карты аккордов в контракте emo.json (``key_source``): Chordino
+# (NNLS Chroma), вывод «Chord Estimate» — точные имена аккордов (21.10.2026,
+# взамен QM Key Detector: тот пропускал смены аккордов и ошибался в ладе).
+KEY_SOURCE = "vamp:nnls-chroma:chordino:simplechord"
 
 # Источник трека темпа в контракте emo.json (``tempo_source``).
 TEMPO_SOURCE = "vamp:qm-vamp-plugins:qm-tempotracker:tempo"
@@ -50,14 +55,14 @@ TEMPO_SOURCE = "vamp:qm-vamp-plugins:qm-tempotracker:tempo"
 # Источник трека сегментов в контракте emo.json (``segment_source``).
 SEGMENTER_SOURCE = "vamp:qm-vamp-plugins:qm-segmenter:segmentation"
 
-# Transform-файл Key Detector внутри ``settings.vamp_transforms_dir``.
-KEY_TRANSFORM_NAME = "qm-keydetector-key.n3"
+# Transform-файл Chordino внутри ``settings.vamp_transforms_dir`` — карта
+# аккордов рендера «Нейромузыки» (мастер 48 кГц).
+CHORD_TRANSFORM_NAME = "chordino-simplechord.n3"
 
-# Тот же Key Detector для входа 32000 Гц («ЕмоЛаб», моно-файл анализа):
-# плагин требует step/block 16384 при 32 кГц (в 32768/32768 он не инициализируется
-# — «differ from required»); фиксированный rate 32000 страхует от входа другой
-# частоты. Рендер «Нейромузыки» идёт общим трансформом выше (мастер 48 кГц).
-KEY_TRANSFORM_NAME_32K = "qm-keydetector-key-32k.n3"
+# Тот же Chordino для входа 32000 Гц («ЕмоЛаб», моно-файл анализа). Ловушка
+# hop: step 0.1 с при block 0.512 с — при step 0.2 с HMM-сглаживание плагина
+# «съедает» смены аккордов (C+Am сливаются в один сегмент, случай 21.10.2026).
+CHORD_TRANSFORM_NAME_32K = "chordino-simplechord-32k.n3"
 
 # Transform-файл Tempo and Beat Tracker (вывод ``tempo``) — там же.
 TEMPO_TRANSFORM_NAME = "qm-tempotracker-tempo.n3"
@@ -71,10 +76,17 @@ TEMPO_TRANSFORM_NAME = "qm-tempotracker-tempo.n3"
 # neighbourhoodLimit = 2 с («Minimum segment duration», дефолт 4 с).
 SEGMENTER_TRANSFORM_NAME_32K = "qm-segmenter-segmentation-32k.n3"
 
-# Коды тональности QM Key Detector: 1…12 — мажор (C=1 … B=12),
+# Коды тональности для вращения звезды: 1…12 — мажор (C=1 … B=12),
 # 13…24 — минор (Cm=13 … Bm=24). Вне диапазона — мусорная строка CSV.
 KEY_CODE_MIN = 1
 KEY_CODE_MAX = 24
+
+# Корневая нота аккорда → полутоны от C (C=0 … B=11): Chordino пишет
+# диезы и бемоли («C#», «Bb», «Ebm6»).
+_ROOT_SEMITONES: dict[str, int] = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
+
+# Корень имени аккорда Chordino: заглавная нота + опциональный знак (#/b).
+_ROOT_RE = re.compile(r"^([A-G])([#b]?)")
 
 # Типы сегментов QM Segmenter: 1…12 (диапазон параметра nSegmentTypes).
 # Имя сегмента — метка плагина (A, B, …: тип 1 → A, 2 → B, …); пустая метка
@@ -145,33 +157,75 @@ def _run_transform(blob: bytes, transform_name: str, cfg: Settings) -> str | Non
     return result.stdout
 
 
-def parse_key_csv(text: str) -> list[dict[str, Any]]:
-    """CSV Sonic Annotator → сегменты ``[{t_sec, key_code, label}]``.
+def chord_key_code(label: str) -> int | None:
+    """Имя аккорда Chordino → код тональности для звезды (1…24) либо ``None``.
 
-    Формат строки (райтер ``csv``, ``--csv-stdout``): ``[имя_файла,] время,
-    код, "метка"`` — колонка имени присутствует, но пустая во всех строках,
-    кроме первой. Метка может быть составной («Eb / D# minor») — источник
-    истины для вращения **числовой код** (1…24), метка — справочно. Строки
-    с некорректным кодом/временем пропускаются; пустой/чужой CSV → пустой
-    список (``None`` зарезервирован под «инструмент недоступен»).
+    Для вращения звезды нужны **только корневая нота и лад** (мажор/минор) —
+    уточнения интервалов в имени аккорда игнорируются (постановка владельца
+    21.10.2026): «C7» → C мажор (1), «Dm6» → D минор (15), «Gaug» → G мажор
+    (8), «Cdim» → C минор (13), «Ebm6» → Eb минор (16). Уменьшённый аккорд
+    (``dim``/``hdim``) сводится к минору (малая терция), увеличенный (``aug``)
+    и sus-аккорды — к мажору (малой терции нет). «N» (нет аккорда), пустая или
+    нераспознаваемая метка — ``None``: строка не порождает сегмент ``key_track``.
+
+    Код: ``1 + полутоны`` для мажора (C=1 … B=12), ``13 + полутоны`` для
+    минора (Cm=13 … Bm=24) — тот же маскинг, что у прежнего QM Key Detector,
+    чтобы ``keyRotation`` на фронте работал без изменений.
+    """
+    name = label.strip()
+    if not name or name.upper() == "N":
+        return None
+    match = _ROOT_RE.match(name)
+    if not match:
+        return None
+    root = match.group(1)
+    accidental = match.group(2)
+    semitone = _ROOT_SEMITONES[root] + (1 if accidental == "#" else -1 if accidental == "b" else 0)
+    quality = name[match.end() :].lower()
+    minor = ("dim" in quality) or (quality.startswith("m") and not quality.startswith("maj"))
+    return (13 if minor else 1) + semitone
+
+
+def parse_chord_csv(text: str) -> list[dict[str, Any]]:
+    """CSV Sonic Annotator → сегменты аккордов ``[{t_sec, key_code, label}]``.
+
+    Формат строки (райтер ``csv``, ``--csv-stdout``) у вывода «Chord Estimate»
+    (точка на смене аккорда, **без длительности**):
+    ``[имя_файла,] время, "аккорд"`` — колонка имени файла присутствует во
+    всех строках, но пустая, кроме первой (как у Segmenter). Метки Chordino —
+    точные имена аккордов («C», «Am», «G7», «Dm6», «Cdim», «Gaug», «Bb»,
+    «Ebm6»), они уходят в ``label`` как есть; «N» (нет аккорда) строку
+    отбрасывает (звезда держит прошлое вращение, в таблицу не попадает).
+    ``key_code`` — только корневая нота + лад (:func:`chord_key_code`).
+    Подряд идущие одинаковые метки схлопываются (одна и та же смена);
+    строки с некорректным временем/нераспознанной меткой пропускаются;
+    пустой/чужой CSV → пустой список (``None`` зарезервирован под
+    «инструмент недоступен»).
     """
     segments: list[dict[str, Any]] = []
+    prev_label: str | None = None
     for row in csv.reader(io.StringIO(text)):
-        if len(row) == 4:
-            time_s, code_s, label = row[1], row[2], row[3]
-        elif len(row) == 3:
-            time_s, code_s, label = row[0], row[1], row[2]
+        if len(row) == 3:
+            time_s, label = row[1], row[2]
+        elif len(row) == 2:
+            time_s, label = row
         else:
             continue
         try:
             t_sec = float(time_s)
-            code = int(float(code_s))
         except ValueError:
             continue
-        if not (KEY_CODE_MIN <= code <= KEY_CODE_MAX):
+        if not math.isfinite(t_sec):
+            continue
+        name = label.strip()
+        if name == prev_label:
+            continue
+        prev_label = name
+        code = chord_key_code(name)
+        if code is None:
             continue
         segments.append(
-            {"t_sec": round(t_sec, 6), "key_code": code, "label": label.strip()},
+            {"t_sec": round(t_sec, 6), "key_code": code, "label": name},
         )
     return segments
 
@@ -179,26 +233,26 @@ def parse_key_csv(text: str) -> list[dict[str, Any]]:
 def key_track_from_wav(
     blob: bytes,
     cfg: Settings | None = None,
-    transform_name: str = KEY_TRANSFORM_NAME,
+    transform_name: str = CHORD_TRANSFORM_NAME,
 ) -> list[dict[str, Any]] | None:
-    """Тональность микса: WAV в байтах → сегменты ``key_track`` либо ``None``.
+    """Карта аккордов микса: WAV в байтах → сегменты ``key_track`` либо ``None``.
 
-    ``transform_name`` — transform-файл Key Detector: по умолчанию общий
-    (рендер «Нейромузыки», мастер 48 кГц); для моно-файла 32000 Гц «ЕмоЛаб»
-    передаётся :data:`KEY_TRANSFORM_NAME_32K` (step/block 16384 — требование
-    плагина при 32 кГц). ``None`` — инструмент недоступен (см. ``_run_transform``):
-    вызывающая сторона оставляет вращение звезды нулевым (кадры «Эмо» без ``key_track``).
+    ``transform_name`` — transform-файл Chordino: по умолчанию общий (рендер
+    «Нейромузыки», мастер 48 кГц); для моно-файла 32000 Гц «ЕмоЛаб»
+    передаётся :data:`CHORD_TRANSFORM_NAME_32K`. ``None`` — инструмент
+    недоступен (см. ``_run_transform``): вызывающая сторона оставляет
+    вращение звезды нулевым (кадры «Эмо» без ``key_track``).
     """
     text = _run_transform(blob, transform_name, cfg or settings)
     if text is None:
         return None
-    return parse_key_csv(text)
+    return parse_chord_csv(text)
 
 
 def parse_tempo_csv(text: str) -> list[dict[str, Any]]:
     """CSV Sonic Annotator → оценки темпа ``[{t_sec, bpm}]``.
 
-    Формат строки (райтер ``csv``, ``--csv-stdout``) — как у Key Detector:
+    Формат строки (райтер ``csv``, ``--csv-stdout``) — как у Chordino:
     ``[имя_файла,] время, значение, [метка]``; вывод ``tempo`` плагина Tempo
     and Beat Tracker — «locked tempo estimates» (в bpm), по одной оценке на
     строку, метка справочная («120,19 bpm»). Строки с некорректным
@@ -242,7 +296,7 @@ def parse_segmenter_csv(text: str) -> list[dict[str, Any]]:
     Формат строки (райтер ``csv``, ``--csv-stdout``) у вывода с длительностью
     (Structural Segment): ``[имя_файла,] начало, длительность, тип, "имя"`` —
     колонка имени файла присутствует, но пустая во всех строках, кроме первой
-    (как у Key Detector). Тип — целое 1…12, имя — метка плагина (A, B, … по
+    (как у Chordino). Тип — целое 1…12, имя — метка плагина (A, B, … по
     типу: 1 → A, 2 → B, …; живой выхлоп — см. ловушку
     ``docs/rules/emolab.md``); пустая метка достраивается буквой по типу.
     Строки с некорректным временем/длительностью/типом пропускаются;

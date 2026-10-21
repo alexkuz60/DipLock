@@ -1652,3 +1652,34 @@ Vitest **+5**: `waveformView.test.ts` **+2** (`drawSegmentLines` — верти�
 строка «Сегментер», «Имя сегмента», имена A, B; без `segment_track` —
 заглушка «Нет данных»); моки кадров переведены на контракт v5. Итог:
 pytest — **1121**, Vitest — **1343** (121 файл).
+
+**21.10.2026, «ЕмоЛаб»: карта аккордов — Chordino «Chord Estimate»**
+(`docs/rules/emolab.md` шаг 6): QM Key Detector (пропускал смены аккордов,
+ошибался в ладе) заменён на **Chordino** (NNLS Chroma): `label` — точное имя
+аккорда («G7», «Dm6», «Ebm6», «Gaug») в таблицу/оверлеи/пиулю, `key_code` —
+только корневая нота + лад для звезды (уточнения интервалов игнорируются:
+«C7»→C мажор, «Dm6»→D минор, «Gaug»→G мажор, «Cdim»→C минор), «N» (нет
+аккорда) отбрасывается; контракт `AudioEmoOut` **v6** (`key_source` =
+`vamp:nnls-chroma:chordino:simplechord`), кэши v5 пересчитываются честно.
+Трансформы `chordino-simplechord.n3` (48 кГц, step 4800) и
+`chordino-simplechord-32k.n3` (32 кГц, step 3200); **ловушка hop**: при
+step 0.2 с HMM-сглаживание плагина «съедает» смены аккордов (C+Am сливаются).
+
+pytest **±7**: `test_audio_vamp.py` — парсер Key Detector заменён на
+`parse_chord_csv`/`chord_key_code`: `test_parse_chord_csv_segments` (живой
+выхлоп Chordino — времена/имена как есть, «N» мимо),
+`test_chord_key_code_rules` (коды звезды: «C»→1, «Bb»→11, «Am»→22,
+«Ebm6»→16, «Dm6»→15, «Cdim»→13, «Gaug»→8, «G7»→8, «Cmaj7»→1, «Csus4»→1),
+`test_chord_key_code_rejects_non_chords`, `test_parse_chord_csv_skips_garbage_and_dedupes`
+(мусор/дубли, «N» — разделитель смен), мок-запуск с `CHORD_TRANSFORM_NAME`,
+живой `test_chord_track_live_sonic_annotator` (C/Am/G7 по 4 с, моно 32 кГц —
+все три смены с точными именами и кодами 1/22/8); `test_emolab.py` —
+конвейер/живая цепочка на `CHORD_TRANSFORM_NAME_32K`, мок-аккорд «C»;
+`test_audio_emo.py` — версия контракта **6**.
+
+Vitest **±4**: `EmoLabPanel` показывает точное имя аккорда (без урезания
+«major/minor»), тип — по коду; `EmoLabSection.test.tsx` — мок «Cmaj7»/«Dm6»
+(коды 1/15 — нулевой поворот для `starRadiiPct`), таблица аккордов с точными
+именами и пиуля «Аккорд»; `NeuromusicSection.test.tsx` — счётчик «C»→«Am»;
+`waveformView.test.ts` — фикстуры на имена Chordino. Итог: pytest — **1123**,
+Vitest — **1343** (121 файл).

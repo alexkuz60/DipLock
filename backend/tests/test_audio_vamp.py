@@ -1,10 +1,10 @@
-"""Тесты VAMP-анализа (Sonic Annotator): парсеры CSV Key Detector/Tempo/Segmenter.
+"""Тесты VAMP-анализа (Sonic Annotator): парсеры CSV Chordino/Tempo/Segmenter.
 
-Юнит — разбор CSV-таблиц плагинов (составные метки, мусорные строки), запуск
-``sonic-annotator`` с моком ``subprocess`` (успех/нет бинаря/нет transform/
-падение/таймаут), привязка ``key_track``/``tempo_track``/``segment_track`` к
-контракту кадров «Эмо» и валидация ``AudioEmoOut``; ``integration`` — живой
-прогон плагинов (бинарь в ``tools/``).
+Юнит — разбор CSV-таблиц плагинов (имена аккордов, мусорные строки, дедуп),
+запуск ``sonic-annotator`` с моком ``subprocess`` (успех/нет бинаря/нет
+transform/падение/таймаут), привязка ``key_track``/``tempo_track``/
+``segment_track`` к контракту кадров «Эмо» и валидация ``AudioEmoOut``;
+``integration`` — живой прогон плагинов (бинарь в ``tools/``).
 
 Юнит-часть **герметична**: реальный ``sonic-annotator`` не нужен — в CI его
 нет (GPL-бинарь не коммитится), бинарь/transform подставляются фиктивными
@@ -24,51 +24,80 @@ from app.schemas.audio import AudioEmoOut, AudioEmoSegment, AudioKeySegment, Aud
 from app.services.audio_render import emo_radar, vamp_analysis
 from app.services.audio_render.vamp_analysis import KEY_SOURCE, SEGMENTER_SOURCE, TEMPO_SOURCE
 
-# Выдержка реального вывода Key Detector (--csv-stdout): имя файла только в
-# первой строке, метка бывает составной («Eb / D# minor»).
-KEY_CSV = (
-    '"master.wav",0.000000000,24,"B minor"\n'
-    ',3.413333333,21,"G# minor"\n'
-    ',6.144000000,12,"B major"\n'
-    ',34.816000000,2,"Db major"\n'
-    ',166.570666667,16,"Eb / D# minor"\n'
+# Выдержка реального вывода Chordino «Chord Estimate» (--csv-stdout): точки на
+# сменах аккордов (без длительности), имя файла только в первой строке, «N» —
+# нет аккорда. Живой прогон — 3 аккорда (C/Am/G7) по 4 с, моно 32 кГц.
+CHORD_CSV = (
+    '"song.wav",0.000000000,"N"\n'
+    ',0.100000000,"C"\n'
+    ',4.100000000,"Am"\n'
+    ',8.100000000,"G7"\n'
+    ',11.500000000,"N"\n'
 )
 
 
 def _segments() -> list[dict]:
-    """Контрольный key_track для тестов привязки к кадрам."""
+    """Контрольный key_track (аккорды Chordino) для тестов привязки к кадрам."""
     return [
-        {"t_sec": 0.0, "key_code": 12, "label": "B major"},
-        {"t_sec": 3.413333, "key_code": 22, "label": "Am"},
+        {"t_sec": 0.1, "key_code": 1, "label": "C"},
+        {"t_sec": 4.1, "key_code": 22, "label": "Am"},
     ]
 
 
-# --- юнит: парсер CSV ----------------------------------------------------------
+# --- юнит: парсер CSV аккордов --------------------------------------------------
 
 
-def test_parse_key_csv_segments():
-    """CSV → сегменты: времена/коды/метки, составная метка сохраняется."""
-    segments = vamp_analysis.parse_key_csv(KEY_CSV)
-    assert len(segments) == 5
-    assert segments[0] == {"t_sec": 0.0, "key_code": 24, "label": "B minor"}
-    assert segments[2]["key_code"] == 12 and segments[2]["label"] == "B major"
-    assert segments[4]["t_sec"] == pytest.approx(166.570667, abs=1e-6)
-    assert segments[4]["key_code"] == 16 and segments[4]["label"] == "Eb / D# minor"
+def test_parse_chord_csv_segments():
+    """CSV → сегменты: времена/точные имена, «N» не порождает сегмент."""
+    segments = vamp_analysis.parse_chord_csv(CHORD_CSV)
+    assert segments == [
+        {"t_sec": 0.1, "key_code": 1, "label": "C"},
+        {"t_sec": 4.1, "key_code": 22, "label": "Am"},
+        {"t_sec": 8.1, "key_code": 8, "label": "G7"},
+    ]
 
 
-def test_parse_key_csv_skips_garbage():
-    """Мусорные строки (код вне 1…24, не число, короткие) — пропускаются."""
+def test_chord_key_code_rules():
+    """Код звезды — только корневая нота + лад; уточнения интервалов мимо."""
+    assert vamp_analysis.chord_key_code("C") == 1
+    assert vamp_analysis.chord_key_code("Bb") == 11
+    assert vamp_analysis.chord_key_code("B") == 12
+    assert vamp_analysis.chord_key_code("Am") == 22
+    assert vamp_analysis.chord_key_code("Ebm6") == 16
+    assert vamp_analysis.chord_key_code("Dm6") == 15
+    assert vamp_analysis.chord_key_code("Cdim") == 13  # малая терция → минор
+    assert vamp_analysis.chord_key_code("Gaug") == 8  # мажорная основа
+    assert vamp_analysis.chord_key_code("G7") == 8
+    assert vamp_analysis.chord_key_code("Cmaj7") == 1
+    assert vamp_analysis.chord_key_code("Csus4") == 1
+
+
+def test_chord_key_code_rejects_non_chords():
+    """«N» (нет аккорда), пустая/чужая метка — None (строка без сегмента)."""
+    assert vamp_analysis.chord_key_code("N") is None
+    assert vamp_analysis.chord_key_code("") is None
+    assert vamp_analysis.chord_key_code("Xy") is None
+
+
+def test_parse_chord_csv_skips_garbage_and_dedupes():
+    """Мусор/дубли — мимо; «N» — разделитель: «C» после него — новый сегмент."""
     text = (
-        '"f.wav",0.0,0,"nope"\n'      # код 0 — вне диапазона
-        ',1.0,25,"nope"\n'            # код 25 — вне диапазона
-        ',2.0,xx,"B minor"\n'         # код не число
-        "just,a\n"                    # короткая строка
-        "\n"                          # пустая строка
-        ',3.0,24.0,"B minor"\n'       # валидная (код как float-строка)
+        '"f.wav",0.0,"N"\n'  # нет аккорда — без сегмента
+        ',0.5,"Xy"\n'  # не аккорд
+        ',xx,"C"\n'  # время не число
+        "just,a,b\n"  # мусорная строка
+        "\n"  # пустая строка
+        ',2.0,"C"\n'  # валидная
+        ',3.0,"C"\n'  # дубль подряд — схлопывается
+        ',4.0,"N"\n'  # разделитель
+        ',5.0,"C"\n'  # новая смена «C» — остаётся
     )
-    segments = vamp_analysis.parse_key_csv(text)
-    assert segments == [{"t_sec": 3.0, "key_code": 24, "label": "B minor"}]
-    assert vamp_analysis.parse_key_csv("") == []
+    segments = vamp_analysis.parse_chord_csv(text)
+    assert segments == [
+        {"t_sec": 2.0, "key_code": 1, "label": "C"},
+        {"t_sec": 5.0, "key_code": 1, "label": "C"},
+    ]
+    assert vamp_analysis.parse_chord_csv("") == []
 
 
 # --- юнит: запуск sonic-annotator (мок subprocess) -----------------------------
@@ -95,15 +124,15 @@ def test_key_track_from_wav_success(monkeypatch, tmp_path):
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
-        return subprocess.CompletedProcess(cmd, 0, stdout=KEY_CSV, stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout=CHORD_CSV, stderr="")
 
-    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.KEY_TRANSFORM_NAME)
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.CHORD_TRANSFORM_NAME)
     monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
     track = vamp_analysis.key_track_from_wav(b"RIFF-fake")
-    assert track is not None and len(track) == 5
+    assert track is not None and len(track) == 3
     cmd = captured["cmd"]
     assert cmd[0] == settings.sonic_annotator_bin
-    assert "-t" in cmd and vamp_analysis.KEY_TRANSFORM_NAME in cmd[2]
+    assert "-t" in cmd and vamp_analysis.CHORD_TRANSFORM_NAME in cmd[2]
     assert cmd[-3:] == ["-w", "csv", "--csv-stdout"]
     # Ловушка сборки 1.7: VAMP_PATH обязан передаваться явно.
     assert captured["kwargs"]["env"]["VAMP_PATH"]
@@ -152,7 +181,7 @@ def test_key_track_from_wav_process_failures(monkeypatch, tmp_path, effect):
         called = True
         raise effect
 
-    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.KEY_TRANSFORM_NAME)
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.CHORD_TRANSFORM_NAME)
     monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
     assert vamp_analysis.key_track_from_wav(b"x") is None
     # Мок обязан быть вызван: ранний выход по isfile — молчаливая потеря теста.
@@ -168,7 +197,7 @@ def test_key_track_from_wav_nonzero_rc(monkeypatch, tmp_path):
         called = True
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
 
-    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.KEY_TRANSFORM_NAME)
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.CHORD_TRANSFORM_NAME)
     monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
     assert vamp_analysis.key_track_from_wav(b"x") is None
     assert called is True
@@ -192,7 +221,8 @@ def test_audio_emo_out_validates_key_track():
     payload = emo_radar.emo_frames(np.ones(40_000), key_track=_segments())
     validated = AudioEmoOut.model_validate(payload)
     assert validated.key_track is not None
-    assert validated.key_track[0].key_code == 12
+    assert validated.key_track[0].key_code == 1
+    assert validated.key_track[0].label == "C"
     assert validated.key_source == KEY_SOURCE
     with pytest.raises(ValidationError):
         AudioKeySegment(t_sec=0.0, key_code=25, label="X")
@@ -390,16 +420,18 @@ def test_audio_emo_out_validates_segment_track():
         AudioEmoSegment(t_sec=0.0, name="X", segment_type=13)
 
 
-# --- integration: живой прогон Key Detector ------------------------------------
+# --- integration: живой прогон Chordino ----------------------------------------
 
 
 @pytest.mark.integration
-def test_key_track_live_sonic_annotator():
-    """Реальный sonic-annotator + qm-keydetector по синтетическому WAV.
+def test_chord_track_live_sonic_annotator():
+    """Реальный sonic-annotator + chordino («Chord Estimate») по аккордам.
 
     Маркер ``integration``: пропускается без бинаря в ``tools/`` (в CI его
-    нет); содержимое тональности не проверяем — важна работоспособность
-    цепочки и формат сегментов.
+    нет). Синтетические аккорды по 4 с (C → Am → G7, синусы нот, моно 32 кГц) —
+    плагин обязан найти все три смены с точными именами «C», «Am», «G7»
+    (постановка 21.10.2026: Chordino не должен пропускать смены аккордов);
+    «N» сегментом не становится.
     """
     import os
 
@@ -407,12 +439,28 @@ def test_key_track_live_sonic_annotator():
 
     if not os.path.isfile(settings.sonic_annotator_bin):
         pytest.skip("sonic-annotator не установлен")
-    # Синус 440 Гц (ля первой октавы) — минимум осмысленного для детектора.
-    fs = 48_000
-    t = np.arange(fs * 3) / fs
-    blob = wav_bytes(np.stack([np.sin(2 * np.pi * 440 * t)] * 2, axis=1), fs)
-    track = vamp_analysis.key_track_from_wav(blob)
-    assert track is not None
+    fs = 32_000
+
+    def chord(freqs: list[float], dur: float = 4.0) -> np.ndarray:
+        t = np.arange(int(fs * dur)) / fs
+        return sum(np.sin(2 * np.pi * f * t) for f in freqs) / len(freqs)
+
+    sig = np.concatenate(
+        [
+            chord([261.63, 329.63, 392.0]),  # C
+            chord([220.0, 261.63, 329.63]),  # Am
+            chord([196.0, 246.94, 293.66, 349.23]),  # G7
+        ],
+    )
+    blob = wav_bytes(np.stack([sig] * 2, axis=1), fs)
+    track = vamp_analysis.key_track_from_wav(
+        blob, transform_name=vamp_analysis.CHORD_TRANSFORM_NAME_32K,
+    )
+    assert track is not None and len(track) == 3
+    assert [seg["label"] for seg in track] == ["C", "Am", "G7"]
+    assert [seg["key_code"] for seg in track] == [1, 22, 8]
+    times = [seg["t_sec"] for seg in track]
+    assert times == sorted(times)
     assert all(1 <= seg["key_code"] <= 24 for seg in track)
 
 

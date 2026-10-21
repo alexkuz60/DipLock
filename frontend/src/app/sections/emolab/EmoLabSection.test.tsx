@@ -104,10 +104,10 @@ const EMO_PAYLOAD: AudioEmo = {
     rays: Array.from({ length: 7 }, (_, ray) => Math.min(100, (ray + 1) * 10 + index * 10)),
   })),
   key_track: [
-    { t_sec: 0, key_code: 1, label: 'C major' },
-    { t_sec: 3.5, key_code: 13, label: 'C minor' },
+    { t_sec: 0, key_code: 1, label: 'Cmaj7' },
+    { t_sec: 3.5, key_code: 15, label: 'Dm6' },
   ],
-  key_source: 'vamp:qm-vamp-plugins:qm-keydetector:key',
+  key_source: 'vamp:nnls-chroma:chordino:simplechord',
   tempo_track: [{ t_sec: 0, bpm: 120 }],
   tempo_source: 'vamp:qm-vamp-plugins:qm-tempotracker:tempo',
   segment_track: [
@@ -244,7 +244,7 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     expect(screen.getByTestId('emolab-title-file')).toHaveTextContent('song.wav')
     // Пиули «Аккорд»/«Темп» из кадров «Эмо» (компоненты «Нейромузыки», пишутся rAF).
     await waitFor(() =>
-      expect(screen.getByTestId('emo-counter-key')).toHaveTextContent('C major'),
+      expect(screen.getByTestId('emo-counter-key')).toHaveTextContent('Cmaj7'),
     )
     expect(screen.getByTestId('emo-counter-tempo')).toHaveTextContent('120')
     // Паспорт в панели: файл и «Анализ: Готово» (текст дублирует пилюлю).
@@ -339,12 +339,13 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     // Строки карт VAMP остаются; под картой аккордов — таблица аккордов,
     // ниже — таблица сегментов (у обеих колонка «Время»).
     expect(screen.getByText('Карта аккордов')).toBeInTheDocument()
-    expect(screen.getAllByText('VAMP Key Detector').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('VAMP Chordino').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Карта темпа')).toBeInTheDocument()
     expect(screen.getAllByText('Время').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Тип (минор/мажор)')).toBeInTheDocument()
-    // Аккорд — метка QM без слова лада («C major» → «C»), тип — по коду.
-    expect(screen.getAllByText('C')).toHaveLength(2)
+    // Аккорд — точное имя Chordino как есть («Cmaj7», «Dm6»), тип — по коду.
+    expect(screen.getAllByText('Cmaj7').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Dm6').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('мажор')).toBeInTheDocument()
     expect(screen.getByText('минор')).toBeInTheDocument()
 

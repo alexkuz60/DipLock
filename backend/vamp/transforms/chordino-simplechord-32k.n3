@@ -1,0 +1,18 @@
+@prefix xsd:      <http://www.w3.org/2001/XMLSchema#> .
+@prefix vamp:     <http://purl.org/ontology/vamp/> .
+@prefix :         <#> .
+
+# Трансформ Chordino (NNLS Chroma, M. Mauch), вывод «Chord Estimate»
+# (vamp:nnls-chroma:chordino:simplechord) для моно-файла 32000 Гц «ЕмоЛаб».
+# Ловушка hop (21.10.2026): step 0.1 с (3200 сэмплов) — при step 0.2 с
+# HMM-сглаживание плагина «съедает» смены аккордов (C+Am сливаются в один
+# сегмент). Block 16384 = 0.512 с окна. Параметры — дефолты MIREX
+# (useNNLS=1, useHMM=1, boostn=0.1); метки «C», «Am», «G7», «Dm6», «Cdim»,
+# «Gaug», «Bb», «Ebm6» — точные имена аккордов, «N» — нет аккорда.
+:transform a vamp:Transform ;
+    vamp:plugin <http://vamp-plugins.org/rdf/plugins/nnls-chroma#chordino> ;
+    vamp:sample_rate "32000"^^xsd:float ;
+    vamp:step_size "3200"^^xsd:int ;
+    vamp:block_size "16384"^^xsd:int ;
+    vamp:plugin_version """""" ;
+    vamp:output <http://vamp-plugins.org/rdf/plugins/nnls-chroma#chordino_output_simplechord> .

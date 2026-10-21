@@ -175,10 +175,11 @@ bash desktop/install-desktop.sh remove   # удалить ярлык
 
 ## 🎵 VAMP-анализ (Sonic Annotator) — установка
 
-Для **вращения звезды «Эмо» по тональности** микса используется
-**Sonic Annotator** (C4DM QMUL) с плагином **QM Key Detector** из
-Vamp Plugin Pack. Инструмент **опциональный**: без него рендер и кадры
-«Эмо» работают как прежде (`key_track: null`, вращение нулевое).
+Для **карты аккордов и вращения звезды «Эмо»** микса используется
+**Sonic Annotator** (C4DM QMUL) с плагином **Chordino** (NNLS Chroma,
+вывод «Chord Estimate») из Vamp Plugin Pack. Инструмент **опциональный**:
+без него рендер и кадры «Эмо» работают как прежде (`key_track: null`,
+вращение нулевое).
 
 ```bash
 # 1. Бинарь Sonic Annotator 1.7 (linux64-static) → tools/sonic-annotator/
@@ -197,8 +198,8 @@ cd ../..
 #    *.so, *.n3, *.cat в ~/vamp.
 
 # 3. Проверка цепочки
-VAMP_PATH=$HOME/vamp tools/sonic-annotator/sonic-annotator -l | grep keydetector
-# → vamp:qm-vamp-plugins:qm-keydetector:key
+VAMP_PATH=$HOME/vamp tools/sonic-annotator/sonic-annotator -l | grep chordino
+# → vamp:nnls-chroma:chordino:simplechord
 ```
 
 **Нюансы установки:**
@@ -214,9 +215,10 @@ VAMP_PATH=$HOME/vamp tools/sonic-annotator/sonic-annotator -l | grep keydetector
 - **Docker**: официально не поддерживается (см. выше); при сборке своего образа
   монтируйте `tools/` и `~/vamp` томами.
 - Transform плагина зафиксирован в репо:
-  `backend/vamp/transforms/qm-keydetector-key.n3` (step/block 32768,
-  length 10, tuning 440). Лицензия инструмента — GPL-2.0 (запускается
-  отдельным процессом, код проекта не смешивается). Подробности —
+  `backend/vamp/transforms/chordino-simplechord.n3` (step 4800 = 0.1 с,
+  block 24576; ловушка hop — при step 0.2 с плагин теряет смены аккордов).
+  Лицензия инструмента — GPL-2.0 (запускается отдельным процессом, код
+  проекта не смешивается). Подробности —
   `docs/rules/neuromusic.md`, §«Вращение звезды».
 
 ---

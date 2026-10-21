@@ -165,7 +165,7 @@ def test_emo_frames_contract_and_global_normalization():
     mono = rng.standard_normal(n)
     mono[96_000:] *= 5.0  # вторая половина микса громче — «дыхание» между кадрами
     payload = emo_radar.emo_frames(mono)
-    assert payload["schema_version"] == emo_radar.EMO_SCHEMA_VERSION == 5
+    assert payload["schema_version"] == emo_radar.EMO_SCHEMA_VERSION == 6
     assert payload["tempo_track"] is None and payload["tempo_source"] is None
     assert payload["segment_track"] is None and payload["segment_source"] is None
     assert payload["fs_audio"] == FS_AUDIO

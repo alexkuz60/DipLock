@@ -62,7 +62,11 @@ EMO_RAY_COUNT = 7
 # v5 (21.10.2026): добавлен ``segment_track`` (сегменты VAMP Segmenter,
 # «ЕмоЛаб» — визуально-слуховой контроль, в расчётах не участвует);
 # кадры v4 отвергаются → добивка (у рендера) / честный пересчёт («ЕмоЛаб»).
-EMO_SCHEMA_VERSION = 5
+# v6 (21.10.2026): карта аккордов — Chordino «Chord Estimate» взамен QM Key
+# Detector: ``label`` — точное имя аккорда («G7», «Ebm6»), ``key_code`` —
+# только корневая нота + лад для звезды; кадры v5 отвергаются → пересчёт
+# (старые метки «B major» — не аккорды).
+EMO_SCHEMA_VERSION = 6
 
 # Нормировка лучей: шкала одна на весь микс (решение владельца 08.10.2026).
 EMO_NORMALIZATION = "db_relative"
@@ -164,11 +168,8 @@ def emo_frames(
     всех кадров), карта ``[−60 … 0]`` дБ → ``[0 … 100]`` % радиуса; тишина →
     нули.
 
-    ``key_track`` — сегменты тональности микса (VAMP Key Detector,
-    ``vamp_analysis.key_track_from_wav``): ``None`` — инструмент недоступен,
-    вращение звезды в UI остаётся нулевым. ``tempo_track`` — оценки темпа
-    микса (VAMP Tempo and Beat Tracker, ``vamp_analysis.tempo_track_from_wav``):
-    ``None`` — инструмент недоступен, темп-коррекция в UI нулевая.
+    ``key_track`` — карта аккордов микса (VAMP Chordino, ``vamp_analysis``):
+    ``None`` — инструмент недоступен, вращение в UI нулевое. ``tempo_track`` —
     ``segment_track`` — сегменты трека (VAMP Segmenter,
     ``vamp_analysis.segment_track_from_wav``, «ЕмоЛаб»): ``None`` — инструмент
     недоступен; данные только для визуально-слухового контроля (таблица и
