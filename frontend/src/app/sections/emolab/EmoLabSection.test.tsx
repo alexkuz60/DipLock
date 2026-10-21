@@ -12,6 +12,7 @@ import { api } from '@/shared/api/client'
 import type { AudioEmo, EmoTrackStatus } from '@/shared/api/types'
 import { useEmoLab } from '@/shared/state/emolab'
 import { useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
+import { EMO_LABEL_W, EMO_PAD_LEFT, EMO_VIEW_W, emoTimeX } from './emogram'
 import { EmoLabPanel } from './EmoLabPanel'
 import { EmoLabSection } from './EmoLabSection'
 import { EmoLabTitleFile, EmoLabToolActions } from './EmoLabToolActions'
@@ -425,5 +426,45 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     expect(dots[0]?.getAttribute('stroke')).toBe('hsl(0.0, 85%, 55.0%)')
     expect(dots[0]?.getAttribute('stroke-width')).toBe('10')
     expect(dots[6]?.getAttribute('stroke')).toBe('hsl(275.0, 85%, 70.0%)')
+  })
+
+  it('табы визуализации: «Звезда» по умолчанию, переключение на «Эмограмму» и обратно', async () => {
+    mockApi()
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
+    // Таб «Звезда» — дефолт: звезда занимает всю секцию, эмограммы нет.
+    expect(screen.queryByTestId('emogram')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Эмограмма' }))
+    expect(screen.getByTestId('emogram')).toBeInTheDocument()
+    expect(screen.queryByTestId('radial-chart')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Звезда' }))
+    expect(screen.getByTestId('radial-chart')).toBeInTheDocument()
+    expect(screen.queryByTestId('emogram')).not.toBeInTheDocument()
+  })
+
+  it('таб «Эмограмма»: сетка 14 эмо, ряды кадров и курсор плеера', async () => {
+    mockApi()
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Эмограмма' }))
+    const emogram = screen.getByTestId('emogram')
+    expect(emogram.querySelectorAll('[data-part="emo-grid"]')).toHaveLength(14)
+    expect(emogram.querySelectorAll('[data-part="emo-label"]')).toHaveLength(14)
+    // 6 кадров мока (лучи все > 0) — по столбику «Экспрессии» и ступени
+    // «Динамики» на каждый.
+    expect(emogram.querySelectorAll('[data-part="express-bar"]')).toHaveLength(6)
+    expect(emogram.querySelectorAll('[data-part="emo-step"]')).toHaveLength(6)
+
+    // Курсор позиции плеера: 3 с из 6 — середина шкалы времени (jsdom: ширина
+    // полотна дефолтная, rAF пишет x1/x2 вертикали императивно).
+    const playhead = emogram.querySelector('[data-part="playhead"]') as SVGLineElement
+    const expectedX =
+      EMO_PAD_LEFT + emoTimeX(3, 6, EMO_VIEW_W - EMO_LABEL_W - EMO_PAD_LEFT)
+    playerMock.position = 3
+    await waitFor(() => expect(Number(playhead.getAttribute('x1'))).toBeCloseTo(expectedX, 3))
   })
 })

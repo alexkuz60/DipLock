@@ -133,7 +133,7 @@ audits/                # архив аудитов (версируется; ли
 | `docs/rules/api-jobs.md` | инвентарь роутов, «задача = job», ETag/304, ошибки |
 | `docs/rules/compare.md`, `docs/rules/group-analysis.md` | сравнение пары (B9); групповой анализ N>2 (4.7) |
 | `docs/rules/consilium.md` | Консилиум: Т1–Т6, модельный роутер ИИ |
-| `docs/rules/emolab.md` | «ЕмоЛаб»: аудиотрек, ФФТ/VAMP, звезда реакции |
+| `docs/rules/emolab.md` | «ЕмоЛаб»: аудио, ФФТ/VAMP, звезда реакции, Эмограмма |
 | `docs/rules/interviews.md` | беседа: аудио, стенограмма, микрофон |
 | `docs/rules/neuromusic.md`, `docs/rules/spatial-audio.md` | «Нейромузыка», пространственная обработка |
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, «UI не запускает обработку» |

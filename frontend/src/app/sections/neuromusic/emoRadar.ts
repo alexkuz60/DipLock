@@ -44,6 +44,26 @@ export function raysDbRange(
   })
 }
 
+/**
+ * Кадры с лучами в другом **динамическом диапазоне** (одно место применения
+ * `raysDbRange` для звезды `RadialChart.tsx` и «Эмограммы» `emolab/Emogram.tsx`):
+ * окно `[dbFloor … 0]` дБ контракта переносится в окно `[−dbRangeDb … 0]` дБ.
+ * Шкала контракта (`dbFloor >= 0`, не число) либо не заданный/равный порог —
+ * те же кадры без копий.
+ */
+export function framesDbRange(
+  frames: readonly AudioEmoFrame[],
+  dbFloor: number,
+  dbRangeDb: number,
+): readonly AudioEmoFrame[] {
+  if (!Number.isFinite(dbFloor) || dbFloor >= 0) return frames
+  if (!(dbRangeDb > 0) || dbRangeDb === Math.abs(dbFloor)) return frames
+  return frames.map((frame) => ({
+    ...frame,
+    rays: raysDbRange(frame.rays, dbFloor, -dbRangeDb),
+  }))
+}
+
 /** Секунд на кадр: `hop_samples / fs_audio` (32000/48000 = 2/3 с). */
 export function hopSeconds(hopSamples: number, fsAudio: number): number {
   if (!(hopSamples > 0) || !(fsAudio > 0)) return 0

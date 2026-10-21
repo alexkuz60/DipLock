@@ -10,6 +10,7 @@ import {
   dominantPoint,
   pointAt,
   randomRayPercents,
+  sectorIndexOf,
   segmentBoundaries,
   starPolygon,
   tempoStarPolygon,
@@ -290,5 +291,17 @@ describe('radialChart — темп-коррекция (09.10.2026)', () => {
     // Без tempo — прежняя формула (аддитивность параметра).
     const [plain] = dominantCloud([{ rays }], 90, center)
     expect(plain?.x).toBeCloseTo(expected.x, 9)
+  })
+
+  it('sectorIndexOf: сектор угла — от SEGMENT_START против часовой, с шиворот', () => {
+    expect(sectorIndexOf(SEGMENT_START)).toBe(0)
+    expect(sectorIndexOf(SEGMENT_START + SEGMENT_STEP - 1e-9)).toBe(0)
+    expect(sectorIndexOf(SEGMENT_START + SEGMENT_STEP)).toBe(1)
+    expect(sectorIndexOf(SEGMENT_START + 6.5 * SEGMENT_STEP)).toBe(6)
+    // Шов круга: угол за 2π и отрицательный нормализуются в сектор 6/0.
+    expect(sectorIndexOf(SEGMENT_START + 2 * Math.PI - 1e-9)).toBe(6)
+    expect(sectorIndexOf(SEGMENT_START - 1e-9)).toBe(6)
+    expect(sectorIndexOf(SEGMENT_START + 2 * Math.PI)).toBe(0)
+    expect(sectorIndexOf(Number.NaN)).toBe(0)
   })
 })

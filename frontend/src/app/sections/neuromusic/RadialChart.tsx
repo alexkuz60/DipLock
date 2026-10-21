@@ -45,10 +45,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AudioEmo } from '@/shared/api/types'
-import { bandColor } from '@/shared/lib/bandColors'
 import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
-import { BAND_HZ, BAND_ORDER } from './bandLabels'
-import { hopSeconds, interpolatedRays, raysDbRange } from './emoRadar'
+import { hopSeconds, interpolatedRays, framesDbRange } from './emoRadar'
 import { frameRotations, interpolatedRotation } from './keyRotation'
 import {
   frameTempos,
@@ -57,6 +55,7 @@ import {
 } from './tempoCorrection'
 import {
   GRID_FRACTIONS,
+  SECTOR_COLORS,
   SEGMENT_STEP,
   dominantCloud,
   dominantPoint,
@@ -90,16 +89,6 @@ const CLOUD_RING_STROKE_PX = 1
  * тот же приём, что у точки доминанты (`DOMINANT_DOT_PX`).
  */
 const VERTEX_DOT_PX = 10
-/**
- * Цвета секторов 1…7 графика-радара — **гамма базовых полос спектра
- * «Диполей»** (`shared/lib/bandColors.ts`): δ красный, δ/θ оранжевый,
- * θ жёлтый, α зелёный, β циан, γ голубой, γ-high розово-фиолетовый.
- * Луч k несёт полосу `BAND_ORDER[k]` (δ…γ-high), поэтому цвет дуги сектора
- * k+1 и круга вершины k — один и тот же адрес полосы на фигуре.
- */
-const SECTOR_COLORS: readonly string[] = BAND_ORDER.map((key) =>
-  bandColor(BAND_HZ[key] ?? [0.5, 2]),
-)
 
 export type RadialChartProps = {
   /** Кадры «Эмо» (null/undefined — фоллбэк-рандомизатор до загрузки). */
@@ -141,16 +130,10 @@ export function RadialChart({
   // (`db_floor`) в окно [−dbRangeDb … 0] дБ одним местом — полигоны, облако
   // и анимация ниже читают уже перенесённые проценты. Шкала контракта либо
   // не заданный диапазон — кадры без изменений (та же ссылка, без копий).
-  const scaledFrames = useMemo(() => {
-    if (!frames) return null
-    const floor = Number(emo?.db_floor)
-    if (!Number.isFinite(floor) || floor >= 0) return frames
-    if (!(dbRangeDb > 0) || dbRangeDb === Math.abs(floor)) return frames
-    return frames.map((frame) => ({
-      ...frame,
-      rays: raysDbRange(frame.rays, floor, -dbRangeDb),
-    }))
-  }, [frames, emo, dbRangeDb])
+  const scaledFrames = useMemo(
+    () => (frames ? framesDbRange(frames, Number(emo?.db_floor), dbRangeDb) : null),
+    [frames, emo, dbRangeDb],
+  )
   // Углы вращения кадров — из тональности микса (key_track; без трека —
   // нули, звезда без поворота). Статика: меняется только с кадрами.
   const rotations = useMemo(

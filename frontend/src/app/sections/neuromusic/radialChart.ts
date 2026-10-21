@@ -8,6 +8,8 @@
  * `radialChart.test.ts`, рисует `RadialChart.tsx`.
  */
 
+import { bandColor } from '@/shared/lib/bandColors'
+import { BAND_HZ, BAND_ORDER } from './bandLabels'
 import { tempoCorrectedRays } from './tempoCorrection'
 
 /** Число сегментов = число полос партитуры (`BAND_ORDER` из `bandLabels.ts`). */
@@ -29,6 +31,32 @@ export const SEGMENT_STEP = (2 * Math.PI) / RADIAL_SEGMENTS
  */
 export function segmentBoundaries(): number[] {
   return Array.from({ length: RADIAL_SEGMENTS }, (_, index) => SEGMENT_START + index * SEGMENT_STEP)
+}
+
+/**
+ * Цвета секторов 1…7 графика-радара — **гамма базовых полос спектра
+ * «Диполей»** (`shared/lib/bandColors.ts`): δ красный, δ/θ оранжевый,
+ * θ жёлтый, α зелёный, β циан, γ голубой, γ-high розово-фиолетовый.
+ * Луч k несёт полосу `BAND_ORDER[k]` (δ…γ-high), поэтому цвет дуги сектора
+ * k+1 и круга вершины k — один и тот же адрес полосы на фигуре. Общий
+ * источник для `RadialChart.tsx` (дуги/круги вершин) и «Эмограммы»
+ * (`emolab/Emogram.tsx`: цвет ступени «Динамики Эмо» = цвет сектора угла).
+ */
+export const SECTOR_COLORS: readonly string[] = BAND_ORDER.map((key) =>
+  bandColor(BAND_HZ[key] ?? [0.5, 2]),
+)
+
+/**
+ * Индекс сектора 0…`RADIAL_SEGMENTS`−1, в котором лежит угол `angleRad`:
+ * отсчёт от `SEGMENT_START` (начало сектора 1) против часовой на полный
+ * круг 2π, ширина сектора — `SEGMENT_STEP`. Угол за кругом (и отрицательный)
+ * нормализуется; нечисловой — сектор 0.
+ */
+export function sectorIndexOf(angleRad: number): number {
+  if (!Number.isFinite(angleRad)) return 0
+  const full = 2 * Math.PI
+  const relative = (((angleRad - SEGMENT_START) % full) + full) % full
+  return Math.min(RADIAL_SEGMENTS - 1, Math.floor(relative / SEGMENT_STEP))
 }
 
 export type RadialPoint = {

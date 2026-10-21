@@ -13,18 +13,32 @@
  * «Диполей» на дугах секторов/вершинах (`bandColors`), динамический диапазон
  * шкалы лучей (`dbRangeDb` панели «Опции») и выкл/вкл значений темпа при
  * расчёте лучей (`tempoRays`); «Нейромузыка» рисует радар прежним (дефолты
- * пропов — её поведение).
+ * пропов — её поведение). Под радаром — «Эмограмма» (`Emogram.tsx`): лучи
+ * звезды, развернутые по шкале времени (столбики «Экспрессии Эмо» и ступени
+ * «Динамики Эмо», шкала Y «Эмо» из 14 эмоций + курсор позиции плеера).
  *
  * Задел на будущее: собранные из аудио данные сравниваются с записанной
  * ЭЭГ-сессией прослушивания этого аудио (отдельная задача; шаг 2 — моно
  * 32000 Гц, кадр звезды = 1 с, VAMP-карты на моно-файле — `docs/rules/emolab.md`).
  */
 import { Smile } from 'lucide-react'
-import { useEmoLab } from '@/shared/state/emolab'
+import { useEmoLab, type EmoVizTab } from '@/shared/state/emolab'
 import { Placeholder } from '@/shared/ui/Placeholder'
+import { SegmentedControl, type SegmentedOption } from '@/shared/ui/SegmentedControl'
 import { EmoCounters } from '../neuromusic/EmoCounters'
 import { RadialChart } from '../neuromusic/RadialChart'
+import { Emogram } from './Emogram'
 import { EmoLabTracker } from './EmoLabTracker'
+
+/**
+ * Табы секции «Визуализация»: каждый график — свой таб, чтобы звезда-полигон
+ * не мельчал под вторым графиком; новые аналитические графики добавляются
+ * сюда же (постановка владельца 21.10.2026).
+ */
+const VIZ_TABS: SegmentedOption<EmoVizTab>[] = [
+  { value: 'star', label: 'Звезда', title: 'Звезда-полигон «Эмо»: лучи, облако и суммарная доминанта' },
+  { value: 'emogram', label: 'Эмограмма', title: 'Лучи звезды по шкале времени: экспрессия и динамика эмо' },
+]
 
 export function EmoLabSection() {
   const filename = useEmoLab((state) => state.filename)
@@ -34,6 +48,8 @@ export function EmoLabSection() {
   const emo = useEmoLab((state) => state.emo)
   const dbRangeDb = useEmoLab((state) => state.dbRangeDb)
   const tempoRays = useEmoLab((state) => state.tempoRays)
+  const vizTab = useEmoLab((state) => state.vizTab)
+  const setVizTab = useEmoLab((state) => state.setVizTab)
 
   if (!filename) {
     return (
@@ -102,23 +118,37 @@ export function EmoLabSection() {
         <EmoLabTracker emo={emo} />
       </section>
 
-      {/* Визуализация под трекером: звезда-полигон «Эмо» (кадры ФФТ + вращение
-          по аккордам + темп-коррекция лучей) и пиули «Аккорд»/«Темп» —
-          компоненты «Нейромузыки» (пропы «ЕмоЛаб»: гамма полос на дугах
-          секторов/вершинах, динамический диапазон и чекбокс темпа). Секция
-          растягивается на весь остаток рабочей области, картинка вписывается
-          по высоте. */}
+      {/* Визуализация под трекером: графики разделены по табам («Звезда» /
+          «Эмограмма» / дальше), каждый занимает всю высоту секции — звезда
+          не мельчает под вторым графиком. «Звезда» — звезда-полигон «Эмо»
+          (кадры ФФТ + вращение по аккордам + темп-коррекция лучей) и пиули
+          «Аккорд»/«Темп» — компоненты «Нейромузыки» (пропы «ЕмоЛаб»: гамма
+          полос на дугах секторов/вершинах, динамический диапазон и чекбокс
+          темпа). «Эмограмма» — лучи звезды по шкале времени (столбики
+          «Экспрессии Эмо» и ступени «Динамики Эмо» + курсор позиции плеера).
+          Активный таб живёт в сторе `emolab.ts` (переживает уход из раздела). */}
       <section
         aria-label="Визуализация"
         data-testid="emolab-visualization"
-        className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-bg-2 p-2"
+        className="flex min-h-0 flex-1 flex-col gap-2 rounded-xl border border-border bg-bg-2 p-2"
       >
-        <div className="flex h-full min-h-0">
-          <div className="min-w-0 flex-1">
-            <RadialChart emo={emo} dbRangeDb={dbRangeDb} tempoRays={tempoRays} bandColors />
+        <SegmentedControl
+          label="График"
+          layout="inline"
+          value={vizTab}
+          onChange={setVizTab}
+          options={VIZ_TABS}
+        />
+        {vizTab === 'star' ? (
+          <div className="flex min-h-0 flex-1">
+            <div className="min-w-0 flex-1">
+              <RadialChart emo={emo} dbRangeDb={dbRangeDb} tempoRays={tempoRays} bandColors />
+            </div>
+            <EmoCounters emo={emo} />
           </div>
-          <EmoCounters emo={emo} />
-        </div>
+        ) : (
+          <Emogram emo={emo} dbRangeDb={dbRangeDb} tempoRays={tempoRays} />
+        )}
       </section>
     </div>
   )

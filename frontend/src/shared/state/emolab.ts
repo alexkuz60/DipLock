@@ -24,6 +24,13 @@ import { createRunToken, JOB_POLL_MS } from '@/shared/lib/jobPolling'
 const analysisToken = createRunToken()
 
 /**
+ * Таб секции «Визуализация» (шаг 4, «Эмограмма»): графики разделены по табам,
+ * чтобы звезда-полигон не мельчал под вторым графиком; позже тут же появятся
+ * новые аналитические графики.
+ */
+export type EmoVizTab = 'star' | 'emogram'
+
+/**
  * Динамический диапазон шкалы лучей звезды по умолчанию, дБ — окно
  * `[−60 … 0]` совпадает со шкалой контракта (`db_floor` кадров «Эмо»).
  */
@@ -66,6 +73,8 @@ export type EmoLabState = {
   dbRangeDb: number
   /** Значения темпа участвуют в расчёте лучей звезды (темп-коррекция) */
   tempoRays: boolean
+  /** Активный таб секции «Визуализация» (звезда / «Эмограмма» / дальше) */
+  vizTab: EmoVizTab
 
   /** Открыть внешний аудиотрек (wav/mp3): запуск анализа на сервере */
   openFile: (file: File) => Promise<void>
@@ -73,6 +82,8 @@ export type EmoLabState = {
   setDbRangeDb: (value: number) => void
   /** Вкл/выкл значений темпа при расчёте лучей звезды («Опции раздела») */
   setTempoRays: (value: boolean) => void
+  /** Смена таба секции «Визуализация» */
+  setVizTab: (value: EmoVizTab) => void
   /** Сброс раздела (смена трека/уход): отмена поллинга, освобождение blob */
   reset: () => void
 }
@@ -89,6 +100,7 @@ export const useEmoLab = create<EmoLabState>()((set, get) => ({
   audioUrl: null,
   dbRangeDb: EMO_DB_RANGE_DEFAULT,
   tempoRays: true,
+  vizTab: 'star',
 
   setDbRangeDb: (value) => {
     set({ dbRangeDb: Number.isFinite(value) && value > 0 ? value : EMO_DB_RANGE_DEFAULT })
@@ -96,6 +108,10 @@ export const useEmoLab = create<EmoLabState>()((set, get) => ({
 
   setTempoRays: (value) => {
     set({ tempoRays: Boolean(value) })
+  },
+
+  setVizTab: (value) => {
+    set({ vizTab: value === 'emogram' ? 'emogram' : 'star' })
   },
 
   openFile: async (file) => {
@@ -165,6 +181,7 @@ export const useEmoLab = create<EmoLabState>()((set, get) => ({
       audioUrl: null,
       dbRangeDb: EMO_DB_RANGE_DEFAULT,
       tempoRays: true,
+      vizTab: 'star',
     })
   },
 }))
