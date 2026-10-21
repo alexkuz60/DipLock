@@ -10,13 +10,14 @@
   кадр звезды длится ровно **1 с** (уточнение владельца 20.10.2026: кадр =
   32000 сэмплов = 1 сек);
 * VAMP-плагины Соник Аннотатора — ``services/audio_render/vamp_analysis``:
-  карта темпа (Tempo and Beat Tracker) и карта аккордов (Key Detector;
-  «аккорд» — термин UI для сегмента тональности).
+  карта темпа (Tempo and Beat Tracker), карта аккордов (Key Detector;
+  «аккорд» — термин UI для сегмента тональности) и сегментация трека
+  (Segmenter — визуально-слуховой контроль, в расчётах не участвует).
 
-Контракт payload — тот же ``emo.json`` (``AudioEmoOut``, v4): кадры +
-``key_track`` + ``tempo_track``, поэтому фронтенд-звезда-полигон
-«Нейромузыки» (вращение по аккордам, темп-коррекция лучей) переиспользуется
-без правок.
+Контракт payload — тот же ``emo.json`` (``AudioEmoOut``, v5): кадры +
+``key_track`` + ``tempo_track`` + ``segment_track``, поэтому фронтенд-звезда-
+полигон «Нейромузыки» (вращение по аккордам, темп-коррекция лучей)
+переиспользуется без правок.
 
 Паттерн — как у рендера (``audio_render/render.py``): in-memory статус для
 поллинга, результат пишется в дисковый кэш ``emolab/{track_id}/`` (манифест —
@@ -111,6 +112,18 @@ def _state_from_manifest(track_id: str, manifest: dict[str, Any]) -> TrackState:
     )
 
 
+def _emo_cache_valid(cfg: Settings, track_id: str) -> bool:
+    """Кэш-хит по делу: в кэше лежит ``emo.json`` текущей версии контракта.
+
+    Файлы кэшей переживают перезапуск и смену контракта, а ``parse_emo``
+    отвергает старые версии (кадры v4 при контракте v5) — кэш с устаревшим
+    либо битым ``emo.json`` считается промахом и честно пересчитывается
+    (иначе трек навсегда остался бы без данных нового контракта).
+    """
+    blob = store.read_artifact(cfg, track_id, store.EMO_NAME)
+    return blob is not None and emo_radar.parse_emo(blob) is not None
+
+
 def start_analysis(
     blob: bytes, filename: str, cfg: Settings | None = None,
 ) -> tuple[str, bool]:
@@ -120,18 +133,26 @@ def start_analysis(
     повторное открытие того же трека возвращает тот же id и не пересчитывает.
     Порядок — как у рендера: кэш памяти → кэш диска → запуск фонового потока.
     Уже идущий анализ того же файла идемпотентен: второй поток не стартует.
+    Устаревший кэш (нет ``emo.json`` текущей версии контракта, см.
+    :func:`_emo_cache_valid`) — промах: тот же файл пересчитывается заново.
     """
     cfg = cfg or settings
     track_id = hashlib.sha256(blob).hexdigest()[: store.TRACK_ID_LEN]
+    fresh = _emo_cache_valid(cfg, track_id)
     with _LOCK:
         _sweep_locked(time.time())
         state = _TRACKS.get(track_id)
-        if state is not None:
+        if state is not None and (state.status != "succeeded" or fresh):
             return track_id, state.status == "succeeded"
+        if state is not None:
+            # Устаревший кэш-хит в памяти (восстановлен из манифеста прошлой
+            # версии контракта): убираем, ниже стартует честный пересчёт.
+            _TRACKS.pop(track_id, None)
     manifest = store.load_manifest(cfg, track_id)
+    cached_hit = manifest is not None and fresh
     state = (
         _state_from_manifest(track_id, manifest)
-        if manifest is not None
+        if cached_hit and manifest is not None
         else TrackState(track_id=track_id, filename=filename)
     )
     with _LOCK:
@@ -139,7 +160,7 @@ def start_analysis(
         if again is not None:  # параллельный запуск того же файла — не плодим
             return track_id, again.status == "succeeded"
         _TRACKS[track_id] = state
-    if manifest is not None:
+    if cached_hit:
         return track_id, True
     thread = threading.Thread(
         target=_run_analysis,
@@ -164,12 +185,15 @@ def _run_analysis(state: TrackState, blob: bytes, cfg: Settings) -> None:
             )
             state.stage, state.pct = "Карта темпа (VAMP)", 0.45
             tempo_track = vamp_analysis.tempo_track_from_wav(wav_blob, cfg)
+            state.stage, state.pct = "Сегментер (VAMP)", 0.55
+            segment_track = vamp_analysis.segment_track_from_wav(wav_blob, cfg)
             state.stage, state.pct = "ФФТ-кадры «Эмо»", 0.65
             payload = emo_radar.emo_frames(
                 audio.data,
                 fs=track_input.ANALYSIS_FS,
                 key_track=key_track,
                 tempo_track=tempo_track,
+                segment_track=segment_track,
             )
             state.stage, state.pct = "Сохранение", 0.9
             files = {
@@ -199,7 +223,8 @@ def _run_analysis(state: TrackState, blob: bytes, cfg: Settings) -> None:
             state.message = (
                 f"Кадров: {payload['frame_count']}; "
                 f"аккорды: {'есть' if key_track else 'нет'}; "
-                f"темп: {'есть' if tempo_track else 'нет'}"
+                f"темп: {'есть' if tempo_track else 'нет'}; "
+                f"сегменты: {len(segment_track) if segment_track else 'нет'}"
             )
             state.finished_at = time.time()
         except Exception as exc:  # статус несёт ошибку клиенту, поток не падает

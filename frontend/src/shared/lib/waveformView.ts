@@ -8,7 +8,7 @@
  * чистая (без Tone и Web Audio) — юнит-тестируется отдельно; отрисовка терпит
  * `getContext` без 2D (jsdom) — просто ничего не рисует.
  */
-import type { AudioKeySegment, AudioTempoSegment } from '@/shared/api/types'
+import type { AudioEmoSegment, AudioKeySegment, AudioTempoSegment } from '@/shared/api/types'
 
 
 /** Варианты горизонтального зума: во сколько раз окно уже всего файла. */
@@ -180,6 +180,8 @@ export type TrackerTheme = {
   chordLine: string
   /** Ступенчатая линия темпа (аннотации Соник Аннотатора) */
   tempoLine: string
+  /** Вертикали сегментов трека с метками имён (VAMP Segmenter, «ЕмоЛаб») */
+  segmentLine: string
 }
 
 export function trackerTheme(): TrackerTheme {
@@ -200,6 +202,7 @@ export function trackerTheme(): TrackerTheme {
     playhead: color('--color-fg-0', '#e8eef6'),
     chordLine: color('--color-nm-chord', '#7ee0ff'),
     tempoLine: color('--color-nm-tempo', '#ffb454'),
+    segmentLine: color('--color-nm-segment', '#ff8ce6'),
   }
 }
 
@@ -391,6 +394,54 @@ export function drawKeyLines(
     ctx.lineTo(x, height)
   }
   ctx.stroke()
+}
+
+/**
+ * Минимальная дистанция между метками имён сегментов, px: ближе метка не
+ * рисуется (линия остаётся) — иначе на ×1 плотные сегменты сливают подписи.
+ */
+export const SEGMENT_LABEL_MIN_PX = 14
+
+/**
+ * Вертикальные линии сегментов трека (VAMP Segmenter, «ЕмоЛаб»): по одной на
+ * начало каждого сегмента (`t_sec`), на всю высоту волны, с подписью имени
+ * сегмента (A, B, C…) у верхней кромки (`theme.segmentLine`). В отличие от
+ * `drawKeyLines` сегмент в 0.0 тоже рисуется — это начало первого сегмента
+ * (его имя «A»), а не только «край файла». Подписи разреживаются по
+ * `SEGMENT_LABEL_MIN_PX`; линии вне видимого окна пропускаются;
+ * `segment_track` пуст/`null` — ничего не рисуется. Данные — только для
+ * визуально-слухового контроля (в расчётах волны/лучей не участвуют).
+ */
+export function drawSegmentLines(
+  ctx: CanvasRenderingContext2D,
+  segmentTrack: readonly AudioEmoSegment[] | null | undefined,
+  view: ViewState,
+  width: number,
+  height: number,
+  theme: TrackerTheme,
+): void {
+  if (!segmentTrack || segmentTrack.length === 0 || view.end <= view.start || !(width > 0)) return
+  const labels: { x: number; name: string }[] = []
+  let lastLabelX = Number.NEGATIVE_INFINITY
+  ctx.lineWidth = 1
+  ctx.strokeStyle = theme.segmentLine
+  ctx.beginPath()
+  for (const segment of segmentTrack) {
+    if (!Number.isFinite(segment.t_sec) || segment.t_sec < 0) continue
+    const x = Math.round(timeToX(segment.t_sec, view, width)) + 0.5
+    if (x < 0 || x > width) continue
+    ctx.moveTo(x, 0)
+    ctx.lineTo(x, height)
+    if (x >= lastLabelX + SEGMENT_LABEL_MIN_PX) {
+      lastLabelX = x
+      labels.push({ x: x + 2, name: segment.name })
+    }
+  }
+  ctx.stroke()
+  ctx.fillStyle = theme.segmentLine
+  ctx.font = '11px sans-serif'
+  ctx.textBaseline = 'top'
+  for (const label of labels) ctx.fillText(label.name, label.x, 2)
 }
 
 /**

@@ -107,6 +107,13 @@ export type AudioKeySegment = Schemas['AudioKeySegment']
 /** Оценка темпа микса (VAMP Tempo and Beat Tracker, `tempo_track` кадров «Эмо») */
 export type AudioTempoSegment = Schemas['AudioTempoSegment']
 
+/**
+ * Сегмент трека (VAMP Segmenter, `segment_track` кадров «Эмо», «ЕмоЛаб»):
+ * начало однородного сегмента + его имя (A, B, C… — метка плагина по типу).
+ * Данные визуально-слухового контроля анализа, в расчётах пока не участвуют.
+ */
+export type AudioEmoSegment = Schemas['AudioEmoSegment']
+
 /** «ЕмоЛаб» (шаг 1): анализ внешнего аудиотрека — старт (202) и статус поллинга */
 export type EmoAnalyzeStart = Schemas['EmoAnalyzeOut']
 export type EmoTrackStatus = Schemas['EmoTrackStatus']

@@ -87,9 +87,9 @@ const playerMock = (
   }
 ).__player
 
-/** Кадры «Эмо» с картами Соник Аннотатора (контракт GET …/emo, v4). */
+/** Кадры «Эмо» с картами Соник Аннотатора (контракт GET …/emo, v5). */
 const EMO_PAYLOAD: AudioEmo = {
-  schema_version: 4,
+  schema_version: 5,
   fs_audio: 32000,
   fft_size: 32768,
   hop_samples: 32000,
@@ -110,6 +110,11 @@ const EMO_PAYLOAD: AudioEmo = {
   key_source: 'vamp:qm-vamp-plugins:qm-keydetector:key',
   tempo_track: [{ t_sec: 0, bpm: 120 }],
   tempo_source: 'vamp:qm-vamp-plugins:qm-tempotracker:tempo',
+  segment_track: [
+    { t_sec: 0, name: 'A', segment_type: 1 },
+    { t_sec: 3.5, name: 'B', segment_type: 2 },
+  ],
+  segment_source: 'vamp:qm-vamp-plugins:qm-segmenter:segmentation',
 }
 
 const STATUS_DONE: EmoTrackStatus = {
@@ -331,11 +336,12 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     pickFile()
     await waitFor(() => expect(screen.getAllByText('Готово').length).toBeGreaterThanOrEqual(2))
 
-    // Строки карт VAMP остаются; под картой аккордов — таблица сегментов.
+    // Строки карт VAMP остаются; под картой аккордов — таблица аккордов,
+    // ниже — таблица сегментов (у обеих колонка «Время»).
     expect(screen.getByText('Карта аккордов')).toBeInTheDocument()
     expect(screen.getAllByText('VAMP Key Detector').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('Карта темпа')).toBeInTheDocument()
-    expect(screen.getByText('Время')).toBeInTheDocument()
+    expect(screen.getAllByText('Время').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Тип (минор/мажор)')).toBeInTheDocument()
     // Аккорд — метка QM без слова лада («C major» → «C»), тип — по коду.
     expect(screen.getAllByText('C')).toHaveLength(2)
@@ -357,6 +363,31 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     ]) {
       expect(screen.queryByText(label)).not.toBeInTheDocument()
     }
+  })
+
+  it('панель: таблица сегментов (время, имя сегмента) — визуально-слуховой контроль', async () => {
+    mockApi()
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getAllByText('Готово').length).toBeGreaterThanOrEqual(2))
+
+    // Строка «Сегментер» и таблица сегментов: время, имя сегмента (A, B, …).
+    expect(screen.getByText('Сегментер')).toBeInTheDocument()
+    expect(screen.getAllByText('VAMP Segmenter').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('Имя сегмента')).toBeInTheDocument()
+    expect(screen.getAllByText('A').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('B').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('панель: без данных Segmenter — заглушка «Нет данных» вместо таблицы', async () => {
+    mockApi({ emo: { ...EMO_PAYLOAD, segment_track: null, segment_source: null } })
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getAllByText('Готово').length).toBeGreaterThanOrEqual(2))
+    expect(
+      screen.getByText('Нет данных — сегменты не рассчитаны (VAMP Segmenter недоступен)'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Имя сегмента')).not.toBeInTheDocument()
   })
 
   it('динамический диапазон: −40…0 растягивает лучи, −96…0 сжимает шкалу', async () => {

@@ -7600,7 +7600,7 @@
           "ЕмоЛаб"
         ],
         "summary": "Кадры радара «Эмо» аудиотрека: 7 лучей + карты темпа/аккордов",
-        "description": "Кадры анимации звезды-полигона (контракт рендера «Нейромузыки», v4).\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с; лучи — децибельная шкала громкости (``db_relative``,\n``db_floor`` −60 дБ). ``key_track`` — карта аккордов (VAMP Key Detector)\nдля вращения звезды, ``tempo_track`` — карта темпа (VAMP Tempo and Beat\nTracker) для темп-коррекции лучей; ``null`` — инструмент недоступен\n(best-effort, вращение/коррекция в UI нулевые).\n\n404 — трек не найден, 409 — анализ ещё идёт либо не удался.",
+        "description": "Кадры анимации звезды-полигона (контракт рендера «Нейромузыки», v5).\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с; лучи — децибельная шкала громкости (``db_relative``,\n``db_floor`` −60 дБ). ``key_track`` — карта аккордов (VAMP Key Detector)\nдля вращения звезды, ``tempo_track`` — карта темпа (VAMP Tempo and Beat\nTracker) для темп-коррекции лучей; ``segment_track`` — сегменты трека\n(VAMP Segmenter) для визуально-слухового контроля (таблица «Опций» и\nлинии с метками имён A, B, C…); ``null`` — инструмент недоступен\n(best-effort, вращение/коррекция в UI нулевые, сегментов нет).\n\n404 — трек не найден, 409 — анализ ещё идёт либо не удался.",
         "operationId": "emolab_track_emo_api_v1_emolab__track_id__emo_get",
         "parameters": [
           {
@@ -8959,8 +8959,8 @@
           "schema_version": {
             "type": "integer",
             "title": "Schema Version",
-            "description": "Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, 4 — + tempo_track)",
-            "default": 4
+            "description": "Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, 4 — + tempo_track, 5 — + segment_track)",
+            "default": 5
           },
           "fs_audio": {
             "type": "integer",
@@ -9070,6 +9070,33 @@
             ],
             "title": "Tempo Source",
             "description": "Идентификатор источника tempo_track (vamp:qm-vamp-plugins:qm-tempotracker:tempo)"
+          },
+          "segment_track": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AudioEmoSegment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment Track",
+            "description": "Сегменты трека (VAMP Segmenter) для визуально-слухового контроля анализа: таблица сегментов в «Опциях», вертикали с метками имён (A, B, C…) поверх волны плеера и на «Эмограмме»; в расчётах пока не участвуют; null — инструмент недоступен"
+          },
+          "segment_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Segment Source",
+            "description": "Идентификатор источника segment_track (vamp:qm-vamp-plugins:qm-segmenter:segmentation)"
           }
         },
         "type": "object",
@@ -9086,7 +9113,37 @@
           "frames"
         ],
         "title": "AudioEmoOut",
-        "description": "``GET /audio/render/{id}/emo``: кадры анимации радара «Эмо».\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с — сетка синхронизации анимации с плеером и (в дальнейшем)\nдипольными эпохами. Лучи — на **децибельной шкале громкости**\n(``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта\n``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из\ndB-лучей **после вращения полигона**. ``schema_version`` 3 (09.10.2026):\n``key_track`` — сегменты тональности микса (VAMP Key Detector) для\nвращения звезды. ``schema_version`` 4 (09.10.2026): ``tempo_track`` —\nоценки темпа микса (VAMP Tempo and Beat Tracker) для темп-коррекции\nрадара. Данные — из ``emo.json`` кэша рендера; рендеры до среза\n«Эмо» добиваются расчётом из ``master.wav``."
+        "description": "``GET /audio/render/{id}/emo``: кадры анимации радара «Эмо».\n\nОкно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔\nвремя k · 2/3 с — сетка синхронизации анимации с плеером и (в дальнейшем)\nдипольными эпохами. Лучи — на **децибельной шкале громкости**\n(``schema_version`` 2): ``db = 20·log10(raw/global_max)``, карта\n``[db_floor … 0]`` дБ → ``[0 … 100]`` % R; доминанта считается в UI из\ndB-лучей **после вращения полигона**. ``schema_version`` 3 (09.10.2026):\n``key_track`` — сегменты тональности микса (VAMP Key Detector) для\nвращения звезды. ``schema_version`` 4 (09.10.2026): ``tempo_track`` —\nоценки темпа микса (VAMP Tempo and Beat Tracker) для темп-коррекции\nрадара. ``schema_version`` 5 (21.10.2026): ``segment_track`` — сегменты\nтрека (VAMP Segmenter, «ЕмоЛаб») для визуально-слухового контроля (в\nрасчётах не участвуют). Данные — из ``emo.json`` кэша рендера; рендеры\nдо среза «Эмо» добиваются расчётом из ``master.wav``."
+      },
+      "AudioEmoSegment": {
+        "properties": {
+          "t_sec": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "T Sec",
+            "description": "Начало сегмента, с"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Имя сегмента (A, B, C… — метка VAMP Segmenter)"
+          },
+          "segment_type": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "Segment Type",
+            "description": "Тип сегмента QM Segmenter: 1…12 (при nSegmentTypes = 8 — 1…8)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "t_sec",
+          "name",
+          "segment_type"
+        ],
+        "title": "AudioEmoSegment",
+        "description": "Сегмент трека (VAMP Segmenter, ``segment_track`` кадров «Эмо», «ЕмоЛаб»).\n\nНачало однородного сегмента аудиотрека: ``segment_type`` — тип сегмента\n(целое 1…12, при параметре `nSegmentTypes` = 8 — 1…8), ``name`` — имя\nсегмента (метка плагина A, B, … по типу: 1 → A, 2 → B, …). Данные для\nвизуально-слухового контроля анализа (таблица в «Опциях», вертикали с\nметками поверх волны и на «Эмограмме»); в расчётах пока не участвуют."
       },
       "AudioIrCatalogOut": {
         "properties": {

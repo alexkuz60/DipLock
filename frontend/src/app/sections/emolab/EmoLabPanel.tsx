@@ -4,14 +4,17 @@
  * **таблица аккордов** (время, аккорд, тип (минор/мажор) из `key_track` VAMP
  * Key Detector), параметр **«Динамический диапазон»** шкалы лучей звезды
  * (−96…0 / −60…0 / −40…0 дБ) и под строкой «Карта темпа» — чекбокс значений
- * темпа при расчёте лучей звезды. Прочие инфо-строки параметров (частота
- * моно-файла, окно FFT, сдвиг, лучи полигона, скорость плеера) убраны.
+ * темпа при расчёте лучей звезды; под строкой «Сегментер» — **таблица
+ * сегментов** (время, имя сегмента A, B, C… из `segment_track` VAMP
+ * Segmenter — визуально-слуховой контроль, в расчётах не участвует).
+ * Прочие инфо-строки параметров (частота моно-файла, окно FFT, сдвиг, лучи
+ * полигона, скорость плеера) убраны.
  *
  * Собственные опции раздела (набор маркеров аффективного фона, привязка к
  * стадиям препроцессинга) — отдельным срезом после уточнения постановки
  * (владелец, 20.10.2026).
  */
-import type { AudioKeySegment } from '@/shared/api/types'
+import type { AudioEmoSegment, AudioKeySegment } from '@/shared/api/types'
 import { formatTime } from '@/shared/lib/waveformView'
 import { useEmoLab } from '@/shared/state/emolab'
 import { Panel } from '@/shared/ui/Panel'
@@ -99,6 +102,42 @@ function ChordTable({ keyTrack }: { keyTrack: readonly AudioKeySegment[] | null 
   )
 }
 
+/** Таблица сегментов трека VAMP Segmenter: время, имя сегмента (A, B, C…). */
+function SegmentTable({ segmentTrack }: { segmentTrack: readonly AudioEmoSegment[] | null }) {
+  if (!segmentTrack || segmentTrack.length === 0) {
+    return (
+      <p className="ui-list-row py-1 text-sm text-fg-2">
+        Нет данных — сегменты не рассчитаны (VAMP Segmenter недоступен)
+      </p>
+    )
+  }
+  return (
+    <div className="mt-1 max-h-44 overflow-y-auto rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <caption className="sr-only">
+          Сегменты трека: время, имя сегмента (A, B, C…)
+        </caption>
+        <thead className="sticky top-0 bg-bg-2">
+          <tr className="text-fg-2">
+            <th className="px-2 py-1 text-left font-medium">Время</th>
+            <th className="px-2 py-1 text-left font-medium">Имя сегмента</th>
+          </tr>
+        </thead>
+        <tbody>
+          {segmentTrack.map((segment, index) => (
+            <tr key={`${segment.t_sec}-${index}`} className="border-t border-border">
+              <td className="px-2 py-1 tabular-nums text-fg-1">
+                {formatTime(segment.t_sec, true)}
+              </td>
+              <td className="px-2 py-1 text-fg-0">{segment.name}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 export function EmoLabPanel() {
   const filename = useEmoLab((state) => state.filename)
   const durationSec = useEmoLab((state) => state.durationSec)
@@ -157,6 +196,8 @@ export function EmoLabPanel() {
           onChange={setTempoRays}
           hint="Выкл — радиусы вершин без темп-коррекции значений VAMP"
         />
+        <InfoRow label="Сегментер" value="VAMP Segmenter" />
+        <SegmentTable segmentTrack={emo?.segment_track ?? null} />
         <p className="mt-2 text-xs text-fg-2">
           Опции раздела (окно анализа, набор маркеров аффективного фона, привязка к
           стадиям препроцессинга) появятся отдельным срезом.

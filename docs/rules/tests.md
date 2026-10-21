@@ -1620,3 +1620,35 @@ Vitest **+1** (обновлено **+4**): `EmoLabSection.test.tsx` **+1** — �
 эмограмма-тест переехал под таб); `emogram.test.ts`/`Emogram.test.tsx` —
 цвета столбиков δ `hsl(0…)`/γ-high `hsl(275…)` вместо акцента. Итог:
 pytest — **1114** (без изменений), Vitest — **1338** (121 файл).
+
+**21.10.2026, «ЕмоЛаб»: VAMP Segmenter — сегменты трека, шаг 5**
+(`docs/rules/emolab.md`): сегментация трека (nSegmentTypes = 8, Minimum
+segment duration = 2 с) для визуально-слухового контроля анализа — таблица
+«Время / Имя сегмента» в «Опциях» и вертикали с метками имён A, B, C… поверх
+волны плеера и на «Эмограмме» (в расчётах не участвуют); контракт `AudioEmoOut`
+**v5** (+ `segment_track`/`segment_source`, `AudioEmoSegment`), кэш анализов
+при смене версии контракта пересчитывается честно (`_emo_cache_valid`).
+
+pytest **+7**: `test_audio_vamp.py` **+6** — парсер CSV сегментера (реальный
+выхлоп `[файл,] начало, длительность, тип, "имя"`: времена/типы/имена A…,
+мусорные строки, пустая метка → буква по типу), запуск `sonic-annotator`
+(мок subprocess, в команде — `qm-segmenter-segmentation-32k.n3`), привязка
+`segment_track` к payload (+`segment_source`) и валидация `AudioEmoSegment`
+(тип вне 1…12 → `ValidationError`), живой прогон
+`test_segment_track_live_sonic_annotator` (моно 32 кГц из тонов/шума: ≥2
+сегментов, имена A…H, `t_sec` по возрастанию); `test_emolab.py` **+1** —
+`test_analysis_recomputes_stale_cache` (кэш с `emo.json` прошлой версии →
+промах и честный пересчёт); расширены `test_analysis_writes_cache_and_contract`
+(сегменты в контракте v5) и живой `test_live_vamp_chain_on_32k_mono`
+(сегментер в цепочке 32 кГц); `test_audio_emo.py` — `EMO_SCHEMA_VERSION`
+**5** (+ сегменты-`None` в контракте кадров).
+
+Vitest **+5**: `waveformView.test.ts` **+2** (`drawSegmentLines` — вертикали
+включая 0.0 цветом `segmentLine`, метки A/B с режущимся `SEGMENT_LABEL_MIN_PX`,
+сегмент вне окна — мимо; пустой/`null` `segment_track` — ничего не рисуется);
+`emolab/Emogram.test.tsx` **+1** (3 вертикали `segment-line` на всю высоту
+графика, x = `emoTimeX(t)`, метки `segment-label` A/B/C у верха);
+`emolab/EmoLabSection.test.tsx` **+2** (таблица сегментов в «Опциях» —
+строка «Сегментер», «Имя сегмента», имена A, B; без `segment_track` —
+заглушка «Нет данных»); моки кадров переведены на контракт v5. Итог:
+pytest — **1121**, Vitest — **1343** (121 файл).

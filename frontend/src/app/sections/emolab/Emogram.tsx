@@ -17,7 +17,11 @@
  *   35 % прозрачности — ступень «Динамики» читается поверх;
  * * **Динамика Эмо** (`emo-step`) — горизонтальные линии-ступени длиной 1 с
  *   (1 кадр анимации звезды) на высоте угла доминанты, цвет = цвет сектора
- *   радара этого угла (`radialChart.SECTOR_COLORS`).
+ *   радара этого угла (`radialChart.SECTOR_COLORS`);
+ * * **Сегменты трека** (`segment-line`/`segment-label`) — вертикали начала
+ *   каждого сегмента VAMP Segmenter с меткой имени (A, B, C…) у верха
+ *   (визуально-слуховой контроль «ЕмоЛаб», в расчётах не участвуют;
+ *   метки разреживаются по `SEGMENT_LABEL_MIN_PX`, как на волне плеера).
  *
  * Курсор позиции плеера (`playhead`) — вертикаль по `getActivePlayer().position`,
  * пишется императивно через ref в `rAF` (без ре-рендеров React, приём
@@ -28,7 +32,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AudioEmo } from '@/shared/api/types'
 import { timeTicks } from '@/shared/lib/eegView'
-import { formatTime } from '@/shared/lib/waveformView'
+import { SEGMENT_LABEL_MIN_PX, formatTime } from '@/shared/lib/waveformView'
 import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
 import { framesDbRange, hopSeconds } from '../neuromusic/emoRadar'
 import { frameRotations } from '../neuromusic/keyRotation'
@@ -130,6 +134,21 @@ export function Emogram({ emo = null, dbRangeDb = 0, tempoRays = true }: Emogram
     const last = frames?.[frames.length - 1]?.t_sec ?? 0
     return last + frameSec
   }, [emo, frames, frameSec])
+
+  // Сегменты трека (VAMP Segmenter, «ЕмоЛаб»): x-позиции вертикалей и меток
+  // имён A, B, C…; метки разреживаются по SEGMENT_LABEL_MIN_PX — та же
+  // механика, что `waveformView.drawSegmentLines` на волне плеера.
+  const segments = emo && Array.isArray(emo.segment_track) ? emo.segment_track : null
+  const segmentMarks = useMemo(() => {
+    if (!segments) return []
+    let lastLabelX = Number.NEGATIVE_INFINITY
+    return segments.map((segment) => {
+      const x = emoTimeX(segment.t_sec, durationSec, plotW)
+      const withLabel = x >= lastLabelX + SEGMENT_LABEL_MIN_PX
+      if (withLabel) lastLabelX = x
+      return { x, name: segment.name, withLabel }
+    })
+  }, [segments, durationSec, plotW])
 
   // Деления времени: круглые секунды (`eegView.timeTicks`), подписи — м:СС
   // трекера (`formatTime`), как у линейки волны.
@@ -283,6 +302,34 @@ export function Emogram({ emo = null, dbRangeDb = 0, tempoRays = true }: Emogram
             strokeWidth={2}
             vectorEffect="non-scaling-stroke"
           />
+        ))}
+        {/* 3. Сегменты трека (VAMP Segmenter, «ЕмоЛаб»): вертикали начала
+            каждого сегмента с меткой имени (A, B, C…) у верха — данные
+            визуально-слухового контроля, в расчётах не участвуют. */}
+        {segmentMarks.map((mark, index) => (
+          <g key={index}>
+            <line
+              data-part="segment-line"
+              x1={x0 + mark.x}
+              y1={y0}
+              x2={x0 + mark.x}
+              y2={y1}
+              stroke="var(--color-nm-segment)"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+            {mark.withLabel && (
+              <text
+                data-part="segment-label"
+                x={x0 + mark.x + 3}
+                y={y0 + 10}
+                fontSize={10}
+                fill="var(--color-nm-segment)"
+              >
+                {mark.name}
+              </text>
+            )}
+          </g>
         ))}
         {/* Курсор позиции плеера (верхний слой): rAF двигает через ref. */}
         <line

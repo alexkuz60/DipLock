@@ -1,10 +1,10 @@
-"""Тесты VAMP-анализа (Sonic Annotator): парсеры CSV Key Detector/Tempo и треки.
+"""Тесты VAMP-анализа (Sonic Annotator): парсеры CSV Key Detector/Tempo/Segmenter.
 
 Юнит — разбор CSV-таблиц плагинов (составные метки, мусорные строки), запуск
 ``sonic-annotator`` с моком ``subprocess`` (успех/нет бинаря/нет transform/
-падение/таймаут), привязка ``key_track``/``tempo_track`` к контракту кадров
-«Эмо» и валидация ``AudioEmoOut``; ``integration`` — живой прогон плагинов
-(бинарь в ``tools/``).
+падение/таймаут), привязка ``key_track``/``tempo_track``/``segment_track`` к
+контракту кадров «Эмо» и валидация ``AudioEmoOut``; ``integration`` — живой
+прогон плагинов (бинарь в ``tools/``).
 
 Юнит-часть **герметична**: реальный ``sonic-annotator`` не нужен — в CI его
 нет (GPL-бинарь не коммитится), бинарь/transform подставляются фиктивными
@@ -20,9 +20,9 @@ import pytest
 from pydantic import ValidationError
 
 from app.core.config import settings
-from app.schemas.audio import AudioEmoOut, AudioKeySegment, AudioTempoSegment
+from app.schemas.audio import AudioEmoOut, AudioEmoSegment, AudioKeySegment, AudioTempoSegment
 from app.services.audio_render import emo_radar, vamp_analysis
-from app.services.audio_render.vamp_analysis import KEY_SOURCE, TEMPO_SOURCE
+from app.services.audio_render.vamp_analysis import KEY_SOURCE, SEGMENTER_SOURCE, TEMPO_SOURCE
 
 # Выдержка реального вывода Key Detector (--csv-stdout): имя файла только в
 # первой строке, метка бывает составной («Eb / D# minor»).
@@ -304,6 +304,92 @@ def test_audio_emo_out_validates_tempo_track():
         AudioTempoSegment(t_sec=0.0, bpm=0.0)
 
 
+# --- юнит: парсер CSV Segmenter ------------------------------------------------
+
+# Выдержка реального вывода QM Segmenter (--csv-stdout): начало, длительность,
+# тип, имя (метка плагина A, B, … по типу); имя файла только в первой строке.
+SEGMENT_CSV = (
+    '"song.wav",0.000000000,6.000000000,1,"A"\n'
+    ',6.000000000,3.200000000,2,"B"\n'
+    ',9.200000000,2.400000000,3,"C"\n'
+    ',11.600000000,9.600000000,4,"D"\n'
+    ',21.200000000,5.000000000,5,"E"\n'
+    ',26.200000000,6.400000000,1,"A"\n'
+)
+
+
+def _segment_track() -> list[dict]:
+    """Контрольный segment_track для тестов привязки к контракту кадров."""
+    return [
+        {"t_sec": 0.0, "segment_type": 1, "name": "A"},
+        {"t_sec": 3.5, "segment_type": 2, "name": "B"},
+    ]
+
+
+def test_parse_segmenter_csv_segments():
+    """CSV → сегменты: начала/типы/имена (A, B, … — метки плагина по типу)."""
+    segments = vamp_analysis.parse_segmenter_csv(SEGMENT_CSV)
+    assert len(segments) == 6
+    assert segments[0] == {"t_sec": 0.0, "segment_type": 1, "name": "A"}
+    assert segments[1] == {"t_sec": 6.0, "segment_type": 2, "name": "B"}
+    assert segments[5] == {"t_sec": 26.2, "segment_type": 1, "name": "A"}
+    times = [seg["t_sec"] for seg in segments]
+    assert times == sorted(times)
+
+
+def test_parse_segmenter_csv_skips_garbage():
+    """Мусорные строки пропускаются, пустая метка достраивается буквой типа."""
+    text = (
+        '"f.wav",0.0,5.0,0,"X"\n'   # тип 0 — вне диапазона
+        ',1.0,5.0,13,"X"\n'         # тип 13 — вне диапазона
+        ',2.0,0.0,2,"B"\n'          # длительность 0 — не сегмент
+        ',3.0,-1.0,2,"B"\n'         # отрицательная длительность
+        ',4.0,xx,2,"B"\n'           # длительность не число
+        "just,a,b,c,d,e\n"          # время не число
+        "\n"                        # пустая строка
+        ',5.0,3.0,3,\n'             # пустая метка → буква по типу (C)
+    )
+    segments = vamp_analysis.parse_segmenter_csv(text)
+    assert segments == [{"t_sec": 5.0, "segment_type": 3, "name": "C"}]
+    assert vamp_analysis.parse_segmenter_csv("") == []
+
+
+def test_segment_track_from_wav_success(monkeypatch, tmp_path):
+    """Успех: идёт 32k-трансформ Segmenter, CSV разобран в segment_track."""
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, stdout=SEGMENT_CSV, stderr="")
+
+    _fake_toolchain(monkeypatch, tmp_path, vamp_analysis.SEGMENTER_TRANSFORM_NAME_32K)
+    monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
+    track = vamp_analysis.segment_track_from_wav(b"RIFF-fake")
+    assert track is not None and len(track) == 6
+    assert vamp_analysis.SEGMENTER_TRANSFORM_NAME_32K in captured["cmd"][2]
+
+
+def test_emo_frames_attach_segment_track():
+    """segment_track попадает в payload (+segment_source); без него оба None."""
+    track = _segment_track()
+    payload = emo_radar.emo_frames(np.ones(40_000), segment_track=track)
+    assert payload["segment_track"] == track
+    assert payload["segment_source"] == SEGMENTER_SOURCE
+    plain = emo_radar.emo_frames(np.ones(40_000))
+    assert plain["segment_track"] is None and plain["segment_source"] is None
+
+
+def test_audio_emo_out_validates_segment_track():
+    """AudioEmoOut принимает segment_track; тип вне 1…12 — ошибка."""
+    payload = emo_radar.emo_frames(np.ones(40_000), segment_track=_segment_track())
+    validated = AudioEmoOut.model_validate(payload)
+    assert validated.segment_track is not None
+    assert validated.segment_track[0].name == "A"
+    assert validated.segment_source == SEGMENTER_SOURCE
+    with pytest.raises(ValidationError):
+        AudioEmoSegment(t_sec=0.0, name="X", segment_type=13)
+
+
 # --- integration: живой прогон Key Detector ------------------------------------
 
 
@@ -354,3 +440,38 @@ def test_tempo_track_live_sonic_annotator():
     assert track is not None and len(track) >= 1
     assert all(seg["bpm"] > 0 for seg in track)
     assert any(abs(seg["bpm"] - 120.0) < 5.0 for seg in track)
+
+
+@pytest.mark.integration
+def test_segment_track_live_sonic_annotator():
+    """Реальный sonic-annotator + qm-segmenter по моно-файлу 32 кГц.
+
+    Ловушка: плагин диктует step/block 6400/19200 при 32 кГц — с другим
+    трансформом не инициализируется и сегменты молча пропадают (best-effort).
+    Синтетический трек из разных фрагментов (тоны/шум) — плагин обязан найти
+    несколько сегментов с именами A, B, … по типам 1…8 (без жёстких границ —
+    важна работоспособность цепочки и формат имён).
+    """
+    import os
+
+    from app.services.audio_render.export import wav_bytes
+
+    if not os.path.isfile(settings.sonic_annotator_bin):
+        pytest.skip("sonic-annotator не установлен")
+    fs = 32_000
+    t = np.arange(fs * 6) / fs
+
+    def tone(freq: float) -> np.ndarray:
+        return 0.3 * np.sin(2 * np.pi * freq * t)
+
+    rng = np.random.default_rng(7)
+    noise = 0.3 * rng.standard_normal(t.size)
+    sig = np.concatenate([tone(220.0), noise, tone(880.0), tone(330.0)])
+    blob = wav_bytes(np.stack([sig] * 2, axis=1), fs)
+    track = vamp_analysis.segment_track_from_wav(blob)
+    assert track is not None and len(track) >= 2
+    assert track[0]["t_sec"] == 0.0
+    assert all(1 <= seg["segment_type"] <= 8 for seg in track)
+    assert all(len(seg["name"]) == 1 and "A" <= seg["name"] <= "H" for seg in track)
+    times = [seg["t_sec"] for seg in track]
+    assert times == sorted(times)

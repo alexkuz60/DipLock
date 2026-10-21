@@ -2877,14 +2877,16 @@ export interface paths {
         };
         /**
          * Кадры радара «Эмо» аудиотрека: 7 лучей + карты темпа/аккордов
-         * @description Кадры анимации звезды-полигона (контракт рендера «Нейромузыки», v4).
+         * @description Кадры анимации звезды-полигона (контракт рендера «Нейромузыки», v5).
          *
          *     Окно FFT 32768 (2^15), сдвиг 32000 сэмплов (перекрытие 768): кадр k ↔
          *     время k · 2/3 с; лучи — децибельная шкала громкости (``db_relative``,
          *     ``db_floor`` −60 дБ). ``key_track`` — карта аккордов (VAMP Key Detector)
          *     для вращения звезды, ``tempo_track`` — карта темпа (VAMP Tempo and Beat
-         *     Tracker) для темп-коррекции лучей; ``null`` — инструмент недоступен
-         *     (best-effort, вращение/коррекция в UI нулевые).
+         *     Tracker) для темп-коррекции лучей; ``segment_track`` — сегменты трека
+         *     (VAMP Segmenter) для визуально-слухового контроля (таблица «Опций» и
+         *     линии с метками имён A, B, C…); ``null`` — инструмент недоступен
+         *     (best-effort, вращение/коррекция в UI нулевые, сегментов нет).
          *
          *     404 — трек не найден, 409 — анализ ещё идёт либо не удался.
          */
@@ -3555,14 +3557,16 @@ export interface components {
          *     ``key_track`` — сегменты тональности микса (VAMP Key Detector) для
          *     вращения звезды. ``schema_version`` 4 (09.10.2026): ``tempo_track`` —
          *     оценки темпа микса (VAMP Tempo and Beat Tracker) для темп-коррекции
-         *     радара. Данные — из ``emo.json`` кэша рендера; рендеры до среза
-         *     «Эмо» добиваются расчётом из ``master.wav``.
+         *     радара. ``schema_version`` 5 (21.10.2026): ``segment_track`` — сегменты
+         *     трека (VAMP Segmenter, «ЕмоЛаб») для визуально-слухового контроля (в
+         *     расчётах не участвуют). Данные — из ``emo.json`` кэша рендера; рендеры
+         *     до среза «Эмо» добиваются расчётом из ``master.wav``.
          */
         AudioEmoOut: {
             /**
              * Schema Version
-             * @description Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, 4 — + tempo_track)
-             * @default 4
+             * @description Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, 4 — + tempo_track, 5 — + segment_track)
+             * @default 5
              */
             schema_version: number;
             /**
@@ -3636,6 +3640,43 @@ export interface components {
              * @description Идентификатор источника tempo_track (vamp:qm-vamp-plugins:qm-tempotracker:tempo)
              */
             tempo_source?: string | null;
+            /**
+             * Segment Track
+             * @description Сегменты трека (VAMP Segmenter) для визуально-слухового контроля анализа: таблица сегментов в «Опциях», вертикали с метками имён (A, B, C…) поверх волны плеера и на «Эмограмме»; в расчётах пока не участвуют; null — инструмент недоступен
+             */
+            segment_track?: components["schemas"]["AudioEmoSegment"][] | null;
+            /**
+             * Segment Source
+             * @description Идентификатор источника segment_track (vamp:qm-vamp-plugins:qm-segmenter:segmentation)
+             */
+            segment_source?: string | null;
+        };
+        /**
+         * AudioEmoSegment
+         * @description Сегмент трека (VAMP Segmenter, ``segment_track`` кадров «Эмо», «ЕмоЛаб»).
+         *
+         *     Начало однородного сегмента аудиотрека: ``segment_type`` — тип сегмента
+         *     (целое 1…12, при параметре `nSegmentTypes` = 8 — 1…8), ``name`` — имя
+         *     сегмента (метка плагина A, B, … по типу: 1 → A, 2 → B, …). Данные для
+         *     визуально-слухового контроля анализа (таблица в «Опциях», вертикали с
+         *     метками поверх волны и на «Эмограмме»); в расчётах пока не участвуют.
+         */
+        AudioEmoSegment: {
+            /**
+             * T Sec
+             * @description Начало сегмента, с
+             */
+            t_sec: number;
+            /**
+             * Name
+             * @description Имя сегмента (A, B, C… — метка VAMP Segmenter)
+             */
+            name: string;
+            /**
+             * Segment Type
+             * @description Тип сегмента QM Segmenter: 1…12 (при nSegmentTypes = 8 — 1…8)
+             */
+            segment_type: number;
         };
         /**
          * AudioIrCatalogOut

@@ -7,6 +7,7 @@ import {
   drawButterfly,
   drawKeyLines,
   drawPlayhead,
+  drawSegmentLines,
   drawTempoSteps,
   filePeaks,
   formatTime,
@@ -29,6 +30,7 @@ const THEME: TrackerTheme = {
   playhead: '#e8eef6',
   chordLine: '#7ee0ff',
   tempoLine: '#ffb454',
+  segmentLine: '#ff8ce6',
 }
 
 /** Фейковый 2D-контекст: jsdom без пакета canvas не даёт настоящий. */
@@ -282,6 +284,44 @@ describe('waveformView — аннотации Соник Аннотатора', 
     drawKeyLines(ctx, null, { start: 0, end: 4 }, 100, 200, THEME)
     drawKeyLines(ctx, [], { start: 0, end: 4 }, 100, 200, THEME)
     expect(raw.stroke).not.toHaveBeenCalled()
+  })
+
+  it('drawSegmentLines: вертикали сегментов с метками имён (0.0 — тоже), метки режутся', () => {
+    const { ctx, moves, lines, styles, raw } = fakeCtx()
+    const track = [
+      { t_sec: 0, name: 'A', segment_type: 1 },
+      { t_sec: 1, name: 'B', segment_type: 2 },
+      { t_sec: 1.05, name: 'C', segment_type: 3 }, // ближе SEGMENT_LABEL_MIN_PX — без метки
+      { t_sec: 5, name: 'D', segment_type: 4 }, // вне окна
+    ]
+    // Окно 0…4 с при ширине 400 px → 100 px/с: t=0 → 0.5, t=1 → 100.5, t=1.05 → 105.5.
+    drawSegmentLines(ctx, track, { start: 0, end: 4 }, 400, 200, THEME)
+    // Сегмент в 0.0 — начало первого сегмента (имя «A»), линия рисуется.
+    expect(moves).toEqual([
+      [0.5, 0],
+      [100.5, 0],
+      [105.5, 0],
+    ])
+    expect(lines).toEqual([
+      [0.5, 200],
+      [100.5, 200],
+      [105.5, 200],
+    ])
+    expect(raw.stroke).toHaveBeenCalledTimes(1)
+    expect(styles).toEqual([THEME.segmentLine])
+    // Метки A и B у верхней кромки; C ближе SEGMENT_LABEL_MIN_PX от B — пропущена.
+    expect(raw.fillText.mock.calls).toEqual([
+      ['A', 2.5, 2],
+      ['B', 102.5, 2],
+    ])
+  })
+
+  it('drawSegmentLines: пустой/отсутствующий segment_track — ничего не рисуется', () => {
+    const { ctx, raw } = fakeCtx()
+    drawSegmentLines(ctx, null, { start: 0, end: 4 }, 100, 200, THEME)
+    drawSegmentLines(ctx, [], { start: 0, end: 4 }, 100, 200, THEME)
+    expect(raw.stroke).not.toHaveBeenCalled()
+    expect(raw.fillText).not.toHaveBeenCalled()
   })
 
   it('tempoBpmRange: min…max по валидным оценкам; без валидных — null', () => {

@@ -19,6 +19,9 @@
  * идут на **шкале темпа радара** (`neuromusic/tempoCorrection.radarTempoStepY`,
  * поправка 21.10.2026): 0 сигнала волны = 120 bpm, низ графика = 60 bpm,
  * верх = 240 bpm — линия над волной и метка темпа на радаре на одной шкале.
+ * Там же — вертикали сегментов трека с метками имён A, B, C…
+ * (`waveformView.drawSegmentLines`, VAMP Segmenter, «ЕмоЛаб»):
+ * визуально-слуховой контроль анализа, в расчётах данные не участвуют.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AudioEmo } from '@/shared/api/types'
@@ -28,6 +31,7 @@ import {
   drawKeyLines,
   drawPlayhead,
   drawRuler,
+  drawSegmentLines,
   drawTempoSteps,
   filePeaks,
   formatTime,
@@ -230,6 +234,16 @@ export function EmoLabTracker({ emo = null }: EmoLabTrackerProps) {
           // низ графика = 60, верх = 240 — высота линии совпадает с меткой
           // темпа на радаре при одном bpm.
           radarTempoStepY,
+        )
+        // Сегменты трека (VAMP Segmenter, «ЕмоЛаб»): вертикали с метками имён
+        // A, B, C… — визуально-слуховой контроль, в расчётах не участвуют.
+        drawSegmentLines(
+          waveCtx,
+          emoRef.current?.segment_track ?? null,
+          view,
+          w,
+          WAVE_HEIGHT_PX,
+          theme,
         )
       }
     }

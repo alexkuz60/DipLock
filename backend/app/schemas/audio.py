@@ -248,6 +248,24 @@ class AudioTempoSegment(BaseModel):
     bpm: float = Field(gt=0.0, description="Темп, bpm (> 0)")
 
 
+class AudioEmoSegment(BaseModel):
+    """Сегмент трека (VAMP Segmenter, ``segment_track`` кадров «Эмо», «ЕмоЛаб»).
+
+    Начало однородного сегмента аудиотрека: ``segment_type`` — тип сегмента
+    (целое 1…12, при параметре `nSegmentTypes` = 8 — 1…8), ``name`` — имя
+    сегмента (метка плагина A, B, … по типу: 1 → A, 2 → B, …). Данные для
+    визуально-слухового контроля анализа (таблица в «Опциях», вертикали с
+    метками поверх волны и на «Эмограмме»); в расчётах пока не участвуют.
+    """
+
+    t_sec: float = Field(ge=0.0, description="Начало сегмента, с")
+    name: str = Field(description="Имя сегмента (A, B, C… — метка VAMP Segmenter)")
+    segment_type: int = Field(
+        ge=1, le=12,
+        description="Тип сегмента QM Segmenter: 1…12 (при nSegmentTypes = 8 — 1…8)",
+    )
+
+
 class AudioEmoFrame(BaseModel):
     """Один кадр анимации радара «Эмо» (слайд полигона со своим вектором Доминанты)."""
 
@@ -277,15 +295,17 @@ class AudioEmoOut(BaseModel):
     ``key_track`` — сегменты тональности микса (VAMP Key Detector) для
     вращения звезды. ``schema_version`` 4 (09.10.2026): ``tempo_track`` —
     оценки темпа микса (VAMP Tempo and Beat Tracker) для темп-коррекции
-    радара. Данные — из ``emo.json`` кэша рендера; рендеры до среза
-    «Эмо» добиваются расчётом из ``master.wav``.
+    радара. ``schema_version`` 5 (21.10.2026): ``segment_track`` — сегменты
+    трека (VAMP Segmenter, «ЕмоЛаб») для визуально-слухового контроля (в
+    расчётах не участвуют). Данные — из ``emo.json`` кэша рендера; рендеры
+    до среза «Эмо» добиваются расчётом из ``master.wav``.
     """
 
     schema_version: int = Field(
-        default=4,
+        default=5,
         description=(
             "Версия контракта emo.json (2 — дБ-шкала лучей, 3 — + key_track, "
-            "4 — + tempo_track)"
+            "4 — + tempo_track, 5 — + segment_track)"
         ),
     )
     fs_audio: int = Field(description="Частота дискретизации микса, Гц (48000)")
@@ -337,5 +357,21 @@ class AudioEmoOut(BaseModel):
         description=(
             "Идентификатор источника tempo_track "
             "(vamp:qm-vamp-plugins:qm-tempotracker:tempo)"
+        ),
+    )
+    segment_track: list[AudioEmoSegment] | None = Field(
+        default=None,
+        description=(
+            "Сегменты трека (VAMP Segmenter) для визуально-слухового контроля "
+            "анализа: таблица сегментов в «Опциях», вертикали с метками имён "
+            "(A, B, C…) поверх волны плеера и на «Эмограмме»; в расчётах "
+            "пока не участвуют; null — инструмент недоступен"
+        ),
+    )
+    segment_source: str | None = Field(
+        default=None,
+        description=(
+            "Идентификатор источника segment_track "
+            "(vamp:qm-vamp-plugins:qm-segmenter:segmentation)"
         ),
     )

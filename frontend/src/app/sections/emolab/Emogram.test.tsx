@@ -25,7 +25,7 @@ import {
 
 /** Кадры «Эмо»: луч 0 (100 %), луч 6 (100 %), тишина (доминанта в центре). */
 const EMO: AudioEmo = {
-  schema_version: 4,
+  schema_version: 5,
   fs_audio: 32000,
   fft_size: 32768,
   hop_samples: 32000,
@@ -44,6 +44,8 @@ const EMO: AudioEmo = {
   key_source: null,
   tempo_track: null,
   tempo_source: null,
+  segment_track: null,
+  segment_source: null,
 }
 
 /** Геометрия дефолтного полотна (jsdom: замера нет → `EMO_VIEW_W`×`EMO_VIEW_H`). */
@@ -124,5 +126,34 @@ describe('ЕмоЛаб: график «Эмограмма»', () => {
     const playhead = parts(screen.getByTestId('emogram'), 'playhead')
     expect(playhead).toHaveLength(1)
     expect(Number(playhead[0]?.getAttribute('x1'))).toBeCloseTo(EMO_PAD_LEFT, 6)
+  })
+
+  it('сегменты трека: вертикали на всю высоту с метками имён A, B, C… у верха', () => {
+    renderWithProviders(
+      <Emogram
+        emo={{
+          ...EMO,
+          segment_track: [
+            { t_sec: 0, name: 'A', segment_type: 1 },
+            { t_sec: 1, name: 'B', segment_type: 2 },
+            { t_sec: 2, name: 'C', segment_type: 3 },
+          ],
+          segment_source: 'vamp:qm-vamp-plugins:qm-segmenter:segmentation',
+        }}
+      />,
+    )
+    const root = screen.getByTestId('emogram')
+    const lines = parts(root, 'segment-line')
+    expect(lines).toHaveLength(3)
+    // Сегмент 0 — у левого края графика, сегмент 1 — на 1/3 шкалы времени (3 с).
+    expect(Number(lines[0]?.getAttribute('x1'))).toBeCloseTo(EMO_PAD_LEFT, 6)
+    expect(Number(lines[1]?.getAttribute('x1'))).toBeCloseTo(EMO_PAD_LEFT + PLOT_W / 3, 6)
+    for (const line of lines) {
+      expect(Number(line.getAttribute('y1'))).toBeCloseTo(EMO_PAD_TOP, 6)
+      expect(Number(line.getAttribute('y2'))).toBeCloseTo(Y_BOTTOM, 6)
+    }
+    // Имена сегментов — метки плагина (A, B, C…) в порядке появления.
+    const labels = parts(root, 'segment-label')
+    expect(labels.map((node) => node.textContent)).toEqual(['A', 'B', 'C'])
   })
 })

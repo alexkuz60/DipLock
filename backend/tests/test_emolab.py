@@ -6,6 +6,7 @@
 тестах не запускается — как в ``test_audio_vamp.py`` юнит-часть герметична).
 """
 import io
+import json
 import os
 import time
 
@@ -20,9 +21,13 @@ from app.services.emolab import store, track_analysis, track_input
 
 _PREFIX = f"{settings.api_prefix}/emolab"
 
-# Фиксированные карты VAMP для мока (код 1 = C major, темп 120 bpm).
+# Фиксированные карты VAMP для мока (код 1 = C major, темп 120 bpm, сегмент A).
 KEY_SEGMENTS = [{"t_sec": 0.0, "key_code": 1, "label": "C major"}]
 TEMPO_SEGMENTS = [{"t_sec": 0.0, "bpm": 120.0}]
+SEGMENT_SEGMENTS = [
+    {"t_sec": 0.0, "segment_type": 1, "name": "A"},
+    {"t_sec": 3.5, "segment_type": 2, "name": "B"},
+]
 
 
 def _wav_blob(
@@ -53,8 +58,12 @@ def stub_vamp(monkeypatch):
     def _tempo(blob, cfg=None):
         return [dict(segment) for segment in TEMPO_SEGMENTS]
 
+    def _segment(blob, cfg=None, transform_name=None):
+        return [dict(segment) for segment in SEGMENT_SEGMENTS]
+
     monkeypatch.setattr(vamp_analysis, "key_track_from_wav", _key)
     monkeypatch.setattr(vamp_analysis, "tempo_track_from_wav", _tempo)
+    monkeypatch.setattr(vamp_analysis, "segment_track_from_wav", _segment)
     return calls
 
 
@@ -122,7 +131,7 @@ def test_wav_bytes_is_analysis_contract():
 
 
 def test_analysis_writes_cache_and_contract(stub_vamp, isolated_io):
-    """Полный конвейер: кэш-манифест, emo.json — контракт AudioEmoOut (v4)."""
+    """Полный конвейер: кэш-манифест, emo.json — контракт AudioEmoOut (v5)."""
     track_analysis.clear_states()
     track_id, cached = track_analysis.start_analysis(_wav_blob(), "song.wav", settings)
     assert not cached
@@ -151,6 +160,9 @@ def test_analysis_writes_cache_and_contract(stub_vamp, isolated_io):
         assert len(frame.rays) == emo_radar.EMO_RAY_COUNT
     assert validated.key_track is not None and validated.key_track[0].key_code == 1
     assert validated.tempo_track is not None and validated.tempo_track[0].bpm == 120.0
+    assert validated.segment_track is not None
+    assert [seg.name for seg in validated.segment_track] == ["A", "B"]
+    assert validated.segment_source == vamp_analysis.SEGMENTER_SOURCE
 
 
 def test_start_analysis_caches_by_digest(stub_vamp, isolated_io):
@@ -173,6 +185,35 @@ def test_start_analysis_caches_by_digest(stub_vamp, isolated_io):
     )
     assert other_id != track_id and not other_cached
     assert _wait_track(other_id).status == "succeeded"
+
+
+def test_analysis_recomputes_stale_cache(stub_vamp, isolated_io):
+    """Устаревший emo.json (контракт прошлой версии) — промах: честный пересчёт.
+
+    ``parse_emo`` отвергает кадры прошлой версии (v4 при контракте v5) —
+    ловушка смены версии: без пересчёта кэш-хит навсегда отдавал бы трек без
+    данных нового контракта (сегментов, темпа…), а ``GET …/emo`` — 409.
+    """
+    track_analysis.clear_states()
+    blob = _wav_blob()
+    track_id, cached = track_analysis.start_analysis(blob, "song.wav", settings)
+    assert not cached
+    assert _wait_track(track_id).status == "succeeded"
+
+    # В кэше — контракт прошлой версии (как после обновления сервера).
+    stale = json.dumps({"schema_version": emo_radar.EMO_SCHEMA_VERSION - 1}).encode()
+    assert store.write_track_files(settings, track_id, {store.EMO_NAME: stale})
+    track_analysis.clear_states()  # смерть процесса: память пуста, диск жив
+
+    again_id, again_cached = track_analysis.start_analysis(blob, "song.wav", settings)
+    assert again_id == track_id and not again_cached
+    assert _wait_track(track_id).status == "succeeded"
+    payload = track_analysis.emo_payload_of(
+        track_analysis.state_of(track_id, settings), settings,
+    )
+    assert payload is not None
+    assert payload["schema_version"] == emo_radar.EMO_SCHEMA_VERSION
+    assert payload["segment_track"] == SEGMENT_SEGMENTS
 
 
 def test_store_sweep_keeps_only_limit(isolated_io, monkeypatch):
@@ -310,5 +351,8 @@ def test_live_vamp_chain_on_32k_mono():
         wav, settings, transform_name=vamp_analysis.KEY_TRANSFORM_NAME_32K,
     )
     tempo = vamp_analysis.tempo_track_from_wav(wav, settings)
+    segments = vamp_analysis.segment_track_from_wav(wav, settings)
     assert key and all(1 <= seg["key_code"] <= 24 for seg in key)
     assert tempo is not None and any(abs(seg["bpm"] - 120.0) < 5.0 for seg in tempo)
+    assert segments is not None and len(segments) >= 1
+    assert all(seg["name"] in "ABCDEFGH" for seg in segments)

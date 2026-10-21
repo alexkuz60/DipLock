@@ -138,7 +138,7 @@
 |---|---|
 | `POST /emolab/analyze` | загрузка аудио (wav/mp3) → 202 `{track_id, status, cached, filename, duration_s}`; повтор того же содержимого (sha256 = `track_id`) — `cached=true`, `status=succeeded`; 400 — не wav/mp3, битый, длиннее 30 мин; 413 — > лимита загрузки |
 | `GET /emolab/{track_id}/status` | поллинг анализа: `{status, stage, pct, message, error, duration_s}`; после рестарта поднимается из манифеста диска |
-| `GET /emolab/{track_id}/emo` | кадры «Эмо» аудиотрека (**`AudioEmoOut` v4** — `frames`, `key_track`, `tempo_track`, контракт рендера «Нейромузыки»); 404 — нет, 409 — идёт/упал |
+| `GET /emolab/{track_id}/emo` | кадры «Эмо» аудиотрека (**`AudioEmoOut` v5** — `frames`, `key_track`, `tempo_track`, `segment_track`, контракт рендера «Нейромузыки»); 404 — нет, 409 — идёт/упал |
 
 ## Инвентарь эндпоинтов (87 в `routes.py`, порядок файла)
 

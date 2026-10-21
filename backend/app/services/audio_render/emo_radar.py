@@ -24,6 +24,9 @@
  * v4 контракта (09.10.2026): ``tempo_track`` — оценки темпа микса (VAMP
    Tempo and Beat Tracker, ``vamp_analysis``) для темп-коррекции радара;
    ``None`` — инструмент недоступен, коррекция в UI нулевая.
+ * v5 контракта (21.10.2026): ``segment_track`` — сегменты трека (VAMP
+   Segmenter, ``vamp_analysis``, «ЕмоЛаб») для визуально-слухового контроля
+   (таблица в «Опциях», линии с метками имён); в расчётах не участвует.
 
 Временный моно-файл не нужен: при рендере кадры считаются из массива
 мастера в памяти, для старых кэшей — ``frames_from_wav`` по ``master.wav``.
@@ -39,7 +42,7 @@ import numpy as np
 import soundfile as sf
 
 from app.services.audio_render.core import FS_AUDIO
-from app.services.audio_render.vamp_analysis import KEY_SOURCE, TEMPO_SOURCE
+from app.services.audio_render.vamp_analysis import KEY_SOURCE, SEGMENTER_SOURCE, TEMPO_SOURCE
 
 # Окно FFT (2^15), сдвиг окна и перекрытие кадров (спецификация владельца).
 EMO_FFT_SIZE = 32768
@@ -56,7 +59,10 @@ EMO_RAY_COUNT = 7
 # VAMP Key Detector) для вращения звезды; кадры v2 отвергаются → добивка.
 # v4 (09.10.2026): добавлен ``tempo_track`` (оценки темпа из VAMP Tempo and
 # Beat Tracker) для темп-коррекции радара; кадры v3 отвергаются → добивка.
-EMO_SCHEMA_VERSION = 4
+# v5 (21.10.2026): добавлен ``segment_track`` (сегменты VAMP Segmenter,
+# «ЕмоЛаб» — визуально-слуховой контроль, в расчётах не участвует);
+# кадры v4 отвергаются → добивка (у рендера) / честный пересчёт («ЕмоЛаб»).
+EMO_SCHEMA_VERSION = 5
 
 # Нормировка лучей: шкала одна на весь микс (решение владельца 08.10.2026).
 EMO_NORMALIZATION = "db_relative"
@@ -148,6 +154,7 @@ def emo_frames(
     fs: int = FS_AUDIO,
     key_track: list[dict[str, Any]] | None = None,
     tempo_track: list[dict[str, Any]] | None = None,
+    segment_track: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Кадры анимации радара «Эмо» для моно-сигнала микса.
 
@@ -162,6 +169,10 @@ def emo_frames(
     вращение звезды в UI остаётся нулевым. ``tempo_track`` — оценки темпа
     микса (VAMP Tempo and Beat Tracker, ``vamp_analysis.tempo_track_from_wav``):
     ``None`` — инструмент недоступен, темп-коррекция в UI нулевая.
+    ``segment_track`` — сегменты трека (VAMP Segmenter,
+    ``vamp_analysis.segment_track_from_wav``, «ЕмоЛаб»): ``None`` — инструмент
+    недоступен; данные только для визуально-слухового контроля (таблица и
+    линии в UI), в расчётах лучей не участвуют.
 
     Возвращает dict контракта ``emo.json`` (он же ответ ``GET …/emo``):
     метаданные окна/сетки/шкалы + список кадров ``{t_sec, rays[7]}`` в
@@ -202,6 +213,8 @@ def emo_frames(
         "key_source": KEY_SOURCE if key_track else None,
         "tempo_track": tempo_track,
         "tempo_source": TEMPO_SOURCE if tempo_track else None,
+        "segment_track": segment_track,
+        "segment_source": SEGMENTER_SOURCE if segment_track else None,
     }
 
 
@@ -210,6 +223,7 @@ def frames_from_master(
     fs: int = FS_AUDIO,
     key_track: list[dict[str, Any]] | None = None,
     tempo_track: list[dict[str, Any]] | None = None,
+    segment_track: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Кадры из стерео-мастера рендера: моно-слияние ``(L+R)/2`` → расчёт.
 
@@ -219,13 +233,17 @@ def frames_from_master(
     """
     arr = np.asarray(master, dtype=np.float64)
     mono = arr.mean(axis=1) if arr.ndim == 2 else arr.ravel()
-    return emo_frames(mono, fs=fs, key_track=key_track, tempo_track=tempo_track)
+    return emo_frames(
+        mono, fs=fs,
+        key_track=key_track, tempo_track=tempo_track, segment_track=segment_track,
+    )
 
 
 def frames_from_wav(
     blob: bytes,
     key_track: list[dict[str, Any]] | None = None,
     tempo_track: list[dict[str, Any]] | None = None,
+    segment_track: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Кадры из байтов ``master.wav`` (добивка рендеров до среза «Эмо»).
 
@@ -236,7 +254,10 @@ def frames_from_wav(
     data, samplerate = sf.read(io.BytesIO(blob), dtype="float64")
     arr = np.asarray(data)
     mono = arr.mean(axis=1) if arr.ndim == 2 else arr.ravel()
-    return emo_frames(mono, fs=int(samplerate), key_track=key_track, tempo_track=tempo_track)
+    return emo_frames(
+        mono, fs=int(samplerate),
+        key_track=key_track, tempo_track=tempo_track, segment_track=segment_track,
+    )
 
 
 def emo_bytes(payload: dict[str, Any]) -> bytes:

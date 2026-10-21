@@ -1,0 +1,31 @@
+@prefix xsd:      <http://www.w3.org/2001/XMLSchema#> .
+@prefix vamp:     <http://purl.org/ontology/vamp/> .
+@prefix :         <#> .
+
+# Трансформ Segmenter (QM Vamp Plugins) для входа 32000 Гц («ЕмоЛаб»):
+# делит трек на последовательность однородных сегментов (Structural Segment).
+# Параметры по умолчанию изменены (постановка владельца 21.10.2026):
+# Number of segment-types = 8 (дефолт плагина 10), Minimum segment duration
+# = 2 с (дефолт 4 с); Feature Type — дефолтный Hybrid (Constant-Q).
+# Ловушка: плагин диктует step/block своей частоты и отвергает другие
+# («supplied step size … differs from required …»): при 32 кГц требуются
+# step 6400 (= 0.2 с) и block 19200 (= 3 × step).
+:transform a vamp:Transform ;
+    vamp:plugin <http://vamp-plugins.org/rdf/plugins/qm-vamp-plugins#qm-segmenter> ;
+    vamp:sample_rate "32000"^^xsd:float ;
+    vamp:step_size "6400"^^xsd:int ;
+    vamp:block_size "19200"^^xsd:int ;
+    vamp:plugin_version """""" ;
+    vamp:parameter_binding [
+        vamp:parameter [ vamp:identifier "nSegmentTypes" ] ;
+        vamp:value "8"^^xsd:float ;
+    ] ;
+    vamp:parameter_binding [
+        vamp:parameter [ vamp:identifier "featureType" ] ;
+        vamp:value "1"^^xsd:float ;
+    ] ;
+    vamp:parameter_binding [
+        vamp:parameter [ vamp:identifier "neighbourhoodLimit" ] ;
+        vamp:value "2"^^xsd:float ;
+    ] ;
+    vamp:output <http://vamp-plugins.org/rdf/plugins/qm-vamp-plugins#qm-segmenter_output_segmentation> .
