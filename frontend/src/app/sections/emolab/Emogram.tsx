@@ -3,7 +3,7 @@
  * лучи полигона-звезды, развернутые по шкале времени аудиотрека. Живёт в
  * табе «Эмограмма» секции «Визуализация» (табы `EmoLabSection`: «Звезда» /
  * «Эмограмма» / дальше) и строится из тех же доминант кадров «Эмо»
- * (динамический диапазон `dbRangeDb`, вращение по аккордам, темп-коррекция
+ * (вращение по аккордам, темп-коррекция
  * `tempoRays` — пропы «ЕмоЛаб», как у `RadialChart`).
  *
  * Ось Y справа «Эмо» — 14 подписей снизу вверх (страх → агрессия) и 14
@@ -34,9 +34,10 @@ import type { AudioEmo } from '@/shared/api/types'
 import { timeTicks } from '@/shared/lib/eegView'
 import { SEGMENT_LABEL_MIN_PX, formatTime } from '@/shared/lib/waveformView'
 import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
-import { framesDbRange, hopSeconds } from '../neuromusic/emoRadar'
-import { frameRotations } from '../neuromusic/keyRotation'
+import { hopSeconds } from '../neuromusic/emoRadar'
+import { frameRotations, type RotationLaw } from '../neuromusic/keyRotation'
 import { SECTOR_COLORS } from '../neuromusic/radialChart'
+import type { RadialScaleKey } from '../neuromusic/radialDbRange'
 import { frameTempos } from '../neuromusic/tempoCorrection'
 import {
   EMO_BAR_GAP_PX,
@@ -56,13 +57,24 @@ import {
 export type EmogramProps = {
   /** Кадры «Эмо» (null — только сетка и подписи шкал). */
   emo?: AudioEmo | null
-  /** Динамический диапазон шкалы лучей, дБ (0 — шкала контракта `db_floor`). */
-  dbRangeDb?: number
   /** Значения темпа участвуют в расчёте лучей звезды (темп-коррекция). */
   tempoRays?: boolean
+  /**
+   * Шкала радиальных значений (`db-40`/`db-60`): конечная оптимизация
+   * высот столбиков «Экспрессии» (`radialDbRange`); ступени «Динамики» не
+   * меняются (углы доминант — инвариант). `null`/дефолт — без переноса.
+   */
+  radialScale?: RadialScaleKey | null
+  /** Закон вращения звезды (`keyRotation.ts`): хроматический (дефолт) либо гармонический. */
+  rotationLaw?: RotationLaw
 }
 
-export function Emogram({ emo = null, dbRangeDb = 0, tempoRays = true }: EmogramProps) {
+export function Emogram({
+  emo = null,
+  tempoRays = true,
+  radialScale = null,
+  rotationLaw = 'chromatic',
+}: EmogramProps) {
   // Размер ячейки: 1 единица viewBox = 1 px экрана (приём `RadialChart.tsx`);
   // в jsdom раскладки нет (rect = 0) — остаются дефолтные размеры, и тесты
   // видят «честные» пиксели.
@@ -84,15 +96,11 @@ export function Emogram({ emo = null, dbRangeDb = 0, tempoRays = true }: Emogram
   const frames = emo && Array.isArray(emo.frames) ? emo.frames : null
   const hopSec = emo ? hopSeconds(emo.hop_samples, emo.fs_audio) : 1
   const frameSec = hopSec > 0 ? hopSec : 1
-  // Динамический диапазон: лучи переносятся тем же местом, что у звезды
-  // (`emoRadar.framesDbRange`) — столбики и ступени читают шкалу радара.
-  const scaledFrames = useMemo(
-    () => (frames ? framesDbRange(frames, Number(emo?.db_floor), dbRangeDb) : null),
-    [frames, emo, dbRangeDb],
-  )
+  // Лучи — линейная шкала по пику трека (контракт v8): столбики и ступени
+  // читают проценты радара как есть, без переноса шкалы.
   const rotations = useMemo(
-    () => frameRotations(emo?.key_track ?? null, frames ?? []),
-    [emo, frames],
+    () => frameRotations(emo?.key_track ?? null, frames ?? [], rotationLaw),
+    [emo, frames, rotationLaw],
   )
   const tempos = useMemo(
     () => frameTempos(emo?.tempo_track ?? null, frames ?? [], hopSec),
@@ -102,9 +110,9 @@ export function Emogram({ emo = null, dbRangeDb = 0, tempoRays = true }: Emogram
   // тем же пропам) — серия для обоих графиков Эмограммы.
   const series = useMemo(
     () =>
-      scaledFrames
+      frames
         ? dominantSeries(
-            scaledFrames.map((frame, index) => ({
+            frames.map((frame, index) => ({
               tSec: frame.t_sec,
               rays: frame.rays,
               rotation: rotations[index] ?? 0,
@@ -112,9 +120,12 @@ export function Emogram({ emo = null, dbRangeDb = 0, tempoRays = true }: Emogram
             })),
           )
         : [],
-    [scaledFrames, rotations, tempos, tempoRays],
+    [frames, rotations, tempos, tempoRays],
   )
-  const bars = useMemo(() => emoBars(series, frameSec), [series, frameSec])
+  const bars = useMemo(
+    () => emoBars(series, frameSec, radialScale),
+    [series, frameSec, radialScale],
+  )
   const steps = useMemo(() => emoSteps(series, frameSec), [series, frameSec])
 
   // Геометрия полотна: правый столбец — подписи шкалы Y «Эмо», низ — шкала

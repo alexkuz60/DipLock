@@ -25,13 +25,13 @@ import {
 
 /** Кадры «Эмо»: луч 0 (100 %), луч 6 (100 %), тишина (доминанта в центре). */
 const EMO: AudioEmo = {
-  schema_version: 5,
+  schema_version: 8,
   fs_audio: 32000,
   fft_size: 32768,
   hop_samples: 32000,
   overlap_samples: 768,
-  normalization: 'db_relative',
-  db_floor: -60,
+  window: 'blackman_harris',
+  normalization: 'peak_linear',
   global_max: 1000,
   duration_s: 3,
   frame_count: 3,

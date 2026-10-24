@@ -12,7 +12,7 @@ import { api } from '@/shared/api/client'
 import type { AudioEmo, EmoTrackStatus } from '@/shared/api/types'
 import { useEmoLab } from '@/shared/state/emolab'
 import { useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
-import { EMO_LABEL_W, EMO_PAD_LEFT, EMO_VIEW_W, emoTimeX } from './emogram'
+import { EMO_LABEL_W, EMO_LABELS, EMO_PAD_LEFT, EMO_VIEW_W, emoTimeX } from './emogram'
 import { EmoLabPanel } from './EmoLabPanel'
 import { EmoLabSection } from './EmoLabSection'
 import { EmoLabTitleFile, EmoLabToolActions } from './EmoLabToolActions'
@@ -87,15 +87,15 @@ const playerMock = (
   }
 ).__player
 
-/** Кадры «Эмо» с картами Соник Аннотатора (контракт GET …/emo, v5). */
+/** Кадры «Эмо» с картами Соник Аннотатора (контракт GET …/emo, v10). */
 const EMO_PAYLOAD: AudioEmo = {
-  schema_version: 5,
+  schema_version: 10,
   fs_audio: 32000,
   fft_size: 32768,
   hop_samples: 32000,
   overlap_samples: 768,
-  normalization: 'db_relative',
-  db_floor: -60,
+  window: 'blackman_harris',
+  normalization: 'peak_linear',
   global_max: 4812.5,
   duration_s: 6,
   frame_count: 6,
@@ -190,6 +190,22 @@ function starRadiiPct(): number[] {
 /** Асимметричный матчер радиусов: % с допуском 0.05 (points — полный float). */
 function raysCloseTo(pct: readonly number[]) {
   return pct.map((value) => expect.closeTo(value, 1))
+}
+
+/**
+ * Угол первой вершины полигона-звезды, град (математически: 0° — восток,
+ * против часовой; SVG y вниз — знак y переворачиваем). Вершина 0 стоит на
+ * `SEGMENT_START + поворот` — по ней видно вращение звезды.
+ */
+function starAngleDeg(): number {
+  const frame = document.querySelector('[data-part="frame"]') as SVGCircleElement
+  const cx = Number(frame.getAttribute('cx'))
+  const cy = Number(frame.getAttribute('cy'))
+  const polygon = document.querySelector('[data-part="polygon"]') as SVGPolygonElement
+  const first = (polygon.getAttribute('points') ?? '').trim().split(/\s+/)[0] ?? '0,0'
+  const [x, y] = first.split(',').map(Number)
+  const angle = (Math.atan2(cy - (y ?? 0), (x ?? 0) - cx) * 180) / Math.PI
+  return ((angle % 360) + 360) % 360
 }
 
 beforeEach(() => {
@@ -312,25 +328,34 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
 
     // Позиция плеера 0 — кадр 0 сетки (t_sec = 0): лучи 10…70 % радиуса.
+    // Дефолт «Динамический диапазон» −60 дБ — конечная оптимизация радиусов
+    // (`radialDbRange`): вершины показывают лог-шкалу, не сырые проценты.
     playerMock.position = 0
     await waitFor(() =>
-      expect(starRadiiPct()).toEqual(raysCloseTo([10, 20, 30, 40, 50, 60, 70])),
+      expect(starRadiiPct()).toEqual(
+        raysCloseTo([66.67, 76.7, 82.57, 86.74, 89.97, 92.61, 94.84]),
+      ),
     )
 
     // Позиция 3.0 — кадр 3 (t_sec = 3 с): лучи 40…100 % (рост по кадрам).
     playerMock.position = 3
     await waitFor(() =>
-      expect(starRadiiPct()).toEqual(raysCloseTo([40, 50, 60, 70, 80, 90, 100])),
+      expect(starRadiiPct()).toEqual(
+        raysCloseTo([86.74, 89.97, 92.61, 94.84, 96.77, 98.47, 100]),
+      ),
     )
 
-    // Середина кадров 2 и 3 (t = 2.5) — линейная интерполяция слайдов.
+    // Середина кадров 2 и 3 (t = 2.5) — линейная интерполяция слайдов
+    // (лучи 35…95 %), затем перенос дБ-окна.
     playerMock.position = 2.5
     await waitFor(() =>
-      expect(starRadiiPct()).toEqual(raysCloseTo([35, 45, 55, 65, 75, 85, 95])),
+      expect(starRadiiPct()).toEqual(
+        raysCloseTo([84.8, 88.44, 91.35, 93.76, 95.84, 97.65, 99.26]),
+      ),
     )
   })
 
-  it('панель: таблица аккордов, динамический диапазон и чекбокс темпа; инфо-строки убраны', async () => {
+  it('панель: таблица аккордов и чекбокс темпа; инфо-строки убраны', async () => {
     mockApi()
     renderEmoLab()
     pickFile()
@@ -344,15 +369,34 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     expect(screen.getAllByText('Время').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Тип (минор/мажор)')).toBeInTheDocument()
     // Аккорд — точное имя Chordino как есть («Cmaj7», «Dm6»), тип — по коду.
+    // (В центре квинтового круга тоже есть «мажор» — ищем все совпадения.)
     expect(screen.getAllByText('Cmaj7').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Dm6').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('мажор')).toBeInTheDocument()
-    expect(screen.getByText('минор')).toBeInTheDocument()
+    expect(screen.getAllByText('мажор').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('минор').length).toBeGreaterThanOrEqual(1)
 
-    // Динамический диапазон — −60…0 по умолчанию (шкала контракта).
-    expect(screen.getByLabelText('Динамический диапазон')).toHaveValue('60')
     // Чекбокс значений темпа включён (поведение «Нейромузыки»).
     expect(screen.getByLabelText('Учитывать темп при расчёте лучей звезды')).toBeChecked()
+
+    // «Динамический диапазон» вернулся 23.10.2026 как конечная оптимизация
+    // радиусов вершин/доминанты: сегменты −40/−60 дБ, дефолт −60 дБ.
+    const dbGroup = screen.getByRole('group', { name: 'Динамический диапазон' })
+    expect(dbGroup).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '−40 дБ' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
+    expect(screen.getByRole('button', { name: '−60 дБ' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+
+    // «Закон вращения звезды»: хроматический (дефолт) / гармонический.
+    expect(screen.getByRole('group', { name: 'Закон вращения звезды' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Хроматический' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
 
     // Прочие инфо-строки параметров анализа убраны (правка 21.10.2026).
     for (const label of [
@@ -391,35 +435,6 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     expect(screen.queryByText('Имя сегмента')).not.toBeInTheDocument()
   })
 
-  it('динамический диапазон: −40…0 растягивает лучи, −96…0 сжимает шкалу', async () => {
-    mockApi()
-    renderEmoLab()
-    pickFile()
-    await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
-    playerMock.position = 0
-    await waitFor(() =>
-      expect(starRadiiPct()).toEqual(raysCloseTo([10, 20, 30, 40, 50, 60, 70])),
-    )
-
-    // −60…0 → −40…0: ×60/40 с зажимом 100 % (луч 70 → 105 → 100).
-    fireEvent.change(screen.getByLabelText('Динамический диапазон'), {
-      target: { value: '40' },
-    })
-    await waitFor(() =>
-      expect(starRadiiPct()).toEqual(raysCloseTo([15, 30, 45, 60, 75, 90, 100])),
-    )
-
-    // −60…0 → −96…0: ×60/96 — вся звезда ужимается к центру.
-    fireEvent.change(screen.getByLabelText('Динамический диапазон'), {
-      target: { value: '96' },
-    })
-    await waitFor(() =>
-      expect(starRadiiPct()).toEqual(
-        [6.25, 12.5, 18.75, 25, 31.25, 37.5, 43.75].map((value) => expect.closeTo(value, 2)),
-      ),
-    )
-  })
-
   it('чекбокс темпа: выкл — лучи звезды без темп-коррекции значений VAMP', async () => {
     // 240 bpm: Kr = 1 — вершины верхней половины (лучи 0, 1, 5, 6) удвоены,
     // условная нормализация делит все на max (140 → 100 %).
@@ -428,13 +443,19 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     pickFile()
     await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
     playerMock.position = 0
+    // Радиусы после темп-коррекции и нормализации (14.3…100 %) — в дБ-окне
+    // дефолта −60 дБ (конечная оптимизация, `radialDbRange`).
     await waitFor(() =>
-      expect(starRadiiPct()).toEqual(raysCloseTo([14.3, 28.6, 21.4, 28.6, 35.7, 85.7, 100])),
+      expect(starRadiiPct()).toEqual(
+        raysCloseTo([71.83, 81.86, 77.7, 81.86, 85.09, 97.77, 100]),
+      ),
     )
 
     fireEvent.click(screen.getByLabelText('Учитывать темп при расчёте лучей звезды'))
     await waitFor(() =>
-      expect(starRadiiPct()).toEqual(raysCloseTo([10, 20, 30, 40, 50, 60, 70])),
+      expect(starRadiiPct()).toEqual(
+        raysCloseTo([66.67, 76.7, 82.57, 86.74, 89.97, 92.61, 94.84]),
+      ),
     )
   })
 
@@ -498,5 +519,102 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
       EMO_PAD_LEFT + emoTimeX(3, 6, EMO_VIEW_W - EMO_LABEL_W - EMO_PAD_LEFT)
     playerMock.position = 3
     await waitFor(() => expect(Number(playhead.getAttribute('x1'))).toBeCloseTo(expectedX, 3))
+  })
+
+  it('закон вращения: гармонический — поворот по позиции аккорда в круге квинт', async () => {
+    // key_track мока: Cmaj7 (код 1) → Dm6 (код 15) с 3.5 с. На позиции 4 активен
+    // Dm: хроматика — −7δ = −30°, гармоника — позиция Dm в круге = 11 → −11δ ≈ −47.14°.
+    mockApi()
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
+    playerMock.position = 4
+    // SEGMENT_START = π/2 + π/7 ≈ 115.714°.
+    await waitFor(() => expect(starAngleDeg()).toBeCloseTo(85.714, 1))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Гармонический' }))
+    await waitFor(() => expect(starAngleDeg()).toBeCloseTo(68.571, 1))
+
+    // Возврат к хроматическому закону.
+    fireEvent.click(screen.getByRole('button', { name: 'Хроматический' }))
+    await waitFor(() => expect(starAngleDeg()).toBeCloseTo(85.714, 1))
+  })
+
+  it('динамический диапазон: −40 дБ растягивает радиусы сильнее −60 дБ', async () => {
+    mockApi()
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
+    playerMock.position = 0
+    // Лучи кадра 0 — 10…70 %; дефолт −60 дБ.
+    await waitFor(() =>
+      expect(starRadiiPct()).toEqual(
+        raysCloseTo([66.67, 76.7, 82.57, 86.74, 89.97, 92.61, 94.84]),
+      ),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '−40 дБ' }))
+    // −40 дБ: 10 % → −20 дБ → 50 %, тихие значения раздвинуты сильнее.
+    await waitFor(() =>
+      expect(starRadiiPct()).toEqual(raysCloseTo([50, 65.05, 73.86, 80.1, 84.95, 88.91, 92.26])),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '−60 дБ' }))
+    await waitFor(() =>
+      expect(starRadiiPct()).toEqual(
+        raysCloseTo([66.67, 76.7, 82.57, 86.74, 89.97, 92.61, 94.84]),
+      ),
+    )
+  })
+
+  it('квинтово-квартовый круг: в ряд с радаром (таб «Звезда»), подсветка активного аккорда', async () => {
+    mockApi()
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
+    // Круг — в табе «Звезда» рядом с радаром (того же диаметра).
+    const circle = screen.getByTestId('circle-of-fifths')
+    expect(circle).toBeInTheDocument()
+    expect(circle.querySelectorAll('[data-part="cof-cell"]')).toHaveLength(24)
+
+    // На позиции 0 активен Cmaj7 (код 1): тоника C, суб/доминанта F+G,
+    // параллельная Am, одноимённая Cm.
+    await waitFor(() => {
+      const roles = Array.from(circle.querySelectorAll('[data-part="cof-cell"]')).map((cell) => [
+        cell.nextElementSibling?.textContent,
+        cell.getAttribute('data-role'),
+      ])
+      expect(roles).toContainEqual(['C', 'tonic'])
+      expect(roles).toContainEqual(['G', 'dominant'])
+      expect(roles).toContainEqual(['F', 'subdominant'])
+      expect(roles).toContainEqual(['Am', 'parallel'])
+      expect(roles).toContainEqual(['Cm', 'sameName'])
+    })
+
+    // В табе «Эмограмма» круга нет (живёт только в табе «Звезда»).
+    fireEvent.click(screen.getByRole('button', { name: 'Эмограмма' }))
+    expect(screen.queryByTestId('circle-of-fifths')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Звезда' }))
+    expect(screen.getByTestId('circle-of-fifths')).toBeInTheDocument()
+  })
+
+  it('«Общая эмо-характеристика» — между радаром и квинтовым кругом', async () => {
+    mockApi()
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
+    const radar = screen.getByTestId('radial-chart')
+    const histogram = screen.getByTestId('emo-histogram')
+    const circle = screen.getByTestId('circle-of-fifths')
+    // Порядок в DOM: радар → гистограмма → круг.
+    expect(
+      radar.compareDocumentPosition(histogram) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      histogram.compareDocumentPosition(circle) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    // Подписи 14 категорий — по шкале «Эмо» («страх» … «агрессия»).
+    const labels = Array.from(histogram.querySelectorAll('[data-part="hist-label"]'))
+    expect(labels.map((node) => node.textContent)).toEqual([...EMO_LABELS])
   })
 })

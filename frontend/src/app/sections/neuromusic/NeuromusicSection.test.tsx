@@ -104,15 +104,15 @@ const TRACKS = ['delta', 'delta_theta', 'theta', 'alpha', 'beta', 'gamma', 'high
 
 /** Кадры «Эмо» для мока (реальный контракт GET …/emo): 6 слайдов записи 4 с,
  * сетка 32000/48000; лучи слайда k = (i+1)·10 + k·10, максимум 100 % R
- * (шкала — dB_relative, порог −60 дБ, schema_version 2). */
+ * (шкала — линейная по пику трека, schema_version 8). */
 const EMO_PAYLOAD: AudioEmo = {
-  schema_version: 2,
+  schema_version: 8,
   fs_audio: 48000,
   fft_size: 32768,
   hop_samples: 32000,
   overlap_samples: 768,
-  normalization: 'db_relative',
-  db_floor: -60,
+  window: 'blackman_harris',
+  normalization: 'peak_linear',
   global_max: 4812.5,
   duration_s: 4,
   frame_count: 6,

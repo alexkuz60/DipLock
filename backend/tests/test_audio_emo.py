@@ -11,6 +11,7 @@ import time
 
 import numpy as np
 import pytest
+from scipy.signal.windows import blackmanharris
 
 from app.core.config import settings
 from app.services.audio_render import emo_radar, vamp_analysis
@@ -66,76 +67,140 @@ def _wait_render(client, render_id: str, timeout: float = 30.0) -> dict:
 # --- юнит: октавная схема ------------------------------------------------------
 
 
-def test_octave_blocks_cover_bins_once():
-    """Блоки b = 1…14 (ширина 2^b, старт 2^b − 1) покрывают бины 1…32766 ровно
-    по одному разу; DC (0) и последний бин 32767 не участвуют."""
-    blocks = emo_radar.octave_blocks()
+def test_counter_blocks_cover_bins_up_to_nyquist_once():
+    """14 блоков двух заходов покрывают бины 0…16384 ровно по одному разу:
+    ширины 2, 2, 4, 8 … 8192 (границы на степенях двойки — октавы
+    0–2, 2–4, 4–8 …; последний блок добирает до Найквиста — 8193), DC
+    (бин 0) — блок 0 счётчика 0, зеркало выше Найквиста не участвует
+    (схема v10, 23.10.2026, консультация по октавным спектрам)."""
+    blocks = emo_radar.counter_blocks()
     assert len(blocks) == 14
-    assert [width for _, width in blocks] == [2**b for b in range(1, 15)]
-    assert blocks[0] == (1, 2) and blocks[6] == (127, 128) and blocks[13] == (16383, 16384)
-    covered = np.zeros(emo_radar.EMO_FFT_SIZE, dtype=np.int64)
+    assert [width for _, width in blocks[:13]] == [2, 2, *[2**b for b in range(2, 13)]]
+    assert blocks[0] == (0, 2) and blocks[1] == (2, 2) and blocks[6] == (64, 64)
+    assert blocks[7] == (128, 128) and blocks[13] == (8192, 8193)  # 8192 + Найквист
+    covered = np.zeros(emo_radar.EMO_BIN_COUNT, dtype=np.int64)
     for start, width in blocks:
         covered[start : start + width] += 1
-    assert int(covered[1:32767].min()) == 1 and int(covered[1:32767].max()) == 1
-    assert covered[0] == 0 and covered[32767] == 0
+    nyquist = emo_radar.EMO_NYQUIST_BIN
+    assert int(covered[: nyquist + 1].min()) == 1
+    assert int(covered[: nyquist + 1].max()) == 1
+    assert int(covered[nyquist + 1 :].sum()) == 0
 
 
 def test_counter_sums_maps_blocks_to_counters():
-    """Счётчик k = сумма блоков k и k+7 (по схеме владельца, «+7 новых»)."""
-    magnitudes = np.arange(emo_radar.EMO_FFT_SIZE, dtype=np.float64)
+    """Счётчик k = энергия блоков k и k+7: sqrt(Σ|Z|²) по обоим блокам —
+    мощности аддитивны, корень один на счётчик (v10, формула энергии
+    полосы из консультации по октавным спектрам)."""
+    magnitudes = np.arange(emo_radar.EMO_BIN_COUNT, dtype=np.float64)
     sums = emo_radar.counter_sums(magnitudes)
-    blocks = emo_radar.octave_blocks()
+    blocks = emo_radar.counter_blocks()
     expected = np.zeros(emo_radar.EMO_RAY_COUNT, dtype=np.float64)
     for k in range(emo_radar.EMO_RAY_COUNT):
-        for block in (blocks[k], blocks[k + 7]):
-            start, width = block
-            expected[k] += float(np.sum(magnitudes[start : start + width]))
+        power = 0.0
+        for index in (k, k + 7):
+            start, width = blocks[index]
+            segment = magnitudes[start : start + width]
+            power += float(np.sum(segment * segment))
+        expected[k] = power**0.5
+    assert sums.shape == (emo_radar.EMO_RAY_COUNT,)
     np.testing.assert_allclose(sums, expected, rtol=1e-12)
 
 
+def test_counter_sums_first_counter_holds_dc_bin():
+    """DC (fft[0]) — в счётчике 0 (блок 0 = бины 0–1, «0–2 Гц»), а не
+    отбрасывается; энергия одного бина = его амплитуда (sqrt(z²) = z)."""
+    magnitudes = np.zeros(emo_radar.EMO_BIN_COUNT, dtype=np.float64)
+    magnitudes[0] = 7.0
+    sums = emo_radar.counter_sums(magnitudes)
+    assert sums[0] == 7.0
+    np.testing.assert_array_equal(sums[1:], np.zeros(emo_radar.EMO_RAY_COUNT - 1))
+
+
+def test_counter_sums_sixth_counter_is_64_plus_nyquist_tail():
+    """Счётчик 6 = 64 низких бина (64–127) + верхние 8193 (8192–16384,
+    по Найквисту) — структурно сильный «HG»-луч (схема v10)."""
+    magnitudes = np.zeros(emo_radar.EMO_BIN_COUNT, dtype=np.float64)
+    magnitudes[64:128] = 1.0  # 64 бина первого захода
+    magnitudes[8192:16385] = 2.0  # 8193 бина второго (по Найквисту)
+    sums = emo_radar.counter_sums(magnitudes)
+    assert sums[6] == pytest.approx(np.sqrt(64.0 + 4.0 * 8193))
+    np.testing.assert_array_equal(sums[:6], np.zeros(emo_radar.EMO_RAY_COUNT - 1))
+
+
+def test_counter_sums_pink_noise_gives_even_rays():
+    """Розовый шум (амплитуда ∝ 1/√f — энергия октав равномерна) → все 7
+    счётчиков сопоставимы: без веера ≈8× магнитудных сумм v9,
+    «опрокидывавшего звезду» в 4-й квадрант (регресс-страж v10)."""
+    mags = np.zeros(emo_radar.EMO_BIN_COUNT, dtype=np.float64)
+    mags[1:] = 1.0 / np.sqrt(np.arange(1, emo_radar.EMO_BIN_COUNT, dtype=np.float64))
+    sums = emo_radar.counter_sums(mags)
+    assert float(sums.min()) > 0.0
+    assert float(sums.max() / sums.min()) < 1.2
+
+
 def test_counter_sums_rejects_short_input():
-    """Короче окна FFT — ValueError (защита от молчаливого среза бинов)."""
-    with pytest.raises(ValueError, match="32768"):
+    """Короче rfft-спектра окна — ValueError (защита от молчаливого среза бинов)."""
+    with pytest.raises(ValueError, match="16385"):
         emo_radar.counter_sums(np.ones(100))
 
 
-def test_db_rays_decibel_scale():
-    """Децибельная шкала громкости: 0 дБ → 100 %, −60 дБ → 0 %, линейна по дБ.
+def test_counter_sums_ignores_bins_above_nyquist():
+    """Энергия только выше Найквиста (бины > 16384, зеркало) не попадает ни в
+    один счётчик: лучи не завышаются зеркальной копией спектра (v7)."""
+    magnitudes = np.zeros(emo_radar.EMO_FFT_SIZE, dtype=np.float64)
+    magnitudes[emo_radar.EMO_NYQUIST_BIN + 5] = 1e9
+    np.testing.assert_array_equal(
+        emo_radar.counter_sums(magnitudes), np.zeros(emo_radar.EMO_RAY_COUNT),
+    )
 
-    Амплитудные счётчики переводятся 20·log10 к глобальному максимуму и
-    картируются [−60…0] дБ → [0…100] % R (EMO_DB_FLOOR); тишина и нули — 0.
+
+def test_emo_window_is_blackman_harris():
+    """Окно аподизации — Блекмена-Харриса (4-членное): длина окна FFT,
+    симметрия, края ≈ 6e-5 (−84 дБ) — утечка спектра подавлена."""
+    window = emo_radar.emo_window()
+    assert window.size == emo_radar.EMO_FFT_SIZE == 32768
+    assert emo_radar.EMO_WINDOW_NAME == "blackman_harris"
+    np.testing.assert_allclose(window, window[::-1], rtol=0.0, atol=1e-12)
+    assert float(window[0]) == pytest.approx(6e-5, abs=1e-7)
+    assert float(window.max()) == pytest.approx(1.0)
+    np.testing.assert_allclose(
+        window, blackmanharris(emo_radar.EMO_FFT_SIZE), rtol=0.0, atol=0.0,
+    )
+
+
+def test_peak_rays_linear_scale():
+    """Линейная шкала по пику трека: pct = 100·raw/peak, зажим 0…100.
+
+    Нормировка по пику всего трека (механика старого EmoLab, решение
+    совещания 22.10.2026): масштаб радара 0..1 = проценты / 100,
+    логарифмирования нет; тишина и нули — 0.
     """
     peak = 1000.0
     raw = np.array([peak, peak / 2, 100.0, 10.0, 1.0, 0.5, 0.0])
-    pct = emo_radar.db_rays(raw, peak)
-    assert pct[0] == pytest.approx(100.0)  # 0 дБ
-    assert pct[1] == pytest.approx(100.0 * (60.0 - 20 * np.log10(2)) / 60.0)
-    assert pct[2] == pytest.approx(100.0 * 40.0 / 60.0)  # −20 дБ → 66.67 %
-    assert pct[3] == pytest.approx(100.0 * 20.0 / 60.0)  # −40 дБ → 33.33 %
-    assert pct[4] == pytest.approx(0.0, abs=1e-9)  # ровно −60 дБ — на пороге
-    assert pct[5] == 0.0  # ниже порога — зажато
-    assert pct[6] == 0.0  # ноль счётчика
-    # Полная тишина — вся шкала в нуле, без log10(0).
-    np.testing.assert_array_equal(emo_radar.db_rays(np.zeros(7), 0.0), np.zeros(7))
+    pct = emo_radar.peak_rays(raw, peak)
+    np.testing.assert_allclose(
+        pct, [100.0, 50.0, 10.0, 1.0, 0.1, 0.05, 0.0], rtol=1e-12,
+    )
+    # Полная тишина — вся шкала в нуле.
+    np.testing.assert_array_equal(emo_radar.peak_rays(np.zeros(7), 0.0), np.zeros(7))
     # Сырьё выше референса (теоретически не бывает) — зажим к 100 %.
-    assert float(emo_radar.db_rays(np.array([2 * peak]), peak)[0]) == 100.0
+    assert float(emo_radar.peak_rays(np.array([2 * peak]), peak)[0]) == 100.0
 
 
-def test_sine_peaks_in_counter_of_its_bin_and_mirror():
-    """Синус ровно на бине — энергия в двух бинах (k и N−k): счётчики,
-    содержащие оба, получают максимум, остальные ≈ 0 (окно прямоугольное)."""
+def test_sine_stays_in_counter_of_its_bin_without_mirror():
+    """Синус ровно на бине — энергия только в счётчике его блока: зеркала
+    выше Найквиста нет (rfft), утечку окна Блекмена-Харриса подавляет
+    (< 1e-6 пика; до v7 прямоугольное окно и зеркало давали ~74 %
+    в соседнем луче — эталон эпохи до v7 в docs/emo_calc.md)."""
     fs = emo_radar.EMO_FFT_SIZE  # в тесте 1 Гц на бин — частота бина = номер
-    bin_index = 400  # блок 8 (бины 255–510) → счётчик 0
+    bin_index = 400  # блок 8 (бины 256–511) → счётчик 8 mod 7 = 1
     t = np.arange(fs) / fs
     mono = np.sin(2 * np.pi * bin_index * t)
-    sums = emo_radar.counter_sums(np.abs(np.fft.fft(mono)))
-    mirror = emo_radar.EMO_FFT_SIZE - bin_index  # блок 14 → счётчик 6
-    assert mirror == 32368
-    assert sums[0] > 0 and sums[6] > 0
-    assert sums[0] == pytest.approx(sums[6], rel=1e-9)
-    assert int(np.argmax(sums)) in (0, 6)
-    rest = np.delete(sums, (0, 6))
-    assert float(rest.max()) < sums[0] * 1e-6
+    sums = emo_radar.counter_sums(np.abs(np.fft.rfft(mono * emo_radar.emo_window())))
+    assert int(np.argmax(sums)) == 1
+    assert sums[6] < sums[1] * 1e-6  # бывшее «зеркало» блока 14 — пусто
+    rest = np.delete(sums, 1)
+    assert float(rest.max()) < sums[1] * 1e-6
 
 
 def test_frame_starts_grid():
@@ -159,20 +224,21 @@ def test_frame_starts_grid():
 
 def test_emo_frames_contract_and_global_normalization():
     """Контракт кадров: сетка t_sec, 7 лучей ≤ 100, максимум микса = 100 % R
-    (децибельная шкала от глобального максимума), детерминизм."""
+    (линейная шкала по пику трека), детерминизм."""
     rng = np.random.default_rng(42)
     n = 192_000  # 4 с @48 кГц, как у тестового EDF
     mono = rng.standard_normal(n)
     mono[96_000:] *= 5.0  # вторая половина микса громче — «дыхание» между кадрами
     payload = emo_radar.emo_frames(mono)
-    assert payload["schema_version"] == emo_radar.EMO_SCHEMA_VERSION == 6
+    assert payload["schema_version"] == emo_radar.EMO_SCHEMA_VERSION == 10
+    assert payload["window"] == emo_radar.EMO_WINDOW_NAME == "blackman_harris"
     assert payload["tempo_track"] is None and payload["tempo_source"] is None
     assert payload["segment_track"] is None and payload["segment_source"] is None
     assert payload["fs_audio"] == FS_AUDIO
     assert payload["fft_size"] == 32768 and payload["fft_size"] == 2**15
     assert payload["hop_samples"] == 32000 and payload["overlap_samples"] == 768
-    assert payload["normalization"] == "db_relative"
-    assert payload["db_floor"] == emo_radar.EMO_DB_FLOOR == -60.0
+    assert payload["normalization"] == "peak_linear"
+    assert "db_floor" not in payload
     assert payload["global_max"] > 0
     assert payload["duration_s"] == pytest.approx(4.0, abs=1e-6)
     assert payload["frame_count"] == len(payload["frames"]) == 6
@@ -267,8 +333,9 @@ def test_render_writes_emo_and_endpoint_serves(client, tmp_path, edf_file):
     assert payload["fs_audio"] == FS_AUDIO
     assert payload["fft_size"] == 32768 and payload["hop_samples"] == 32000
     assert payload["overlap_samples"] == 768
-    assert payload["normalization"] == "db_relative"
-    assert payload["db_floor"] == emo_radar.EMO_DB_FLOOR
+    assert payload["window"] == emo_radar.EMO_WINDOW_NAME
+    assert payload["normalization"] == "peak_linear"
+    assert "db_floor" not in payload
     assert payload["global_max"] > 0
     assert payload["frame_count"] == len(payload["frames"])
     assert payload["key_track"] is None and payload["key_source"] is None

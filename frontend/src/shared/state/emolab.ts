@@ -30,12 +30,6 @@ const analysisToken = createRunToken()
  */
 export type EmoVizTab = 'star' | 'emogram'
 
-/**
- * Динамический диапазон шкалы лучей звезды по умолчанию, дБ — окно
- * `[−60 … 0]` совпадает со шкалой контракта (`db_floor` кадров «Эмо»).
- */
-export const EMO_DB_RANGE_DEFAULT = 60
-
 function errorText(error: unknown): string {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
@@ -66,22 +60,31 @@ export type EmoLabState = {
   emo: AudioEmo | null
   /** `blob:` URL выбранного файла — плеер играет локально, без сервера */
   audioUrl: string | null
-  /**
-   * Динамический диапазон шкалы лучей звезды, дБ: окно `[−dbRangeDb … 0]` →
-   * `[0 … 100]` % R (отображение, анализ не пересчитывается)
-   */
-  dbRangeDb: number
   /** Значения темпа участвуют в расчёте лучей звезды (темп-коррекция) */
   tempoRays: boolean
+  /**
+   * Закон вращения звезды (правый сайдбар, 23.10.2026): `chromatic` — по
+   * полутонам от C мажор / A минор; `harmonic` — по позиции аккорда в
+   * квинтово-квартовом круге (`neuromusic/keyCircle.ts`).
+   */
+  rotationLaw: 'chromatic' | 'harmonic'
+  /**
+   * Шкала радиальных значений вершин/доминанты (опция «Динамический
+   * диапазон», `neuromusic/radialDbRange.ts`): `db-40`/`db-60` — дБ-окно
+   * −40/−60 (конечная оптимизация радиусов после расчёта звезды).
+   */
+  radialScale: 'db-40' | 'db-60'
   /** Активный таб секции «Визуализация» (звезда / «Эмограмма» / дальше) */
   vizTab: EmoVizTab
 
   /** Открыть внешний аудиотрек (wav/mp3): запуск анализа на сервере */
   openFile: (file: File) => Promise<void>
-  /** Смена динамического диапазона шкалы лучей («Опции раздела») */
-  setDbRangeDb: (value: number) => void
   /** Вкл/выкл значений темпа при расчёте лучей звезды («Опции раздела») */
   setTempoRays: (value: boolean) => void
+  /** Смена закона вращения звезды («Опции раздела») */
+  setRotationLaw: (value: 'chromatic' | 'harmonic') => void
+  /** Смена шкалы радиальных значений («Опции раздела») */
+  setRadialScale: (value: 'db-40' | 'db-60') => void
   /** Смена таба секции «Визуализация» */
   setVizTab: (value: EmoVizTab) => void
   /** Сброс раздела (смена трека/уход): отмена поллинга, освобождение blob */
@@ -98,16 +101,21 @@ export const useEmoLab = create<EmoLabState>()((set, get) => ({
   error: null,
   emo: null,
   audioUrl: null,
-  dbRangeDb: EMO_DB_RANGE_DEFAULT,
   tempoRays: true,
+  rotationLaw: 'chromatic',
+  radialScale: 'db-60',
   vizTab: 'star',
-
-  setDbRangeDb: (value) => {
-    set({ dbRangeDb: Number.isFinite(value) && value > 0 ? value : EMO_DB_RANGE_DEFAULT })
-  },
 
   setTempoRays: (value) => {
     set({ tempoRays: Boolean(value) })
+  },
+
+  setRotationLaw: (value) => {
+    set({ rotationLaw: value === 'harmonic' ? 'harmonic' : 'chromatic' })
+  },
+
+  setRadialScale: (value) => {
+    set({ radialScale: value === 'db-40' ? 'db-40' : 'db-60' })
   },
 
   setVizTab: (value) => {
@@ -179,8 +187,9 @@ export const useEmoLab = create<EmoLabState>()((set, get) => ({
       error: null,
       emo: null,
       audioUrl: null,
-      dbRangeDb: EMO_DB_RANGE_DEFAULT,
       tempoRays: true,
+      rotationLaw: 'chromatic',
+      radialScale: 'db-60',
       vizTab: 'star',
     })
   },

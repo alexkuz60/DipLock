@@ -39,15 +39,23 @@
  * (`data-part="sector-arc"`) и залитые круги вершин полигона ⌀10 px
  * (`data-part="vertex-dot"`) в **гамме базовых полос «Диполей»**
  * (`shared/lib/bandColors.ts`: δ красный … γ-high розово-фиолетовый),
- * `dbRangeDb` — динамический диапазон шкалы лучей (окно `[−N … 0]` дБ,
- * `emoRadar.raysDbRange`), `tempoRays` — выкл/вкл значений темпа при
+ * `tempoRays` — выкл/вкл значений темпа при
  * расчёте лучей звезды (метка темпа при этом продолжает показывать bpm).
+ * `radialScale` (23.10.2026) — шкала радиусов
+ * вершин/доминанты («ЕмоЛаб»): конечная оптимизация радиусов вершин и
+ * доминанты **после** расчёта звезды (`radialDbRange.ts`), направления
+ * векторов не меняются (углы доминант — инвариант «Эмограммы»); `null`/дефолт
+ * — без переноса. `rotationLaw` — закон
+ * вращения (`keyRotation.ts`): хроматический (дефолт) либо гармонический.
+ * Перенос дБ-окна (`dbRangeDb`, «Динамический диапазон» на лучах) убран с v8 —
+ * лучи приходят линейными по пику трека и используются как есть.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AudioEmo } from '@/shared/api/types'
 import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
-import { hopSeconds, interpolatedRays, framesDbRange } from './emoRadar'
-import { frameRotations, interpolatedRotation } from './keyRotation'
+import { hopSeconds, interpolatedRays } from './emoRadar'
+import { frameRotations, interpolatedRotation, type RotationLaw } from './keyRotation'
+import { radialScalePoint, radialScalePoints, type RadialScaleKey } from './radialDbRange'
 import {
   frameTempos,
   interpolatedTempo,
@@ -94,12 +102,6 @@ export type RadialChartProps = {
   /** Кадры «Эмо» (null/undefined — фоллбэк-рандомизатор до загрузки). */
   emo?: AudioEmo | null
   /**
-   * Динамический диапазон шкалы лучей, дБ: окно `[−dbRangeDb … 0]` дБ →
-   * `[0 … 100]` % R (`emoRadar.raysDbRange`, параметр «Опции раздела»
-   * «ЕмоЛаб»). Не задан/≤ 0 — шкала контракта (`db_floor`, −60 дБ).
-   */
-  dbRangeDb?: number
-  /**
    * Значения темпа участвуют в расчёте лучей звезды (темп-коррекция радиусов
    * `tempoStarPolygon`); `false` — радиусы без коррекции, метка темпа на оси Y
    * при этом продолжает показывать bpm кадра (чекбокс «ЕмоЛаб»). Дефолт —
@@ -112,33 +114,37 @@ export type RadialChartProps = {
    * рисует прежний нейтральный радар, включает «ЕмоЛаб».
    */
   bandColors?: boolean
+  /**
+   * Шкала радиальных значений вершин/доминанты (`db-40`/`db-60`):
+   * конечная оптимизация радиусов **после** расчёта звезды
+   * (`radialDbRange.ts`); `null`/дефолт — без переноса (поведение
+   * «Нейромузыки»). Углы векторов не меняются.
+   */
+  radialScale?: RadialScaleKey | null
+  /** Закон вращения звезды (`keyRotation.ts`): хроматический (дефолт) либо гармонический. */
+  rotationLaw?: RotationLaw
 }
 
 export function RadialChart({
   emo = null,
-  dbRangeDb = 0,
   tempoRays = true,
   bandColors = false,
+  radialScale = null,
+  rotationLaw = 'chromatic',
 }: RadialChartProps) {
   const boundaries = segmentBoundaries()
   // Фоллбэк-лучи: случайные 0.1…1.0 R — один раз на монтирование.
   const randomRays = useMemo(() => randomRayPercents(), [])
   // Кадры обязаны быть массивом: защита от ответа не по контракту (заглушка
-  // мока, дрейф API) — иначе фоллбэк вместо падения.
+  // мока, дрейф API) — иначе фоллбэк вместо падения. Лучи — линейная шкала
+  // по пику трека (контракт v8): полигоны, облако и анимация ниже читают
+  // проценты как есть, без переноса шкалы.
   const frames = emo && Array.isArray(emo.frames) ? emo.frames : null
-  // Динамический диапазон: лучи кадров переносятся из шкалы контракта
-  // (`db_floor`) в окно [−dbRangeDb … 0] дБ одним местом — полигоны, облако
-  // и анимация ниже читают уже перенесённые проценты. Шкала контракта либо
-  // не заданный диапазон — кадры без изменений (та же ссылка, без копий).
-  const scaledFrames = useMemo(
-    () => (frames ? framesDbRange(frames, Number(emo?.db_floor), dbRangeDb) : null),
-    [frames, emo, dbRangeDb],
-  )
   // Углы вращения кадров — из тональности микса (key_track; без трека —
   // нули, звезда без поворота). Статика: меняется только с кадрами.
   const rotations = useMemo(
-    () => frameRotations(emo?.key_track ?? null, frames ?? []),
-    [emo, frames],
+    () => frameRotations(emo?.key_track ?? null, frames ?? [], rotationLaw),
+    [emo, frames, rotationLaw],
   )
   // Темп кадров — из VAMP Tempo and Beat Tracker (tempo_track; без трека —
   // null, темп-коррекция нулевая). Статика: меняется только с кадрами.
@@ -156,10 +162,10 @@ export function RadialChart({
   const raysRef = useRef<number[]>(randomRays)
   const rotationRef = useRef(0)
   const tempoRef = useRef<number | null>(null)
-  const lastFramesRef = useRef<typeof scaledFrames>(null)
-  if (scaledFrames !== lastFramesRef.current) {
-    lastFramesRef.current = scaledFrames
-    const first = scaledFrames?.[0]
+  const lastFramesRef = useRef<typeof frames>(null)
+  if (frames !== lastFramesRef.current) {
+    lastFramesRef.current = frames
+    const first = frames?.[0]
     raysRef.current = first ? [...first.rays] : randomRays
   }
 
@@ -203,14 +209,18 @@ export function RadialChart({
       tempoRef.current = bpm
       // Чекбокс темпа («ЕмоЛаб»): без значений темпа радиусы вершин не
       // корректируются, но метка темпа на оси Y показывает bpm кадра.
-      const vertices = tempoStarPolygon(
+      // Доминанта считается из исходных вершин (её угол — инвариант ступеней
+      // «Эмограммы»), затем — конечная оптимизация радиусов (−40/−60 дБ).
+      const rawVertices = tempoStarPolygon(
         raysRef.current,
         RADIUS,
         CENTER_PT,
         rotationRad,
         tempoRays ? bpm : null,
       )
-      const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
+      const rawDominant = dominantPoint(rawVertices, CENTER_PT, RADIUS)
+      const vertices = radialScalePoints(rawVertices, CENTER_PT, RADIUS, radialScale)
+      const dominant = radialScalePoint(rawDominant, CENTER_PT, RADIUS, radialScale)
       polygonRef.current?.setAttribute(
         'points',
         vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(' '),
@@ -245,38 +255,43 @@ export function RadialChart({
         }
       }
     },
-    [tempoRays],
+    [tempoRays, radialScale],
   )
 
   // Анимация: пока есть кадры, каждый кадр экрана читает позицию плеера
   // (с учётом rate ×0.5; вне игры — сохранённая позиция/0) и рисует
   // интерполированные лучи. Пауза/seek → сразу слайд текущей позиции.
   useEffect(() => {
-    if (!emo || !scaledFrames) return
+    if (!emo || !frames) return
     const hopSec = hopSeconds(emo.hop_samples, emo.fs_audio)
     let raf = 0
     const tick = () => {
       const position = getActivePlayer()?.position ?? 0
-      const rays = interpolatedRays(scaledFrames, hopSec, position)
+      const rays = interpolatedRays(frames, hopSec, position)
       // Плавный доворот звезды: тот же линейный интерполятор, что у лучей.
-      const rotation = interpolatedRotation(rotations, scaledFrames, hopSec, position) ?? 0
+      const rotation = interpolatedRotation(rotations, frames, hopSec, position) ?? 0
       // Темп кадра — тоже плавно, как лучи и вращение.
-      const tempo = interpolatedTempo(tempos, scaledFrames, hopSec, position)
+      const tempo = interpolatedTempo(tempos, frames, hopSec, position)
       if (rays) paint(rays, rotation, tempo)
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [emo, scaledFrames, rotations, tempos, paint])
+  }, [emo, frames, rotations, tempos, paint])
 
-  const vertices = tempoStarPolygon(
+  // Исходное состояние (до первого кадра анимации): та же цепочка, что в paint —
+  // доминанта из исходных вершин (угол — инвариант), затем конечная оптимизация
+  // радиусов (−40/−60 дБ) для вершин, доминанты и облака.
+  const rawVertices = tempoStarPolygon(
     raysRef.current,
     RADIUS,
     CENTER_PT,
     rotationRef.current,
     tempoRays ? tempoRef.current : null,
   )
-  const dominant = dominantPoint(vertices, CENTER_PT, RADIUS)
+  const rawDominant = dominantPoint(rawVertices, CENTER_PT, RADIUS)
+  const vertices = radialScalePoints(rawVertices, CENTER_PT, RADIUS, radialScale)
+  const dominant = radialScalePoint(rawDominant, CENTER_PT, RADIUS, radialScale)
   const polygonPoints = vertices.map((vertex) => `${vertex.x},${vertex.y}`).join(' ')
   // Облако доминант всех кадров и их суммарная точка — статика (меняется
   // только при загрузке кадров): каждая точка = доминанта своего кадра
@@ -285,18 +300,23 @@ export function RadialChart({
   // внутри облака, в отличие от сырой суммы, упиравшейся в обод.
   const cloud = useMemo(
     () =>
-      scaledFrames
-        ? dominantCloud(
-            scaledFrames.map((frame, index) => ({
-              rays: frame.rays,
-              rotation: rotations[index] ?? 0,
-              tempo: tempoRays ? (tempos[index] ?? null) : null,
-            })),
-            RADIUS,
+      frames
+        ? radialScalePoints(
+            dominantCloud(
+              frames.map((frame, index) => ({
+                rays: frame.rays,
+                rotation: rotations[index] ?? 0,
+                tempo: tempoRays ? (tempos[index] ?? null) : null,
+              })),
+              RADIUS,
+              CENTER_PT,
+            ),
             CENTER_PT,
+            RADIUS,
+            radialScale,
           )
         : [],
-    [scaledFrames, rotations, tempos, tempoRays],
+    [frames, rotations, tempos, tempoRays, radialScale],
   )
   const totalPoint = useMemo(
     () => (cloud.length > 0 ? totalDominant(cloud, CENTER_PT, RADIUS) : null),

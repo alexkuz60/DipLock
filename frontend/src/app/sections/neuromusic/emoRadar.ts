@@ -12,58 +12,6 @@
  */
 import type { AudioEmoFrame } from '@/shared/api/types'
 
-/**
- * Лучи кадра в другом **динамическом диапазоне** шкалы: проценты радиуса окна
- * `[fromFloorDb … 0]` дБ переносятся в окно `[toFloorDb … 0]` дБ
- * (оба порога — отрицательные: `db_floor` контракта). Формула — обратная
- * карте `db_rays` бэкенда (`services/audio_render/emo_radar.py`):
- * `pct = 100·db/floor` → `pct₂ = pct · fromFloor/toFloor`, зажим 0…100.
- *
- * Параметр «Динамический диапазон» панели «ЕмоЛаб» (−96…0 / −60…0 / −40…0
- * дБ) переносит шкалу лучей без пересчёта анализа. Кадры пишутся с порогом
- * −60 дБ (тишина глубже — 0 %), поэтому в более широком окне (−96…0) всё
- * ниже −60 дБ остаётся на нуле — данные кадров ниже порога не сохраняются.
- * Негодные пороги (0, NaN, не отрицательные) — масштаб 1 (копия с зажимом);
- * нечисловые значения лучей — 0 (как у `starPolygon`).
- */
-export function raysDbRange(
-  rays: readonly number[],
-  fromFloorDb: number,
-  toFloorDb: number,
-): number[] {
-  const scale =
-    Number.isFinite(fromFloorDb) &&
-    Number.isFinite(toFloorDb) &&
-    fromFloorDb < 0 &&
-    toFloorDb < 0
-      ? fromFloorDb / toFloorDb
-      : 1
-  return rays.map((value) => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return 0
-    return Math.min(100, Math.max(0, value * scale))
-  })
-}
-
-/**
- * Кадры с лучами в другом **динамическом диапазоне** (одно место применения
- * `raysDbRange` для звезды `RadialChart.tsx` и «Эмограммы» `emolab/Emogram.tsx`):
- * окно `[dbFloor … 0]` дБ контракта переносится в окно `[−dbRangeDb … 0]` дБ.
- * Шкала контракта (`dbFloor >= 0`, не число) либо не заданный/равный порог —
- * те же кадры без копий.
- */
-export function framesDbRange(
-  frames: readonly AudioEmoFrame[],
-  dbFloor: number,
-  dbRangeDb: number,
-): readonly AudioEmoFrame[] {
-  if (!Number.isFinite(dbFloor) || dbFloor >= 0) return frames
-  if (!(dbRangeDb > 0) || dbRangeDb === Math.abs(dbFloor)) return frames
-  return frames.map((frame) => ({
-    ...frame,
-    rays: raysDbRange(frame.rays, dbFloor, -dbRangeDb),
-  }))
-}
-
 /** Секунд на кадр: `hop_samples / fs_audio` (32000/48000 = 2/3 с). */
 export function hopSeconds(hopSamples: number, fsAudio: number): number {
   if (!(hopSamples > 0) || !(fsAudio > 0)) return 0

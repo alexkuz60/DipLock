@@ -11,6 +11,8 @@ import {
   dominantSeries,
   emoAngleFraction,
   emoBars,
+  emoCategoryIndex,
+  emoHistogram,
   emoSteps,
   emoTimeX,
 } from './emogram'
@@ -137,5 +139,85 @@ describe('Эмограмма: доминанты, столбики и ступе
     expect(steps[2]?.sector).toBe(6)
     // Шаг ступени по времени — ровно 1 с (кадр анимации звезды).
     expect(steps.every((step) => step.lenSec === 1)).toBe(true)
+  })
+})
+
+describe('Эмограмма: дБ-оптимизация столбиков экспрессии (23.10.2026)', () => {
+  it('emoBars с полом −60 дБ: высота = лог-шкала радиус-вектора, набор тот же', () => {
+    const series = [
+      { tSec: 0, radiusFrac: 1, angleRad: SEGMENT_START },
+      { tSec: 1, radiusFrac: 0.1, angleRad: SEGMENT_START },
+      { tSec: 2, radiusFrac: 0.01, angleRad: SEGMENT_START },
+    ]
+    const bars = emoBars(series, 1, 'db-60')
+    expect(bars).toHaveLength(3)
+    expect(bars[0]?.height).toBeCloseTo(1, 12) // 0 дБ → 1
+    expect(bars[1]?.height).toBeCloseTo(2 / 3, 12) // −20 дБ → 2/3
+    expect(bars[2]?.height).toBeCloseTo(1 / 3, 12) // −40 дБ → 1/3
+    // Набор столбиков фильтруется по исходному радиус-вектору (как ступени).
+    expect(emoBars(series, 1, 'db-60').map((bar) => bar.tSec)).toEqual([0, 1, 2])
+  })
+
+  it('ступени «Динамики» не зависят от дБ-оптимизации (углы — инвариант)', () => {
+    const series = [
+      { tSec: 0, radiusFrac: 0.1, angleRad: SEGMENT_START + Math.PI },
+      { tSec: 1, radiusFrac: 0.001, angleRad: SEGMENT_START + 3 * (Math.PI / 7) },
+    ]
+    const stepsRaw = emoSteps(series, 1)
+    // Высота столбика переносится — ступени строятся из тех же углов.
+    expect(emoBars(series, 1, 'db-40')[0]?.height).not.toBeCloseTo(0.1, 6)
+    expect(stepsRaw[0]?.yFrac).toBeCloseTo(0.5, 10)
+    expect(stepsRaw[1]?.yFrac).toBeCloseTo(3 / 14, 10)
+    expect(stepsRaw).toHaveLength(2) // тихий кадр (0.001) не выпадает
+  })
+
+  it('пол −40 дБ: ниже пола — 0, без переноса — исходная высота', () => {
+    const series = [{ tSec: 0, radiusFrac: 0.01, angleRad: SEGMENT_START }]
+    expect(emoBars(series, 1, 'db-40')[0]?.height).toBe(0) // −40 дБ = пол окна
+    expect(emoBars(series, 1)[0]?.height).toBeCloseTo(0.01, 12) // без переноса
+    expect(emoBars(series, 1, null)[0]?.height).toBeCloseTo(0.01, 12)
+  })
+})
+
+describe('Общая эмо-характеристика: категории и накопленные суммы (24.10.2026)', () => {
+  it('emoCategoryIndex: категория i = сектор [SEGMENT_START + i·π/7, +π/7), шов круга', () => {
+    expect(emoCategoryIndex(SEGMENT_START)).toBe(0) // «страх»
+    expect(emoCategoryIndex(SEGMENT_START + Math.PI / 7 - 1e-9)).toBe(0)
+    expect(emoCategoryIndex(SEGMENT_START + Math.PI / 7)).toBe(1) // «трагедия»
+    expect(emoCategoryIndex(SEGMENT_START + 13 * (Math.PI / 7))).toBe(13) // «агрессия»
+    // Шов круга: угол через 2π и отрицательный нормализуются в категорию 13/0.
+    expect(emoCategoryIndex(SEGMENT_START + 2 * Math.PI - 1e-9)).toBe(13)
+    expect(emoCategoryIndex(SEGMENT_START - 1e-9)).toBe(13)
+    expect(emoCategoryIndex(Number.NaN)).toBe(0)
+  })
+
+  it('emoHistogram: накопленные суммы |D| по категориям, порядок страх → агрессия', () => {
+    const rows = emoHistogram([
+      { tSec: 0, radiusFrac: 0.5, angleRad: SEGMENT_START }, // «страх»
+      { tSec: 1, radiusFrac: 0.25, angleRad: SEGMENT_START + 1e-9 }, // тоже «страх»
+      { tSec: 2, radiusFrac: 0.75, angleRad: SEGMENT_START + Math.PI / 7 }, // «трагедия»
+      { tSec: 3, radiusFrac: 0, angleRad: SEGMENT_START }, // тишина — мимо
+    ])
+    expect(rows).toHaveLength(14)
+    expect(rows.map((row) => row.label)).toEqual([...EMO_LABELS])
+    expect(rows[0]?.value).toBeCloseTo(0.75, 12) // 0.5 + 0.25
+    expect(rows[1]?.value).toBeCloseTo(0.75, 12)
+    expect(rows.slice(2).every((row) => row.value === 0)).toBe(true)
+    // Сектор категории = floor(index/2): 2 эмоции на сектор радара.
+    expect(rows[0]?.sector).toBe(0)
+    expect(rows[1]?.sector).toBe(0)
+    expect(rows[13]?.sector).toBe(6)
+  })
+
+  it('пустой ряд — 14 нулевых строк; суммы сырые (складываются |D| кадров)', () => {
+    const empty = emoHistogram([])
+    expect(empty).toHaveLength(14)
+    expect(empty.every((row) => row.value === 0)).toBe(true)
+    const sums = emoHistogram([
+      { tSec: 0, radiusFrac: 0.3, angleRad: SEGMENT_START + 4 * (Math.PI / 7) },
+      { tSec: 1, radiusFrac: 0.4, angleRad: SEGMENT_START + 4.5 * (Math.PI / 7) },
+    ])
+    expect(sums[4]?.value).toBeCloseTo(0.7, 12)
+    expect(sums[4]?.label).toBe(EMO_LABELS[4])
   })
 })

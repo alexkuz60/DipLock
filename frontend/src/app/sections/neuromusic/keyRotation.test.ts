@@ -56,6 +56,31 @@ describe('keyRotationRad — таблица углов (спецификация
   })
 })
 
+describe('keyRotationRad — гармонический закон (квинтово-квартовый круг)', () => {
+  it('мажор: C = 0, G = +1δ … F = +11δ (позиция в круге × δ)', () => {
+    expect(keyRotationRad(1, 'harmonic')).toBe(0) // C — позиция 0
+    expect(keyRotationRad(8, 'harmonic')).toBeCloseTo(1 * KEY_DELTA_RAD, 12) // G
+    expect(keyRotationRad(3, 'harmonic')).toBeCloseTo(2 * KEY_DELTA_RAD, 12) // D
+    expect(keyRotationRad(6, 'harmonic')).toBeCloseTo(11 * KEY_DELTA_RAD, 12) // F
+  })
+
+  it('минор: Am = 0, Em = −1δ … Dm = −11δ (по часовой, как в хроматике)', () => {
+    expect(keyRotationRad(22, 'harmonic')).toBe(0) // Am — позиция 0
+    expect(keyRotationRad(17, 'harmonic')).toBeCloseTo(-1 * KEY_DELTA_RAD, 12) // Em
+    expect(keyRotationRad(15, 'harmonic')).toBeCloseTo(-11 * KEY_DELTA_RAD, 12) // Dm
+    expect(keyRotationRad(13, 'harmonic')).toBeCloseTo(-9 * KEY_DELTA_RAD, 12) // Cm
+  })
+
+  it('хроматический — дефолт; код вне 1…24 — 0 в обоих законах', () => {
+    expect(keyRotationRad(8)).toBeCloseTo(7 * KEY_DELTA_RAD, 12) // G: 7 полутонов
+    expect(keyRotationRad(8, 'chromatic')).toBeCloseTo(7 * KEY_DELTA_RAD, 12)
+    expect(keyRotationRad(8, 'harmonic')).toBeCloseTo(1 * KEY_DELTA_RAD, 12)
+    expect(keyRotationRad(0, 'harmonic')).toBe(0)
+    expect(keyRotationRad(25, 'harmonic')).toBe(0)
+    expect(keyRotationRad(Number.NaN, 'harmonic')).toBe(0)
+  })
+})
+
 describe('frameRotations — угол кадра из активного сегмента', () => {
   it('сегмент длится до следующего; до первого сегмента — 0', () => {
     const track = [seg(0, 12), seg(2, 22)] // B major (+11δ) → Am (0)
@@ -77,6 +102,17 @@ describe('frameRotations — угол кадра из активного сег�
     expect(frameRotations(null, frames)).toEqual([0, 0])
     expect(frameRotations([], frames)).toEqual([0, 0])
     expect(frameRotations(null, [])).toEqual([])
+  })
+
+  it('закон вращения передаётся в угол кадра', () => {
+    const track = [seg(0, 8)] // G major: хроматика +7δ, гармоника +1δ
+    const frames = [{ t_sec: 0 }, { t_sec: 1 }]
+    const chromatic = frameRotations(track, frames)
+    expect(chromatic[0]).toBeCloseTo(7 * KEY_DELTA_RAD, 12)
+    expect(chromatic[1]).toBeCloseTo(7 * KEY_DELTA_RAD, 12)
+    const harmonic = frameRotations(track, frames, 'harmonic')
+    expect(harmonic[0]).toBeCloseTo(1 * KEY_DELTA_RAD, 12)
+    expect(harmonic[1]).toBeCloseTo(1 * KEY_DELTA_RAD, 12)
   })
 })
 

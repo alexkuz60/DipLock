@@ -30,6 +30,7 @@
  * `emolab/Emogram.tsx`.
  */
 import { SEGMENT_START, dominantCloud, sectorIndexOf } from '../neuromusic/radialChart'
+import { radialScaleFrac, type RadialScaleKey } from '../neuromusic/radialDbRange'
 
 /**
  * 14 эмоций шкалы Y «Эмо», **снизу вверх**: страх → агрессия. Линия i стоит
@@ -176,15 +177,25 @@ export type EmoStep = {
  * её угла (`sectorIndexOf` — тот же сектор, что у ступени кадра). Кадры без
  * радиус-вектора (тишина — доминанта в центре) не рисуются (столбик нулевой
  * высоты не виден). `frameSec` — длина кадра по шкале времени (1 с).
+ *
+ * `scale` (23.10.2026) — шкала радиусов
+ * (`radialDbRange`): дБ-окно −40/−60 — конечная
+ * оптимизация радиального значения доминанты (`radialScaleFrac`) — высота
+ * столбика становится естественнее (лог-шкала громкости); набор столбиков
+ * фильтруется по ИСХОДНОМУ радиус-вектору (как ступени — инвариант).
  */
-export function emoBars(series: readonly EmoDominant[], frameSec: number): EmoBar[] {
+export function emoBars(
+  series: readonly EmoDominant[],
+  frameSec: number,
+  scale: RadialScaleKey | null = null,
+): EmoBar[] {
   const lenSec = frameSec > 0 && Number.isFinite(frameSec) ? frameSec : 0
   return series
     .filter((point) => point.radiusFrac > 0)
     .map((point) => ({
       tSec: point.tSec,
       lenSec,
-      height: point.radiusFrac,
+      height: radialScaleFrac(point.radiusFrac, scale),
       sector: sectorIndexOf(point.angleRad),
     }))
 }
@@ -205,4 +216,52 @@ export function emoSteps(series: readonly EmoDominant[], frameSec: number): EmoS
       yFrac: emoAngleFraction(point.angleRad),
       sector: sectorIndexOf(point.angleRad),
     }))
+}
+
+/**
+ * Категория настроения угла доминанты (0…13 → `EMO_LABELS`): категория i
+ * покрывает сектор `[SEGMENT_START + i·π/7, +π/7)` — та же шкала, что Y
+ * «Эмограммы» («страх» = 0 внизу … «агрессия» = 13 вверху). Нечисловой угол —
+ * категория 0.
+ */
+export function emoCategoryIndex(angleRad: number): number {
+  return Math.min(EMO_LABELS.length - 1, Math.max(0, Math.floor(emoAngleFraction(angleRad) * EMO_LABELS.length)))
+}
+
+/** Строка «Общей эмо-характеристики»: категория настроения и её накопленная сумма. */
+export type EmoHistogramRow = {
+  /** Индекс категории (0…13 → `EMO_LABELS`) */
+  readonly index: number
+  /** Текстовая характеристика настроения («страх» … «агрессия») */
+  readonly label: string
+  /** Накопленная сумма длин радиус-векторов доминант категории (сырые числа) */
+  readonly value: number
+  /** Индекс сектора радара категории (0…6 → цвет `SECTOR_COLORS`) */
+  readonly sector: number
+}
+
+/**
+ * «Общая эмо-характеристика аудио-трека»: накопленные суммы векторов
+ * доминант по 14 текстовым характеристикам настроения (`EMO_LABELS`).
+ *
+ * Каждый кадр с ненулевым радиус-вектором вносит `radiusFrac` (длину
+ * радиус-вектора доминанты, доли R) в категорию своего угла
+ * (`emoCategoryIndex`); кадры без радиус-вектора (тишина — доминанта в
+ * центре) не участвуют (угол не определён). Суммы **сырые** (как в старом
+ * EmoLab) — перенос «Динамический диапазон» (`radialScale`) на них не
+ * влияет; `tempoRays`/`rotationLaw` влияют через доминанту. Порядок строк —
+ * по шкале «Эмо» («страх» первым), без сортировки по величине.
+ */
+export function emoHistogram(series: readonly EmoDominant[]): EmoHistogramRow[] {
+  const sums = new Array<number>(EMO_LABELS.length).fill(0)
+  for (const point of series) {
+    if (!(point.radiusFrac > 0)) continue
+    sums[emoCategoryIndex(point.angleRad)] += point.radiusFrac
+  }
+  return sums.map((value, index) => ({
+    index,
+    label: EMO_LABELS[index] ?? '',
+    value,
+    sector: sectorIndexOf(SEGMENT_START + index * (Math.PI / 7)),
+  }))
 }

@@ -12,12 +12,27 @@
  * - единица смещения δ = 1/12 сектора, секторов 7 (по 1/7 круга) →
  *   δ = 2π/84 = π/42 рад ≈ 4.2857°.
  *
+ * **Два закона вращения** (постановка владельца 23.10.2026): хроматический
+ * (`'chromatic'`, как выше — число полутонов от C/A) и гармонический
+ * (`'harmonic'` — позиция аккорда в квинтово-квартовом круге,
+ * `keyCircle.ts`): те же 12 позиций для мажора/минора, смещение на `P` тиков
+ * по δ **в пределах одного сектора** (1/7 круга), а не на `P/12` полного
+ * круга. Направление — то же: мажор `+`, минор `−`.
+ *
  * Угол кадра — из активного сегмента тональности, между кадрами сетки 2/3 с
  * — **линейная интерполяция** (решение владельца: плавный доворот, как у
  * лучей). Доминанты считаются **после** вращения полигона. Чистая математика
  * без DOM — покрыта `keyRotation.test.ts`; применяет `RadialChart.tsx`.
  */
 import type { AudioEmoFrame, AudioKeySegment } from '@/shared/api/types'
+import { circleSlotOf } from './keyCircle'
+
+/**
+ * Закон вращения звезды «Эмо» («Закон вращения звезды», панель «ЕмоЛаб»):
+ * `chromatic` — по полутонам от C мажор / A минор; `harmonic` — по позиции
+ * аккорда в квинтово-квартовом круге (`keyCircle.ts`).
+ */
+export type RotationLaw = 'chromatic' | 'harmonic'
 
 /**
  * Шаг вращения δ, рад: 1/12 сектора (сектор — 2π/7) → 2π/84 = π/42.
@@ -37,8 +52,18 @@ export const KEY_CODE_MAX = 24
  * - минор (код 13…24): `−((9 − (код−13)) mod 12)·δ` — Am=0, Abm=−1,
  *   Gm=−2 … Bbm=−11 (по часовой, хроматический спуск от A);
  * - код вне 1…24 либо не число — 0 (нет вращения).
+ *
+ * `law = 'harmonic'` — гармонический закон (`keyCircle.ts`): `±P·δ`, где
+ * `P` — позиция аккорда в квинтово-квартовом круге (0…11); мажор `+`,
+ * минор `−`, та же единица δ (1/12 сектора) и то же направление, что в
+ * хроматическом законе.
  */
-export function keyRotationRad(keyCode: number): number {
+export function keyRotationRad(keyCode: number, law: RotationLaw = 'chromatic'): number {
+  if (law === 'harmonic') {
+    const slot = circleSlotOf(keyCode)
+    if (!slot || slot.position === 0) return 0 // C / Am — чистый +0 (не −0).
+    return slot.ring === 'major' ? slot.position * KEY_DELTA_RAD : -slot.position * KEY_DELTA_RAD
+  }
   if (!Number.isFinite(keyCode)) return 0
   const code = Math.round(keyCode)
   if (code < KEY_CODE_MIN || code > KEY_CODE_MAX) return 0
@@ -74,11 +99,13 @@ export function activeKeySegment(
  * активного сегмента `key_track` (последний с `t_sec ≤ t` кадра; сегмент
  * длится до следующего). До первого сегмента — 0 (тональность не
  * определена). `null`/пустой трек — нули на все кадры (вращение выключено).
- * Длина ряда — длина `frames` (параллельный ряд, как лучи).
+ * Длина ряда — длина `frames` (параллельный ряд, как лучи). `law` — закон
+ * вращения (`RotationLaw`): хроматический (дефолт) либо гармонический.
  */
 export function frameRotations(
   keyTrack: readonly AudioKeySegment[] | null | undefined,
   frames: readonly Pick<AudioEmoFrame, 't_sec'>[],
+  law: RotationLaw = 'chromatic',
 ): number[] {
   const rotations = new Array<number>(frames.length).fill(0)
   if (!keyTrack || keyTrack.length === 0) return rotations
@@ -91,7 +118,7 @@ export function frameRotations(
       segmentIndex += 1
     }
     const segment = segmentIndex >= 0 ? keyTrack[segmentIndex] : undefined
-    rotations[index] = segment ? keyRotationRad(segment.key_code) : 0
+    rotations[index] = segment ? keyRotationRad(segment.key_code, law) : 0
   })
   return rotations
 }

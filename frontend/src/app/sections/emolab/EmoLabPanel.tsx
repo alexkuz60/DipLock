@@ -2,8 +2,7 @@
  * Панель «Опции раздела» «ЕмоЛаб»: паспорт открытого аудиотрека и параметры
  * анализа (правка владельца 21.10.2026): под строкой «Карта аккордов» —
  * **таблица аккордов** (время, аккорд, тип (минор/мажор) из `key_track` VAMP
- * Key Detector), параметр **«Динамический диапазон»** шкалы лучей звезды
- * (−96…0 / −60…0 / −40…0 дБ) и под строкой «Карта темпа» — чекбокс значений
+ * Key Detector), под строкой «Карта темпа» — чекбокс значений
  * темпа при расчёте лучей звезды; под строкой «Сегментер» — **таблица
  * сегментов** (время, имя сегмента A, B, C… из `segment_track` VAMP
  * Segmenter — визуально-слуховой контроль, в расчётах не участвует).
@@ -19,16 +18,30 @@ import { formatTime } from '@/shared/lib/waveformView'
 import { useEmoLab } from '@/shared/state/emolab'
 import { Panel } from '@/shared/ui/Panel'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
-import { SelectField, type SelectOption } from '@/shared/ui/SelectField'
+import { SegmentedControl, type SegmentedOption } from '@/shared/ui/SegmentedControl'
+import type { RadialScaleKey } from '../neuromusic/radialDbRange'
+
+/** Опции «Закона вращения звезды» (хроматический — дефолт, гармонический). */
+const ROTATION_LAW_OPTIONS: SegmentedOption<'chromatic' | 'harmonic'>[] = [
+  {
+    value: 'chromatic',
+    label: 'Хроматический',
+    title: 'Полутоны от C мажор / A минор: мажор — против часовой, минор — по часовой',
+  },
+  {
+    value: 'harmonic',
+    label: 'Гармонический',
+    title: 'Позиция аккорда в квинтово-квартовом круге: смещение в пределах одного сектора',
+  },
+]
 
 /**
- * Варианты динамического диапазона шкалы лучей звезды: окно `[−N … 0]` дБ →
- * `[0 … 100]` % R. −60 — шкала контракта (`db_floor` кадров «Эмо»).
+ * Опции «Динамического диапазона» — шкала радиусов вершин/доминанты:
+ * дБ-окно −40/−60 (конечная оптимизация после расчёта звезды).
  */
-const DB_RANGE_OPTIONS: SelectOption<string>[] = [
-  { value: '96', label: '−96…0 дБ' },
-  { value: '60', label: '−60…0 дБ' },
-  { value: '40', label: '−40…0 дБ' },
+const RADIAL_SCALE_OPTIONS: SegmentedOption<RadialScaleKey>[] = [
+  { value: 'db-40', label: '−40 дБ', title: 'Окно −40…0 дБ: тихие значения раздвигаются сильнее' },
+  { value: 'db-60', label: '−60 дБ', title: 'Окно −60…0 дБ: дефолт, ближе к шкале контракта' },
 ]
 
 /** Строка read-параметра (как в заглушках: `ui-list-row` без контрола). */
@@ -141,10 +154,12 @@ export function EmoLabPanel() {
   const status = useEmoLab((state) => state.status)
   const cached = useEmoLab((state) => state.cached)
   const emo = useEmoLab((state) => state.emo)
-  const dbRangeDb = useEmoLab((state) => state.dbRangeDb)
-  const setDbRangeDb = useEmoLab((state) => state.setDbRangeDb)
   const tempoRays = useEmoLab((state) => state.tempoRays)
   const setTempoRays = useEmoLab((state) => state.setTempoRays)
+  const rotationLaw = useEmoLab((state) => state.rotationLaw)
+  const setRotationLaw = useEmoLab((state) => state.setRotationLaw)
+  const radialScale = useEmoLab((state) => state.radialScale)
+  const setRadialScale = useEmoLab((state) => state.setRadialScale)
 
   return (
     <>
@@ -177,15 +192,22 @@ export function EmoLabPanel() {
         )}
       </Panel>
       <Panel title="Параметры анализа" hint="Шкала лучей звезды и карты VAMP (Соник Аннотатор)">
+        <SegmentedControl
+          label="Закон вращения звезды"
+          value={rotationLaw}
+          onChange={setRotationLaw}
+          options={ROTATION_LAW_OPTIONS}
+          hint="Хроматический — по полутонам; гармонический — по позиции аккорда в квинтово-квартовом круге"
+        />
+        <SegmentedControl
+          label="Динамический диапазон"
+          value={radialScale}
+          onChange={setRadialScale}
+          options={RADIAL_SCALE_OPTIONS}
+          hint="Шкала радиусов вершин и доминанты — конечная оптимизация после расчёта звезды (дБ-окно)"
+        />
         <InfoRow label="Карта аккордов" value="VAMP Chordino" />
         <ChordTable keyTrack={emo?.key_track ?? null} />
-        <SelectField
-          label="Динамический диапазон"
-          value={String(dbRangeDb)}
-          options={DB_RANGE_OPTIONS}
-          onChange={(value) => setDbRangeDb(Number(value))}
-          hint="Окно шкалы лучей звезды, дБ (0 дБ = глобальный максимум счётчиков)"
-        />
         <InfoRow label="Карта темпа" value="VAMP Tempo and Beat Tracker" />
         <CheckboxRow
           label="Учитывать темп при расчёте лучей звезды"

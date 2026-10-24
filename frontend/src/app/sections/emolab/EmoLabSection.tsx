@@ -10,8 +10,7 @@
  * звезда-полигон (`RadialChart` из «Нейромузыки»): вращение по аккордам,
  * темп-коррекция лучей, счётчики «Аккорд»/«Темп» (`EmoCounters`). Правка
  * владельца 21.10.2026: радар включает пропы «ЕмоЛаб» — гамма полос
- * «Диполей» на дугах секторов/вершинах (`bandColors`), динамический диапазон
- * шкалы лучей (`dbRangeDb` панели «Опции») и выкл/вкл значений темпа при
+ * «Диполей» на дугах секторов/вершинах (`bandColors`) и выкл/вкл значений темпа при
  * расчёте лучей (`tempoRays`); «Нейромузыка» рисует радар прежним (дефолты
  * пропов — её поведение). Под радаром — «Эмограмма» (`Emogram.tsx`): лучи
  * звезды, развернутые по шкале времени (столбики «Экспрессии Эмо» и ступени
@@ -27,7 +26,9 @@ import { Placeholder } from '@/shared/ui/Placeholder'
 import { SegmentedControl, type SegmentedOption } from '@/shared/ui/SegmentedControl'
 import { EmoCounters } from '../neuromusic/EmoCounters'
 import { RadialChart } from '../neuromusic/RadialChart'
+import { CircleOfFifths } from './CircleOfFifths'
 import { Emogram } from './Emogram'
+import { EmoHistogram } from './EmoHistogram'
 import { EmoLabTracker } from './EmoLabTracker'
 
 /**
@@ -46,8 +47,9 @@ export function EmoLabSection() {
   const status = useEmoLab((state) => state.status)
   const error = useEmoLab((state) => state.error)
   const emo = useEmoLab((state) => state.emo)
-  const dbRangeDb = useEmoLab((state) => state.dbRangeDb)
   const tempoRays = useEmoLab((state) => state.tempoRays)
+  const rotationLaw = useEmoLab((state) => state.rotationLaw)
+  const radialScale = useEmoLab((state) => state.radialScale)
   const vizTab = useEmoLab((state) => state.vizTab)
   const setVizTab = useEmoLab((state) => state.setVizTab)
 
@@ -123,7 +125,7 @@ export function EmoLabSection() {
           не мельчает под вторым графиком. «Звезда» — звезда-полигон «Эмо»
           (кадры ФФТ + вращение по аккордам + темп-коррекция лучей) и пиули
           «Аккорд»/«Темп» — компоненты «Нейромузыки» (пропы «ЕмоЛаб»: гамма
-          полос на дугах секторов/вершинах, динамический диапазон и чекбокс
+          полос на дугах секторов/вершинах и чекбокс
           темпа). «Эмограмма» — лучи звезды по шкале времени (столбики
           «Экспрессии Эмо» и ступени «Динамики Эмо» + курсор позиции плеера).
           Активный таб живёт в сторе `emolab.ts` (переживает уход из раздела). */}
@@ -141,13 +143,40 @@ export function EmoLabSection() {
         />
         {vizTab === 'star' ? (
           <div className="flex min-h-0 flex-1">
-            <div className="min-w-0 flex-1">
-              <RadialChart emo={emo} dbRangeDb={dbRangeDb} tempoRays={tempoRays} bandColors />
+            {/* Радар, «Общая эмо-характеристика» и квинтово-квартовый круг в
+                ряд — у радара и круга одинаковые контейнеры (svg + подвал h-6:
+                у круга — легенда, у радара — пустой) — диаметры звезды и круга
+                совпадают. */}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1">
+                <RadialChart
+                  emo={emo}
+                  tempoRays={tempoRays}
+                  bandColors
+                  radialScale={radialScale}
+                  rotationLaw={rotationLaw}
+                />
+              </div>
+              <div className="h-6 shrink-0" aria-hidden="true" />
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1">
+                <EmoHistogram emo={emo} tempoRays={tempoRays} rotationLaw={rotationLaw} />
+              </div>
+              <div className="h-6 shrink-0" aria-hidden="true" />
+            </div>
+            <div className="flex min-w-0 flex-1 flex-col">
+              <CircleOfFifths emo={emo} />
             </div>
             <EmoCounters emo={emo} />
           </div>
         ) : (
-          <Emogram emo={emo} dbRangeDb={dbRangeDb} tempoRays={tempoRays} />
+          <Emogram
+            emo={emo}
+            tempoRays={tempoRays}
+            radialScale={radialScale}
+            rotationLaw={rotationLaw}
+          />
         )}
       </section>
     </div>

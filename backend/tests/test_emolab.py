@@ -131,7 +131,7 @@ def test_wav_bytes_is_analysis_contract():
 
 
 def test_analysis_writes_cache_and_contract(stub_vamp, isolated_io):
-    """Полный конвейер: кэш-манифест, emo.json — контракт AudioEmoOut (v5)."""
+    """Полный конвейер: кэш-манифест, emo.json — контракт AudioEmoOut (текущая схема)."""
     track_analysis.clear_states()
     track_id, cached = track_analysis.start_analysis(_wav_blob(), "song.wav", settings)
     assert not cached
@@ -190,7 +190,7 @@ def test_start_analysis_caches_by_digest(stub_vamp, isolated_io):
 def test_analysis_recomputes_stale_cache(stub_vamp, isolated_io):
     """Устаревший emo.json (контракт прошлой версии) — промах: честный пересчёт.
 
-    ``parse_emo`` отвергает кадры прошлой версии (v4 при контракте v5) —
+    ``parse_emo`` отвергает кадры прошлой версии схемы —
     ловушка смены версии: без пересчёта кэш-хит навсегда отдавал бы трек без
     данных нового контракта (сегментов, темпа…), а ``GET …/emo`` — 409.
     """

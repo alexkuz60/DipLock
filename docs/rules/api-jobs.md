@@ -213,7 +213,7 @@
 | 70 | `GET /audio/render/{id}/master.wav` | мастер-WAV 48 кГц/PCM_24 из дискового кэша (без `Content-Disposition` — играется в `<audio>`) |
 | 71 | `GET /audio/render/{id}/track/{band}.wav` | WAV одного трека полосы (соль-прослушивание; для `variant=montage` — 404 с подсказкой рядового пути) |
 | 72 | `GET /audio/render/{id}/sidecar.json` | sidecar-«партитура»: веса, гейны, checksum входа, `extensions`, `variant`/`rows` |
-| 73 | `GET /audio/render/{id}/emo` | **кадры радара «Эмо»** (§«Эмо» в `neuromusic.md`): `AudioEmoOut` — окно FFT 32768, шаг 32000/перекрытие 768, лучи на **децибельной шкале** (`db_relative`, порог `db_floor` −60 дБ → 0 % R, `global_max` = 0 дБ), `frames[{t_sec, rays[7]}]`, `schema_version` 2; `emo.json` кэша рендера, старые рендеры (и v1) добиваются из `master.wav`; 404 — рендер, 409 — идёт/упал/нет мастера |
+| 73 | `GET /audio/render/{id}/emo` | **кадры радара «Эмо»** (§«Эмо» в `neuromusic.md`): `AudioEmoOut` — окно FFT 32768, шаг 32000/перекрытие 768, окно Блекмена-Харриса, лучи на **линейной шкале по пику трека** (`peak_linear`, `global_max` = 100 % R), `frames[{t_sec, rays[7]}]`, `schema_version` 10; `emo.json` кэша рендера, старые рендеры (прошлых версий контракта) добиваются из `master.wav`; 404 — рендер, 409 — идёт/упал/нет мастера |
 | 74 | `GET /audio/ir` | **каталог IR-пресетов** реверберации плеера (`AudioIrCatalogOut`; spatial-audio, п.2) |
 | 75 | `GET /audio/ir/{preset}.wav` | стерео-IR пресета (WAV 48 кГц, ETag/304; ленивая генерация pyroomacoustics → `cache_dir/ir/`; 404 — неизвестный пресет) |
 | 76 | `GET /audio/render/{id}/track/{row}/{band}.wav` | **рядовой трек «Монтажа»** (ряд × полоса; `track_{row}_{band}.wav`); 404 с перечнем рядов/полос; для `variant=express` — 404 с подсказкой |
