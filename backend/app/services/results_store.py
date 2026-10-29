@@ -327,8 +327,19 @@ async def _persist_report(
         # Базис КД (§2.2 data-blocks): максимум момента — внутри полосы;
         # пороги задаёт методика (concept.md §3, C0) — без них вердикт NULL.
         # Формула — один владелец (`services/kd_criteria.py`): те же вердикты
-        # считает пакетный прогон (С1) для кластеров.
-        kd_basis, verdicts, n_kd_passed = kd_basis_for(points, settings)
+        # считает пакетный прогон (С1) для кластеров. Порог GOF — свой у
+        # полосы: форма прогона (`params`) перекрывает методику (29.10.2026).
+        kd_basis, verdicts, n_kd_passed = kd_basis_for(
+            points, settings,
+            band_key=band_key or None,
+            band_hz=(
+                (float(band_hz[0]), float(band_hz[1]))
+                if band_hz[0] is not None and band_hz[1] is not None
+                else None
+            ),
+            gof_min_by_band=getattr(params, "kd_gof_min_by_band", None),
+            moment_share=getattr(params, "kd_moment_share", None),
+        )
 
         session.add(AnalysisBand(
             analysis_id=analysis.id,
@@ -393,6 +404,16 @@ async def _persist_report(
             n_no_attribution=summary.get("n_no_attribution"),
             median_gof=summary.get("median_gof"),
             median_riv=summary.get("median_riv"),
+            # Доля вращения момента (срез 2): CW/CCW по «плоским» тройкам
+            # траектории (`services/moment_rotation.py`)
+            rotation_cw_share=summary.get("rotation_cw_share"),
+            rotation_ccw_share=summary.get("rotation_ccw_share"),
+            rotation_triples=summary.get("rotation_triples"),
+            # Магистраль потока и упорядоченность (срез 3, `services/flow_metrics.py`)
+            flow_orderliness=summary.get("flow_orderliness"),
+            flow_steps=summary.get("flow_steps"),
+            flow_basis=summary.get("flow_basis"),
+            flow_top_transitions=summary.get("flow_top_transitions"),
         ))
         # Полный счёт имён (§8.4.4): из результата убираем — UI достаточно топов.
         counts = summary.pop("name_counts", None) or {}

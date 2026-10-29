@@ -194,6 +194,7 @@ from app.services.group_analysis import (
 )
 from app.services.group_reports import ensure_compare_report, ensure_group_report
 from app.services.job_manager import job_manager, noop_progress
+from app.services.kd_criteria import effective_gof_map
 from app.services.mains import mains_component
 from app.services.mri_slices import (
     mip_png as mri_mip_png,
@@ -208,6 +209,7 @@ from app.services.mri_slices import (
     slice_ref as mri_slice_ref,
 )
 from app.services.mri_volumes import volume_bytes, volumes_ref
+from app.services.probe_context import probe_features_by_band
 from app.services.recording_signals import (
     SignalBuildError,
     build_signal_blob,
@@ -912,7 +914,15 @@ async def create_compare_job(
                         f"доступные события — {available}"
                     ),
                 )
-    return submit_compare_job(recording_a, recording_b, params)
+    # Признаки слоя (срез 5) собираются до постановки: воркер синхронный и к БД
+    # не обращается; на момент постановки — последние прогоны автоотчёта пары.
+    layer_features = await probe_features_by_band(
+        [recording_a.recording_id, recording_b.recording_id],
+        list(settings.freq_bands),
+    )
+    return submit_compare_job(
+        recording_a, recording_b, params, layer_features=layer_features,
+    )
 
 
 @router.get(
@@ -954,6 +964,17 @@ async def create_archive_batch_job(
     cluster_min_points: int | None = Form(
         None, description="Минимум точек в кластере",
     ),
+    kd_gof_min_by_band: str | None = Form(
+        None,
+        description=(
+            'Пороги GOF полос КД (JSON вида {"delta": 0.9}, доля 0…1); '
+            "пусто — пороги методики / дефолты /meta"
+        ),
+    ),
+    kd_moment_share: float | None = Form(
+        None, gt=0.0, le=1.0,
+        description="КД: момент ≥ X % максимума своей полосы (доля 0…1); пусто — «не оценено»",
+    ),
 ) -> JobCreated:
     """Серия прогонов пакета (С1) по каталогу + отчёт «обработано/ошибки/дубли».
 
@@ -966,6 +987,7 @@ async def create_archive_batch_job(
         reference=reference, reference_channels=reference_channels,
         epoch_length_ms=epoch_length_ms, grid_mm=grid_mm,
         cluster_voxel_norm=cluster_voxel_norm, cluster_min_points=cluster_min_points,
+        kd_gof_min_by_band=kd_gof_min_by_band, kd_moment_share=kd_moment_share,
     )
     for known_id in params.recording_ids:
         require_recording(known_id)  # 404 с текстом для UI: неизвестная/устаревшая
@@ -1153,6 +1175,17 @@ async def create_dipole_batch_job(
     cluster_min_points: int | None = Form(
         None, description="Минимум точек в кластере (пусто — дефолт сервера)",
     ),
+    kd_gof_min_by_band: str | None = Form(
+        None,
+        description=(
+            'Пороги GOF полос КД (JSON вида {"delta": 0.9}, доля 0…1); '
+            "пусто — пороги методики / дефолты /meta"
+        ),
+    ),
+    kd_moment_share: float | None = Form(
+        None, gt=0.0, le=1.0,
+        description="КД: момент ≥ X % максимума своей полосы (доля 0…1); пусто — «не оценено»",
+    ),
 ) -> JobCreated:
     """Пакет поддиапазонов (С1): несколько расчётов одной сессии и их сопоставление.
 
@@ -1169,6 +1202,7 @@ async def create_dipole_batch_job(
         reference=reference, reference_channels=reference_channels,
         epoch_length_ms=epoch_length_ms, grid_mm=grid_mm,
         cluster_voxel_norm=cluster_voxel_norm, cluster_min_points=cluster_min_points,
+        kd_gof_min_by_band=kd_gof_min_by_band, kd_moment_share=kd_moment_share,
     )
     return submit_recording_job(
         "dipole_batch", recording, params,
@@ -1341,6 +1375,17 @@ async def create_report_job(
     event_id: str | None = Form(None, description="Описание события (режим events)"),
     epoch_pre_ms: float = Form(200.0, description="Окно до события, мс (режим events)"),
     epoch_post_ms: float = Form(800.0, description="Окно после события, мс (режим events)"),
+    kd_gof_min_by_band: str | None = Form(
+        None,
+        description=(
+            'Пороги GOF полос КД (JSON вида {"delta": 0.9}, доля 0…1); '
+            "пусто — пороги методики / дефолты /meta"
+        ),
+    ),
+    kd_moment_share: float | None = Form(
+        None, gt=0.0, le=1.0,
+        description="КД: момент ≥ X % максимума своей полосы (доля 0…1); пусто — «не оценено»",
+    ),
 ) -> JobCreated:
     """Автоотчёт раздела «Итоги» — одна задача в три ступени.
 
@@ -1366,6 +1411,7 @@ async def create_report_job(
         grid_mm=grid_mm, bands=bands,
         epoch_mode=epoch_mode, event_id=event_id,
         epoch_pre_ms=epoch_pre_ms, epoch_post_ms=epoch_post_ms,
+        kd_gof_min_by_band=kd_gof_min_by_band, kd_moment_share=kd_moment_share,
     )
     # Шлюз «событие есть в записи» — до старта задачи (как у сравнения):
     # иначе на середине дороги, когда стадии уже посчитаны.
@@ -2220,6 +2266,11 @@ async def get_meta() -> MetaResponse:
             name: [float(fmin), float(fmax)]
             for name, (fmin, fmax) in settings.functional_bands.items()
         },
+        # Дефолты КД для «Опций расчётов диполов» (С0, 29.10.2026): по-полосный
+        # GOF (экспертная интерполяция δ→γ) и доля момента X % (None — «не
+        # оценено», методика пока не дала значение).
+        kd_gof_min_by_band=effective_gof_map(settings),
+        kd_moment_share=settings.kd_moment_share,
         signal_levels=[int(level) for level in settings.signal_levels],
         signal_base_points=settings.signal_base_points,
         artifact_thresholds=ArtifactThresholds(

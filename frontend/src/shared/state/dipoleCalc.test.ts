@@ -162,6 +162,9 @@ describe('состояние расчёта диполей', () => {
       epochLengthMs: 500,
       gridMm: 9,
       psdMethod: CALC_PARAM_DEFAULTS.psdMethod,
+      // Старое хранилище не знало полей КД: пустые правки = дефолты методики
+      kdGofByBand: {},
+      kdMomentSharePercent: null,
     })
   })
 

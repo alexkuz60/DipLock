@@ -40,6 +40,8 @@ import {
 import {
   GOF_THRESHOLD_RANGE,
   GRID_MM_RANGE,
+  KD_GOF_RANGE,
+  KD_MOMENT_SHARE_RANGE,
   REFINE_HALFWIN_OPTIONS,
   THRESHOLD_NAM_RANGE,
   calcJobSummary,
@@ -91,6 +93,8 @@ export function DipolesPanel() {
   const setGofThreshold = useDipoleCalc((state) => state.setGofThreshold)
   const setAmplitudeThreshold = useDipoleCalc((state) => state.setAmplitudeThreshold)
   const setNotchHz = useDipoleCalc((state) => state.setNotchHz)
+  const setKdGofForBand = useDipoleCalc((state) => state.setKdGofForBand)
+  const setKdMomentSharePercent = useDipoleCalc((state) => state.setKdMomentSharePercent)
   const refineHalfwinMs = useDipoleCalc((state) => state.refineHalfwinMs)
   const setRefineHalfwinMs = useDipoleCalc((state) => state.setRefineHalfwinMs)
   const resetCalc = useDipoleCalc((state) => state.reset)
@@ -136,6 +140,14 @@ export function DipolesPanel() {
   // Результат посчитан на других параметрах: панель обязана сказать это явно,
   // а не выглядеть «актуальной» (та же подпись, что в таблице локализации)
   const staleResult = calcResult !== null && !resultMatchesParams(calcResult, calcParams)
+
+  // КД (С0, 29.10.2026): дефолты полос — из `/meta` (экспертная интерполяция
+  // δ→γ), правки хранятся в `calcParams.kdGofByBand` и перекрывают дефолт.
+  const kdGofDefaults = meta.data?.kd_gof_min_by_band ?? {}
+  const kdBandKeys = [...Object.keys(freqBands), ...Object.keys(functionalBands)]
+  const kdOverrides = calcParams.kdGofByBand
+  // Дефолт доли момента — из /meta (эксперт X = 5 %, KD_MOMENT_SHARE)
+  const kdMomentDefaultPercent = Math.round((meta.data?.kd_moment_share ?? 0) * 1000) / 10
 
   const layer = calcResult ? dipoleLayerFromScan(calcResult) : EMPTY_DIPOLE_LAYER
   /** Пороги отображения (GOF % — основной, момент нА·м — дополнительный) */
@@ -398,6 +410,64 @@ export function DipolesPanel() {
             ))}
           </ul>
         ) : null}
+      </Panel>
+      {/* С0 (29.10.2026): пороги КД — вердикт годности точки диполя.
+          Поля запоминаются и уходят в расчёт пакета и автоотчёт. */}
+      <Panel
+        title="КД — критерий годности"
+        hint="Вердикт точки: момент ≥ X % максимума своей полосы И GOF ≥ порога своей полосы. Пороги запоминаются и уходят в «Рассчитать пакет» и автоотчёт «Итоги»; правка ничего не запускает."
+      >
+        <NumberField
+          label="Момент ≥"
+          value={calcParams.kdMomentSharePercent ?? kdMomentDefaultPercent}
+          onChange={(value) => setKdMomentSharePercent(value > 0 ? value : null)}
+          min={KD_MOMENT_SHARE_RANGE[0]}
+          max={KD_MOMENT_SHARE_RANGE[1]}
+          step={1}
+          unit="%"
+          hint={`X % от максимума момента своей полосы (эксперт: 5 %). 0 — дефолт методики из /meta (сейчас: ${kdMomentDefaultPercent} %); правка запоминается.`}
+        />
+        <p className="mt-2 text-sm text-fg-2">
+          Порог GOF — свой у полосы (%): дефолт — экспертная интерполяция
+          «δ 90 % → γ 77.5 %» (консультация методики 29.10.2026), правка
+          запоминается для каждой полосы.
+        </p>
+        <div className="mt-1 grid grid-cols-2 gap-x-3">
+          {kdBandKeys.map((key) => {
+            const range = freqBands[key] ?? functionalBands[key]
+            return (
+              <NumberField
+                key={key}
+                label={key}
+                value={
+                  kdOverrides[key] ?? Math.round((kdGofDefaults[key] ?? 0) * 1000) / 10
+                }
+                onChange={(value) => setKdGofForBand(key, value)}
+                min={KD_GOF_RANGE[0]}
+                max={KD_GOF_RANGE[1]}
+                step={0.5}
+                unit="%"
+                hint={range ? `GOF ≥ порога полосы ${range[0]}–${range[1]} Гц` : undefined}
+              />
+            )
+          })}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button
+            icon={<RotateCcw className="size-4" />}
+            disabled={
+              Object.values(kdOverrides).every((value) => value == null) &&
+              calcParams.kdMomentSharePercent == null
+            }
+            onClick={() => {
+              for (const key of Object.keys(kdOverrides)) setKdGofForBand(key, null)
+              setKdMomentSharePercent(null)
+            }}
+            title="Сбросить правки порогов: поля вернутся к дефолтам методики из /meta"
+          >
+            Сбросить к дефолтам методики
+          </Button>
+        </div>
       </Panel>
       {/* С1/С2: набор поддиапазонов одним прогоном — сопоставление и кластеры */}
       <BatchPanel />

@@ -96,6 +96,22 @@ export type CalcParams = {
    * отпечаток расчёта (`calcSignature`) не входит.
    */
   psdMethod: 'welch' | 'multitaper'
+  /**
+   * Пороги GOF КД по полосам, % (С0, 29.10.2026): `null`/нет записи — дефолт
+   * методики из `/meta` (`kd_gof_min_by_band`, экспертная интерполяция δ→γ).
+   * Уходят в форму пакета (`kd_gof_min_by_band`, долей 0…1) и в форму
+   * автоотчёта — вердикты `kd_passed`. В `calcSignature` не входят: точки
+   * расчёта порог не меняет, меняются только вердикты в результате и БД
+   * (прецедент `psdMethod`).
+   */
+  kdGofByBand: Record<string, number | null>
+  /**
+   * КД: «момент ≥ X % максимума своей полосы», %; `null` — **дефолт методики**
+   * из `/meta` (`KD_MOMENT_SHARE`, эксперт X = 5 %, 29.10.2026) — правка
+   * перекрывает его и запоминается; 0 в поле возвращает дефолт. Глобально,
+   * не по полосам (решение владельца 29.10.2026).
+   */
+  kdMomentSharePercent: number | null
 }
 
 export const CALC_PARAM_DEFAULTS: CalcParams = {
@@ -105,6 +121,10 @@ export const CALC_PARAM_DEFAULTS: CalcParams = {
   // Дефолт — Welch: привычный метод прежних расчётов. Для коротких эпох
   // (250–500 мс) правильнее multitaper — переключатель стоит рядом с длиной эпохи.
   psdMethod: 'welch',
+  // Поля КД пустые: показываются дефолты методики из `/meta` и запоминаются
+  // только **правки** пользователя («Опции расчётов диполов»).
+  kdGofByBand: {},
+  kdMomentSharePercent: null,
 }
 
 /** Ограничения контролов панели (совпадают со схемой формы на сервере). */
@@ -117,6 +137,13 @@ export const THRESHOLD_NAM_RANGE: [number, number] = [0, 1000]
  * Числового дефолта методики здесь нет (concept.md §2): 0 = показать всё.
  */
 export const GOF_THRESHOLD_RANGE: [number, number] = [0, 100]
+/**
+ * Пороги КД (С0, 29.10.2026), %: поля «Опций расчётов диполов». GOF — по-полосный
+ * (дефолт полосы — из `/meta`, экспертная интерполяция δ 90 % → γ 77.5 %),
+ * «момент ≥ X %» — глобальный (пусто — КД «не оценено»).
+ */
+export const KD_GOF_RANGE: [number, number] = [0, 100]
+export const KD_MOMENT_SHARE_RANGE: [number, number] = [0, 100]
 
 /** Состояние одной фоновой задачи раздела: прогресс по этапам и эпохам. */
 export type CalcJob = {
@@ -405,5 +432,26 @@ export function normalizeCalcParams(params: CalcParams): CalcParams {
     // Из сохранённых параметров может придти всё что угодно, а метод обязан
     // принадлежать списку: неизвестное — Welch, а не 400 при запуске задачи
     psdMethod: params.psdMethod === 'multitaper' ? 'multitaper' : 'welch',
+    // Правки порогов КД: только конечные числа диапазона или null («дефолт
+    // методики»); мусор из localStorage не уезжает в форму задачи
+    kdGofByBand: normalizeKdMap(params.kdGofByBand),
+    kdMomentSharePercent: normalizeKdPercent(params.kdMomentSharePercent),
   }
+}
+
+/** Значение порога КД, %: конечное число диапазона или null («не задано»). */
+export function normalizeKdPercent(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return clamp(value, KD_GOF_RANGE)
+}
+
+/** Карта порогов GOF по полосам: чистые проценты или null на каждую полосу. */
+export function normalizeKdMap(
+  map: Record<string, unknown> | null | undefined,
+): Record<string, number | null> {
+  const out: Record<string, number | null> = {}
+  for (const [key, value] of Object.entries(map ?? {})) {
+    out[key] = normalizeKdPercent(value)
+  }
+  return out
 }

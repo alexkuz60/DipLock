@@ -884,6 +884,15 @@ export function reportBandFixture(bandKey: string): ReportBandSummary {
     n_points: 9,
     n_no_attribution: 0,
     median_gof: 0.82,
+    rotation_ccw_share: 0.75,
+    rotation_cw_share: 0.25,
+    rotation_triples: 4,
+    flow_orderliness: 0.62,
+    flow_steps: 5,
+    flow_basis: 'mni',
+    flow_top_transitions: [
+      { from_structure: 'Precuneus', to_structure: 'таламус (справа)', count: 3, share: 0.6 },
+    ],
     top_structures: [{ name: 'Precuneus', count: 5, share: 5 / 9, median_gof: 0.85 }],
     top_brodmann: [{ name: 'BA7-lh', count: 5, share: 5 / 9, median_gof: 0.85 }],
     dynamics: [{ name: 'Precuneus', shares: [0.2, 0.4, 0.6, 0.4, 0.2] }],
@@ -1043,6 +1052,16 @@ export function compareResultFixture(
         median_a_uv2: 4.0, median_b_uv2: 4.1, ci95_delta_db: [-0.5, 0.9],
         effect: 0.1, p_value: 0.62, q_value: 0.71,
         fdr_significant_channels: [], topomap_delta_url: null,
+      },
+    ],
+    layer_features: [
+      {
+        feature: 'rotation_ccw_share', band_key: 'alpha', band_hz: [8, 16],
+        value_a: 0.6, value_b: 0.8, delta: 0.2,
+      },
+      {
+        feature: 'flow_orderliness', band_key: 'alpha', band_hz: [8, 16],
+        value_a: 0.4, value_b: null, delta: null,
       },
     ],
     indices: {

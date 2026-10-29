@@ -70,6 +70,11 @@ describe('домен расчёта диполей: формы, отпечатк
       notchHz: 55,
       gridMm: 50,
       epochLengthMs: 500.4,
+      // Мусор правок КД: не-числа — к «дефолту методики» (null), числа — в рамки
+      ...( {
+        kdGofByBand: { alpha: 'x', beta: 150, gamma: 77.5 },
+        kdMomentSharePercent: Number.NaN,
+      } as object),
     } as CalcParams)
 
     expect(params.notchHz).toBe(50)
@@ -81,6 +86,8 @@ describe('домен расчёта диполей: формы, отпечатк
       gridMm: 20,
       epochLengthMs: 500,
       psdMethod: CALC_PARAM_DEFAULTS.psdMethod,
+      kdGofByBand: { alpha: null, beta: 100, gamma: 77.5 },
+      kdMomentSharePercent: null,
     })
   })
 

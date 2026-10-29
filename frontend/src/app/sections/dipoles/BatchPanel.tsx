@@ -14,6 +14,7 @@
  */
 import { bandLabel, shareLabel } from '@/shared/lib/dipoleBatch'
 import { bandColor } from '@/shared/lib/bandColors'
+import { clusterFeaturesLabel } from '@/shared/lib/clusterFeatures'
 import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { Button } from '@/shared/ui/Button'
@@ -164,6 +165,10 @@ export function BatchPanel() {
                 {cluster.top_structures?.length
                   ? ` — ${cluster.top_structures.join(', ')}`
                   : ''}
+                {/* Профиль признаков (ищем характерное сами): только измеренное */}
+                <div className="mt-0.5 text-xs text-fg-2">
+                  {clusterFeaturesLabel(cluster.features)}
+                </div>
               </li>
             ))}
           </ul>

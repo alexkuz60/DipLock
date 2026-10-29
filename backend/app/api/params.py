@@ -9,6 +9,7 @@
 ``docs/rules/api-jobs.md``): молча зажимать значения нельзя, пользователь
 должен видеть, что именно не так.
 """
+import json
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -759,6 +760,8 @@ def report_params(
     event_id: str | None = None,
     epoch_pre_ms: float = 200.0,
     epoch_post_ms: float = 800.0,
+    kd_gof_min_by_band: str | None = None,
+    kd_moment_share: float | None = None,
 ) -> ReportParams:
     """Параметры автоотчёта: часть 1 — те же параметры стадий EDF, часть 2 — пакет.
 
@@ -791,6 +794,8 @@ def report_params(
         require_epoch_length(base.epoch_length_ms)
     return ReportParams(
         preprocess=base, grid_mm=grid_mm, band_keys=report_band_keys(bands),
+        kd_gof_min_by_band=parse_kd_gof_min_by_band(kd_gof_min_by_band),
+        kd_moment_share=parse_kd_moment_share(kd_moment_share),
     )
 
 
@@ -862,6 +867,66 @@ def dipole_batch_bands(raw: str | None) -> list[BandSpec]:
     return specs
 
 
+def parse_kd_gof_min_by_band(raw: str | None) -> dict[str, float] | None:
+    """Пороги GOF полос формы (JSON ``{"delta": 0.9}``) → карта долей 0…1.
+
+    ``None``/пусто — карта не задана (порог решает методика); мусор и значения
+    вне ``(0…1]`` — 400 с понятным текстом (конвенция ``api/params.py``).
+    """
+    if raw is None or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                'kd_gof_min_by_band — JSON-объект вида {"delta": 0.9}: '
+                "пороги GOF полос, доля 0…1"
+            ),
+        ) from None
+    if not isinstance(data, dict) or not data:
+        raise HTTPException(
+            status_code=400,
+            detail='kd_gof_min_by_band — непустой JSON-объект вида {"delta": 0.9}',
+        )
+    out: dict[str, float] = {}
+    for key, value in data.items():
+        try:
+            threshold = float(value)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"kd_gof_min_by_band[{key}]: значение не число",
+            ) from None
+        if not 0.0 < threshold <= 1.0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"kd_gof_min_by_band[{key}] = {threshold:g} вне (0…1]: "
+                    "порог GOF — доля объяснённой дисперсии"
+                ),
+            )
+        out[str(key)] = threshold
+    return out
+
+
+def parse_kd_moment_share(value: float | None) -> float | None:
+    """Порог «момент ≥ X % максимума своей полосы» формы (доля 0…1); None — не задан."""
+    if value is None:
+        return None
+    share = float(value)
+    if not 0.0 < share <= 1.0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"kd_moment_share = {share:g} вне (0…1]: "
+                "доля от максимума момента своей полосы"
+            ),
+        )
+    return share
+
+
 def dipole_batch_params(
     *,
     bands: str | None,
@@ -872,12 +937,16 @@ def dipole_batch_params(
     grid_mm: float,
     cluster_voxel_norm: float | None = None,
     cluster_min_points: int | None = None,
+    kd_gof_min_by_band: str | None = None,
+    kd_moment_share: float | None = None,
 ) -> DipoleBatchParams:
     """Параметры прогона по набору поддиапазонов (С1/С2).
 
     Одна длина эпохи на весь прогон (п.7 ``docs/rules/dipoles.md``);
     ``cluster_voxel_norm`` — размер вокселя кластеризации в **нормированных**
     единицах (доля от диаметра области поиска, С2), ``None`` — дефолт конфига.
+    ``kd_gof_min_by_band`` — JSON-карта порогов GOF полос (доля 0…1, С0);
+    ``kd_moment_share`` — общий порог «момент ≥ X %» (доля 0…1).
     """
     require_epoch_length(epoch_length_ms)
     specs = dipole_batch_bands(bands)
@@ -911,6 +980,8 @@ def dipole_batch_params(
         grid_mm=grid_mm,
         cluster_voxel_norm=voxel_norm,
         cluster_min_points=min_points,
+        kd_gof_min_by_band=parse_kd_gof_min_by_band(kd_gof_min_by_band),
+        kd_moment_share=parse_kd_moment_share(kd_moment_share),
     )
 
 
@@ -925,6 +996,8 @@ def archive_batch_params(
     grid_mm: float,
     cluster_voxel_norm: float | None = None,
     cluster_min_points: int | None = None,
+    kd_gof_min_by_band: str | None = None,
+    kd_moment_share: float | None = None,
 ) -> ArchiveBatchParams:
     """Параметры серии (С8): записи (пусто — весь каталог) + снимок расчёта.
 
@@ -936,6 +1009,7 @@ def archive_batch_params(
         reference_channels=reference_channels,
         epoch_length_ms=epoch_length_ms, grid_mm=grid_mm,
         cluster_voxel_norm=cluster_voxel_norm, cluster_min_points=cluster_min_points,
+        kd_gof_min_by_band=kd_gof_min_by_band, kd_moment_share=kd_moment_share,
     )
     ids = [item.strip() for item in (recording_ids or "").split(",") if item.strip()]
     if len(ids) > settings.archive_batch_max_recordings:

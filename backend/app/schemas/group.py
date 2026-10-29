@@ -17,6 +17,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.schemas.analysis import ClusterFeaturesOut
+
 
 class GroupAggregateIn(BaseModel):
     """Вход ``POST /group/aggregate``: выборка записей + групповые фильтры §3.5."""
@@ -155,6 +157,10 @@ class GroupClusterOut(BaseModel):
     )
     top_brodmann: list[str] = Field(
         default_factory=list, description="Доминирующие поля Бродмана кластера (топ-3)",
+    )
+    features: ClusterFeaturesOut | None = Field(
+        default=None,
+        description="Профиль признаков кластера (ищем характерное сами); None — не считался",
     )
 
 

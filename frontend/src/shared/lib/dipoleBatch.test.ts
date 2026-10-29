@@ -22,7 +22,7 @@ import { bandColor } from './bandColors'
 import { dipoleBatchResultFixture, dipoleScanResultFixture } from '@/test/fixtures'
 
 describe('помощники пакета поддиапазонов', () => {
-  it('собирает форму с набором полос и параметрами расчёта', () => {
+  it('собирает форму с набором полос, параметрами расчёта и порогами КД', () => {
     const form = buildDipoleBatchForm({
       bandKeys: ['alpha', 'beta', 'custom:2.5-4'],
       epochLengthMs: 500,
@@ -30,6 +30,8 @@ describe('помощники пакета поддиапазонов', () => {
       notchHz: 50,
       reference: 'average',
       referenceChannels: null,
+      kdGofByBand: { alpha: 90, gamma: null },
+      kdMomentSharePercent: 50,
     })
     expect(form.get('bands')).toBe('alpha,beta,custom:2.5-4')
     expect(form.get('epoch_length_ms')).toBe('500')
@@ -38,6 +40,24 @@ describe('помощники пакета поддиапазонов', () => {
     // Пустой референс не уходит в форму (сервер ждёт «average» по умолчанию)
     expect(form.get('reference')).toBeNull()
     expect(form.get('reference_channels')).toBeNull()
+    // КД (С0): заданные пороги — долями 0…1, null («дефолт методики») не уходит
+    expect(form.get('kd_gof_min_by_band')).toBe('{"alpha":0.9}')
+    expect(form.get('kd_moment_share')).toBe('0.5')
+  })
+
+  it('не шлёт поля КД без правок: пустые пороги решает методика сервера', () => {
+    const form = buildDipoleBatchForm({
+      bandKeys: ['alpha'],
+      epochLengthMs: 1000,
+      gridMm: 7,
+      notchHz: null,
+      reference: 'average',
+      referenceChannels: null,
+      kdGofByBand: {},
+      kdMomentSharePercent: null,
+    })
+    expect(form.get('kd_gof_min_by_band')).toBeNull()
+    expect(form.get('kd_moment_share')).toBeNull()
   })
 
   it('держит рамки набора: лимит полос прогона покрывает каталог', () => {

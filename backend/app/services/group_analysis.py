@@ -364,6 +364,10 @@ async def aggregate_group(
             "mni": point.mni_coords,
             "structure": point.anatomical_structure,
             "area": point.brodmann_area,
+            # Измеренное для профиля признаков кластера (cluster_features)
+            "amplitude_nam": point.amplitude_nam,
+            "gof": point.gof,
+            "kd_passed": point.kd_passed,
         }
         for rid, point in flat
     ]

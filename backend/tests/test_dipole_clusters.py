@@ -147,3 +147,39 @@ def test_cluster_stability_matches_bands_by_centroid():
     assert alpha1["matched_band_keys"] == ["alpha"]  # дальний кластер одинок
     assert alpha1["band_share"] == 0.5
     assert stability["beta:0"]["matched_band_keys"] == ["alpha", "beta"]
+
+
+def test_cluster_carries_feature_profile(clouds):
+    """Кластер несёт профиль признаков: измеренное считается, остальное — None."""
+    clusters = cluster_dipoles(clouds, settings)
+    features = clusters[0]["features"]
+    assert features["n_points"] == clusters[0]["n_points"]
+    # Одна структура — «монокультура»: энтропия 0, доля 1.0
+    assert features["structure_entropy"] == 0.0
+    assert features["structure_share"][0]["share"] == 1.0
+    # Амплитуды/GOF/вердикты в выборке не измерены — честные None, не 0
+    assert features["moment_mean_nam"] is None
+    assert features["gof_median"] is None
+    assert features["kd_pass_share"] is None
+
+
+def test_cluster_profile_counts_measured():
+    """Строки с амплитудами/GOF/вердиктами: сила, качество и КД в профиле."""
+    rows = [
+        _point(0, 0, 50, "rec-a", "таламус", "BA7-lh")
+        | {"amplitude_nam": 100.0, "gof": 0.9, "kd_passed": 1},
+        _point(2, 1, 51, "rec-a", "таламус", "BA7-lh")
+        | {"amplitude_nam": 300.0, "gof": 0.8, "kd_passed": 0},
+        _point(4, 2, 49, "rec-b", "зрительная кора", "BA17-lh")
+        | {"amplitude_nam": 200.0, "gof": 0.85, "kd_passed": 1},
+        _point(1, 3, 52, "rec-b", "зрительная кора", "BA17-lh")
+        | {"amplitude_nam": 200.0, "gof": 0.85, "kd_passed": None},
+    ]
+    clusters = cluster_dipoles(rows, settings)
+    assert len(clusters) == 1
+    features = clusters[0]["features"]
+    assert features["moment_max_nam"] == 300.0
+    assert features["gof_median"] == 0.85
+    # Оценено 3 (одна «не оценено»), прошло 2 → доля 2/3, не 2/4
+    assert features["n_kd_evaluated"] == 3
+    assert features["kd_pass_share"] == 0.667

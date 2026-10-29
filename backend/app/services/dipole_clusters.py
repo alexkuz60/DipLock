@@ -37,6 +37,7 @@ from typing import Any
 import numpy as np
 
 from app.core.config import Settings
+from app.services.cluster_features import feature_profile
 from app.services.dipole_scanner import GRID_RADIUS_MM
 
 # Топ доминирующих ROI кластера (подпись «к чему относится кластер»)
@@ -180,6 +181,10 @@ def cluster_points(
             ],
             "top_structures": _top(structures),
             "top_brodmann": _top(areas),
+            # Профиль признаков (исследовательский слой): характерные черты
+            # кластера — состав/сила/качество/КД/компактность того, что измерено
+            # в точках (cluster_features.py; не измерено — None).
+            "features": feature_profile(cluster_points, total=total),
         })
     results.sort(key=lambda item: (-item["n_points"], item["centroid_mni"]))
     return results

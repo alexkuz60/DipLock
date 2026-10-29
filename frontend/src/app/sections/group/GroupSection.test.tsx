@@ -164,6 +164,27 @@ describe('раздел «Групповой анализ» (сравнение)'
     expect(screen.getAllByTestId('compare-dumbbell')).toHaveLength(4)
   })
 
+  it('признаки слоя (срез 5): дельты вращения/потока и честное «не измерено»', () => {
+    mockApiFetch({ compareResult: compareResultFixture() })
+    useGroupCompare.setState({ result: compareResultFixture() })
+    renderGroup()
+
+    const table = screen.getByTestId('compare-layer-features')
+    // Обе стороны измерены: дельта в процентных пунктах (0.2 доли = +20.0 п.п.)
+    expect(table.textContent).toContain('Вращение CCW')
+    expect(table.textContent).toContain('+20.0 п.п.')
+    // Одна сторона не измерена — «—», а не 0 (не измерено ≠ ноль)
+    expect(table.textContent).toContain('Упорядоченность потока R')
+    expect(table.textContent).toContain('0.400')
+    expect(table.textContent).toContain('—')
+
+    // Без признаков — пустое состояние с объяснением, а не нули
+    act(() => {
+      useGroupCompare.setState({ result: compareResultFixture({ layer_features: [] }) })
+    })
+    expect(screen.getByTestId('compare-layer-features-empty')).toBeInTheDocument()
+  })
+
   it('столбики дельт несут числа и форму из результата (ΔдБ в правой колонке)', () => {
     mockApiFetch({ compareResult: compareResultFixture() })
     useGroupCompare.setState({ result: compareResultFixture() })

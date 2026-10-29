@@ -312,6 +312,22 @@ class ReportBandSummary(Base):
     n_no_attribution = Column(Integer, nullable=True)
     median_gof = Column(Float, nullable=True)
     median_riv = Column(Float, nullable=True)
+    # Доля вращения момента (срез 2): CW/CCW по «плоским» тройкам траектории
+    # (`services/moment_rotation.py`, взгляд снаружи сферы); доли среди
+    # троек с определённым знаком, `rotation_triples` — знаменатель.
+    # NULL — плоских троек не было (или отчёт собран до среза 2).
+    rotation_cw_share = Column(Float, nullable=True)
+    rotation_ccw_share = Column(Float, nullable=True)
+    rotation_triples = Column(Integer, nullable=True)
+    # Магистраль потока и упорядоченность (срез 3, `services/flow_metrics.py`):
+    # R векторов смещения траектории позиций (`flow_orderliness` ∈ [0; 1],
+    # `flow_steps` — число шагов, `flow_basis` — mni | head) и топ переходов
+    # «структура → структура» (`flow_top_transitions`, JSON-список
+    # {from_structure, to_structure, count, share}). NULL/[] — не измерено.
+    flow_orderliness = Column(Float, nullable=True)
+    flow_steps = Column(Integer, nullable=True)
+    flow_basis = Column(String, nullable=True)
+    flow_top_transitions = Column(JSON, nullable=True)
 
 
 class ReportNameCount(Base):

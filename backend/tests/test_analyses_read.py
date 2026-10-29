@@ -12,6 +12,7 @@ import asyncio
 
 import pytest
 
+from app.core.config import settings
 from app.services import recording_store, results_store
 from app.services.preprocess import PreprocessParams
 from app.services.recordings import recording_registry
@@ -112,8 +113,11 @@ def test_analyses_page_counters_and_filters(client):
     assert unknown_kind["total"] == 0 and unknown_kind["items"] == []
 
 
-def test_analysis_detail_bands_and_404(client):
+def test_analysis_detail_bands_and_404(client, monkeypatch):
     """Паспорт прогона: полосы ``analysis_bands``, КД — «не оценено», 404 — нет."""
+    # Порог X % снят: ветка «не оценено» (пороги методики активны — в
+    # test_kd_criteria.py, живой дефолт X = 5 %).
+    monkeypatch.setattr(settings, "kd_moment_share", None)
     _seed()
     analysis_id = _analysis_id(client)
     detail = client.get(f"{_PREFIX}/analyses/{analysis_id}")
@@ -131,8 +135,11 @@ def test_analysis_detail_bands_and_404(client):
     assert client.get(f"{_PREFIX}/analyses/999999").status_code == 404
 
 
-def test_analysis_points_filter_and_404(client):
+def test_analysis_points_filter_and_404(client, monkeypatch):
     """Точки пакета: фильтр полосы, пагинация, честный ``None`` вердикта; 404."""
+    # Порог X % снят: ветка «не оценено» (живой дефолт X = 5 % — в
+    # test_kd_criteria.py).
+    monkeypatch.setattr(settings, "kd_moment_share", None)
     _seed()
     analysis_id = _analysis_id(client)
 

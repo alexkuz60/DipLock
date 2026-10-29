@@ -21,6 +21,7 @@ import { EegScreenArticle } from './articles/EegScreenArticle'
 import { EloretaArticle } from './articles/EloretaArticle'
 import { EpochsArticle } from './articles/EpochsArticle'
 import { FilterArticle } from './articles/FilterArticle'
+import { FeaturesRulesArticle } from './articles/FeaturesRulesArticle'
 import { GlossaryArticle } from './articles/GlossaryArticle'
 import { GroupAnalysisArticle } from './articles/GroupAnalysisArticle'
 import { IntroArticle } from './articles/IntroArticle'
@@ -60,6 +61,7 @@ const ARTICLE_COMPONENTS: Record<WikiArticleId, ComponentType> = {
   'group-analysis': GroupAnalysisArticle,
   'summary-compare-report': SummaryCompareReportArticle,
   'summary-group-report': SummaryGroupReportArticle,
+  'features-rules': FeaturesRulesArticle,
   export: SessionExportArticle,
   glossary: GlossaryArticle,
 }

@@ -27,6 +27,7 @@ import {
   ScanSearch,
   Scissors,
   Sparkles,
+  Telescope,
   Users,
   type LucideIcon,
 } from 'lucide-react'
@@ -50,6 +51,7 @@ export type WikiArticleId =
   | 'group-analysis'
   | 'summary-compare-report'
   | 'summary-group-report'
+  | 'features-rules'
   | 'export'
   | 'glossary'
 
@@ -191,6 +193,13 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'Итоги: отчёт группы',
     hint: 'Сохранённый прогон, два знаменателя share, тепловые карты, кластеры',
     icon: Users,
+  },
+  {
+    id: 'features-rules',
+    title: 'Признаки и правила: слой исследований',
+    short: 'Признаки и правила',
+    hint: 'КД-вердикты, вращение/поток, признаки кластеров, гипотезы «N из M»',
+    icon: Telescope,
   },
   {
     id: 'export',

@@ -875,6 +875,60 @@ advisory-строка: компонент уже в `removed` не предла�
 (write-API пишет при POST/задачах — в рабочую базу тесты не ходят). Итог: pytest — **643**
 (без `integration` — **627**), Vitest — **952**.
 
+**Пороги КД по полосам (29.10.2026, срез 1 слоя «признаки»):**
+`test_kd_criteria.py` (+15: экспертная интерполяция `default_gof_min` — якоря δ/γ,
+монотонность и зажим, честный `None` без якорей; цепочка перекрытий
+`resolve_gof_min` «форма → методика → дефолт»; `kd_basis_for` — фактический порог
+полосы в `kd_basis`, вердикт NULL без X %; `kd_meta`; `effective_gof_map`;
+формы `parse_kd_*` — 400 на мусор/вне диапазона), `test_report_store.py`
+(обновлён: `gof_min` — фактический порог полосы), `test_session_bundle.py`
+(manifest **v3**, `criteria.kd_gof_min_by_band` = `effective_gof_map`);
+Vitest: `dipoleBatch.test.ts` (+1: поля `kd_*` формы, без правок — не шлются),
+`dipoleCalcModel.test.ts`/`dipoleCalc.test.ts` (мусор правок КД нормализуется),
+`DipolesPanel.test.tsx` (+2: секция «КД» — запоминание правки, «0 = не задано»).
+
+**Доля вращения момента (29.10.2026, срез 2):** `test_moment_rotation.py` (+7:
+знак тройки «взгляд снаружи» x→y→z = CCW / x→z→y = CW, смешанная
+последовательность 2/3–1/3, вырожденные тройки без знака, сломанные точки
+перепрыгиваются, < 3 векторов — NULL, масштаб момента не важен),
+`test_report_store.py` (агрегат полосы → колонки `report_band_summaries`),
+`test_migrations.py` (паритет моделей/миграций с новыми колонками 0014);
+Vitest: `SummarySection.test.tsx` (пилюля «вращение: CCW… · CW…»).
+
+**Магистраль потока и упорядоченность (29.10.2026, срез 3):**
+`test_flow_metrics.py` (+8: прямой поток R = 1, возвратный R = 0, смешанный
+R = |Σd|/Σ|d| = 1/3, базис mni → head без смешения, «не измерено» — NULL,
+переходы только смен структуры и через разрывы атрибуции, пустая магистраль,
+топ-лимит 5), `test_report_store.py` (строка `report_band_summaries`),
+`test_migrations.py` (колонки 0015, вкл. JSON); Vitest:
+`SummarySection.test.tsx` (пилюля «поток: R …» + строка «Магистраль потока»).
+
+**Правила-гипотезы «N из M» (29.10.2026, срез 4):** `test_hypothesis_check.py`
+(+15: трёхзначная И-логика «провал определён / неизмеренное — не оценено»,
+операторы `>=`/`<=`/`>`/`<`/`==`/`!=`, N/M и статусы
+`confirmed`/`rejected`/`descriptive`/`insufficient`, контрпримеры, шлюзы
+`HypothesisError`), `test_probe_context.py` (+4: последний прогон автоотчёта
+(§8.4.2), сборка признаков КД/вращение/поток, «не измерено» без нулей, дедуп
+выборки), `test_hypotheses_api.py` (+5: 400-шлюзы и форма 200 двух эндпоинтов
+роутера `PrivateRoute`).
+
+**Дельты признаков слоя в сравнении пары (29.10.2026, срез 5):**
+`test_compare.py` (+4: `LAYER_FEATURE_KEYS ⊂ PROBE_FEATURES`, математика
+дельт `layer_feature_rows` с честным `None` на одностороннем измерении,
+сквозной прогон `run_compare(..., layer_features=)` с каветом в `notes`,
+без признаков — предупреждение и пустой список), `test_probe_context.py`
+(+1: батч `probe_features_by_band` — «только измеренные», без нулей);
+Vitest `GroupSection.test.tsx` (+1: панель «Признаки слоя» — дельты в п.п.,
+«—» вместо 0, пустое состояние).
+
+**X % момента = 5 % (29.10.2026, КД активирован):** живой дефолт методики —
+`test_kd_criteria.py::test_expert_default_moment_share_activates_verdicts`
+(вердикты считаются, `moment_share_x = 0.05` в базисе); ветка «не оценено»
+сохранена — тесты персиста/read-API снимают порог явно
+(`test_report_store`/`test_dipole_batch`/`test_analyses_read`);
+`test_session_bundle` — паспорт манифеста несёт `kd_moment_share = 0.05`;
+Vitest `DipolesPanel.test.tsx` — поле «Момент ≥» (правка/возврат дефолта).
+
 FreeSurfer + развитие «Итогов» (02.10.2026): pytest **+16** — `test_fsaverage_assets.py`
 (+11: приоритет «готовый файл → кэш → расчёт», `*_source` без расчёта, `bem_path` пустой →
 `RuntimeError`, `init-status`/`meta` отдают `sources`; 2 `integration` — реальный расчёт BEM
@@ -1809,3 +1863,12 @@ Vitest **+7** (итог **1377**, 125 файлов); pytest без измене�
 * `emolab/EmoLabSection.test.tsx` **+1**: «Общая эмо-характеристика» стоит
   **между** радаром и квинтовым кругом (порядок в DOM), подписи — по шкале
   «Эмо».
+
+**Признаки кластеров — исследовательский слой (29.10.2026, «ищем сами»):**
+`test_cluster_features.py` (7: измеренное считается, неизмерённое — None не 0,
+доля КД среди оценённых, энтропия 0…1, полушария по знаку x, RMS-радиус,
+пустой кластер — None); `test_dipole_clusters.py` **+2** (кластер несёт
+профиль; измеренные строки — сила/качество/КД); `test_dipole_batch.py`
+(профиль в кластерах пакета + валидация `DipoleBatchResult`);
+Vitest `shared/lib/clusterFeatures.test.ts` (4: «—» без профиля и без
+измерений, сборка строки, «КД» без вердиктов не «0 %»).

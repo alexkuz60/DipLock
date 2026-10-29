@@ -23,7 +23,9 @@ import { api, apiErrorText } from '@/shared/api/client'
 import type { JobStatus, ReportHtmlOut, ReportResult } from '@/shared/api/types'
 import { clamp } from '@/shared/lib/calcFilter'
 import { GRID_MM_RANGE } from '@/shared/lib/dipoleCalcModel'
+import { applyKdFormFields } from '@/shared/lib/dipoleBatch'
 import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
+import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfParams } from '@/shared/state/edfParams'
 import { buildPreprocessForm } from '@/shared/state/edfRecording'
 
@@ -58,9 +60,11 @@ function pendingJob(): JobStatus {
 
 /**
  * Форма задачи автоотчёта: стадии EDF (фильтр/пороги/очистка/длина эпохи)
- * + поля пакета (`bands`, `grid_mm`). Нарезка (fixed/events) уходит **как в
- * EDF**: часть 1 обязана пересказывать те же числа, что видит пользователь
- * (3c, остаток B9); поле `stage` отчёту не нужно — стадии он запускает сам.
+ * + поля пакета (`bands`, `grid_mm`) + пороги КД (С0). Нарезка (fixed/events)
+ * уходит **как в EDF**: часть 1 обязана пересказывать те же числа, что видит
+ * пользователь (3c, остаток B9); поле `stage` отчёту не нужно — стадии он
+ * запускает сам. Пороги КД берутся из «Опций расчётов диполов»
+ * (`useDipoleCalc`): вердикты `kd_passed` отчёта обязаны совпадать с пакетом.
  */
 function buildReportForm(bandKeys: string[] | null, gridMm: number): FormData {
   const params = useEdfParams.getState().params
@@ -69,6 +73,8 @@ function buildReportForm(bandKeys: string[] | null, gridMm: number): FormData {
   if (bandKeys) form.set('bands', bandKeys.join(','))
   else form.delete('bands')
   form.set('grid_mm', String(gridMm))
+  const calc = useDipoleCalc.getState().params
+  applyKdFormFields(form, calc.kdGofByBand, calc.kdMomentSharePercent)
   return form
 }
 

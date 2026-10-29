@@ -25,6 +25,7 @@ from app.models.db import (
     init_db,
 )
 from app.services import recording_store, results_store
+from app.services.kd_criteria import default_gof_min
 from app.services.preprocess import PreprocessParams
 from app.services.report import ReportParams
 from tests.test_recording_store import _recording
@@ -62,6 +63,15 @@ def _summary(key: str, points: list[dict], structures: list[str]) -> dict:
         "n_no_attribution": 1,
         "median_gof": 0.8,
         "median_riv": 0.2,
+        "rotation_ccw_share": 0.75,
+        "rotation_cw_share": 0.25,
+        "rotation_triples": 4,
+        "flow_orderliness": 0.62,
+        "flow_steps": 5,
+        "flow_basis": "mni",
+        "flow_top_transitions": [
+            {"from_structure": "Struct0", "to_structure": "Struct1", "count": 3, "share": 0.6},
+        ],
         "top_structures": rows[:5],
         "top_brodmann": rows[:12],
         "name_counts": {"structure": rows, "brodmann": rows[:2]},
@@ -129,8 +139,11 @@ def _clean_recording_rows():
     asyncio.run(recording_store.drop_recording_rows(_REC))
 
 
-def test_report_persists_analysis_bands_and_points():
-    """Прогон отчёта: analyses (паспорт+отпечаток), analysis_bands, dipole_points."""
+def test_report_persists_analysis_bands_and_points(monkeypatch):
+    """Персист строк кирпичного слоя: analyses + полосы + точки (БД-путь)."""
+    # Пороги КД сняты: тест проверяет персист строк (вердикты — честные NULL
+    # «не оценено»), математика КД живёт в test_kd_criteria.py.
+    monkeypatch.setattr(settings, "kd_moment_share", None)
     rec = _recording(_REC)
     result = _report_result()
 
@@ -163,7 +176,8 @@ def test_report_persists_analysis_bands_and_points():
         assert alpha.n_errors == 1  # warnings полосы
         # Базис КД: максимум момента — внутри полосы (100 нАм у первой точки)
         assert alpha.moment_max_nam == 100.0
-        # Пороги КД не заданы (concept.md §3: «своих дефолтов нет») → NULL
+        # Доля момента X % методикой не задана → вердикт NULL («не оценено»),
+        # хотя порог GOF полосы уже фактически применён (экспертный дефолт).
         assert alpha.n_kd_passed is None
 
         points = await _rows(DipolePoint, analysis_id=analysis.id)
@@ -181,7 +195,9 @@ def test_report_persists_analysis_bands_and_points():
         assert alpha_point.kd_passed is None
         assert alpha_point.kd_basis == {
             "moment_share_x": None,
-            "gof_min": None,
+            # GOF — фактический порог полосы: экспертная интерполяция δ→γ
+            # (консультация методики 29.10.2026), пока методика не перекрыла.
+            "gof_min": default_gof_min(8.0, 13.0, settings),
             "moment_max_nam": 100.0,
             # Базисы нормировки — обязательная часть описания порога (С0)
             "moment_basis": KD_MOMENT_BASIS,
@@ -223,6 +239,17 @@ def test_report_persists_run_and_aggregates():
         alpha = next(s for s in summaries if s.band_key == "alpha")
         assert alpha.n_points == 6 and alpha.n_no_attribution == 1
         assert alpha.median_gof == 0.8 and alpha.median_riv == 0.2
+        # Доля вращения момента (срез 2): из агрегата полосы в строку БД
+        assert alpha.rotation_ccw_share == 0.75
+        assert alpha.rotation_cw_share == 0.25
+        assert alpha.rotation_triples == 4
+        # Магистраль потока и упорядоченность (срез 3): та же дорога
+        assert alpha.flow_orderliness == 0.62
+        assert alpha.flow_steps == 5
+        assert alpha.flow_basis == "mni"
+        assert alpha.flow_top_transitions == [
+            {"from_structure": "Struct0", "to_structure": "Struct1", "count": 3, "share": 0.6},
+        ]
 
         # §8.4.4: ВСЕ имена словаря, а не топ-N (7 структур при TOP_STRUCTURES=5)
         structure_counts = await _rows(

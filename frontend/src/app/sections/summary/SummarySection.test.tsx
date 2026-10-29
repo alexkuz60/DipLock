@@ -210,6 +210,17 @@ describe('раздел «Итоги»', () => {
     expect(screen.getAllByText('Precuneus').length).toBeGreaterThan(0)
     expect(screen.getByText('BA7-lh')).toBeInTheDocument()
     expect(screen.getByTestId('summary-dynamics-export')).toBeInTheDocument()
+    // Доля вращения момента (срез 2): CW/CCW по «плоским» тройкам траектории
+    expect(screen.getByTestId('summary-dynamics-meta')).toHaveTextContent(
+      'вращение: CCW 75.0 % · CW 25.0 % — троек: 4',
+    )
+    // Упорядоченность потока и магистраль (срез 3): R смещений + топ-переходы
+    expect(screen.getByTestId('summary-dynamics-meta')).toHaveTextContent(
+      'поток: R 0.620 · шагов: 5 (mni)',
+    )
+    expect(screen.getByTestId('summary-dynamics-flow')).toHaveTextContent(
+      'Магистраль потока: Precuneus → таламус (справа) (60.0 %)',
+    )
 
     // Переключение полосы — чистая отрисовка, запросов не прибавилось
     const fetchMock = mockApiFetch()

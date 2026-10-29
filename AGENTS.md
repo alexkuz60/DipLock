@@ -54,7 +54,7 @@ backend/app/
 │                      #   recording_jobs.py, consilium.py, llm_router.py, uploads.py
 ├── schemas/           # Pydantic-контракт ответов (OpenAPI → TS-типы UI)
 ├── models/db.py       # SQLAlchemy модели (пишется только legacy-анализ) + init_db (alembic)
-├── services/          # КАЖДЫЙ модуль = один шаг пайплайна (55 модулей + consilium/, audio_render/)
+├── services/          # КАЖДЫЙ модуль = один шаг пайплайна (60 модулей + consilium/, audio_render/)
 └── utils/             # brain_export, versions, png, marching_squares, robust
 frontend/              # UI (Vite+React+TS), сборка → backend/app/static/ui
 data/                  # локальные данные (edf/results/cache) — НЕ коммитить
@@ -101,9 +101,8 @@ audits/                # архив аудитов (версируется; ли
   запускает расчёт (считает только кнопка) — `docs/rules/frontend-state.md`.
   **Правки UI видны на :8000/ui/ только после `npm run build`** — иначе раздаётся прошлый
   бандл и «правка не работает» при живом коде (случай 24.09.2026). Держите `npm run build:watch`;
-  на :5173/ui/ правки видны сразу (Vite dev). Vite dev может отдать **залипший
-  трансформ-кэш промежуточной правки** (симптом: гибрид старого и нового поведения;
-  лечение — перезапуск `npm run dev`, случай 24.09.2026).
+  на :5173/ui/ — сразу (Vite dev может отдать **залипший трансформ-кэш** — гибрид
+  старого и нового поведения; лечение — перезапуск `npm run dev`, случай 24.09.2026).
 - **Backend:** правки backend видны в API только после перезагрузки процесса — держите
   uvicorn с `--reload`. Признак устаревшего процесса — `init-status.code.stale=true`
   («Состояние сервера» → «Код бэкенда»): перезапустите сервер **кнопкой «Перезапустить бэкенд»** (режим лаунчера) и **«Пересчитайте» запись** — файлы задач
@@ -113,8 +112,8 @@ audits/                # архив аудитов (версируется; ли
 
 `venv/`, `__pycache__/`, `.env`, `data/results/`, `*.db`, `data/llm_router.json` (API-ключи ИИ),
 `data/protocols/` (черновики приёмки), `audits/audit_dsh.md` и
-`audits/audit_sol_61.md` (личные срезы владельца) — см. `.gitignore`. `.env` содержит локальные
-пути/настройки — шаблон: `backend/.env.example`.
+`audits/audit_sol_61.md` (личные срезы владельца) — см. `.gitignore`; шаблон `.env` —
+`backend/.env.example`.
 
 ## Карта документации
 
@@ -139,6 +138,7 @@ audits/                # архив аудитов (версируется; ли
 | `docs/rules/frontend-state.md` | разделы, zustand-срезы, «UI не запускает обработку» |
 | `docs/rules/data-and-caches.md` | инварианты кэшей/артефактов, отпечатки, файл задачи |
 | `docs/rules/results-db.md` | база результатов (4.4): write-API, «история не UPSERT», TTL, PHI |
+| `docs/rules/hypotheses.md` | гипотезы «N из M»: признаки пробы, формат, «не навреди» |
 | `docs/rules/safety.md` | безопасность и дрейф MNE API |
 | `docs/rules/frontend-perf.md` | производительность клиента: замеры, воркеры/GPU |
 | `docs/rules/tests.md` | покрытие тестов, ruff/mypy и CI |

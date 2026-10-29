@@ -43,6 +43,38 @@ export type DipoleBatchFormInput = {
   notchHz: number | null
   reference: string
   referenceChannels: string | null
+  /**
+   * Правки порогов GOF КД по полосам, % (`null`/нет записи — дефолт методики
+   * из `/meta`); в форму уходят **только заданные** значения долей 0…1.
+   */
+  kdGofByBand: Record<string, number | null>
+  /** КД: «момент ≥ X %», %; `null` — не задано (вердикт «не оценено») */
+  kdMomentSharePercent: number | null
+}
+
+/**
+ * Поля КД в форме задачи (С0, 29.10.2026): `kd_gof_min_by_band` — JSON-карта
+ * заданных порогов полос (доли 0…1), `kd_moment_share` — доля 0…1. Общий
+ * помощник для формы пакета (`buildDipoleBatchForm`) и формы автоотчёта
+ * (`buildReportForm`): вердикты `kd_passed` считаются по одним правилам.
+ */
+export function applyKdFormFields(
+  form: FormData,
+  kdGofByBand: Record<string, number | null>,
+  kdMomentSharePercent: number | null,
+): void {
+  const fractions: Record<string, number> = {}
+  for (const [key, percent] of Object.entries(kdGofByBand)) {
+    if (typeof percent === 'number' && Number.isFinite(percent)) {
+      fractions[key] = percent / 100
+    }
+  }
+  if (Object.keys(fractions).length > 0) {
+    form.set('kd_gof_min_by_band', JSON.stringify(fractions))
+  }
+  if (typeof kdMomentSharePercent === 'number' && Number.isFinite(kdMomentSharePercent)) {
+    form.set('kd_moment_share', String(kdMomentSharePercent / 100))
+  }
 }
 
 /**
@@ -62,6 +94,7 @@ export function buildDipoleBatchForm(input: DipoleBatchFormInput): FormData {
   if (input.referenceChannels) {
     form.set('reference_channels', input.referenceChannels)
   }
+  applyKdFormFields(form, input.kdGofByBand, input.kdMomentSharePercent)
   return form
 }
 

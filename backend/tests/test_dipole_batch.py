@@ -122,8 +122,11 @@ def test_batch_signature_tracks_bands_and_params():
     assert batch_signature(base) != batch_signature(other_grid)
 
 
-def test_run_dipole_batch_returns_band_sets(tmp_path):
+def test_run_dipole_batch_returns_band_sets(tmp_path, monkeypatch):
     """Набор результатов: полосы со своими точками, одна длина эпохи на прогон."""
+    # Порог X % снят — проверяем ветку «без порогов методики» («не оценено»);
+    # живой дефолт X = 5 % и вердикты — в test_kd_criteria.py.
+    monkeypatch.setattr(settings, "kd_moment_share", None)
     recording = _register(tmp_path, _two_band_edf(tmp_path), "rec-batch")
     result = run_dipole_batch(recording, settings, _batch("alpha,beta"))
 
@@ -137,6 +140,13 @@ def test_run_dipole_batch_returns_band_sets(tmp_path):
         # КД без порогов методики — честное «не оценено» (None), а не False
         assert band["n_kd_passed"] is None
         assert all(point["kd_passed"] is None for point in band["points"])
+    # Профиль признаков кластера (исследовательский слой) в каждом кластере
+    assert result["clusters"], "синтетический ЭЭГ даёт кластеры пакета"
+    for cluster in result["clusters"]:
+        features = cluster["features"]
+        assert features is not None
+        assert features["n_points"] == cluster["n_points"]
+        assert features["moment_mean_nam"] is not None  # амплитуды измерены
     # Контракт валидируется на месте (как у DipoleScanResult в API)
     DipoleBatchResult(**result)
 
@@ -211,8 +221,12 @@ def test_batch_rejects_duplicate_and_bad_bands():
 # ---------- write-API (4.4): analyses/analysis_bands/dipole_points ----------
 
 
-def test_dipole_batch_persists_analysis_rows(tmp_path):
+def test_dipole_batch_persists_analysis_rows(tmp_path, monkeypatch):
     """Прогон пакета пишет B7/B6: строка analyses + полосы + точки с КД."""
+    # X % порога момента снимаем: здесь проверяется персист строк (вердикты
+    # остаются честными NULL «не оценено»), а не математика КД (своя в
+    # test_kd_criteria.py; живой дефолт методики X = 5 % — там же).
+    monkeypatch.setattr(settings, "kd_moment_share", None)
     recording = _register(tmp_path, _two_band_edf(tmp_path), "rec-batch-store")
     params = _batch("alpha,beta")
     result = run_dipole_batch(recording, settings, params)

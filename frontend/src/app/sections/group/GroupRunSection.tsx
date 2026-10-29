@@ -12,6 +12,7 @@ import { useMemo, useState } from 'react'
 import { Download, GitBranch } from 'lucide-react'
 import type { GroupAggregateOut, GroupRow } from '@/shared/api/types'
 import { groupCsv, groupCsvFilename } from '@/shared/lib/groupExport'
+import { clusterFeaturesLabel } from '@/shared/lib/clusterFeatures'
 import { bandLabel } from '@/shared/lib/spectrum'
 import { useGroupRun } from '@/shared/state/groupRun'
 import { Button } from '@/shared/ui/Button'
@@ -188,6 +189,7 @@ function ClustersPanel({ aggregate }: { aggregate: GroupAggregateOut }) {
                 <th className="py-1.5 pr-3 text-right font-normal">Плотность</th>
                 <th className="py-1.5 pr-3 font-normal">Структуры (топ)</th>
                 <th className="py-1.5 font-normal">Поля БА (топ)</th>
+                <th className="py-1.5 font-normal">Признаки (профиль)</th>
               </tr>
             </thead>
             <tbody>
@@ -219,6 +221,10 @@ function ClustersPanel({ aggregate }: { aggregate: GroupAggregateOut }) {
                   </td>
                   <td className="py-1.5 text-fg-2">
                     {(cluster.top_brodmann ?? []).join(', ') || '—'}
+                  </td>
+                  {/* Профиль признаков (ищем характерное сами): только измеренное */}
+                  <td className="py-1.5 text-xs text-fg-2">
+                    {clusterFeaturesLabel(cluster.features)}
                   </td>
                 </tr>
               ))}

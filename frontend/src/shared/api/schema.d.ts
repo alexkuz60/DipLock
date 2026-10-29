@@ -2900,6 +2900,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hypotheses/probe-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Контекст проб: признаки выборки в одной полосе
+         * @description Признаки пробы каждой записи выборки (КД, вращение, поток) — до проверки
+         *     правила. Записи без прогона автоотчёта — честные ``measured=False`` и
+         *     предупреждения, а не нули.
+         */
+        post: operations["post_probe_context_api_v1_hypotheses_probe_context_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hypotheses/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Проверка правила-гипотезы: признак выполнен в N записях из M
+         * @description Проверка правила по выборке проб: N из M, статус и контрпримеры.
+         *     Интерпретацию признаков даёт исследователь — ответ только измеряет.
+         */
+        post: operations["post_hypothesis_check_api_v1_hypotheses_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router": {
         parameters: {
             query?: never;
@@ -4157,6 +4200,16 @@ export interface components {
              * @description Минимум точек в кластере
              */
             cluster_min_points?: number | null;
+            /**
+             * Kd Gof Min By Band
+             * @description Пороги GOF полос КД (JSON вида {"delta": 0.9}, доля 0…1); пусто — пороги методики / дефолты /meta
+             */
+            kd_gof_min_by_band?: string | null;
+            /**
+             * Kd Moment Share
+             * @description КД: момент ≥ X % максимума своей полосы (доля 0…1); пусто — «не оценено»
+             */
+            kd_moment_share?: number | null;
         };
         /** Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post */
         Body_create_bundle_job_api_v1_recordings__recording_id__bundle_post: {
@@ -4305,6 +4358,16 @@ export interface components {
              * @description Минимум точек в кластере (пусто — дефолт сервера)
              */
             cluster_min_points?: number | null;
+            /**
+             * Kd Gof Min By Band
+             * @description Пороги GOF полос КД (JSON вида {"delta": 0.9}, доля 0…1); пусто — пороги методики / дефолты /meta
+             */
+            kd_gof_min_by_band?: string | null;
+            /**
+             * Kd Moment Share
+             * @description КД: момент ≥ X % максимума своей полосы (доля 0…1); пусто — «не оценено»
+             */
+            kd_moment_share?: number | null;
         };
         /** Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post */
         Body_create_dipole_refine_job_api_v1_recordings__recording_id__dipole_refine_post: {
@@ -4821,6 +4884,16 @@ export interface components {
              * @default 800
              */
             epoch_post_ms: number;
+            /**
+             * Kd Gof Min By Band
+             * @description Пороги GOF полос КД (JSON вида {"delta": 0.9}, доля 0…1); пусто — пороги методики / дефолты /meta
+             */
+            kd_gof_min_by_band?: string | null;
+            /**
+             * Kd Moment Share
+             * @description КД: момент ≥ X % максимума своей полосы (доля 0…1); пусто — «не оценено»
+             */
+            kd_moment_share?: number | null;
         };
         /** Body_create_spectrogram_job_api_v1_recordings__recording_id__spectrogram_post */
         Body_create_spectrogram_job_api_v1_recordings__recording_id__spectrogram_post: {
@@ -5251,6 +5324,107 @@ export interface components {
             excluded: boolean;
         };
         /**
+         * ClusterFeaturesOut
+         * @description Профиль признаков кластера — исследовательский слой (29.10.2026).
+         *
+         *     Характерные черты любого скопления данных: признаки **ищем сами**
+         *     (эмпирические гипотезы, Принцип 2.2), это не входные пороги эксперта.
+         *     Считается только измеренное; неизмерённое — ``None`` («не измерено»),
+         *     никогда 0. Универсален для любых строк данных (`cluster_features.py`).
+         */
+        ClusterFeaturesOut: {
+            /**
+             * N Points
+             * @description Точек в кластере
+             */
+            n_points: number;
+            /**
+             * Share
+             * @description Доля кластера от выборки кластеризации (0..1); None — выборка не задана
+             */
+            share?: number | null;
+            /**
+             * Structure Share
+             * @description Топ-3 структур с долями (среди точек с определённой структурой)
+             */
+            structure_share?: components["schemas"]["ClusterNameShareOut"][] | null;
+            /**
+             * Structure Entropy
+             * @description Нормированная энтропия состава 0..1: 0 — одна структура, 1 — много равных; None — структуры не определены
+             */
+            structure_entropy?: number | null;
+            /**
+             * Hemisphere Share
+             * @description Доли left/right/midline по знаку x MNI (x = 0 — срединная линия); None — координат не было
+             */
+            hemisphere_share?: {
+                [key: string]: number;
+            } | null;
+            /**
+             * Moment Sum Nam
+             * @description Суммарный момент точек, нАм
+             */
+            moment_sum_nam?: number | null;
+            /**
+             * Moment Mean Nam
+             * @description Средний момент, нАм
+             */
+            moment_mean_nam?: number | null;
+            /**
+             * Moment Max Nam
+             * @description Максимальный момент, нАм
+             */
+            moment_max_nam?: number | null;
+            /**
+             * Gof Median
+             * @description Медиана GOF точек (внутри своего набора)
+             */
+            gof_median?: number | null;
+            /**
+             * Gof Min
+             * @description Минимальный GOF точек
+             */
+            gof_min?: number | null;
+            /**
+             * N Kd Evaluated
+             * @description Точек с вердиктом КД (остальные — «не оценено»)
+             * @default 0
+             */
+            n_kd_evaluated: number;
+            /**
+             * N Kd Passed
+             * @description Прошедших КД
+             * @default 0
+             */
+            n_kd_passed: number;
+            /**
+             * Kd Pass Share
+             * @description Доля прошедших КД среди оценённых (0..1); None — вердиктов нет («не измерено»), не 0
+             */
+            kd_pass_share?: number | null;
+            /**
+             * Radius Rms Mm
+             * @description RMS-радиус точек от центроида, мм (компактность)
+             */
+            radius_rms_mm?: number | null;
+        };
+        /**
+         * ClusterNameShareOut
+         * @description Строка «имя + доля» профиля признаков кластера.
+         */
+        ClusterNameShareOut: {
+            /**
+             * Name
+             * @description Имя (структура, поле, категория)
+             */
+            name: string;
+            /**
+             * Share
+             * @description Доля от известного состава, 0..1
+             */
+            share: number;
+        };
+        /**
          * ClusterParamsOut
          * @description Паспорт кластеризации (С2): параметры в нормированных единицах + базис.
          */
@@ -5549,6 +5723,46 @@ export interface components {
             warnings?: string[];
         };
         /**
+         * CompareFeatureDeltaOut
+         * @description Дельта признака слоя «признаки + правила» (срез 5): B − A, без p/CI.
+         *
+         *     Источник — последний прогон автоотчёта каждой записи (``probe_context``):
+         *     одно значение на сторону, поэтому к дельте неприменимы Welch/FDR/bootstrap
+         *     (в отличие от дельт мощностей ``CompareBandOut``) — она описательная.
+         */
+        CompareFeatureDeltaOut: {
+            /**
+             * Feature
+             * @description Признак пробы: rotation_ccw_share | rotation_cw_share | flow_orderliness (подмножество PROBE_FEATURES)
+             */
+            feature: string;
+            /**
+             * Band Key
+             * @description Ключ полосы freq_bands (сравнение — внутри полосы)
+             */
+            band_key: string;
+            /**
+             * Band Hz
+             * @description Границы полосы, Гц [lo, hi]
+             */
+            band_hz: number[];
+            /**
+             * Value A
+             * @description Значение в A; None — не измерено
+             */
+            value_a: number | null;
+            /**
+             * Value B
+             * @description Значение в B; None — не измерено
+             */
+            value_b: number | null;
+            /**
+             * Delta
+             * @description B − A; None — не измерено на одной из сторон (не 0, а «нет данных»)
+             */
+            delta: number | null;
+        };
+        /**
          * CompareIndicesOut
          * @description Скалярные индексы обеих сторон и их дельты (IAF и отношения ритмов).
          */
@@ -5669,6 +5883,11 @@ export interface components {
              * @description Дельты по диапазонам freq_bands
              */
             bands: components["schemas"]["CompareBandOut"][];
+            /**
+             * Layer Features
+             * @description Дельты признаков слоя (срез 5): вращение CCW/CW и упорядоченность потока — одно значение на сторону из последнего прогона автоотчёта; пусто — признаки не измерены (предупреждение в warnings)
+             */
+            layer_features?: components["schemas"]["CompareFeatureDeltaOut"][];
             indices: components["schemas"]["CompareIndicesOut"];
             specparam: components["schemas"]["CompareSpecparamOut"];
             stats: components["schemas"]["CompareStatsOut"];
@@ -7727,6 +7946,8 @@ export interface components {
             top_structures?: string[];
             /** Top Brodmann */
             top_brodmann?: string[];
+            /** @description Профиль признаков кластера (ищем характерное сами); None — не считался */
+            features?: components["schemas"]["ClusterFeaturesOut"] | null;
             /**
              * N Bands Matched
              * @description Устойчивость: в скольких полосах пакета найден кластер той же области
@@ -8503,6 +8724,35 @@ export interface components {
             sfreq: number;
         };
         /**
+         * FlowTransitionOut
+         * @description Переход «структура → структура» магистрали потока (срез 3).
+         *
+         *     Только **смены** структуры на траектории позиций своей полосы; ``share`` —
+         *     доля от всех переходов полосы (``services/flow_metrics.py``).
+         */
+        FlowTransitionOut: {
+            /**
+             * From Structure
+             * @description Структура-источник перехода
+             */
+            from_structure: string;
+            /**
+             * To Structure
+             * @description Структура-приёмник перехода
+             */
+            to_structure: string;
+            /**
+             * Count
+             * @description Число переходов этой пары
+             */
+            count: number;
+            /**
+             * Share
+             * @description Доля от всех переходов полосы, 0..1
+             */
+            share: number;
+        };
+        /**
          * GpuStatusOut
          * @description Автоопределение GPU локального сервера (один запрос, без расчётов).
          */
@@ -8840,6 +9090,8 @@ export interface components {
              * @description Доминирующие поля Бродмана кластера (топ-3)
              */
             top_brodmann?: string[];
+            /** @description Профиль признаков кластера (ищем характерное сами); None — не считался */
+            features?: components["schemas"]["ClusterFeaturesOut"] | null;
         };
         /**
          * GroupClusterParamsOut
@@ -9048,6 +9300,145 @@ export interface components {
             vertex_count: number;
             /** Face Count */
             face_count: number;
+        };
+        /**
+         * HypothesisCheckIn
+         * @description Вход ``POST /hypotheses/check``: правило + выборка проб.
+         */
+        HypothesisCheckIn: {
+            /**
+             * Label
+             * @description Имя/текст гипотезы — эхо в ответе (не влияет на проверку)
+             */
+            label?: string | null;
+            /**
+             * Band Key
+             * @description Полоса правила (freq_bands/functional_bands); между полосами не сравниваем
+             */
+            band_key: string;
+            /**
+             * Conditions
+             * @description Условия правила (И-логика); минимум одно
+             */
+            conditions: components["schemas"]["HypothesisConditionIn"][];
+            /**
+             * Min Share
+             * @description Порог подтверждения: N/M ≥ min_share → confirmed; None — только описание
+             */
+            min_share?: number | null;
+            /**
+             * Recording Ids
+             * @description Записи-участники выборки (дедупликация сохраняет порядок)
+             */
+            recording_ids: string[];
+        };
+        /**
+         * HypothesisCheckOut
+         * @description Ответ проверки гипотезы: N из M, статус и построчные итоги.
+         */
+        HypothesisCheckOut: {
+            /** Label */
+            label?: string | null;
+            /** Band Key */
+            band_key: string;
+            /**
+             * Band Hz
+             * @description Границы полосы, Гц [lo, hi]
+             */
+            band_hz: number[];
+            /** Conditions */
+            conditions: components["schemas"]["HypothesisConditionOut"][];
+            /** Min Share */
+            min_share?: number | null;
+            /**
+             * N
+             * @description Записей, где правило выполнилось
+             */
+            n: number;
+            /**
+             * M
+             * @description Оценено записей (вошли в знаменатель доли)
+             */
+            m: number;
+            /**
+             * Share
+             * @description N / M; None — M = 0
+             */
+            share: number | null;
+            /**
+             * Status
+             * @description confirmed | rejected | descriptive | insufficient
+             */
+            status: string;
+            /** Records */
+            records: components["schemas"]["HypothesisRecordOut"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * HypothesisConditionIn
+         * @description Условие правила: признак пробы, оператор и порог.
+         */
+        HypothesisConditionIn: {
+            /**
+             * Feature
+             * @description Имя признака пробы (PROBE_FEATURES)
+             */
+            feature: string;
+            /**
+             * Op
+             * @description Оператор: >= | <= | > | < | == | !=
+             */
+            op: string;
+            /**
+             * Value
+             * @description Порог условия
+             */
+            value: number;
+        };
+        /**
+         * HypothesisConditionOut
+         * @description Эхо условия правила в ответе.
+         */
+        HypothesisConditionOut: {
+            /** Feature */
+            feature: string;
+            /** Op */
+            op: string;
+            /** Value */
+            value: number;
+        };
+        /**
+         * HypothesisRecordOut
+         * @description Итог проверки одной пробы: вердикт, провалы и её признаки.
+         */
+        HypothesisRecordOut: {
+            /** Recording Id */
+            recording_id: string;
+            /** Filename */
+            filename?: string | null;
+            /**
+             * Passed
+             * @description True — правило выполнилось; False — контрпример; None — не оценено (есть неизмеренные признаки)
+             */
+            passed: boolean | null;
+            /**
+             * Failed Conditions
+             * @description Подписи невыполненных условий
+             */
+            failed_conditions?: string[];
+            /**
+             * Unmeasured Features
+             * @description Подписи условий с неизмеренным признаком
+             */
+            unmeasured_features?: string[];
+            /**
+             * Features
+             * @description Признаки пробы этой полосы (None — не измерено)
+             */
+            features?: {
+                [key: string]: number | null;
+            };
         };
         /**
          * JobCreated
@@ -9263,9 +9654,16 @@ export interface components {
             kd_moment_share?: number | null;
             /**
              * Kd Gof Min
-             * @description Порог GOF; None — методика не задала
+             * @description Порог GOF (скалярный fallback методики); None — не задан
              */
             kd_gof_min?: number | null;
+            /**
+             * Kd Gof Min By Band
+             * @description Фактический по-полосный порог GOF прогона (manifest v3): форма перекрывает методику, полоса без записи — экспертная интерполяция
+             */
+            kd_gof_min_by_band?: {
+                [key: string]: number;
+            };
             /**
              * Kd Moment Basis
              * @description Базис порога момента: «доля от максимума поддиапазона»
@@ -9802,6 +10200,18 @@ export interface components {
                 [key: string]: number[];
             };
             /**
+             * Kd Gof Min By Band
+             * @description Дефолт порога GOF полосы для «Опций расчётов диполов» (доля 0…1): экспертная интерполяция δ 0.90 → γ 0.775 (консультация 29.10.2026), правится в UI и запоминается
+             */
+            kd_gof_min_by_band?: {
+                [key: string]: number;
+            };
+            /**
+             * Kd Moment Share
+             * @description Дефолт порога «момент ≥ X % максимума полосы» (доля 0…1); X = 5 % — эксперт методики (29.10.2026, KD_MOMENT_SHARE)
+             */
+            kd_moment_share?: number | null;
+            /**
              * Functional Bands
              * @description Функциональные ритмы (μ, σ, κ, τ, λ, ψ) — только пресеты фильтра диполей, в спектр/топокартах не участвуют; источник — core/config.py
              */
@@ -10283,6 +10693,68 @@ export interface components {
             duration_sec_calc: number;
         };
         /**
+         * ProbeContextIn
+         * @description Вход ``POST /hypotheses/probe-context``: выборка + полоса.
+         */
+        ProbeContextIn: {
+            /**
+             * Recording Ids
+             * @description Записи-участники выборки (дедупликация сохраняет порядок)
+             */
+            recording_ids: string[];
+            /**
+             * Band Key
+             * @description Полоса контекста (одна — принцип 3)
+             */
+            band_key: string;
+        };
+        /**
+         * ProbeContextOut
+         * @description Ответ контекста проб: строки по записям + честные предупреждения.
+         */
+        ProbeContextOut: {
+            /** Band Key */
+            band_key: string;
+            /** Band Hz */
+            band_hz: number[];
+            /** Records */
+            records: components["schemas"]["ProbeRecordOut"][];
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * ProbeRecordOut
+         * @description Контекст одной пробы: признаки полосы из последнего прогона автоотчёта.
+         */
+        ProbeRecordOut: {
+            /** Recording Id */
+            recording_id: string;
+            /** Filename */
+            filename?: string | null;
+            /**
+             * Report Run Id
+             * @description Взятый прогон автоотчёта; None — прогонов нет
+             */
+            report_run_id?: number | null;
+            /**
+             * Report Created At
+             * @description Когда прогон был выполнен (история, не UPSERT)
+             */
+            report_created_at?: string | null;
+            /**
+             * Features
+             * @description Признаки пробы (None — не измерено)
+             */
+            features?: {
+                [key: string]: number | null;
+            };
+            /**
+             * Measured
+             * @description Есть ли полоса в прогоне; False — признаки не измерены
+             */
+            measured: boolean;
+        };
+        /**
          * RecordingEvent
          * @description Событие записи: аннотация EDF+ или маркер стим-канала (N2, шаг 2.7).
          *
@@ -10572,6 +11044,41 @@ export interface components {
              * @description Медиана RIV — единственный кросс-полосной фильтр (2.6/N23)
              */
             median_riv?: number | null;
+            /**
+             * Rotation Ccw Share
+             * @description Доля тройек траектории с поворотом против часовой (взгляд снаружи сферы, срез 2); среди троек с определённым знаком; None — троек нет
+             */
+            rotation_ccw_share?: number | null;
+            /**
+             * Rotation Cw Share
+             * @description Доля тройек с поворотом по часовой; rotation_ccw_share + rotation_cw_share = 1
+             */
+            rotation_cw_share?: number | null;
+            /**
+             * Rotation Triples
+             * @description Плоских тройек с определённым знаком (знаменатель долей вращения)
+             */
+            rotation_triples?: number | null;
+            /**
+             * Flow Orderliness
+             * @description Упорядоченность потока (срез 3): R = |Σ dᵢ| / Σ|dᵢ| по векторам смещения траектории позиций, 0…1; None — не измерено
+             */
+            flow_orderliness?: number | null;
+            /**
+             * Flow Steps
+             * @description Число векторов смещения (шагов траектории позиций)
+             */
+            flow_steps?: number | null;
+            /**
+             * Flow Basis
+             * @description Базис координат потока: mni | head (смешивать системы нельзя)
+             */
+            flow_basis?: string | null;
+            /**
+             * Flow Top Transitions
+             * @description Магистраль потока (срез 3): топ переходов «структура → структура» по траектории позиций своей полосы (только смены структуры)
+             */
+            flow_top_transitions?: components["schemas"]["FlowTransitionOut"][];
             /** Top Structures */
             top_structures?: components["schemas"]["ReportNameCountOut"][];
             /** Top Brodmann */
@@ -16418,6 +16925,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AudioEmoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_probe_context_api_v1_hypotheses_probe_context_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProbeContextIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProbeContextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_hypothesis_check_api_v1_hypotheses_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HypothesisCheckIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisCheckOut"];
                 };
             };
             /** @description Validation Error */

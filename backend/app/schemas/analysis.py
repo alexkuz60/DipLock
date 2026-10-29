@@ -1571,7 +1571,14 @@ class KdCriteriaOut(BaseModel):
         description="Порог «доля от максимума поддиапазона»; None — методика не задала",
     )
     kd_gof_min: float | None = Field(
-        default=None, description="Порог GOF; None — методика не задала",
+        default=None, description="Порог GOF (скалярный fallback методики); None — не задан",
+    )
+    kd_gof_min_by_band: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Фактический по-полосный порог GOF прогона (manifest v3): форма "
+            "перекрывает методику, полоса без записи — экспертная интерполяция"
+        ),
     )
     kd_moment_basis: str | None = Field(
         default=None, description="Базис порога момента: «доля от максимума поддиапазона»",
@@ -1697,6 +1704,19 @@ class ReportDynamicsOut(BaseModel):
     )
 
 
+class FlowTransitionOut(BaseModel):
+    """Переход «структура → структура» магистрали потока (срез 3).
+
+    Только **смены** структуры на траектории позиций своей полосы; ``share`` —
+    доля от всех переходов полосы (``services/flow_metrics.py``).
+    """
+
+    from_structure: str = Field(description="Структура-источник перехода")
+    to_structure: str = Field(description="Структура-приёмник перехода")
+    count: int = Field(description="Число переходов этой пары")
+    share: float = Field(description="Доля от всех переходов полосы, 0..1")
+
+
 class ReportBandSummaryOut(BaseModel):
     """Агрегаты одной полосы пакета в части 2 отчёта."""
 
@@ -1708,6 +1728,42 @@ class ReportBandSummaryOut(BaseModel):
     median_gof: float | None = None
     median_riv: float | None = Field(
         default=None, description="Медиана RIV — единственный кросс-полосной фильтр (2.6/N23)",
+    )
+    rotation_ccw_share: float | None = Field(
+        default=None,
+        description=(
+            "Доля тройек траектории с поворотом против часовой (взгляд снаружи "
+            "сферы, срез 2); среди троек с определённым знаком; None — троек нет"
+        ),
+    )
+    rotation_cw_share: float | None = Field(
+        default=None,
+        description="Доля тройек с поворотом по часовой; rotation_ccw_share + rotation_cw_share = 1",
+    )
+    rotation_triples: int | None = Field(
+        default=None,
+        description="Плоских тройек с определённым знаком (знаменатель долей вращения)",
+    )
+    flow_orderliness: float | None = Field(
+        default=None,
+        description=(
+            "Упорядоченность потока (срез 3): R = |Σ dᵢ| / Σ|dᵢ| по векторам "
+            "смещения траектории позиций, 0…1; None — не измерено"
+        ),
+    )
+    flow_steps: int | None = Field(
+        default=None, description="Число векторов смещения (шагов траектории позиций)",
+    )
+    flow_basis: str | None = Field(
+        default=None,
+        description="Базис координат потока: mni | head (смешивать системы нельзя)",
+    )
+    flow_top_transitions: list[FlowTransitionOut] = Field(
+        default_factory=list,
+        description=(
+            "Магистраль потока (срез 3): топ переходов «структура → структура» "
+            "по траектории позиций своей полосы (только смены структуры)"
+        ),
     )
     top_structures: list[ReportNameCountOut] = Field(default_factory=list)
     top_brodmann: list[ReportNameCountOut] = Field(default_factory=list)
@@ -1874,6 +1930,21 @@ class MetaResponse(BaseModel):
         description=(
             "Базовые октавные полосы (ключи стабильны — адрес результатов): "
             "δ, δ/θ, θ, α, β, γ, γ-high; источник — core/config.py"
+        ),
+    )
+    kd_gof_min_by_band: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Дефолт порога GOF полосы для «Опций расчётов диполов» (доля 0…1): "
+            "экспертная интерполяция δ 0.90 → γ 0.775 (консультация 29.10.2026), "
+            "правится в UI и запоминается"
+        ),
+    )
+    kd_moment_share: float | None = Field(
+        default=None,
+        description=(
+            "Дефолт порога «момент ≥ X % максимума полосы» (доля 0…1); "
+            "X = 5 % — эксперт методики (29.10.2026, KD_MOMENT_SHARE)"
         ),
     )
     functional_bands: dict[str, list[float]] = Field(
@@ -2259,6 +2330,74 @@ class DipoleBandComparisonOut(BaseModel):
     )
 
 
+class ClusterNameShareOut(BaseModel):
+    """Строка «имя + доля» профиля признаков кластера."""
+
+    name: str = Field(description="Имя (структура, поле, категория)")
+    share: float = Field(description="Доля от известного состава, 0..1")
+
+
+class ClusterFeaturesOut(BaseModel):
+    """Профиль признаков кластера — исследовательский слой (29.10.2026).
+
+    Характерные черты любого скопления данных: признаки **ищем сами**
+    (эмпирические гипотезы, Принцип 2.2), это не входные пороги эксперта.
+    Считается только измеренное; неизмерённое — ``None`` («не измерено»),
+    никогда 0. Универсален для любых строк данных (`cluster_features.py`).
+    """
+
+    n_points: int = Field(description="Точек в кластере")
+    share: float | None = Field(
+        default=None,
+        description="Доля кластера от выборки кластеризации (0..1); None — выборка не задана",
+    )
+    structure_share: list[ClusterNameShareOut] | None = Field(
+        default=None,
+        description="Топ-3 структур с долями (среди точек с определённой структурой)",
+    )
+    structure_entropy: float | None = Field(
+        default=None,
+        description=(
+            "Нормированная энтропия состава 0..1: 0 — одна структура, "
+            "1 — много равных; None — структуры не определены"
+        ),
+    )
+    hemisphere_share: dict[str, float] | None = Field(
+        default=None,
+        description=(
+            "Доли left/right/midline по знаку x MNI (x = 0 — срединная линия); "
+            "None — координат не было"
+        ),
+    )
+    moment_sum_nam: float | None = Field(
+        default=None, description="Суммарный момент точек, нАм",
+    )
+    moment_mean_nam: float | None = Field(
+        default=None, description="Средний момент, нАм",
+    )
+    moment_max_nam: float | None = Field(
+        default=None, description="Максимальный момент, нАм",
+    )
+    gof_median: float | None = Field(
+        default=None, description="Медиана GOF точек (внутри своего набора)",
+    )
+    gof_min: float | None = Field(default=None, description="Минимальный GOF точек")
+    n_kd_evaluated: int = Field(
+        default=0, description="Точек с вердиктом КД (остальные — «не оценено»)",
+    )
+    n_kd_passed: int = Field(default=0, description="Прошедших КД")
+    kd_pass_share: float | None = Field(
+        default=None,
+        description=(
+            "Доля прошедших КД среди оценённых (0..1); None — вердиктов нет "
+            "(«не измерено»), не 0"
+        ),
+    )
+    radius_rms_mm: float | None = Field(
+        default=None, description="RMS-радиус точек от центроида, мм (компактность)",
+    )
+
+
 class DipoleClusterOut(BaseModel):
     """Кластер диполей прогона (С2, B8): геометрия + устойчивость по поддиапазонам."""
 
@@ -2276,6 +2415,10 @@ class DipoleClusterOut(BaseModel):
     )
     top_structures: list[str] = Field(default_factory=list)
     top_brodmann: list[str] = Field(default_factory=list)
+    features: ClusterFeaturesOut | None = Field(
+        default=None,
+        description="Профиль признаков кластера (ищем характерное сами); None — не считался",
+    )
     n_bands_matched: int = Field(
         description="Устойчивость: в скольких полосах пакета найден кластер той же области",
     )

@@ -76,6 +76,29 @@ class CompareBandOut(BaseModel):
     )
 
 
+class CompareFeatureDeltaOut(BaseModel):
+    """Дельта признака слоя «признаки + правила» (срез 5): B − A, без p/CI.
+
+    Источник — последний прогон автоотчёта каждой записи (``probe_context``):
+    одно значение на сторону, поэтому к дельте неприменимы Welch/FDR/bootstrap
+    (в отличие от дельт мощностей ``CompareBandOut``) — она описательная.
+    """
+
+    feature: str = Field(
+        description=(
+            "Признак пробы: rotation_ccw_share | rotation_cw_share | flow_orderliness "
+            "(подмножество PROBE_FEATURES)"
+        ),
+    )
+    band_key: str = Field(description="Ключ полосы freq_bands (сравнение — внутри полосы)")
+    band_hz: list[float] = Field(description="Границы полосы, Гц [lo, hi]")
+    value_a: float | None = Field(description="Значение в A; None — не измерено")
+    value_b: float | None = Field(description="Значение в B; None — не измерено")
+    delta: float | None = Field(
+        description="B − A; None — не измерено на одной из сторон (не 0, а «нет данных»)",
+    )
+
+
 class CompareClusterOut(BaseModel):
     """Значимый кластер «частота × канал» из пермутационного теста."""
 
@@ -223,6 +246,14 @@ class CompareResult(BaseModel):
     psd_mean_b_uv2: list[float] = Field(description="PSD B, усреднённый по каналам и эпохам, мкВ²/Гц")
     psd_delta_db: list[float] = Field(description="10·log10(B/A) по частотам, дБ")
     bands: list[CompareBandOut] = Field(description="Дельты по диапазонам freq_bands")
+    layer_features: list[CompareFeatureDeltaOut] = Field(
+        default_factory=list,
+        description=(
+            "Дельты признаков слоя (срез 5): вращение CCW/CW и упорядоченность "
+            "потока — одно значение на сторону из последнего прогона автоотчёта; "
+            "пусто — признаки не измерены (предупреждение в warnings)"
+        ),
+    )
     indices: CompareIndicesOut
     specparam: CompareSpecparamOut
     stats: CompareStatsOut

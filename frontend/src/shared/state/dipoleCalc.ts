@@ -58,6 +58,7 @@ import {
   calcJobFromStatus,
   normalizeCalcParams,
   normalizeCalcView,
+  normalizeKdPercent,
   normalizeRefineHalfwin,
   type CalcJob,
   type CalcParams,
@@ -217,6 +218,16 @@ export type DipoleCalcState = {
   setGridMm: (value: number) => void
   /** Метод PSD спектра (N17): только задача спектра, диполи не пересчитываются */
   setPsdMethod: (value: 'welch' | 'multitaper') => void
+  /**
+   * Порог GOF КД полосы, % (С0, «Опции расчётов диполов»): `null` — сброс к
+   * дефолту методики из `/meta`. Запоминается (partialize `params`).
+   */
+  setKdGofForBand: (bandKey: string, percent: number | null) => void
+  /**
+   * КД: «момент ≥ X % максимума своей полосы», %; `null` — не задано
+   * (вердикт остаётся «не оценено»). Запоминается.
+   */
+  setKdMomentSharePercent: (value: number | null) => void
   /** Сетевой фильтр 50/60 Гц (`null` — выключен) */
   setNotchHz: (value: number | null) => void
   /**
@@ -404,6 +415,20 @@ export const useDipoleCalc = create<DipoleCalcState>()(
         set((state) => ({ params: { ...state.params, gridMm: clamp(value, GRID_MM_RANGE) } })),
       setPsdMethod: (value) =>
         set((state) => ({ params: { ...state.params, psdMethod: value } })),
+      setKdGofForBand: (bandKey, percent) =>
+        set((state) => ({
+          params: {
+            ...state.params,
+            kdGofByBand: {
+              ...state.params.kdGofByBand,
+              [bandKey]: normalizeKdPercent(percent),
+            },
+          },
+        })),
+      setKdMomentSharePercent: (value) =>
+        set((state) => ({
+          params: { ...state.params, kdMomentSharePercent: normalizeKdPercent(value) },
+        })),
       // Окно уточнения — только варианты списка: произвольное число здесь значило
       // бы «случайные 40 секунд счёта», а не выбор точности (шаг 1.5)
       setRefineHalfwinMs: (value) => set({ refineHalfwinMs: normalizeRefineHalfwin(value) }),
@@ -433,6 +458,8 @@ export const useDipoleCalc = create<DipoleCalcState>()(
               notchHz: params.notchHz,
               reference: 'average',
               referenceChannels: null,
+              kdGofByBand: params.kdGofByBand,
+              kdMomentSharePercent: params.kdMomentSharePercent,
             }),
           )
           // id задачи — сразу после 202: отмена работает и до первого опроса (3.2)

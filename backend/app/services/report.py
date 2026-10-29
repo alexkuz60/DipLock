@@ -49,6 +49,8 @@ from app.services.dipole_scanner import (
     compute_dipole_scan,
     montage_sparse_warning,
 )
+from app.services.flow_metrics import flow_orderliness, top_structure_transitions
+from app.services.moment_rotation import moment_rotation_shares
 from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recordings import Recording
 from app.services.roi import aggregate_roi
@@ -109,6 +111,11 @@ class ReportParams:
     preprocess: PreprocessParams = field(default_factory=PreprocessParams)
     grid_mm: float = GRID_STEP_MM
     band_keys: list[str] = field(default_factory=list)
+    # КД (С0, по-полосный GOF 29.10.2026): пороги формы перекрывают методику —
+    # write-API (`results_store._persist_report`) считает вердикты точек теми же
+    # правилами, что пакетный прогон (`kd_criteria`).
+    kd_gof_min_by_band: dict[str, float] | None = None
+    kd_moment_share: float | None = None
 
 
 def report_band_catalog(cfg: Settings) -> dict[str, tuple[float, float]]:
@@ -157,6 +164,12 @@ def report_signature(
             ",".join(band_keys),
         ]
     )
+    # Пороги КД — часть «что считали» (вердикты точек в БД): только заданные
+    # значения, чтобы отпечатки старых прогонов не менялись.
+    if params.kd_moment_share is not None:
+        payload += f"|kd_moment={params.kd_moment_share:g}"
+    for key in sorted(params.kd_gof_min_by_band or {}):
+        payload += f"|kd_gof[{key}]={float((params.kd_gof_min_by_band or {})[key]):g}"
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
@@ -381,6 +394,13 @@ def summarize_band(
         "n_no_attribution": sum(1 for p in points if not p.get("anatomical_structure")),
         "median_gof": _median(gofs),
         "median_riv": _median(rives),
+        # Доля вращения момента (срез 2): CW/CCW по «плоским» тройкам
+        # траектории своей полосы (`services/moment_rotation.py`)
+        **moment_rotation_shares(points),
+        # Магистраль потока и упорядоченность (срез 3): топ-переходы структур
+        # и R векторов смещения траектории позиций (`services/flow_metrics.py`)
+        **flow_orderliness(points),
+        "flow_top_transitions": top_structure_transitions(points),
         "top_structures": top_structures,
         "top_brodmann": top_brodmann,
         # Полный счёт всех имён словаря (§8.4.4): в БД пишутся целиком, в HTML —

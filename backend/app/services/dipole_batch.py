@@ -49,7 +49,7 @@ from app.services.dipole_scanner import (
     compute_dipole_scan,
     shared_scan_kernel,
 )
-from app.services.kd_criteria import kd_basis_for
+from app.services.kd_criteria import kd_basis_for, resolve_gof_min
 from app.services.recordings import Recording
 
 
@@ -89,6 +89,11 @@ class DipoleBatchParams:
     grid_mm: float = GRID_STEP_MM
     cluster_voxel_norm: float | None = None
     cluster_min_points: int | None = None
+    # КД (С0, по-полосный GOF 29.10.2026): пороги формы прогона перекрывают
+    # порог методики (`kd_criteria.resolve_gof_min`); ``None`` — дефолт
+    # конфига (X = 5 % эксперта + интерполяция GOF).
+    kd_gof_min_by_band: dict[str, float] | None = None
+    kd_moment_share: float | None = None
 
 
 class _BandWindow:
@@ -132,6 +137,12 @@ def batch_signature(params: DipoleBatchParams) -> str:
         f"cluster_voxel_norm={params.cluster_voxel_norm or 0:g}",
         f"cluster_min_points={params.cluster_min_points or 0:g}",
     ]
+    # Пороги КД — часть «что считали»: вердикт меняется без изменения точек.
+    # Только заданные значения (None не входит) — старые отпечатки стабильны.
+    if params.kd_moment_share is not None:
+        parts.append(f"kd_moment={params.kd_moment_share:g}")
+    for key in sorted(params.kd_gof_min_by_band or {}):
+        parts.append(f"kd_gof[{key}]={float((params.kd_gof_min_by_band or {})[key]):g}")
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
@@ -246,9 +257,11 @@ def run_dipole_batch(
             epochs=0,
         )
 
-    # КД решает, что попадает в кластеры (concept.md §3): без порогов методики
-    # кластеры считаются по всем точкам, и это подписано в паспорте (`kd_filter`).
-    kd_evaluated = cfg.kd_moment_share is not None and cfg.kd_gof_min is not None
+    # КД решает, что попадает в кластеры (concept.md §3): вердикт — по-полосный
+    # (порог GOF своей полосы + общая доля момента), поэтому «оцененность» тоже
+    # своя у каждой полосы; без порогов методики в кластеры идут все точки,
+    # и это подписано в паспорте (`kd_filter`).
+    any_kd_evaluated = False
 
     band_runs: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -287,8 +300,16 @@ def run_dipole_batch(
                 "moment_max_nam": None,
                 "median_gof": None,
                 "kd_basis": {
-                    "moment_share_x": cfg.kd_moment_share,
-                    "gof_min": cfg.kd_gof_min,
+                    "moment_share_x": (
+                        params.kd_moment_share
+                        if params.kd_moment_share is not None
+                        else cfg.kd_moment_share
+                    ),
+                    "gof_min": resolve_gof_min(
+                        cfg, band_key=band.band_key,
+                        band_hz=(band.lo_hz, band.hi_hz),
+                        gof_min_by_band=params.kd_gof_min_by_band,
+                    ),
                     "moment_max_nam": None,
                 },
                 "n_epochs_total": None,
@@ -301,7 +322,14 @@ def run_dipole_batch(
             continue
 
         points = list(scan_result.get("points") or [])
-        kd_basis, verdicts, n_kd_passed = kd_basis_for(points, cfg)
+        kd_basis, verdicts, n_kd_passed = kd_basis_for(
+            points, cfg,
+            band_key=band.band_key,
+            band_hz=(band.lo_hz, band.hi_hz),
+            gof_min_by_band=params.kd_gof_min_by_band,
+            moment_share=params.kd_moment_share,
+        )
+        any_kd_evaluated = any_kd_evaluated or any(v is not None for v in verdicts)
         enriched = [
             # Вердикт — bool|None по контракту (DipoleBatchPointOut): 1/0 здесь
             # превратились бы в «1» в JSON, а NULL обязан остаться NULL.
@@ -333,18 +361,26 @@ def run_dipole_batch(
         })
         warnings.extend(band_warnings)
 
-    # Кластеры (С2): точки, прошедшие КД (или все — без порогов методики).
+    # Кластеры (С2): точки, прошедшие КД своей полосы (или все — без порогов
+    # методики; «оцененность» — по вердиктам полосы, а не по глобальному флагу).
     clusters_by_band: dict[str, list[dict[str, Any]]] = {}
     for run in band_runs:
+        run_evaluated = any(
+            point.get("kd_passed") is not None for point in run["points"]
+        )
         cluster_input = [
             {
                 "recording_id": recording.recording_id,
                 "mni": point.get("mni_coords"),
                 "structure": point.get("anatomical_structure"),
                 "area": point.get("brodmann_area"),
+                # Измеренное для профиля признаков кластера (cluster_features)
+                "amplitude_nam": point.get("amplitude_nam"),
+                "gof": point.get("gof"),
+                "kd_passed": point.get("kd_passed"),
             }
             for point in run["points"]
-            if not kd_evaluated or point.get("kd_passed") == 1
+            if not run_evaluated or point.get("kd_passed") == 1
         ]
         clusters_by_band[run["band_key"]] = cluster_points(
             cluster_input,
@@ -372,6 +408,7 @@ def run_dipole_batch(
                 "extent_mm": cluster.get("extent_mm"),
                 "top_structures": cluster.get("top_structures"),
                 "top_brodmann": cluster.get("top_brodmann"),
+                "features": cluster.get("features"),
                 "n_bands_matched": stability_row.get("n_bands_matched", 1),
                 "band_share": stability_row.get("band_share", 1.0 / n_bands),
                 "matched_band_keys": stability_row.get("matched_band_keys", [band_key]),
@@ -413,7 +450,7 @@ def run_dipole_batch(
         "cluster_params": {
             **cluster_params,
             # Что ушло в кластеры: вердикт КД или «все точки» (без порогов).
-            "kd_filter": "kd_passed" if kd_evaluated else None,
+            "kd_filter": "kd_passed" if any_kd_evaluated else None,
         },
         "warnings": list(dict.fromkeys(warnings)),
         "duration_sec_calc": round(time.perf_counter() - started, 3),

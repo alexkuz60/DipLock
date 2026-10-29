@@ -346,4 +346,30 @@ describe('панель раздела «Диполи»', () => {
       expect(warnings).toHaveTextContent('двух периодов нижней частоты полосы'),
     )
   })
+
+  it('секция «КД»: правка порога GOF полосы запоминается и ничего не запускает', async () => {
+    const fetchSpy = mockApiFetch()
+    renderWithProviders(<DipolesPanel />)
+
+    const gofField = await screen.findByLabelText('alpha')
+    fireEvent.change(gofField, { target: { value: '90' } })
+    // Правка запоминается в параметрах расчёта (персист localStorage)
+    expect(useDipoleCalc.getState().params.kdGofByBand.alpha).toBe(90)
+    // Правка параметра не запускает расчёт: запросы только за метаданными
+    const urls = fetchSpy.mock.calls.map(([input]) => String(input))
+    expect(urls.filter((url) => !url.includes('/meta'))).toEqual([])
+  })
+
+  it('секция «КД»: «Момент ≥» хранит правку, а 0 возвращает дефолт методики', async () => {
+    mockApiFetch()
+    renderWithProviders(<DipolesPanel />)
+
+    const field = await screen.findByLabelText('Момент ≥')
+    fireEvent.change(field, { target: { value: '50' } })
+    expect(useDipoleCalc.getState().params.kdMomentSharePercent).toBe(50)
+    fireEvent.change(field, { target: { value: '0' } })
+    // 0 — не «выключить», а вернуться к дефолту методики из /meta (X = 5 %,
+    // эксперт 29.10.2026): правка снимается, поле показывает дефолт
+    expect(useDipoleCalc.getState().params.kdMomentSharePercent).toBeNull()
+  })
 })

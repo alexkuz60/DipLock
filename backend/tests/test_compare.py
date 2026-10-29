@@ -19,7 +19,15 @@ import pytest
 from app.api.params import compare_params
 from app.core.config import settings
 from app.schemas.compare import CompareResult
-from app.services.compare import CompareParams, TfrSpec, clear_compare_cache, run_compare
+from app.services.compare import (
+    LAYER_FEATURE_KEYS,
+    CompareParams,
+    TfrSpec,
+    clear_compare_cache,
+    layer_feature_rows,
+    run_compare,
+)
+from app.services.probe_context import PROBE_FEATURES
 from app.services.recordings import recording_registry
 from app.services.spectral import SpectrumParams
 from tests.conftest import write_minimal_edf
@@ -434,5 +442,60 @@ def test_compare_job_with_event_keeps_contract(client, event_pair):
     assert payload.erds.event_id == "Stim"
     # Спектральная ветка при этом посчитана, как обычно
     assert payload.bands
+
+
+# ---------- признаки слоя в дельтах (срез 5) ----------
+
+def test_layer_feature_keys_are_probe_features():
+    """Признаки слоя — подмножество каталога признаков пробы (слои не разъезжаются)."""
+    assert set(LAYER_FEATURE_KEYS) <= set(PROBE_FEATURES)
+
+
+def test_layer_feature_rows_deltas_and_honest_none():
+    """Дельты признаков: B − A; «не измерено» — None (не 0), лишних строк нет."""
+    rows = layer_feature_rows(
+        {
+            "alpha": {"rotation_ccw_share": 0.6, "rotation_cw_share": 0.4, "flow_orderliness": 0.4},
+            "beta": {"rotation_ccw_share": 0.5},
+        },
+        {
+            "alpha": {"rotation_ccw_share": 0.8, "rotation_cw_share": 0.2, "flow_orderliness": 0.5},
+        },
+        settings,
+    )
+    by_key = {(row["feature"], row["band_key"]): row for row in rows}
+    assert by_key[("rotation_ccw_share", "alpha")]["delta"] == pytest.approx(0.2)
+    assert by_key[("flow_orderliness", "alpha")]["delta"] == pytest.approx(0.1)
+    # Измерено только в A: строка есть, дельта — честного None
+    one_sided = by_key[("rotation_ccw_share", "beta")]
+    assert one_sided["value_a"] == 0.5 and one_sided["value_b"] is None
+    assert one_sided["delta"] is None
+    # Ни на одной стороне — строки не плодим
+    assert ("rotation_ccw_share", "gamma") not in by_key
+    assert ("flow_orderliness", "beta") not in by_key
+
+
+def test_layer_features_in_compare_result(pair):
+    """Сквозной прогон: дельты признаков в результате + кавет в notes."""
+    rec_a, rec_b = pair
+    features = {
+        rec_a.recording_id: {"alpha": {"rotation_ccw_share": 0.6, "flow_orderliness": 0.4}},
+        rec_b.recording_id: {"alpha": {"rotation_ccw_share": 0.9, "flow_orderliness": 0.5}},
+    }
+    result = CompareResult(**run_compare(
+        rec_a, rec_b, settings, _params(), layer_features=features,
+    ))
+    rows = {(row.feature, row.band_key): row for row in result.layer_features}
+    assert rows[("rotation_ccw_share", "alpha")].delta == pytest.approx(0.3)
+    assert rows[("flow_orderliness", "alpha")].delta == pytest.approx(0.1)
+    assert any("Признаки слоя" in note for note in result.notes)
+
+
+def test_compare_without_layer_features_warns_honestly(pair):
+    """Без прогонов автоотчёта — пустые дельты признаков и предупреждение, не нули."""
+    rec_a, rec_b = pair
+    result = CompareResult(**run_compare(rec_a, rec_b, settings, _params()))
+    assert result.layer_features == []
+    assert any("Признаки слоя" in w for w in result.warnings)
 
 

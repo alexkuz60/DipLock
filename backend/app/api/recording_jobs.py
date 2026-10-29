@@ -36,6 +36,7 @@ from app.services.dipole_scanner import (
 from app.services.eloreta import EloretaParams, run_eloreta
 from app.services.evoked import EvokedParams, run_evoked
 from app.services.job_manager import ProgressCallback, job_manager
+from app.services.kd_criteria import kd_meta
 from app.services.preprocess import PreprocessParams, run_preprocess
 from app.services.recordings import Recording, recording_registry
 from app.services.report import ReportParams, run_report
@@ -83,13 +84,19 @@ def worker_evoked(
 def worker_compare(
     progress: ProgressCallback,
     recording_a: Recording, recording_b: Recording, params: CompareParams,
+    layer_features: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Воркер дифференциального анализа (поток): PSD пары → дельты и статистика.
 
     Задача принадлежит **паре** записей, а не одной, поэтому живёт не в
     ``RECORDING_JOB_KINDS``: её результат отдаёт ``GET /compare/{job_id}``.
+    ``layer_features`` — признаки слоя пробы (срез 5), собранные при постановке
+    задачи: воркер синхронный (поток), к БД не обращается.
     """
-    return run_compare(recording_a, recording_b, settings, params, progress)
+    return run_compare(
+        recording_a, recording_b, settings, params, progress,
+        layer_features=layer_features,
+    )
 
 
 def worker_spectrum(
@@ -203,8 +210,15 @@ def submit_recording_job(
         on_success=results_store.on_success_callback(kind, recording, params),
         # params_sig — отпечаток параметров задачи в файле истории: по нему
         # автоотчёт сверяет свои числа с последней стадией EDF (§3.9.4, №1).
+        # kd_meta — пороги КД формы: манифест v3 показывает фактически
+        # применённые пороги прогона, а не только дефолты методики.
         # В ``JobStatus`` meta не входит — контракт API не меняется.
-        meta={"recording_id": recording.recording_id, "params_sig": repr(params), **(meta or {})},
+        meta={
+            "recording_id": recording.recording_id,
+            "params_sig": repr(params),
+            **kd_meta(params),
+            **(meta or {}),
+        },
     )
     logger.info("Создана задача %s %s (%s)", kind, job.job_id, recording.recording_id)
     prefix = settings.api_prefix
@@ -221,17 +235,20 @@ def submit_compare_job(
     recording_b: Recording,
     params: CompareParams,
     meta: dict[str, Any] | None = None,
+    layer_features: dict[str, Any] | None = None,
 ) -> JobCreated:
     """202 для задачи сравнения двух записей: результат — ``GET /compare/{job_id}``.
 
     Задача не привязана к одной записи (пара), поэтому не входит в
     ``RECORDING_JOB_KINDS`` и не пишет строку в БД через ``results_store`` —
     носитель результата B9 (срез 1) — файл задачи и дисковый кэш карт разности.
+    ``layer_features`` — признаки слоя пробы (срез 5), собираются роутом
+    **до** постановки (воркер синхронный и к БД не ходит).
     """
     filename = f"{recording_a.filename} ↔ {recording_b.filename}"
     job = job_manager.submit(
         "compare", filename, worker_compare,
-        recording_a, recording_b, params,
+        recording_a, recording_b, params, layer_features,
         meta={
             "recording_ids": [recording_a.recording_id, recording_b.recording_id],
             "params_sig": repr(params),
@@ -265,6 +282,7 @@ def submit_archive_batch_job(params: ArchiveBatchParams) -> JobCreated:
         meta={
             "recording_ids": list(params.recording_ids),
             "params_sig": repr(params.batch),
+            **kd_meta(params.batch),
         },
     )
     logger.info("Создана задача archive_batch %s (%d записей)",

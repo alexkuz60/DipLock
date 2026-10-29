@@ -41,6 +41,14 @@ backend/app/
 │   ├── audio_render/      # «Нейромузыка» (эксперимент): ядро ×128, варианты Экспресс/Монтаж (rows.py — 4 ряда 10-20), 3D-bake (bake.py), радар «Эмо» (emo_radar.py — FFT-кадры микса), WAV+sidecar (docs/rules/neuromusic.md)
 │   ├── audio_ir.py        # IR-ассеты реверберации плеера: pyroomacoustics → cache/ir/ + ETag (spatial-audio)
 │   ├── dipole_scanner.py  # быстрый расчёт: сетка узлов, сферическая модель (3.4)
+│   ├── dipole_batch.py    # пакет поддиапазонов (С1): прогон полос, сопоставление, ядро один раз
+│   ├── dipole_clusters.py # кластеры диполей (С2, B8): воксель + связные компоненты, устойчивость
+│   ├── cluster_features.py # профиль признаков кластера: характерное ищем сами (29.10.2026)
+│   ├── kd_criteria.py     # КД (С0): пороги GOF по полосам + доля момента X %, базисы нормировки
+│   ├── moment_rotation.py # доля вращения CW/CCW по тройкам траектории момента (срез 2)
+│   ├── flow_metrics.py    # магистраль/упорядоченность потока диполей (срез 3)
+│   ├── probe_context.py   # признаки пробы из последнего прогона автоотчёта (срез 4)
+│   ├── hypothesis_check.py # правило гипотез «N из M»: confirmed/rejected/descriptive (срез 4)
 │   ├── eloreta.py         # eLORETA пик/ROI одной эпохи: forward+inverse MNE (остаток B9)
 │   ├── compare.py         # дифференциальный анализ двух записей (B9): дельты B − A, FDR/бутстрап, кластерный тест MNE, карты разности
 │   ├── report.py          # автоотчёт «Итоги»: MNE.Report (часть 1) + пакет диполей по полосам (§3.9) + тема (THEME_CSS/THEME_JS)

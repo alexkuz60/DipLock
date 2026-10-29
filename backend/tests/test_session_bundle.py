@@ -315,7 +315,7 @@ def test_job_manifest_endpoint(client, tmp_path):
     response = client.get(f"{_PREFIX}/jobs/{job_id}/manifest")
     assert response.status_code == 200, response.text
     manifest = response.json()
-    assert manifest["manifest_version"] == 2
+    assert manifest["manifest_version"] == 3
     assert manifest["kind"] == "bundle"
     assert manifest["recording_id"] == recording_id
     # params_sig — repr параметров задачи (тот же отпечаток, что в истории)
@@ -323,13 +323,19 @@ def test_job_manifest_endpoint(client, tmp_path):
     assert manifest["versions"].get("python")
     assert manifest["versions"].get("mne")
     assert manifest["assets"]
-    # Паспорт критерия КД (С0): пороги и базисы нормировки, None — методика не задала
-    assert manifest["criteria"] == {
-        "kd_moment_share": None,
-        "kd_gof_min": None,
-        "kd_moment_basis": "share_of_band_max",
-        "kd_gof_basis": "absolute",
-    }
+    # Паспорт критерия КД (С0, manifest v3): пороги и базисы нормировки.
+    # GOF — по-полосный: карта совпадает с `effective_gof_map` (экспертная
+    # интерполяция δ 0.90 → γ 0.775); X % момента — экспертное значение 5 %
+    # (29.10.2026), оба порога методики активны.
+    from app.services.kd_criteria import effective_gof_map
+
+    assert manifest["criteria"]["kd_moment_share"] == pytest.approx(0.05)
+    assert manifest["criteria"]["kd_gof_min"] is None
+    assert manifest["criteria"]["kd_gof_min_by_band"] == effective_gof_map(settings)
+    assert manifest["criteria"]["kd_gof_min_by_band"]["delta"] == pytest.approx(0.90)
+    assert manifest["criteria"]["kd_gof_min_by_band"]["gamma"] == pytest.approx(0.775)
+    assert manifest["criteria"]["kd_moment_basis"] == "share_of_band_max"
+    assert manifest["criteria"]["kd_gof_basis"] == "absolute"
     # Контракт RunManifestOut: лишних ключей нет
     assert set(manifest) == {
         "manifest_version", "kind", "recording_id", "params_sig",
@@ -356,7 +362,7 @@ def test_manifest_is_saved_next_to_result_in_job_file():
         with open(path, encoding="utf-8") as fh:
             payload = json.load(fh)
         manifest = payload["manifest"]
-        assert manifest["manifest_version"] == 2
+        assert manifest["manifest_version"] == 3
         assert manifest["kind"] == "spectrum"
         assert manifest["params_sig"] == "SpectrumParams()"
         assert manifest["finished_at"] == "2026-10-04T12:00:00"

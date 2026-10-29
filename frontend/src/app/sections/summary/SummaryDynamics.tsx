@@ -156,7 +156,37 @@ export function SummaryDynamics({ bands }: { bands: ReportBandSummary[] }) {
         <span className="tnum rounded-full bg-bg-3 px-2 py-0.5 text-xs text-fg-2">
           {`RIV (кросс-полосной): ${num(band.median_riv, 3)}`}
         </span>
+        {/* Доля вращения момента (срез 2): CW/CCW по «плоским» тройкам
+            траектории (взгляд снаружи сферы); нет троек — числа не показываем */}
+        {band.rotation_triples != null ? (
+          <span
+            className="tnum rounded-full bg-bg-3 px-2 py-0.5 text-xs text-fg-2"
+            title="Доля тройек траектории момента с поворотом CW/CCW (взгляд снаружи сферы)"
+          >
+            {`вращение: CCW ${pctText(band.rotation_ccw_share ?? 0)} % · CW ${pctText(band.rotation_cw_share ?? 0)} % — троек: ${band.rotation_triples}`}
+          </span>
+        ) : null}
+        {/* Упорядоченность потока (срез 3): R векторов смещения траектории позиций */}
+        {band.flow_orderliness != null ? (
+          <span
+            className="tnum rounded-full bg-bg-3 px-2 py-0.5 text-xs text-fg-2"
+            title="R = |Σ dᵢ| / Σ|dᵢ| по векторам смещения траектории позиций: 1 — прямолинейный однонаправленный поток"
+          >
+            {`поток: R ${band.flow_orderliness.toFixed(3)} · шагов: ${band.flow_steps ?? '—'} (${band.flow_basis ?? '—'})`}
+          </span>
+        ) : null}
       </div>
+      {/* Магистраль потока (срез 3): топ переходов «структура → структура» */}
+      {(band.flow_top_transitions ?? []).length > 0 ? (
+        <p className="mt-1 text-sm text-fg-2" data-testid="summary-dynamics-flow">
+          {`Магистраль потока: ${(band.flow_top_transitions ?? [])
+            .map(
+              (row) =>
+                `${row.from_structure} → ${row.to_structure} (${pctText(row.share)} %)`,
+            )
+            .join(' · ')}`}
+        </p>
+      ) : null}
 
       {(band.warnings ?? []).length > 0 ? (
         <ul className="space-y-1 text-sm text-warn">

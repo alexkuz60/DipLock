@@ -39,6 +39,7 @@ import hashlib
 import os
 import time
 import warnings as py_warnings
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
@@ -92,6 +93,21 @@ ERDS_NOTES: tuple[str, ...] = (
 )
 
 # Полос мощности для полосовой статистики ERDS берутся из конфига — DRY (п.1 AGENTS).
+
+# Признаки слоя «признаки + правила» (срезы 2–3) в дельтах сравнения: подмножество
+# `probe_context.PROBE_FEATURES` (вращение CCW/CW — срез 2, поток — срез 3).
+LAYER_FEATURE_KEYS: tuple[str, ...] = (
+    "rotation_ccw_share",
+    "rotation_cw_share",
+    "flow_orderliness",
+)
+
+# Кавет признаков слоя: добавляется к notes, когда дельты признаков посчитаны.
+LAYER_FEATURE_NOTE = (
+    "Признаки слоя (вращение CCW/CW, упорядоченность потока) — одно значение на "
+    "сторону из последнего прогона автоотчёта каждой записи: p/CI к ним "
+    "неприменимы, дельта B − A описательная."
+)
 
 # Пол мощности для логарифмов: ниже — околонулевой шум, дБ отсекается (не −3000).
 _PSD_FLOOR_UV2 = 1e-12
@@ -466,6 +482,44 @@ def _band_rows(
     _, q_values = fdr_correction(np.asarray(raw_p), alpha=cfg.compare_alpha)
     for row, q in zip(rows, q_values, strict=True):
         row["q_value"] = float(q)
+    return rows
+
+
+def layer_feature_rows(
+    features_a: Mapping[str, Mapping[str, Any]] | None,
+    features_b: Mapping[str, Mapping[str, Any]] | None,
+    cfg: Settings,
+) -> list[dict[str, Any]]:
+    """Дельты признаков слоя B − A: одно значение на сторону, без p/CI.
+
+    ``features_*`` — ``band_key → признаки пробы``
+    (``probe_context.probe_features_by_band``). Строки — только там, где признак
+    измерен хотя бы на одной стороне; дельта — только при измеренности на
+    обеих (``None`` — «не измерено», не 0). Полосы — ``freq_bands`` (как у
+    дельт мощностей); признаки одной полосы между собой сравнимы, между
+    полосами — нет (принцип 3).
+    """
+    rows: list[dict[str, Any]] = []
+    for band_key, (fmin, fmax) in cfg.freq_bands.items():
+        left = (features_a or {}).get(band_key) or {}
+        right = (features_b or {}).get(band_key) or {}
+        for feature in LAYER_FEATURE_KEYS:
+            value_a = left.get(feature)
+            value_b = right.get(feature)
+            if value_a is None and value_b is None:
+                continue
+            rows.append({
+                "feature": feature,
+                "band_key": band_key,
+                "band_hz": [float(fmin), float(fmax)],
+                "value_a": float(value_a) if value_a is not None else None,
+                "value_b": float(value_b) if value_b is not None else None,
+                "delta": (
+                    float(value_b) - float(value_a)
+                    if value_a is not None and value_b is not None
+                    else None
+                ),
+            })
     return rows
 
 
@@ -984,13 +1038,17 @@ def run_compare(
     cfg: Settings,
     params: CompareParams,
     progress: Any = None,
+    layer_features: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     """Дифференциальный анализ пары записей → dict под ``CompareResult``.
 
     Этапы: чтение обеих записей → PSD-кубы → агрегаты сторон → дельты по
     полосам (Welch/FDR/бутстрап) → кластерный тест MNE → карты разности в кэш.
     Прогресс сообщается теми же ключами этапов, что и у спектра (UI-подписи из
-    ``STAGE_TITLES``).
+    ``STAGE_TITLES``). ``layer_features`` — признаки слоя пробы
+    (``recording_id → band_key → признаки``, ``probe_features_by_band`` при
+    постановке задачи): дельты вращения/потока B − A без p/CI (одно значение на
+    сторону); ``None`` — признаки не переданы (честное «не измерено»).
     """
     report = progress or (lambda *args, **kwargs: None)
     started = time.perf_counter()
@@ -1036,6 +1094,20 @@ def run_compare(
     notes_out = list(COMPARE_NOTES)
     if params.tfr is not None:
         notes_out.extend(ERDS_NOTES)
+    # Признаки слоя (срез 5): дельты вращения/потока B − A — описательные
+    # (одно значение на сторону), источник — прогоны автоотчёта обеих записей.
+    layer_rows = layer_feature_rows(
+        (layer_features or {}).get(recording_a.recording_id),
+        (layer_features or {}).get(recording_b.recording_id),
+        cfg,
+    )
+    if layer_rows:
+        notes_out.append(LAYER_FEATURE_NOTE)
+    else:
+        warnings_out.append(
+            "Признаки слоя (вращение/поток) не измерены — дельты признаков пусты "
+            "(нужен прогон автоотчёта обеих записей, раздел «Итоги»)"
+        )
     if sum_a.specparam_warnings:
         warnings_out.extend(f"A: {item}" for item in sum_a.specparam_warnings)
     if sum_b.specparam_warnings:
@@ -1084,6 +1156,7 @@ def run_compare(
             for a, b in zip(sum_a.curve, sum_b.curve, strict=True)
         ],
         "bands": band_rows,
+        "layer_features": layer_rows,
         "indices": {
             "iaf_a_hz": sum_a.iaf_hz,
             "iaf_b_hz": sum_b.iaf_hz,

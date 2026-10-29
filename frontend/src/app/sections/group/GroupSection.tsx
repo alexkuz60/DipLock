@@ -433,6 +433,81 @@ function IndicesPanel({ result }: { result: CompareResult }) {
   )
 }
 
+/**
+ * Признаки слоя «признаки + правила» (срез 5): дельты вращения/потока B − A.
+ * Источник — последний прогон автоотчёта каждой записи (не PSD сравнения):
+ * одно значение на сторону, поэтому p/CI нет — дельта описательная.
+ */
+const LAYER_FEATURE_LABELS: Record<string, string> = {
+  rotation_ccw_share: 'Вращение CCW',
+  rotation_cw_share: 'Вращение CW',
+  flow_orderliness: 'Упорядоченность потока R',
+}
+
+/** Значение признака: доли вращения — в %, R потока — в долях (3 знака). */
+function layerFeatureValue(feature: string, value: number | null | undefined): string {
+  if (value === null || value === undefined) return '—'
+  return feature === 'flow_orderliness' ? value.toFixed(3) : `${(value * 100).toFixed(1)} %`
+}
+
+/** Дельта признака: доли — в процентных пунктах (п.п.), R — в долях. */
+function layerFeatureDelta(feature: string, delta: number | null | undefined): string {
+  if (delta === null || delta === undefined) return '—'
+  const sign = delta > 0 ? '+' : ''
+  return feature === 'flow_orderliness'
+    ? `${sign}${delta.toFixed(3)}`
+    : `${sign}${(delta * 100).toFixed(1)} п.п.`
+}
+
+function LayerFeaturesPanel({ result }: { result: CompareResult }) {
+  const rows = result.layer_features ?? []
+  return (
+    <Panel
+      title="Признаки слоя (B − A)"
+      hint="Вращение и поток — из последнего прогона автоотчёта каждой записи (раздел «Итоги»), а не из PSD сравнения: одно значение на сторону, p/CI неприменимы, дельта описательная."
+    >
+      {rows.length === 0 ? (
+        <p className="text-sm text-fg-2" data-testid="compare-layer-features-empty">
+          Признаки слоя не измерены: соберите автоотчёт обеих записей («Итоги»),
+          чтобы сравнить вращение и поток.
+        </p>
+      ) : (
+        <table className="w-full text-sm" data-testid="compare-layer-features">
+          <thead>
+            <tr className="border-b border-border text-left text-fg-2">
+              <th className="py-1.5 pr-3 font-normal">Признак</th>
+              <th className="py-1.5 pr-3 font-normal">Полоса</th>
+              <th className="py-1.5 pr-3 text-right font-normal">A</th>
+              <th className="py-1.5 pr-3 text-right font-normal">B</th>
+              <th className="py-1.5 text-right font-normal">Δ (B − A)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr
+                key={`${row.feature}-${row.band_key}`}
+                className="border-b border-border/50 text-fg-1"
+              >
+                <td className="py-1.5 pr-3">{LAYER_FEATURE_LABELS[row.feature] ?? row.feature}</td>
+                <td className="py-1.5 pr-3">{`${row.band_key} (${row.band_hz[0]}–${row.band_hz[1]} Гц)`}</td>
+                <td className="tnum py-1.5 pr-3 text-right">
+                  {layerFeatureValue(row.feature, row.value_a)}
+                </td>
+                <td className="tnum py-1.5 pr-3 text-right">
+                  {layerFeatureValue(row.feature, row.value_b)}
+                </td>
+                <td className="tnum py-1.5 text-right font-medium">
+                  {layerFeatureDelta(row.feature, row.delta)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Panel>
+  )
+}
+
 export function GroupSection() {
   const mode = useGroupRun((state) => state.mode)
   const result = useGroupCompare((state) => state.result)
@@ -474,6 +549,7 @@ export function GroupSection() {
       <DeltaTopomaps result={result} />
       <ErdsPanel result={result} />
       <IndicesPanel result={result} />
+      <LayerFeaturesPanel result={result} />
       <Panel title="Каветы и предупреждения" hint="Интерпретация результата — часть контракта: показывается без редактирования.">
         <ul className="list-inside list-disc space-y-1 text-sm text-fg-2" data-testid="compare-notes">
           {(result.notes ?? []).map((note) => (
