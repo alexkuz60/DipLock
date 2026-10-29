@@ -13,6 +13,7 @@ import { renderWithProviders } from '@/test/renderWithProviders'
 import * as neuromusicPlayerLib from '@/shared/lib/neuromusicPlayer'
 import type { AudioEmo } from '@/shared/api/types'
 import { useEdfRecording } from '@/shared/state/edfRecording'
+import { EMO_LABELS } from '../emolab/emogram'
 import {
   DEFAULT_BOOST_DB,
   DEFAULT_LOUDNESS_PHON,
@@ -995,6 +996,34 @@ describe('Нейромузыка — раздел', () => {
     // Точка доминанты стоит там же, где конец линии.
     expect(dot?.getAttribute('x1')).toBe(dominant?.getAttribute('x2'))
     expect(dot?.getAttribute('y1')).toBe(dominant?.getAttribute('y2'))
+  })
+
+  it('разметка ½ сектора: 14 тиков на окружности и 14 надписей эмоций снаружи', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+    await renderSucceeded(fetchMock)
+
+    const chart = within(screen.getByRole('region', { name: 'Визуализация' })).getByTestId(
+      'radial-chart',
+    )
+    // Тики-засечки: 14 штук, каждая пересекает круг-границу (середина на R = 90).
+    const ticks = chart.querySelectorAll('[data-part="sector-tick"]')
+    expect(ticks).toHaveLength(14)
+    for (const tick of ticks) {
+      const midX = (Number(tick.getAttribute('x1')) + Number(tick.getAttribute('x2'))) / 2
+      const midY = (Number(tick.getAttribute('y1')) + Number(tick.getAttribute('y2'))) / 2
+      expect(Math.hypot(midX - 100, midY - 100)).toBeCloseTo(90, 6)
+    }
+    // Надписи классификатора: 14 штук «страх» … «агрессия», каждая снаружи
+    // круга — центр box'а дальше R + 10 px (зазор 10 px, jsdom: pxPerUnit = 1).
+    const labels = chart.querySelectorAll('[data-part="sector-label"]')
+    expect(labels).toHaveLength(14)
+    expect([...labels].map((node) => node.textContent)).toEqual([...EMO_LABELS])
+    for (const label of labels) {
+      const distance = Math.hypot(Number(label.getAttribute('x')) - 100, Number(label.getAttribute('y')) - 100)
+      expect(distance).toBeGreaterThanOrEqual(90 + 10)
+    }
   })
 
   it('звезда в гамме полос «Диполей»: дуги секторов 1…7 и круги вершин ⌀10 px', async () => {

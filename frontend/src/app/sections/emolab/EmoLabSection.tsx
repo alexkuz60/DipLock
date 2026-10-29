@@ -146,8 +146,10 @@ export function EmoLabSection() {
             {/* Радар, «Общая эмо-характеристика» и квинтово-квартовый круг в
                 ряд — у радара и круга одинаковые контейнеры (svg + подвал h-6:
                 у круга — легенда, у радара — пустой) — диаметры звезды и круга
-                совпадают. */}
-            <div className="flex min-w-0 flex-1 flex-col">
+                совпадают. Правка 27.10.2026 (2): колонки радара и круга
+                широкие (`flex-[2]`, круги растут ≈ до высоты гистограммы),
+                гистограмма — `flex-1` (узкая средняя колонка). */}
+            <div className="flex min-w-0 flex-[2] flex-col">
               <div className="min-h-0 flex-1">
                 <RadialChart
                   emo={emo}
@@ -165,7 +167,7 @@ export function EmoLabSection() {
               </div>
               <div className="h-6 shrink-0" aria-hidden="true" />
             </div>
-            <div className="flex min-w-0 flex-1 flex-col">
+            <div className="flex min-w-0 flex-[2] flex-col">
               <CircleOfFifths emo={emo} />
             </div>
             <EmoCounters emo={emo} />

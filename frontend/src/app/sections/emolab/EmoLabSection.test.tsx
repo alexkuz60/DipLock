@@ -598,6 +598,33 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     expect(screen.getByTestId('circle-of-fifths')).toBeInTheDocument()
   })
 
+  it('звезда: разметка ½ сектора и 14 надписей эмоций снаружи, viewBox = у круга', async () => {
+    mockApi()
+    renderEmoLab()
+    pickFile()
+    await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
+    const radar = screen.getByTestId('radial-chart')
+    // 14 тиков-засечек на окружности (шаг ½ сектора) и 14 надписей
+    // классификатора снаружи («страх» … «агрессия») с зазором 10 px.
+    expect(radar.querySelectorAll('[data-part="sector-tick"]')).toHaveLength(14)
+    const labels = radar.querySelectorAll('[data-part="sector-label"]')
+    expect(labels).toHaveLength(14)
+    expect([...labels].map((node) => node.textContent)).toEqual([...EMO_LABELS])
+    for (const label of labels) {
+      const distance = Math.hypot(
+        Number(label.getAttribute('x')) - 100,
+        Number(label.getAttribute('y')) - 100,
+      )
+      expect(distance).toBeGreaterThanOrEqual(100) // R = 90 + зазор 10 px
+    }
+    // Инварианта «диаметр звезды = диаметр круга»: один и тот же адаптивный
+    // viewBox (`radialFrameLayout` по ячейке) у радара и квинтового круга;
+    // в jsdom (без замера) оба — по худшему выступу надписей: −72 −72 344 344.
+    const circle = screen.getByTestId('circle-of-fifths')
+    expect(radar.getAttribute('viewBox')).toBe(circle.querySelector('svg')?.getAttribute('viewBox'))
+    expect(radar.getAttribute('viewBox')).toBe('-72 -72 344 344')
+  })
+
   it('«Общая эмо-характеристика» — между радаром и квинтовым кругом', async () => {
     mockApi()
     renderEmoLab()

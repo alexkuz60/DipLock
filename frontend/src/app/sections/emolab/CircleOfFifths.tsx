@@ -16,10 +16,12 @@
  * «Аккорд» (`activeKeySegment` по позиции плеера, обновление `rAF`, ре-рендер
  * только при смене тональности).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AudioEmo } from '@/shared/api/types'
 import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
+import { EMO_LABELS } from './emogram'
 import { frameIndexAt, hopSeconds } from '../neuromusic/emoRadar'
+import { type RadialFrame, radialFrameLayout } from '../neuromusic/emoTicks'
 import { activeKeySegment } from '../neuromusic/keyRotation'
 import {
   CIRCLE_MAJORS,
@@ -160,6 +162,27 @@ export function CircleOfFifths({ emo = null }: CircleOfFifthsProps) {
   const frames = emo && Array.isArray(emo.frames) ? emo.frames : null
   const hopSec = emo ? hopSeconds(emo.hop_samples, emo.fs_audio) : 0
   const [keyCode, setKeyCode] = useState<number | null>(null)
+  // Кадр viewBox — как у радара (`radialFrameLayout` по ячейке): одинаковые
+  // ячейки колонок → одинаковый viewBox → диаметр круга = диаметр звезды
+  // (инварианта «ЕмоЛаб»). Замер — ResizeObserver; в jsdom кадр по умолчанию.
+  const svgRef = useRef<SVGSVGElement | null>(null)
+  const [frame, setFrame] = useState<RadialFrame>(() =>
+    radialFrameLayout(EMO_LABELS, 0, 0, R_OUTER),
+  )
+  useEffect(() => {
+    const element = svgRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const update = () => {
+      const rect = element.getBoundingClientRect()
+      if (rect.width > 0 && rect.height > 0) {
+        setFrame(radialFrameLayout(EMO_LABELS, rect.width, rect.height, R_OUTER))
+      }
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     if (!emo) {
@@ -189,7 +212,8 @@ export function CircleOfFifths({ emo = null }: CircleOfFifthsProps) {
   return (
     <figure data-testid="circle-of-fifths" className="flex h-full min-h-0 flex-col">
       <svg
-        viewBox={`0 0 ${VIEW} ${VIEW}`}
+        ref={svgRef}
+        viewBox={frame.viewBox}
         preserveAspectRatio="xMidYMid meet"
         role="img"
         aria-label="Квинтово-квартовый круг тональностей с подсветкой активного аккорда"

@@ -53,6 +53,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AudioEmo } from '@/shared/api/types'
 import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
+import { EMO_LABELS } from '../emolab/emogram'
+import {
+  LABEL_FONT_PX,
+  TICK_HALF_PX,
+  type RadialFrame,
+  emoLabelLayout,
+  emoTickAngles,
+  radialFrameLayout,
+} from './emoTicks'
 import { hopSeconds, interpolatedRays } from './emoRadar'
 import { frameRotations, interpolatedRotation, type RotationLaw } from './keyRotation'
 import { radialScalePoint, radialScalePoints, type RadialScaleKey } from './radialDbRange'
@@ -177,23 +186,28 @@ export function RadialChart({
   const vertexDotsRef = useRef<(SVGLineElement | null)[]>([])
 
   /**
-   * Масштаб ячейки: CSS-пикселей экрана на единицу viewBox (приём
-   * `MriProjection`): кружки облака доминант держат экранный диаметр
-   * `DOMINANT_DOT_PX` — в точности как точка текущей доминанты на
-   * радиус-векторе (правка 09.10.2026), поэтому их радиус делится на
-   * масштаб. SVG — квадрат с `preserveAspectRatio="meet"` → масштаб =
-   * min(ширина, высота) / VIEW. В jsdom раскладки нет (rect = 0): масштаб
-   * остаётся 1, и тесты видят «честные» пиксели.
+   * Кадр отрисовки (правка 27.10.2026 (2)): `radialFrameLayout` подгоняет
+   * viewBox под ячейку и даёт масштаб px/единицу — круг занимает максимум
+   * ячейки за вычетом полей под надписи (диаметр ≈ высоте соседней
+   * гистограммы). Масштаб нужен точкам/надписям в **пикселях** (приём
+   * `MriProjection`: ⌀8/10 px, кегль и зазор надписей — на любом масштабе).
+   * В jsdom раскладки нет (rect = 0): кадр по умолчанию — масштаб 1 и
+   * квадратный viewBox по худшему выступу надписей, тесты видят «честные»
+   * пиксели.
    */
   const svgRef = useRef<SVGSVGElement | null>(null)
-  const [pxPerUnit, setPxPerUnit] = useState(1)
+  const [frame, setFrame] = useState<RadialFrame>(() =>
+    radialFrameLayout(EMO_LABELS, 0, 0, RADIUS),
+  )
+  const pxPerUnit = frame.pxPerUnit
   useEffect(() => {
     const element = svgRef.current
     if (!element || typeof ResizeObserver === 'undefined') return
     const update = () => {
       const rect = element.getBoundingClientRect()
-      const side = Math.min(rect.width, rect.height)
-      if (side > 0) setPxPerUnit(side / VIEW)
+      if (rect.width > 0 && rect.height > 0) {
+        setFrame(radialFrameLayout(EMO_LABELS, rect.width, rect.height, RADIUS))
+      }
     }
     update()
     const observer = new ResizeObserver(update)
@@ -322,14 +336,22 @@ export function RadialChart({
     () => (cloud.length > 0 ? totalDominant(cloud, CENTER_PT, RADIUS) : null),
     [cloud],
   )
+  // Разметка ½ сектора и надписи классификатора эмоций (27.10.2026): тики на
+  // круге-границе по границам 14 эмо-категорий (`emoTicks.ts`) и 14 подписей
+  // снаружи круга с зазором 10 px — пересчёт только при смене масштаба.
+  const tickAngles = useMemo(() => emoTickAngles(), [])
+  const emoLabels = useMemo(
+    () => emoLabelLayout(EMO_LABELS, RADIUS, CENTER_PT, pxPerUnit),
+    [pxPerUnit],
+  )
 
   return (
     <svg
       ref={svgRef}
-      viewBox={`0 0 ${VIEW} ${VIEW}`}
+      viewBox={frame.viewBox}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label="Радиальный график: круг-граница, оси X и Y, 7 сегментов, сетка 25/50/75 %, полигон и доминанта"
+      aria-label="Радиальный график: круг-граница с тиками ½ сектора и 14 надписями эмоций, оси X и Y, 7 сегментов, сетка 25/50/75 %, полигон и доминанта"
       data-testid="radial-chart"
       className="h-full w-full"
     >
@@ -343,6 +365,27 @@ export function RadialChart({
         stroke="var(--color-border)"
         strokeWidth={2}
       />
+      {/* Тики ½ сектора (27.10.2026): радиальные засечки длиной 6 px (3 px
+          внутрь + 3 px наружу, `TICK_HALF_PX` / `pxPerUnit`) на границах
+          14 эмо-категорий — `SEGMENT_START + i·π/7`, чётные совпадают с
+          лучами-разделителями. Разметка секторов по радиальной окружности. */}
+      {tickAngles.map((angle, index) => {
+        const inner = pointAt(angle, RADIUS - TICK_HALF_PX / pxPerUnit, CENTER_PT)
+        const outer = pointAt(angle, RADIUS + TICK_HALF_PX / pxPerUnit, CENTER_PT)
+        return (
+          <line
+            key={index}
+            data-part="sector-tick"
+            x1={inner.x}
+            y1={inner.y}
+            x2={outer.x}
+            y2={outer.y}
+            stroke="var(--color-fg-2)"
+            strokeWidth={2}
+            vectorEffect="non-scaling-stroke"
+          />
+        )
+      })}
       {/* Дуги секторов 1…7 в гамме базовых полос «Диполей» (bandColors):
           дуга сектора k идёт вдоль круга-границы от луча-разделителя k до
           k+1 (против часовой) и красится цветом полосы `BAND_ORDER[k]`
@@ -523,6 +566,27 @@ export function RadialChart({
         opacity={0}
         vectorEffect="non-scaling-stroke"
       />
+      {/* Надписи классификатора эмоций (27.10.2026), верхний слой: 14 подписей
+          `EMO_LABELS` («страх» … «агрессия») снаружи по кругу, подпись i — у
+          тика i своей эмо-категории (как шкала Y «Эмограммы»). Зазор до
+          окружности — 10 px (`emoLabelLayout`: центр box'а за пределами
+          круга + support-функция box'а), кегль экранно-пиксельный
+          (`LABEL_FONT_PX` / `pxPerUnit`) — надписи не перекрывают окружность
+          ни при каком масштабе ячейки. */}
+      {emoLabels.map((item, index) => (
+        <text
+          key={index}
+          data-part="sector-label"
+          x={item.x}
+          y={item.y}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontSize={LABEL_FONT_PX / pxPerUnit}
+          fill="var(--color-fg-1)"
+        >
+          {item.label}
+        </text>
+      ))}
     </svg>
   )
 }
