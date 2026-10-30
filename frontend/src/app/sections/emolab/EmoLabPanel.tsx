@@ -21,6 +21,12 @@ import { CheckboxRow } from '@/shared/ui/CheckboxRow'
 import { SegmentedControl, type SegmentedOption } from '@/shared/ui/SegmentedControl'
 import type { RadialScaleKey } from '../neuromusic/radialDbRange'
 
+/**
+ * Ключ опции «Динамический диапазон» в UI: `off` — перенос выключен
+ * (стор хранит `null` — линейная нормировка 0…1).
+ */
+type RadialScaleUiKey = RadialScaleKey | 'off'
+
 /** Опции «Закона вращения звезды» (хроматический — дефолт, гармонический). */
 const ROTATION_LAW_OPTIONS: SegmentedOption<'chromatic' | 'harmonic'>[] = [
   {
@@ -37,9 +43,16 @@ const ROTATION_LAW_OPTIONS: SegmentedOption<'chromatic' | 'harmonic'>[] = [
 
 /**
  * Опции «Динамического диапазона» — шкала радиусов вершин/доминанты:
- * дБ-окно −40/−60 (конечная оптимизация после расчёта звезды).
+ * дБ-окно −40/−60 (конечная оптимизация после расчёта звезды) либо «Выкл»
+ * (правка владельца 30.10.2026) — линейная нормировка координат лучей
+ * звезды и доминант в диапазоне 0…1 (без дБ-переноса).
  */
-const RADIAL_SCALE_OPTIONS: SegmentedOption<RadialScaleKey>[] = [
+const RADIAL_SCALE_OPTIONS: SegmentedOption<RadialScaleUiKey>[] = [
+  {
+    value: 'off',
+    label: 'Выкл',
+    title: 'Линейная нормировка координат лучей звезды и доминант 0…1 (без дБ-переноса)',
+  },
   { value: 'db-40', label: '−40 дБ', title: 'Окно −40…0 дБ: тихие значения раздвигаются сильнее' },
   { value: 'db-60', label: '−60 дБ', title: 'Окно −60…0 дБ: дефолт, ближе к шкале контракта' },
 ]
@@ -201,10 +214,10 @@ export function EmoLabPanel() {
         />
         <SegmentedControl
           label="Динамический диапазон"
-          value={radialScale}
-          onChange={setRadialScale}
+          value={radialScale ?? 'off'}
+          onChange={(value: RadialScaleUiKey) => setRadialScale(value === 'off' ? null : value)}
           options={RADIAL_SCALE_OPTIONS}
-          hint="Шкала радиусов вершин и доминанты — конечная оптимизация после расчёта звезды (дБ-окно)"
+          hint="Шкала радиусов вершин и доминанты — конечная оптимизация после расчёта звезды (дБ-окно); «Выкл» — линейно 0…1"
         />
         <InfoRow label="Карта аккордов" value="VAMP Chordino" />
         <ChordTable keyTrack={emo?.key_track ?? null} />

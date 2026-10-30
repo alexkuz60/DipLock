@@ -71,9 +71,12 @@ export type EmoLabState = {
   /**
    * Шкала радиальных значений вершин/доминанты (опция «Динамический
    * диапазон», `neuromusic/radialDbRange.ts`): `db-40`/`db-60` — дБ-окно
-   * −40/−60 (конечная оптимизация радиусов после расчёта звезды).
+   * −40/−60 (конечная оптимизация радиусов после расчёта звезды), `null` —
+   * опция **выключена** («Выкл», правка владельца 30.10.2026): координаты
+   * лучей звезды и доминант нормируются линейно в диапазоне 0…1 (без
+   * дБ-переноса).
    */
-  radialScale: 'db-40' | 'db-60'
+  radialScale: 'db-40' | 'db-60' | null
   /** Активный таб секции «Визуализация» (звезда / «Эмограмма» / дальше) */
   vizTab: EmoVizTab
 
@@ -83,8 +86,8 @@ export type EmoLabState = {
   setTempoRays: (value: boolean) => void
   /** Смена закона вращения звезды («Опции раздела») */
   setRotationLaw: (value: 'chromatic' | 'harmonic') => void
-  /** Смена шкалы радиальных значений («Опции раздела») */
-  setRadialScale: (value: 'db-40' | 'db-60') => void
+  /** Смена шкалы радиальных значений («Опции раздела»); `null` — «Выкл» (линейно 0…1) */
+  setRadialScale: (value: 'db-40' | 'db-60' | null) => void
   /** Смена таба секции «Визуализация» */
   setVizTab: (value: EmoVizTab) => void
   /** Сброс раздела (смена трека/уход): отмена поллинга, освобождение blob */
@@ -115,7 +118,7 @@ export const useEmoLab = create<EmoLabState>()((set, get) => ({
   },
 
   setRadialScale: (value) => {
-    set({ radialScale: value === 'db-40' ? 'db-40' : 'db-60' })
+    set({ radialScale: value === 'db-40' || value === 'db-60' ? value : null })
   },
 
   setVizTab: (value) => {

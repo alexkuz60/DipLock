@@ -1,8 +1,8 @@
 /**
  * Тесты математики «Эмограммы» (постановка владельца 21.10.2026): шкала Y
- * «Эмо» (14 линий с шагом π/7, «страх» — внизу = начало 1 сектора звезды),
- * доминанты кадров = облако звезды, столбики «Экспрессии Эмо» и ступени
- * «Динамики Эмо» (цвет — сектор радара угла).
+ * «Эмо» (14 линий с шагом π/7, «страх/агрессия» — внизу = начало 1 сектора
+ * звезды), доминанты кадров = облако звезды, столбики «Экспрессии Эмо» и
+ * ступени «Динамики Эмо» (цвет — сектор радара угла).
  */
 import { describe, expect, it } from 'vitest'
 import { SEGMENT_START, dominantCloud } from '../neuromusic/radialChart'
@@ -18,23 +18,23 @@ import {
 } from './emogram'
 
 describe('Эмограмма: шкала «Эмо» и время', () => {
-  it('EMO_LABELS: 14 эмоций снизу вверх, страх → агрессия', () => {
+  it('EMO_LABELS: 14 эмоций снизу вверх, страх/агрессия → эйфория (правка 30.10.2026)', () => {
     expect(EMO_LABELS).toHaveLength(14)
     expect(EMO_LABELS).toEqual([
-      'страх',
+      'страх/агрессия',
       'трагедия',
       'скорбь',
       'отвращение',
       'депрессия',
       'смирение',
       'безразличие',
+      'релакс',
       'интерес',
       'уверенность',
       'радость',
       'энтузиазм',
       'вдохновение',
       'эйфория',
-      'агрессия',
     ])
   })
 
@@ -181,20 +181,20 @@ describe('Эмограмма: дБ-оптимизация столбиков э�
 
 describe('Общая эмо-характеристика: категории и накопленные суммы (24.10.2026)', () => {
   it('emoCategoryIndex: категория i = сектор [SEGMENT_START + i·π/7, +π/7), шов круга', () => {
-    expect(emoCategoryIndex(SEGMENT_START)).toBe(0) // «страх»
+    expect(emoCategoryIndex(SEGMENT_START)).toBe(0) // «страх/агрессия»
     expect(emoCategoryIndex(SEGMENT_START + Math.PI / 7 - 1e-9)).toBe(0)
     expect(emoCategoryIndex(SEGMENT_START + Math.PI / 7)).toBe(1) // «трагедия»
-    expect(emoCategoryIndex(SEGMENT_START + 13 * (Math.PI / 7))).toBe(13) // «агрессия»
+    expect(emoCategoryIndex(SEGMENT_START + 13 * (Math.PI / 7))).toBe(13) // «эйфория»
     // Шов круга: угол через 2π и отрицательный нормализуются в категорию 13/0.
     expect(emoCategoryIndex(SEGMENT_START + 2 * Math.PI - 1e-9)).toBe(13)
     expect(emoCategoryIndex(SEGMENT_START - 1e-9)).toBe(13)
     expect(emoCategoryIndex(Number.NaN)).toBe(0)
   })
 
-  it('emoHistogram: накопленные суммы |D| по категориям, порядок страх → агрессия', () => {
+  it('emoHistogram: накопленные суммы |D| по категориям, порядок страх/агрессия → эйфория', () => {
     const rows = emoHistogram([
-      { tSec: 0, radiusFrac: 0.5, angleRad: SEGMENT_START }, // «страх»
-      { tSec: 1, radiusFrac: 0.25, angleRad: SEGMENT_START + 1e-9 }, // тоже «страх»
+      { tSec: 0, radiusFrac: 0.5, angleRad: SEGMENT_START }, // «страх/агрессия»
+      { tSec: 1, radiusFrac: 0.25, angleRad: SEGMENT_START + 1e-9 }, // тоже «страх/агрессия»
       { tSec: 2, radiusFrac: 0.75, angleRad: SEGMENT_START + Math.PI / 7 }, // «трагедия»
       { tSec: 3, radiusFrac: 0, angleRad: SEGMENT_START }, // тишина — мимо
     ])

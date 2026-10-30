@@ -58,7 +58,7 @@ function parts(root: HTMLElement, part: string): Element[] {
 }
 
 describe('ЕмоЛаб: график «Эмограмма»', () => {
-  it('сетка: 14 эмо-линий с подписями «страх»…«агрессия» и шкала времени', () => {
+  it('сетка: 14 эмо-линий с подписями «страх/агрессия»…«эйфория» и шкала времени', () => {
     renderWithProviders(<Emogram emo={EMO} />)
     const root = screen.getByTestId('emogram')
     expect(screen.getByTestId('emogram-legend-express')).toHaveTextContent('Экспрессия Эмо')
@@ -68,7 +68,7 @@ describe('ЕмоЛаб: график «Эмограмма»', () => {
     expect(grid).toHaveLength(14)
     const labels = parts(root, 'emo-label')
     expect(labels.map((node) => node.textContent)).toEqual([...EMO_LABELS])
-    // Линия «страх» — внизу графика, «агрессия» — на 13/14 высоты.
+    // Линия «страх/агрессия» — внизу графика, «эйфория» — на 13/14 высоты.
     expect(Number(grid[0]?.getAttribute('y1'))).toBeCloseTo(Y_BOTTOM, 6)
     expect(Number(grid[13]?.getAttribute('y1'))).toBeCloseTo(
       Y_BOTTOM - (13 / 14) * PLOT_H,

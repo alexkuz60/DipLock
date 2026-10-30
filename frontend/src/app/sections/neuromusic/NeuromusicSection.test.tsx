@@ -1015,7 +1015,7 @@ describe('Нейромузыка — раздел', () => {
       const midY = (Number(tick.getAttribute('y1')) + Number(tick.getAttribute('y2'))) / 2
       expect(Math.hypot(midX - 100, midY - 100)).toBeCloseTo(90, 6)
     }
-    // Надписи классификатора: 14 штук «страх» … «агрессия», каждая снаружи
+    // Надписи классификатора: 14 штук «страх/агрессия» … «эйфория», каждая снаружи
     // круга — центр box'а дальше R + 10 px (зазор 10 px, jsdom: pxPerUnit = 1).
     const labels = chart.querySelectorAll('[data-part="sector-label"]')
     expect(labels).toHaveLength(14)

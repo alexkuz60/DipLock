@@ -379,9 +379,14 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     expect(screen.getByLabelText('Учитывать темп при расчёте лучей звезды')).toBeChecked()
 
     // «Динамический диапазон» вернулся 23.10.2026 как конечная оптимизация
-    // радиусов вершин/доминанты: сегменты −40/−60 дБ, дефолт −60 дБ.
+    // радиусов вершин/доминанты; 30.10.2026 — «Выкл» (линейная нормировка
+    // 0…1): сегменты «Выкл»/−40/−60 дБ, дефолт −60 дБ.
     const dbGroup = screen.getByRole('group', { name: 'Динамический диапазон' })
     expect(dbGroup).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Выкл' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    )
     expect(screen.getByRole('button', { name: '−40 дБ' })).toHaveAttribute(
       'aria-pressed',
       'false',
@@ -540,7 +545,7 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     await waitFor(() => expect(starAngleDeg()).toBeCloseTo(85.714, 1))
   })
 
-  it('динамический диапазон: −40 дБ растягивает радиусы сильнее −60 дБ', async () => {
+  it('динамический диапазон: −40 дБ растягивает радиусы сильнее −60 дБ, «Выкл» — линейно 0…1', async () => {
     mockApi()
     renderEmoLab()
     pickFile()
@@ -564,6 +569,13 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
       expect(starRadiiPct()).toEqual(
         raysCloseTo([66.67, 76.7, 82.57, 86.74, 89.97, 92.61, 94.84]),
       ),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Выкл' }))
+    // «Выкл» (30.10.2026) — линейная нормировка координат 0…1: сырые лучи
+    // кадра 10…70 % без дБ-переноса.
+    await waitFor(() =>
+      expect(starRadiiPct()).toEqual(raysCloseTo([10, 20, 30, 40, 50, 60, 70])),
     )
   })
 
@@ -605,7 +617,7 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     await waitFor(() => expect(screen.getByTestId('radial-chart')).toBeInTheDocument())
     const radar = screen.getByTestId('radial-chart')
     // 14 тиков-засечек на окружности (шаг ½ сектора) и 14 надписей
-    // классификатора снаружи («страх» … «агрессия») с зазором 10 px.
+    // классификатора снаружи («страх/агрессия» … «эйфория») с зазором 10 px.
     expect(radar.querySelectorAll('[data-part="sector-tick"]')).toHaveLength(14)
     const labels = radar.querySelectorAll('[data-part="sector-label"]')
     expect(labels).toHaveLength(14)
@@ -619,10 +631,10 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     }
     // Инварианта «диаметр звезды = диаметр круга»: один и тот же адаптивный
     // viewBox (`radialFrameLayout` по ячейке) у радара и квинтового круга;
-    // в jsdom (без замера) оба — по худшему выступу надписей: −72 −72 344 344.
+    // в jsdom (без замера) оба — по худшему выступу надписей: −79 −79 358 358.
     const circle = screen.getByTestId('circle-of-fifths')
     expect(radar.getAttribute('viewBox')).toBe(circle.querySelector('svg')?.getAttribute('viewBox'))
-    expect(radar.getAttribute('viewBox')).toBe('-72 -72 344 344')
+    expect(radar.getAttribute('viewBox')).toBe('-79 -79 358 358')
   })
 
   it('«Общая эмо-характеристика» — между радаром и квинтовым кругом', async () => {
@@ -640,7 +652,7 @@ describe('ЕмоЛаб, шаг 1: анализ внешнего аудиотре
     expect(
       histogram.compareDocumentPosition(circle) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
-    // Подписи 14 категорий — по шкале «Эмо» («страх» … «агрессия»).
+    // Подписи 14 категорий — по шкале «Эмо» («страх/агрессия» … «эйфория»).
     const labels = Array.from(histogram.querySelectorAll('[data-part="hist-label"]'))
     expect(labels.map((node) => node.textContent)).toEqual([...EMO_LABELS])
   })

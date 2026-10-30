@@ -5,8 +5,8 @@
  *
  * Кадры мока — одиночные лучи: доминанта кадра стоит точно на луче звезды
  * (угол `SEGMENT_START + k·2π/7` → категория `2k` шкалы «Эмо»): луч 0 →
- * «страх» (категория 0, сектор δ), луч 6 → «эйфория» (категория 12, сектор
- * γ-high). Третий кадр — тишина (доминанта в центре) — не участвует.
+ * «страх/агрессия» (категория 0, сектор δ), луч 6 → «вдохновение» (категория
+ * 12, сектор γ-high). Третий кадр — тишина (доминанта в центре) — не участвует.
  */
 import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
@@ -55,7 +55,7 @@ function parts(root: HTMLElement, part: string): Element[] {
 }
 
 describe('ЕмоЛаб: «Общая эмо-характеристика аудио-трека»', () => {
-  it('14 строк снизу вверх «страх»…«агрессия», подписи слева', () => {
+  it('14 строк снизу вверх «страх/агрессия»…«эйфория», подписи слева', () => {
     renderWithProviders(<EmoHistogram emo={EMO} />)
     const root = screen.getByTestId('emo-histogram')
     const labels = parts(root, 'hist-label')
@@ -65,7 +65,7 @@ describe('ЕмоЛаб: «Общая эмо-характеристика ауд�
     for (const label of labels) {
       expect(Number(label.getAttribute('x'))).toBeCloseTo(HIST_LABEL_W - 8, 6)
     }
-    // «страх» (строка 0) — у нижней кромки, «агрессия» (строка 13) — выше.
+    // «страх/агрессия» (строка 0) — у нижней кромки, «эйфория» (строка 13) — выше.
     const yFirst = Number(labels[0]?.getAttribute('y'))
     const yLast = Number(labels[13]?.getAttribute('y'))
     expect(yFirst).toBeGreaterThan(yLast)
@@ -82,7 +82,7 @@ describe('ЕмоЛаб: «Общая эмо-характеристика ауд�
     // столбик на всю ширину; тихий кадр не добавляет.
     const widths = bars.map((bar) => Number(bar.getAttribute('width')))
     expect(Math.max(...widths)).toBeCloseTo(PLOT_W, 6)
-    // Категории 0 («страх», луч 0) и 12 («эйфория», луч 6) — единственные ненулевые.
+    // Категории 0 («страх/агрессия», луч 0) и 12 («вдохновение», луч 6) — единственные ненулевые.
     expect(widths[0]).toBeCloseTo(PLOT_W, 6)
     expect(widths[12]).toBeCloseTo(PLOT_W, 6)
     expect(widths.filter((width) => width > 0)).toHaveLength(2)

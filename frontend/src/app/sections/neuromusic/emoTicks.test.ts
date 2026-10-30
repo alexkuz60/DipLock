@@ -44,9 +44,10 @@ describe('emoTicks', () => {
   it('radialFrameLayout (jsdom, без замера): масштаб 1, viewBox по худшему выступу', () => {
     const frame = radialFrameLayout(EMO_LABELS, 0, 0, RADIUS)
     expect(frame.pxPerUnit).toBe(1)
-    // Худший выступ — «отвращение» у горизонтали: 10 + halfW·|cosθ| + halfH·|sinθ|
-    // + сам halfW ≈ 171.6 px → полусторона 172, центр (100/100) сохраняется.
-    expect(frame.viewBox).toBe('-72 -72 344 344')
+    // Худший выступ — «уверенность» у горизонтали (правка 30.10.2026):
+    // (R + 10 + halfW·|cosθ| + halfH·|sinθ|)·|cosθ| + halfW ≈ 178.9 px →
+    // полусторона 179, центр (100/100) сохраняется.
+    expect(frame.viewBox).toBe('-79 -79 358 358')
     const [x, y, w, h] = frame.viewBox.split(' ').map(Number)
     expect(x + w / 2).toBe(100)
     expect(y + h / 2).toBe(100)
@@ -121,14 +122,14 @@ describe('emoTicks', () => {
     }
   })
 
-  it('вертикальные надписи (правка 27.10.2026 (2)): «агрессия» ↑, «безразличие» ↓, зазор 15 px', () => {
-    // «агрессия» (i = 13) — угол π/2 (верх круга), «безразличие» (i = 6) —
+  it('вертикальные надписи (правка 27.10.2026 (2)): «эйфория» ↑, «безразличие» ↓, зазор 15 px', () => {
+    // «эйфория» (i = 13) — угол π/2 (верх круга), «безразличие» (i = 6) —
     // 3π/2 (низ): обе строго на вертикали, box ориентирован по вертикали,
     // зазор = gap + shift = 15 px, сдвиг — наружу от центра.
     const layout = emoLabelLayout(EMO_LABELS, RADIUS, CENTER, 1)
     const top = layout[13]
     const bottom = layout[6]
-    expect(top.label).toBe('агрессия')
+    expect(top.label).toBe('эйфория')
     expect(bottom.label).toBe('безразличие')
     for (const item of [top, bottom]) {
       const nearest = Math.hypot(
@@ -137,10 +138,10 @@ describe('emoTicks', () => {
       )
       expect(nearest).toBeCloseTo(RADIUS + LABEL_GAP_PX + LABEL_SHIFT_PX, 6)
     }
-    // Направления сдвигов: «агрессия» выше центра, «безразличие» — ниже.
+    // Направления сдвигов: «эйфория» выше центра, «безразличие» — ниже.
     expect(top.y).toBeLessThan(CENTER.y)
     expect(bottom.y).toBeGreaterThan(CENTER.y)
-    // Остальные надписи (в т.ч. соседние «страх»/«трагедия») — зазор ровно 10 px.
+    // Остальные надписи (в т.ч. соседние «страх/агрессия»/«трагедия») — зазор ровно 10 px.
     const fear = layout[0]
     const fearNearest = Math.hypot(
       Math.max(0, Math.abs(fear.x - CENTER.x) - estimateTextWidthPx(fear.label) / 2),
