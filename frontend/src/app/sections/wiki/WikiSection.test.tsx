@@ -170,6 +170,34 @@ describe('раздел Wiki', () => {
     ).toBeInTheDocument()
   })
 
+  it('статьи о Таблице, Настройках и Сервере открываются по хешу', () => {
+    const { unmount } = renderWithProviders(<WikiSection />, { route: '/wiki#table' })
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'Таблица локализации',
+      }),
+    ).toBeInTheDocument()
+    unmount()
+
+    const second = renderWithProviders(<WikiSection />, { route: '/wiki#settings' })
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'Настройки приложения',
+      }),
+    ).toBeInTheDocument()
+    second.unmount()
+
+    renderWithProviders(<WikiSection />, { route: '/wiki#server' })
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'Состояние сервера',
+      }),
+    ).toBeInTheDocument()
+  })
+
   it('статьи о новшествах стоят в оглавлении в порядке чтения и перед глоссарием', () => {
     renderWithProviders(<WikiSection />, { route: '/wiki#compare' })
 
@@ -183,11 +211,15 @@ describe('раздел Wiki', () => {
     // Сравнение — между «Итоги: события» и групповым анализом, экспорт — перед глоссарием
     expect(names.indexOf('Итоги: события')).toBeLessThan(names.indexOf('Сравнение пары'))
     expect(names.indexOf('Сравнение пары')).toBeLessThan(names.indexOf('Групповой анализ'))
-    // Консилиум, ЕмоЛаб, Нейромузыка — после «Признаки и правила», перед «Экспорт записи»
+    // Консилиум, ЕмоЛаб, Нейромузыка — после «Признаки и правила», перед «Таблица»
     expect(names.indexOf('Признаки и правила')).toBeLessThan(names.indexOf('Консилиум'))
     expect(names.indexOf('Консилиум')).toBeLessThan(names.indexOf('ЕмоЛаб'))
     expect(names.indexOf('ЕмоЛаб')).toBeLessThan(names.indexOf('Нейромузыка'))
-    expect(names.indexOf('Нейромузыка')).toBeLessThan(names.indexOf('Экспорт записи'))
+    expect(names.indexOf('Нейромузыка')).toBeLessThan(names.indexOf('Таблица'))
+    // Таблица, Настройки, Сервер — перед «Экспорт записи»
+    expect(names.indexOf('Таблица')).toBeLessThan(names.indexOf('Настройки'))
+    expect(names.indexOf('Настройки')).toBeLessThan(names.indexOf('Сервер'))
+    expect(names.indexOf('Сервер')).toBeLessThan(names.indexOf('Экспорт записи'))
     expect(names.indexOf('Экспорт записи')).toBeLessThan(names.indexOf('Глоссарий'))
   })
 

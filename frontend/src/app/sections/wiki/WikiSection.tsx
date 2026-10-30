@@ -30,11 +30,14 @@ import { IntroArticle } from './articles/IntroArticle'
 import { NeuromusicArticle } from './articles/NeuromusicArticle'
 import { OpenArticle } from './articles/OpenArticle'
 import { ScreenArticle } from './articles/ScreenArticle'
+import { ServerArticle } from './articles/ServerArticle'
 import { SessionExportArticle } from './articles/SessionExportArticle'
+import { SettingsArticle } from './articles/SettingsArticle'
 import { SummaryEventsArticle } from './articles/SummaryEventsArticle'
 import { SummaryReportArticle } from './articles/SummaryReportArticle'
 import { SummaryCompareReportArticle } from './articles/SummaryCompareReportArticle'
 import { SummaryGroupReportArticle } from './articles/SummaryGroupReportArticle'
+import { TableArticle } from './articles/TableArticle'
 import {
   adjacentArticle,
   parseWikiHash,
@@ -68,6 +71,9 @@ const ARTICLE_COMPONENTS: Record<WikiArticleId, ComponentType> = {
   consilium: ConsiliumArticle,
   emolab: EmolabArticle,
   neuromusic: NeuromusicArticle,
+  table: TableArticle,
+  settings: SettingsArticle,
+  server: ServerArticle,
   export: SessionExportArticle,
   glossary: GlossaryArticle,
 }

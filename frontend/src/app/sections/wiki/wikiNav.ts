@@ -28,8 +28,11 @@ import {
   Play,
   ScanSearch,
   Scissors,
+  ServerCog,
+  Settings,
   Smile,
   Sparkles,
+  Table2,
   Telescope,
   Users,
   type LucideIcon,
@@ -58,6 +61,9 @@ export type WikiArticleId =
   | 'consilium'
   | 'emolab'
   | 'neuromusic'
+  | 'table'
+  | 'settings'
+  | 'server'
   | 'export'
   | 'glossary'
 
@@ -227,6 +233,27 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'Нейромузыка',
     hint: 'Рендер 7 полос ×128, boost/loudness, плеер-трекер, радар «Эмо», IR + 3D-bake',
     icon: Music2,
+  },
+  {
+    id: 'table',
+    title: 'Таблица локализации',
+    short: 'Таблица',
+    hint: 'Все точки расчёта диполей: MNI, структура, поле Бродмана, сортировка, фильтры',
+    icon: Table2,
+  },
+  {
+    id: 'settings',
+    title: 'Настройки приложения',
+    short: 'Настройки',
+    hint: 'Масштаб текста, плотность, параметры расчёта (read-only), GPU, модельный роутер ИИ',
+    icon: Settings,
+  },
+  {
+    id: 'server',
+    title: 'Состояние сервера',
+    short: 'Сервер',
+    hint: 'Готовность MNE/БД/fsaverage/BEM, версии, пути, перезапуск бэкенда',
+    icon: ServerCog,
   },
   {
     id: 'export',
