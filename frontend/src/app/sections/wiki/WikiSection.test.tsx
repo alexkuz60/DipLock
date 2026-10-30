@@ -142,6 +142,34 @@ describe('раздел Wiki', () => {
     ).toBeInTheDocument()
   })
 
+  it('статьи о Консилиуме, ЕмоЛаб и Нейромузыке открываются по хешу', () => {
+    const { unmount } = renderWithProviders(<WikiSection />, { route: '/wiki#consilium' })
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'Консилиум: дело, досье и раунды советников',
+      }),
+    ).toBeInTheDocument()
+    unmount()
+
+    const second = renderWithProviders(<WikiSection />, { route: '/wiki#emolab' })
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'ЕмоЛаб: психоэмоциональный фон аудиотрека',
+      }),
+    ).toBeInTheDocument()
+    second.unmount()
+
+    renderWithProviders(<WikiSection />, { route: '/wiki#neuromusic' })
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'Нейромузыка: ЭЭГ в звук (эксперимент)',
+      }),
+    ).toBeInTheDocument()
+  })
+
   it('статьи о новшествах стоят в оглавлении в порядке чтения и перед глоссарием', () => {
     renderWithProviders(<WikiSection />, { route: '/wiki#compare' })
 
@@ -155,6 +183,11 @@ describe('раздел Wiki', () => {
     // Сравнение — между «Итоги: события» и групповым анализом, экспорт — перед глоссарием
     expect(names.indexOf('Итоги: события')).toBeLessThan(names.indexOf('Сравнение пары'))
     expect(names.indexOf('Сравнение пары')).toBeLessThan(names.indexOf('Групповой анализ'))
+    // Консилиум, ЕмоЛаб, Нейромузыка — после «Признаки и правила», перед «Экспорт записи»
+    expect(names.indexOf('Признаки и правила')).toBeLessThan(names.indexOf('Консилиум'))
+    expect(names.indexOf('Консилиум')).toBeLessThan(names.indexOf('ЕмоЛаб'))
+    expect(names.indexOf('ЕмоЛаб')).toBeLessThan(names.indexOf('Нейромузыка'))
+    expect(names.indexOf('Нейромузыка')).toBeLessThan(names.indexOf('Экспорт записи'))
     expect(names.indexOf('Экспорт записи')).toBeLessThan(names.indexOf('Глоссарий'))
   })
 

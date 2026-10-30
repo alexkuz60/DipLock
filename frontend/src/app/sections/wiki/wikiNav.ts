@@ -21,11 +21,14 @@ import {
   Flag,
   GitCompareArrows,
   Layers,
+  MessagesSquare,
   Monitor,
+  Music2,
   Package,
   Play,
   ScanSearch,
   Scissors,
+  Smile,
   Sparkles,
   Telescope,
   Users,
@@ -52,6 +55,9 @@ export type WikiArticleId =
   | 'summary-compare-report'
   | 'summary-group-report'
   | 'features-rules'
+  | 'consilium'
+  | 'emolab'
+  | 'neuromusic'
   | 'export'
   | 'glossary'
 
@@ -200,6 +206,27 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'Признаки и правила',
     hint: 'КД-вердикты, вращение/поток, признаки кластеров, гипотезы «N из M»',
     icon: Telescope,
+  },
+  {
+    id: 'consilium',
+    title: 'Консилиум: дело, досье и раунды советников',
+    short: 'Консилиум',
+    hint: 'Исследовательское обсуждение: материалы, снимки, раунды, Jev, штурм, предложения',
+    icon: MessagesSquare,
+  },
+  {
+    id: 'emolab',
+    title: 'ЕмоЛаб: психоэмоциональный фон аудиотрека',
+    short: 'ЕмоЛаб',
+    hint: 'Открытие wav/mp3, ФФТ-кадры, VAMP-карты, звезда-полигон, Эмограмма, квинтовый круг',
+    icon: Smile,
+  },
+  {
+    id: 'neuromusic',
+    title: 'Нейромузыка: ЭЭГ в звук (эксперимент)',
+    short: 'Нейромузыка',
+    hint: 'Рендер 7 полос ×128, boost/loudness, плеер-трекер, радар «Эмо», IR + 3D-bake',
+    icon: Music2,
   },
   {
     id: 'export',

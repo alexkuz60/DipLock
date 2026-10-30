@@ -14,17 +14,20 @@ import { Button } from '@/shared/ui/Button'
 import { ArtifactsArticle } from './articles/ArtifactsArticle'
 import { CleanArticle } from './articles/CleanArticle'
 import { CompareArticle } from './articles/CompareArticle'
+import { ConsiliumArticle } from './articles/ConsiliumArticle'
 import { DipoleCalcArticle } from './articles/DipoleCalcArticle'
 import { DipolePlaybackArticle } from './articles/DipolePlaybackArticle'
 import { DipolesOverviewArticle } from './articles/DipolesOverviewArticle'
 import { EegScreenArticle } from './articles/EegScreenArticle'
 import { EloretaArticle } from './articles/EloretaArticle'
+import { EmolabArticle } from './articles/EmolabArticle'
 import { EpochsArticle } from './articles/EpochsArticle'
 import { FilterArticle } from './articles/FilterArticle'
 import { FeaturesRulesArticle } from './articles/FeaturesRulesArticle'
 import { GlossaryArticle } from './articles/GlossaryArticle'
 import { GroupAnalysisArticle } from './articles/GroupAnalysisArticle'
 import { IntroArticle } from './articles/IntroArticle'
+import { NeuromusicArticle } from './articles/NeuromusicArticle'
 import { OpenArticle } from './articles/OpenArticle'
 import { ScreenArticle } from './articles/ScreenArticle'
 import { SessionExportArticle } from './articles/SessionExportArticle'
@@ -62,6 +65,9 @@ const ARTICLE_COMPONENTS: Record<WikiArticleId, ComponentType> = {
   'summary-compare-report': SummaryCompareReportArticle,
   'summary-group-report': SummaryGroupReportArticle,
   'features-rules': FeaturesRulesArticle,
+  consilium: ConsiliumArticle,
+  emolab: EmolabArticle,
+  neuromusic: NeuromusicArticle,
   export: SessionExportArticle,
   glossary: GlossaryArticle,
 }
