@@ -255,6 +255,49 @@ class DipolePoint(Base):
     refined = Column(JSON, nullable=True)
 
 
+class DipoleCluster(Base):
+    """Кластер диполей прогона = кирпич B8 (С2; §8.3 ``docs/data-blocks.md``).
+
+    Строка пакета ``kind=dipole_batch``: геометрия скопления + **профиль
+    признаков** (``features`` — JSON ``ClusterFeaturesOut``; неизмерённое —
+    ``None``, никогда 0). ``cluster_params`` — паспорт кластеризации прогона
+    (нормированные единицы + базис); одинаков у всех строк анализа, хранится
+    на каждой для автономности выгрузки. ``n_bands_matched``/``band_share``/
+    ``matched_band_keys`` — устойчивость по поддиапазонам (одна полоса за
+    расчёт; полный список полос — в ``analysis_bands``).
+
+    Ключ: UNIQUE ``(analysis_id, band_key, cluster_index)`` — адресация
+    «полоса × номер» внутри прогона (крупные первыми в ``cluster_index``).
+    """
+
+    __tablename__ = "dipole_clusters"
+    __table_args__ = (
+        UniqueConstraint(
+            "analysis_id", "band_key", "cluster_index",
+            name="ux_dipole_clusters_band_index",
+        ),
+    )
+    id = Column(Integer, primary_key=True)
+    analysis_id = Column(
+        Integer, ForeignKey("analyses.id", ondelete="CASCADE"), index=True,
+    )
+    band_key = Column(String, nullable=True)
+    cluster_index = Column(Integer, nullable=True)
+    centroid_mni = Column(JSON, nullable=True)
+    n_points = Column(Integer, nullable=True)
+    share = Column(Float, nullable=True)
+    volume_cm3 = Column(Float, nullable=True)
+    density_per_cm3 = Column(Float, nullable=True)
+    extent_mm = Column(JSON, nullable=True)
+    top_structures = Column(JSON, nullable=True)
+    top_brodmann = Column(JSON, nullable=True)
+    features = Column(JSON, nullable=True)
+    cluster_params = Column(JSON, nullable=True)
+    n_bands_matched = Column(Integer, nullable=True)
+    band_share = Column(Float, nullable=True)
+    matched_band_keys = Column(JSON, nullable=True)
+
+
 class ReportRun(Base):
     """Один прогон автоотчёта = кирпич B13 (§8.3; решения §8.4).
 
@@ -613,6 +656,27 @@ class ConsiliumBrainstormIdea(Base):
     risks = Column(String, nullable=True)
     check_method = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False)
+
+
+class Hypothesis(Base):
+    """Сохранённое правило-гипотеза «N из M» = библиотека исследований (Т4).
+
+    Строка — **правило** (полоса + условия + порог) и фиксированная выборка
+    проб, а не разовый ответ проверки: проверка пересчитывается (история
+    ``report_runs`` меняется), правило накапливается. ``conditions`` — JSON
+    списка ``{feature, op, value}``; ``recording_ids`` — выборка на момент
+    сохранения (пересохранение — новая строка, история не UPSERT).
+    Интерпретации/диагнозов здесь нет («не навреди»).
+    """
+
+    __tablename__ = "hypotheses"
+    id = Column(Integer, primary_key=True)
+    label = Column(String, nullable=True)
+    band_key = Column(String, nullable=True)
+    conditions = Column(JSON, nullable=True)
+    min_share = Column(Float, nullable=True)
+    recording_ids = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class ConsiliumProposal(Base):

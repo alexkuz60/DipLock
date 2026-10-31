@@ -89,6 +89,62 @@ class HypothesisCheckOut(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class HypothesisSaveIn(BaseModel):
+    """Вход сохранения правила в библиотеку (Т4): правило + выборка.
+
+    Проверка не запускается: строка — накопленное правило (``concept.md`` §1),
+    ответ N/M даёт ``POST /hypotheses/{id}/recheck`` или ``POST /hypotheses/check``.
+    """
+
+    label: str | None = Field(
+        default=None, description="Имя/текст гипотезы (не влияет на проверку)",
+    )
+    band_key: str = Field(description="Полоса правила (одна — принцип 3)")
+    conditions: list[HypothesisConditionIn] = Field(
+        min_length=1, description="Условия правила (И-логика); минимум одно",
+    )
+    min_share: float | None = Field(
+        default=None, ge=0.0, le=1.0,
+        description="Порог подтверждения; None — только описание N из M",
+    )
+    recording_ids: list[str] = Field(
+        description="Записи-участники выборки на момент сохранения",
+    )
+
+
+class RuleDraftIn(BaseModel):
+    """Вход шаблона «профиль → правило» (Т5): профиль пробы + полоса + выборка.
+
+    ``features`` — слепок признаков (ключи ``PROBE_FEATURES``); ``None`` —
+    «не измерено» и в черновик не идёт. Шаблон **без авто-вердикта**:
+    ``min_share`` не заполняется.
+    """
+
+    features: dict[str, float | int | None] = Field(
+        description="Профиль пробы (измеренные признаки; None — не измерено)",
+    )
+    band_key: str = Field(description="Полоса правила (одна — принцип 3)")
+    recording_ids: list[str] = Field(description="Записи-участники выборки")
+    label: str | None = Field(
+        default=None, description="Имя черновика; None — подпись условий",
+    )
+
+
+class HypothesisOut(BaseModel):
+    """Строка библиотеки гипотез: сохранённое правило + выборка."""
+
+    id: int
+    label: str | None = None
+    band_key: str | None = None
+    conditions: list[dict[str, float | str]] = Field(
+        default_factory=list,
+        description="Условия правила как есть ({feature, op, value})",
+    )
+    min_share: float | None = None
+    recording_ids: list[str] = Field(default_factory=list)
+    created_at: datetime | None = None
+
+
 class ProbeContextIn(BaseModel):
     """Вход ``POST /hypotheses/probe-context``: выборка + полоса."""
 

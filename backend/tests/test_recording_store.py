@@ -19,6 +19,7 @@ from app.models.db import (
     Analysis,
     AnalysisBand,
     Dipole,
+    DipoleCluster,
     DipolePoint,
     EpochRecord,
     RecordingRecord,
@@ -82,6 +83,9 @@ async def _seed_full_tree(recording_id: str) -> None:
         await session.flush()
         session.add(AnalysisBand(analysis_id=analysis.id, band_key="alpha"))
         session.add(DipolePoint(analysis_id=analysis.id, band_key="alpha", epoch_index=0))
+        session.add(DipoleCluster(
+            analysis_id=analysis.id, band_key="alpha", cluster_index=0,
+        ))
         run = ReportRun(recording_id=recording_id, analyses_id=analysis.id)
         session.add(run)
         await session.flush()
@@ -144,6 +148,7 @@ def test_drop_recording_rows_cascades_everything(tmp_path):
         assert await _count(Session, recording_id="rec-keep") == 1
         assert await _count(Analysis, recording_id="rec-keep") == 1
         assert await _count(DipolePoint, band_key="alpha") == 1
+        assert await _count(DipoleCluster, band_key="alpha") == 1
         assert await _count(ReportNameCount, name="Precuneus") == 1
 
     asyncio.run(_check())

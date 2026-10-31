@@ -65,3 +65,34 @@ describe('clusterFeaturesLabel', () => {
     expect(label).not.toContain('0 %')
   })
 })
+describe('clusterFeatureCells', () => {
+  it('null/undefined — все ячейки «—»', async () => {
+    const { clusterFeatureCells } = await import('./clusterFeatures')
+    const cells = clusterFeatureCells(null)
+    expect(Object.values(cells).every((v) => v === '—')).toBe(true)
+  })
+
+  it('измеренное в ячейки; kd без вердикта — «—», не 0 %', async () => {
+    const { clusterFeatureCells } = await import('./clusterFeatures')
+    const cells = clusterFeatureCells({
+      n_points: 3,
+      structure_share: [{ name: 'A', share: 0.6 }],
+      structure_entropy: 0.5,
+      hemisphere_share: { left: 1, midline: 0, right: 0 },
+      moment_mean_nam: 100,
+      moment_max_nam: 200,
+      gof_median: 0.9,
+      gof_min: 0.8,
+      n_kd_evaluated: 0,
+      n_kd_passed: 0,
+      kd_pass_share: null,
+      radius_rms_mm: 5,
+    } as ClusterFeatures)
+    expect(cells.topStructure).toContain('A')
+    expect(cells.entropy).toBe('0.5')
+    expect(cells.momentMean).toBe('100 / макс 200')
+    expect(cells.gof).toBe('0.9 (0.8)')
+    expect(cells.kd).toBe('—')
+    expect(cells.radius).toBe('5')
+  })
+})

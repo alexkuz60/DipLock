@@ -9,7 +9,7 @@
  * нормированными величинами (колонки GOF нет — принцип 3) и кластеры с
  * устойчивостью по поддиапазонам.
  */
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CALC_PARAM_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
@@ -77,7 +77,12 @@ describe('панель «Пакет поддиапазонов»', () => {
     expect(
       screen.getByText(/GOF между полосами не сравним/),
     ).toBeInTheDocument()
-    const headers = screen.getAllByRole('columnheader').map((cell) => cell.textContent)
+    // В сопоставлении полос — нет колонки GOF (принцип 3). Колонка GOF в
+    // таблице профилей кластеров (Т2) — внутриполосная, это другая таблица.
+    const comparison = screen.getByTestId('band-comparison')
+    const headers = within(comparison)
+      .getAllByRole('columnheader')
+      .map((cell) => cell.textContent)
     expect(headers.some((name) => name?.includes('GOF'))).toBe(false)
     expect(headers).toContain('RIV') // единственный кросс-полосной фильтр доверия
   })
@@ -132,5 +137,10 @@ describe('панель «Пакет поддиапазонов»', () => {
     expect(screen.getByText(/устойчивость 1\/2 полос/)).toBeInTheDocument()
     // В кластеры взяты прошедшие КД — так подписано в паспорте
     expect(screen.getByText(/в кластеры взяты точки, прошедшие КД/)).toBeInTheDocument()
+    // Т2: профили в сравнительной таблице, не в списке строк-«супов»
+    expect(screen.getByTestId('batch-cluster-features')).toBeInTheDocument()
+    expect(screen.getByText('Топ-структура')).toBeInTheDocument()
+    expect(screen.getByText(/таламус \(слева\)/)).toBeInTheDocument()
+    expect(screen.getByText('100 % (2/2)')).toBeInTheDocument()
   })
 })

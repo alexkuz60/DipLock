@@ -105,3 +105,93 @@ def test_radius_rms_is_compactness():
 def test_empty_cluster_has_no_profile():
     """Пустой кластер — профиля нет (None), считать нечего."""
     assert feature_profile([]) is None
+
+# ---------- Т6: адаптеры строк эпох / событий / проб ----------
+
+
+def test_epoch_profile_row_maps_artifact_to_kd_verdict():
+    """Эпоха → вердикт чистоты: без артефакта — 1, с артефактом — 0, без поля — None."""
+    from app.services.cluster_features import epoch_profile_row
+
+    clean = epoch_profile_row({"epoch_index": 0, "has_artifact": 0})
+    assert clean["kd_passed"] == 1
+    assert clean["structure"] is None and clean["mni"] is None
+    assert clean["amplitude_nam"] is None and clean["gof"] is None
+
+    dirty = epoch_profile_row({"has_artifact": 1})
+    assert dirty["kd_passed"] == 0
+
+    unknown = epoch_profile_row({"epoch_index": 3})
+    assert unknown["kd_passed"] is None
+
+
+def test_event_profile_row_maps_description_to_structure():
+    """Событие → тип как категория состава; прочего в строке нет."""
+    from app.services.cluster_features import event_profile_row
+
+    row = event_profile_row({"onset": 1.5, "description": "stim:12", "source": "stim"})
+    assert row["structure"] == "stim:12"
+    assert row["mni"] is None and row["gof"] is None and row["kd_passed"] is None
+
+    bare = event_profile_row({"onset": 0.0})
+    assert bare["structure"] is None
+
+
+def test_probe_profile_row_maps_median_gof_only():
+    """Проба → GOF медианы; kd_passed_share не притворяется вердиктом."""
+    from app.services.cluster_features import probe_profile_row
+
+    row = probe_profile_row({
+        "kd_passed_share": 0.9,
+        "median_gof": 0.88,
+        "flow_orderliness": 0.5,
+    })
+    assert row["gof"] == 0.88
+    assert row["kd_passed"] is None  # доля ≠ вердикт
+    assert row["structure"] is None and row["mni"] is None
+
+    empty = probe_profile_row({"median_gof": None})
+    assert empty["gof"] is None
+
+
+def test_adapters_feed_feature_profile_without_fabricating():
+    """Кластер эпох и кластер событий: профиль считает только измеренное."""
+    from app.services.cluster_features import (
+        epoch_profile_row,
+        event_profile_row,
+        feature_profile,
+        probe_profile_row,
+    )
+
+    epochs = [
+        epoch_profile_row({"has_artifact": 0}),
+        epoch_profile_row({"has_artifact": 0}),
+        epoch_profile_row({"has_artifact": 1}),
+        epoch_profile_row({}),  # вердикт не измерен
+    ]
+    profile = feature_profile(epochs, total=10)
+    assert profile["n_points"] == 4
+    assert profile["n_kd_evaluated"] == 3
+    assert profile["n_kd_passed"] == 2
+    assert profile["kd_pass_share"] == 0.667
+    assert profile["moment_mean_nam"] is None
+    assert profile["structure_share"] is None
+
+    events = [
+        event_profile_row({"description": "A"}),
+        event_profile_row({"description": "A"}),
+        event_profile_row({"description": "B"}),
+    ]
+    event_profile = feature_profile(events)
+    assert event_profile["structure_share"] == [
+        {"name": "A", "share": 0.667}, {"name": "B", "share": 0.333},
+    ]
+    assert event_profile["kd_pass_share"] is None
+
+    probes = [
+        probe_profile_row({"median_gof": 0.9}),
+        probe_profile_row({"median_gof": 0.8}),
+    ]
+    probe_prof = feature_profile(probes)
+    assert probe_prof["gof_median"] == 0.85
+    assert probe_prof["kd_pass_share"] is None

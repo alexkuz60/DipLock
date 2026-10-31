@@ -32,6 +32,7 @@ from app.models.db import (
     AnalysisBand,
     AsyncSessionLocal,
     Dipole,
+    DipoleCluster,
     DipolePoint,
     EpochRecord,
     GroupAnalysisMember,
@@ -65,6 +66,9 @@ async def _delete_recording_rows(session: AsyncSession, recording_id: str) -> No
     analysis_ids = select(Analysis.id).where(Analysis.recording_id == recording_id)
     await session.execute(
         delete(DipolePoint).where(DipolePoint.analysis_id.in_(analysis_ids))
+    )
+    await session.execute(
+        delete(DipoleCluster).where(DipoleCluster.analysis_id.in_(analysis_ids))
     )
     await session.execute(
         delete(AnalysisBand).where(AnalysisBand.analysis_id.in_(analysis_ids))

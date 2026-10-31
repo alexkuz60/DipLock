@@ -9,8 +9,11 @@ interpret data; identify patterns»): это не входные пороги о
 
 Универсальность: ``feature_profile`` работает на **любых** строках данных
 (словарь «ключ → значение»): диполи — сейчас; кластеры эпох, событий, проб —
-когда появятся их данные. Считается только измеренное; неизмерённое —
-``None`` («не измерено»), никогда 0 (``docs/rules/results-db.md`` §8.4 п.5).
+через адаптеры строк (``epoch_profile_row`` / ``event_profile_row`` /
+``probe_profile_row``, Т6): они переводят поля источника в канонические ключи
+профиля и честно оставляют ``None``, если аналога нет. Считается только
+измеренное; неизмерённое — ``None`` («не измерено»), никогда 0
+(``docs/rules/results-db.md`` §8.4 п.5).
 
 Признаки профиля:
 
@@ -28,6 +31,16 @@ interpret data; identify patterns»): это не входные пороги о
   прошедших **среди оценённых**; вердиктов нет у всех — честный ``None``;
 * **геометрия**: ``radius_rms_mm`` — RMS-радиус точек от центроида
   (компактность скопления).
+
+Маппинг адаптеров (аналогия, не тождество — подпись у потребителя своя):
+
+* **эпоха** → ``kd_passed``: 1 — без артефакта, 0 — с артефактом (доля
+  «чистых» в кластере эпох); остальные ключи ``None`` (эпоха не несёт
+  MNI/момента/GOF);
+* **событие** → ``structure``: описание события (тип/код) как категория
+  состава — доли и энтропия типов событий в кластере;
+* **проба** → ``gof``: медиана GOF полосы (``median_gof``); ``kd_passed`` не
+  трогаем — ``kd_passed_share`` это **доля**, а не вердикт точки.
 """
 from __future__ import annotations
 
@@ -152,3 +165,54 @@ def feature_profile(
         ),
         "radius_rms_mm": radius_rms_mm,
     }
+
+
+def _empty_profile_row() -> dict[str, Any]:
+    """Каноническая строка профиля: всё «не измерено», пока адаптер не заполнил."""
+    return {
+        "structure": None,
+        "mni": None,
+        "amplitude_nam": None,
+        "gof": None,
+        "kd_passed": None,
+    }
+
+
+def epoch_profile_row(epoch: Mapping[str, Any]) -> dict[str, Any]:
+    """Эпоха → строка профиля (Т6): только вердикт чистоты.
+
+    ``has_artifact`` (0/1 или bool) → ``kd_passed``: 1 — эпоха без артефакта,
+    0 — с артефактом. MNI/момент/GOF у эпохи нет — ``None``, не нули.
+    """
+    row = _empty_profile_row()
+    artifact = epoch.get("has_artifact")
+    if artifact is not None:
+        row["kd_passed"] = 0 if artifact else 1
+    return row
+
+
+def event_profile_row(event: Mapping[str, Any]) -> dict[str, Any]:
+    """Событие → строка профиля (Т6): тип события как категория состава.
+
+    ``description`` (тип/код события) → ``structure``: доли и энтропия
+    показывают смешение типов в кластере событий. Прочие ключи — ``None``.
+    """
+    row = _empty_profile_row()
+    description = event.get("description")
+    if description:
+        row["structure"] = str(description)
+    return row
+
+
+def probe_profile_row(features: Mapping[str, Any]) -> dict[str, Any]:
+    """Признаки пробы → строка профиля (Т6): медиана GOF полосы.
+
+    ``median_gof`` → ``gof``. ``kd_passed`` остаётся ``None``:
+    ``kd_passed_share`` — доля точек, а не вердикт одной строки
+    (не измерено ≠ 0, и доля не притворяется вердиктом).
+    """
+    row = _empty_profile_row()
+    gof = features.get("median_gof")
+    if isinstance(gof, (int, float)):
+        row["gof"] = float(gof)
+    return row

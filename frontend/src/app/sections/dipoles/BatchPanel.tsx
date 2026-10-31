@@ -14,12 +14,13 @@
  */
 import { bandLabel, shareLabel } from '@/shared/lib/dipoleBatch'
 import { bandColor } from '@/shared/lib/bandColors'
-import { clusterFeaturesLabel } from '@/shared/lib/clusterFeatures'
 import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
+import { ClusterFeaturesTable } from '@/shared/ui/ClusterFeaturesTable'
 import { Panel } from '@/shared/ui/Panel'
+import { RuleDraftForm } from './RuleDraftForm'
 
 /** Ячейка сопоставления: число с единицами или «—» (не измерено). */
 function Cell({ value }: { value: string }) {
@@ -99,7 +100,7 @@ export function BatchPanel() {
             Только нормированные величины: GOF между полосами не сравним
             (узкая полоса завышает R²), кросс-полосной фильтр доверия — RIV.
           </p>
-          <div className="mt-1 overflow-x-auto">
+          <div className="mt-1 overflow-x-auto" data-testid="band-comparison">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-fg-2">
@@ -150,28 +151,20 @@ export function BatchPanel() {
               .
             </p>
           ) : null}
-          <ul className="mt-2 space-y-1 text-sm">
-            {clusters.map((cluster) => (
-              <li
-                key={`${cluster.band_key}:${cluster.cluster_index}`}
-                className="rounded-lg border border-line-soft px-2 py-1"
-              >
-                <span className="font-medium">{cluster.band_key}</span>
-                {`: ${cluster.n_points} точек (${shareLabel(cluster.share)} полосы), `}
-                {`устойчивость ${cluster.n_bands_matched}/${bands.length} полос`}
-                {cluster.density_per_cm3 != null
-                  ? `, плотность ${cluster.density_per_cm3} /см³`
-                  : ''}
-                {cluster.top_structures?.length
-                  ? ` — ${cluster.top_structures.join(', ')}`
-                  : ''}
-                {/* Профиль признаков (ищем характерное сами): только измеренное */}
-                <div className="mt-0.5 text-xs text-fg-2">
-                  {clusterFeaturesLabel(cluster.features)}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <ClusterFeaturesTable
+            testId="batch-cluster-features"
+            rows={clusters.map((cluster) => ({
+              id: `${cluster.band_key}:${cluster.cluster_index}`,
+              label: cluster.band_key,
+              labelHint: `устойчивость ${cluster.n_bands_matched}/${bands.length} полос`,
+              features: cluster.features,
+            }))}
+          />
+          <p className="mt-1 text-xs text-fg-2">
+            Строка — один кластер: только измеренные признаки; «—» — не измерено
+            (не 0). Момент и GOF сравниваются внутри одной полосы.
+          </p>
+          <RuleDraftForm bandKey={activeBandKey} />
         </>
       ) : null}
     </Panel>

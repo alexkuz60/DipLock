@@ -143,3 +143,21 @@ def test_probe_features_by_band_returns_only_measured():
     assert features["rec-bands"]["alpha"]["kd_passed_share"] == 1.0  # 4 из 4
     assert "beta" not in features["rec-bands"]  # полосы нет в прогоне
     assert features["rec-ghost"] == {}  # прогона нет
+
+def test_probe_profile_rows_adapts_only_measured():
+    """Т6: строки контекста → профиль; незамеренные пробы не тянут кластер вниз."""
+    from app.services.cluster_features import feature_profile
+    from app.services.probe_context import probe_profile_rows
+
+    rows = [
+        {"measured": True, "features": {"median_gof": 0.9, "kd_passed_share": 1.0}},
+        {"measured": True, "features": {"median_gof": 0.8}},
+        {"measured": False, "features": {"median_gof": None}},  # мимо
+    ]
+    adapted = probe_profile_rows(rows)
+    assert len(adapted) == 2
+    profile = feature_profile(adapted)
+    assert profile is not None
+    assert profile["n_points"] == 2
+    assert profile["gof_median"] == 0.85
+    assert profile["kd_pass_share"] is None  # доля не притворяется вердиктом

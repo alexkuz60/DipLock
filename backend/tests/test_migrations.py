@@ -58,6 +58,10 @@ def test_init_db_creates_schema_and_version(tmp_path, monkeypatch):
         # 4.4: шаг ① записи, шаг ③ кирпичный слой (шаг ② добавляет колонки)
         "recordings", "analyses", "analysis_bands", "dipole_points",
         "report_runs", "report_band_summaries", "report_name_counts", "report_dynamics",
+        # Т3 (31.10.2026): B8 — кластеры + профиль признаков
+        "dipole_clusters",
+        # Т4 (31.10.2026): библиотека правил-гипотез
+        "hypotheses",
         "alembic_version",
     } <= tables
     assert _rows(path, "select version_num from alembic_version") == [(_alembic_head(),)]

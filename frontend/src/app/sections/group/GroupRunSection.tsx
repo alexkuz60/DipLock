@@ -12,7 +12,7 @@ import { useMemo, useState } from 'react'
 import { Download, GitBranch } from 'lucide-react'
 import type { GroupAggregateOut, GroupRow } from '@/shared/api/types'
 import { groupCsv, groupCsvFilename } from '@/shared/lib/groupExport'
-import { clusterFeaturesLabel } from '@/shared/lib/clusterFeatures'
+import { clusterFeatureCells } from '@/shared/lib/clusterFeatures'
 import { bandLabel } from '@/shared/lib/spectrum'
 import { useGroupRun } from '@/shared/state/groupRun'
 import { Button } from '@/shared/ui/Button'
@@ -188,46 +188,54 @@ function ClustersPanel({ aggregate }: { aggregate: GroupAggregateOut }) {
                 <th className="py-1.5 pr-3 text-right font-normal">Объём, см³</th>
                 <th className="py-1.5 pr-3 text-right font-normal">Плотность</th>
                 <th className="py-1.5 pr-3 font-normal">Структуры (топ)</th>
-                <th className="py-1.5 font-normal">Поля БА (топ)</th>
-                <th className="py-1.5 font-normal">Признаки (профиль)</th>
+                <th className="py-1.5 pr-3 font-normal">Поля БА (топ)</th>
+                <th className="py-1.5 pr-3 text-right font-normal">H</th>
+                <th className="py-1.5 pr-3 text-right font-normal">Момент нАм</th>
+                <th className="py-1.5 pr-3 text-right font-normal">GOF</th>
+                <th className="py-1.5 pr-3 text-right font-normal">КД</th>
+                <th className="py-1.5 text-right font-normal">R, мм</th>
               </tr>
             </thead>
             <tbody>
-              {clusters.map((cluster, index) => (
-                <tr
-                  key={`${cluster.centroid_mni.join('-')}-${index}`}
-                  className="border-b border-border/50 text-fg-1"
-                  data-testid={`group-cluster-${index}`}
-                >
-                  <td className="tnum py-1.5 pr-3">
-                    {`[${cluster.centroid_mni.join(', ')}]`}
-                  </td>
-                  <td className="tnum py-1.5 pr-3 text-right">{cluster.n_points}</td>
-                  <td className="tnum py-1.5 pr-3 text-right">{cluster.n_sessions}</td>
-                  <td className="tnum py-1.5 pr-3 text-right">
-                    {`${(cluster.session_share * 100).toFixed(0)} %`}
-                  </td>
-                  <td className="tnum py-1.5 pr-3 text-right">
-                    {`${(cluster.share * 100).toFixed(1)} %`}
-                  </td>
-                  <td className="tnum py-1.5 pr-3 text-right">
-                    {cluster.volume_cm3 ?? '—'}
-                  </td>
-                  <td className="tnum py-1.5 pr-3 text-right">
-                    {cluster.density_per_cm3 ?? '—'}
-                  </td>
-                  <td className="py-1.5 pr-3 text-fg-2">
-                    {(cluster.top_structures ?? []).join(', ') || '—'}
-                  </td>
-                  <td className="py-1.5 text-fg-2">
-                    {(cluster.top_brodmann ?? []).join(', ') || '—'}
-                  </td>
-                  {/* Профиль признаков (ищем характерное сами): только измеренное */}
-                  <td className="py-1.5 text-xs text-fg-2">
-                    {clusterFeaturesLabel(cluster.features)}
-                  </td>
-                </tr>
-              ))}
+              {clusters.map((cluster, index) => {
+                const cells = clusterFeatureCells(cluster.features)
+                return (
+                  <tr
+                    key={`${cluster.centroid_mni.join('-')}-${index}`}
+                    className="border-b border-border/50 text-fg-1"
+                    data-testid={`group-cluster-${index}`}
+                  >
+                    <td className="tnum py-1.5 pr-3">
+                      {`[${cluster.centroid_mni.join(', ')}]`}
+                    </td>
+                    <td className="tnum py-1.5 pr-3 text-right">{cluster.n_points}</td>
+                    <td className="tnum py-1.5 pr-3 text-right">{cluster.n_sessions}</td>
+                    <td className="tnum py-1.5 pr-3 text-right">
+                      {`${(cluster.session_share * 100).toFixed(0)} %`}
+                    </td>
+                    <td className="tnum py-1.5 pr-3 text-right">
+                      {`${(cluster.share * 100).toFixed(1)} %`}
+                    </td>
+                    <td className="tnum py-1.5 pr-3 text-right">
+                      {cluster.volume_cm3 ?? '—'}
+                    </td>
+                    <td className="tnum py-1.5 pr-3 text-right">
+                      {cluster.density_per_cm3 ?? '—'}
+                    </td>
+                    <td className="py-1.5 pr-3 text-fg-2">
+                      {(cluster.top_structures ?? []).join(', ') || '—'}
+                    </td>
+                    <td className="py-1.5 pr-3 text-fg-2">
+                      {(cluster.top_brodmann ?? []).join(', ') || '—'}
+                    </td>
+                    <td className="tnum py-1.5 pr-3 text-right">{cells.entropy}</td>
+                    <td className="tnum py-1.5 pr-3 text-right">{cells.momentMean}</td>
+                    <td className="tnum py-1.5 pr-3 text-right">{cells.gof}</td>
+                    <td className="tnum py-1.5 pr-3 text-right">{cells.kd}</td>
+                    <td className="tnum py-1.5 text-right">{cells.radius}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

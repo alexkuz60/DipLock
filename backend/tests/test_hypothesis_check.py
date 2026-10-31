@@ -15,6 +15,8 @@ from app.services import hypothesis_check
 from app.services.hypothesis_check import (
     HypothesisError,
     check_hypothesis,
+    draft_conditions_from_profile,
+    draft_rule_from_profile,
     evaluate_rule,
     validate_rule,
     validate_selection,
@@ -166,3 +168,56 @@ def test_validate_selection_rejects_empty_and_unknown_band():
         validate_selection("alpha", [])
     with pytest.raises(HypothesisError, match="Неизвестная полоса"):
         validate_selection("omega", ["rec-1"])
+
+# ---------- Т5: шаблон «профиль → правило» (без авто-вердикта) ----------
+
+
+def test_draft_conditions_from_measured_profile_only():
+    """Кандидаты условий — только измеренное; None и n_points в черновик не идут."""
+    conditions = draft_conditions_from_profile({
+        "n_points": 42,  # размер выборки — не признак состояния
+        "kd_passed_share": 0.87,
+        "rotation_ccw_share": None,  # не измерено
+        "flow_orderliness": 0.42,
+        "median_gof": 0.93,
+        "median_riv": 0.12,
+    })
+    features = {c.feature for c in conditions}
+    assert "n_points" not in features
+    assert "rotation_ccw_share" not in features
+    assert features == {
+        "kd_passed_share", "flow_orderliness", "median_gof", "median_riv",
+    }
+    # Доля: шаг 0.05 в сторону наблюдения, без «красивого» 1.0
+    kd = next(c for c in conditions if c.feature == "kd_passed_share")
+    assert kd.op == ">=" and kd.value == 0.85
+    flow = next(c for c in conditions if c.feature == "flow_orderliness")
+    assert flow.op == "<=" and flow.value == 0.45  # 0.42 < 0.5 → ≤
+    gof = next(c for c in conditions if c.feature == "median_gof")
+    assert gof.op == ">=" and gof.value == 0.93
+
+
+def test_draft_rule_has_no_auto_verdict():
+    """Черновик: min_share не задан (проверка останется descriptive)."""
+    draft = draft_rule_from_profile(
+        {"kd_passed_share": 1.0, "flow_orderliness": 0.7},
+        band_key="gamma",
+        recording_ids=["rec-a", "rec-b"],
+        label="черновик из профиля",
+    )
+    assert draft.min_share is None
+    assert draft.band_key == "gamma"
+    assert draft.recording_ids == ["rec-a", "rec-b"]
+    assert draft.label == "черновик из профиля"
+    assert draft.conditions
+
+
+def test_draft_rule_rejects_empty_profile_and_empty_selection():
+    with pytest.raises(HypothesisError, match="нет измеренных признаков"):
+        draft_rule_from_profile(
+            {"kd_passed_share": None}, band_key="alpha", recording_ids=["rec"],
+        )
+    with pytest.raises(HypothesisError, match="Выборка пуста"):
+        draft_rule_from_profile(
+            {"kd_passed_share": 0.9}, band_key="alpha", recording_ids=[],
+        )

@@ -23,17 +23,29 @@
 суждение, а не диагноз и не «оценка одарённости»; ответ — N из M и
 контрпримеры, без интерпретации признаков. Эмо-анализ, нейромузыка и
 ИИ-консультанты слоем признаков не обслуживаются.
+
+Шаблон «профиль → правило» (Т5): ``draft_rule_from_profile`` превращает
+**измеренный** профиль пробы в кандидатов условий (порог — округлённое
+наблюдение, не эксперт) и оставляет ``min_share=None`` — **без авто-вердикта**.
 """
 import math
+from collections.abc import Mapping
 from typing import Any
 
 from app.core.config import settings
-from app.schemas.hypotheses import HypothesisCheckIn, HypothesisConditionIn
+from app.schemas.hypotheses import (
+    HypothesisCheckIn,
+    HypothesisConditionIn,
+    HypothesisSaveIn,
+)
 from app.services.probe_context import PROBE_FEATURES, probe_contexts
 from app.services.report import report_band_catalog
 
 # Операторы условий правила (порядковые + равенство с допуском 1e-9).
 OPERATORS: tuple[str, ...] = (">=", "<=", ">", "<", "==", "!=")
+
+# Порог «доля/упорядоченность» в черновике: шаг округления 0.05 (не эталон).
+_DRAFT_SHARE_STEP = 0.05
 
 
 class HypothesisError(ValueError):
@@ -174,3 +186,77 @@ async def check_hypothesis(payload: HypothesisCheckIn) -> dict[str, Any]:
         "records": records,
         "warnings": warnings,
     }
+
+
+def _draft_threshold(value: float, *, share_like: bool) -> tuple[str, float]:
+    """Оператор и порог черновика из наблюдения (не эталон методики).
+
+    Доля/упорядоченность (0..1): шаг 0.05 в сторону наблюдения; остальное —
+    округление вниз для ``>=`` (условие, которому наблюдение уже удовлетворяет).
+    """
+    if share_like:
+        step = _DRAFT_SHARE_STEP
+        threshold = (
+            math.floor(value / step) * step
+            if value >= 0.5
+            else math.ceil(value / step) * step
+        )
+        threshold = round(threshold, 2)
+        return (">=", threshold) if value >= 0.5 else ("<=", threshold)
+    return ">=", math.floor(value * 100) / 100.0
+
+
+def draft_conditions_from_profile(
+    features: Mapping[str, float | int | None],
+) -> list[HypothesisConditionIn]:
+    """Кандидаты условий из **измеренного** профиля пробы (Т5, без вердикта).
+
+    Включаются только известные ``PROBE_FEATURES`` с числовым значением
+    (``None`` — «не измерено» и не попадает в черновик). Порог — округлённое
+    наблюдение: исследователь правит текст правила, система ничего не
+    интерпретирует. ``n_points`` — размер выборки, не признак состояния —
+    в черновик не идёт.
+    """
+    conditions: list[HypothesisConditionIn] = []
+    for feature in PROBE_FEATURES:
+        if feature == "n_points":
+            continue
+        value = features.get(feature)
+        if value is None:
+            continue
+        numeric = float(value)
+        share_like = feature.endswith("_share") or feature == "flow_orderliness"
+        op, threshold = _draft_threshold(numeric, share_like=share_like)
+        conditions.append(
+            HypothesisConditionIn(feature=feature, op=op, value=threshold)
+        )
+    return conditions
+
+
+def draft_rule_from_profile(
+    features: Mapping[str, float | int | None],
+    *,
+    band_key: str,
+    recording_ids: list[str],
+    label: str | None = None,
+) -> HypothesisSaveIn:
+    """Черновик правила-гипотезы из профиля: кандидаты условий, ``min_share`` не задан.
+
+    Вход — профиль одной пробы (или выбранный исследователем слепок);
+    выборка и полоса передаются как есть. Никакого статуса ``confirmed``:
+    без ``min_share`` проверка остаётся ``descriptive``.
+    """
+    validate_selection(band_key, recording_ids)
+    conditions = draft_conditions_from_profile(features)
+    if not conditions:
+        raise HypothesisError(
+            "В профиле нет измеренных признаков для черновика правила "
+            "(нужен хотя бы один известный признак пробы)"
+        )
+    return HypothesisSaveIn(
+        label=label,
+        band_key=band_key,
+        conditions=conditions,
+        min_share=None,
+        recording_ids=list(recording_ids),
+    )

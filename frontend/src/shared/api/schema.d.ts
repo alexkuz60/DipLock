@@ -2943,6 +2943,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/hypotheses/draft-rule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Шаблон «профиль → правило»: черновик условий без вердикта (Т5)
+         * @description Кандидаты условий из измеренного профиля пробы.
+         *
+         *     Пороги — округлённые наблюдения (не эталон методики); ``min_share`` остаётся
+         *     ``None`` — статус проверки будет ``descriptive``, авто-подтверждения нет.
+         */
+        post: operations["post_rule_draft_api_v1_hypotheses_draft_rule_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hypotheses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Библиотека гипотез: список сохранённых правил
+         * @description Новые сверху; только правило и выборка — без интерпретации.
+         */
+        get: operations["get_hypotheses_api_v1_hypotheses_get"];
+        put?: never;
+        /**
+         * Сохранить правило-гипотезу в библиотеку (Т4)
+         * @description Библиотека правил: правило + выборка, без запуска проверки.
+         *
+         *     Append (история, не UPSERT): повторное сохранение — новая строка.
+         */
+        post: operations["post_hypothesis_api_v1_hypotheses_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hypotheses/{hypothesis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Сохранённое правило-гипотеза */
+        get: operations["get_hypothesis_api_v1_hypotheses__hypothesis_id__get"];
+        put?: never;
+        post?: never;
+        /** Удалить правило-гипотезу из библиотеки */
+        delete: operations["delete_hypothesis_api_v1_hypotheses__hypothesis_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/hypotheses/{hypothesis_id}/recheck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Повторная проверка сохранённого правила (N из M)
+         * @description Пересчёт правила по текущим прогонам автоотчёта (история, не UPSERT).
+         *
+         *     Правило и выборка — из строки библиотеки; ответ — тот же контракт,
+         *     что у ``POST /hypotheses/check``.
+         */
+        post: operations["post_hypothesis_recheck_api_v1_hypotheses__hypothesis_id__recheck_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router": {
         parameters: {
             query?: never;
@@ -9409,6 +9499,31 @@ export interface components {
             value: number;
         };
         /**
+         * HypothesisOut
+         * @description Строка библиотеки гипотез: сохранённое правило + выборка.
+         */
+        HypothesisOut: {
+            /** Id */
+            id: number;
+            /** Label */
+            label?: string | null;
+            /** Band Key */
+            band_key?: string | null;
+            /**
+             * Conditions
+             * @description Условия правила как есть ({feature, op, value})
+             */
+            conditions?: {
+                [key: string]: number | string;
+            }[];
+            /** Min Share */
+            min_share?: number | null;
+            /** Recording Ids */
+            recording_ids?: string[];
+            /** Created At */
+            created_at?: string | null;
+        };
+        /**
          * HypothesisRecordOut
          * @description Итог проверки одной пробы: вердикт, провалы и её признаки.
          */
@@ -9439,6 +9554,40 @@ export interface components {
             features?: {
                 [key: string]: number | null;
             };
+        };
+        /**
+         * HypothesisSaveIn
+         * @description Вход сохранения правила в библиотеку (Т4): правило + выборка.
+         *
+         *     Проверка не запускается: строка — накопленное правило (``concept.md`` §1),
+         *     ответ N/M даёт ``POST /hypotheses/{id}/recheck`` или ``POST /hypotheses/check``.
+         */
+        HypothesisSaveIn: {
+            /**
+             * Label
+             * @description Имя/текст гипотезы (не влияет на проверку)
+             */
+            label?: string | null;
+            /**
+             * Band Key
+             * @description Полоса правила (одна — принцип 3)
+             */
+            band_key: string;
+            /**
+             * Conditions
+             * @description Условия правила (И-логика); минимум одно
+             */
+            conditions: components["schemas"]["HypothesisConditionIn"][];
+            /**
+             * Min Share
+             * @description Порог подтверждения; None — только описание N из M
+             */
+            min_share?: number | null;
+            /**
+             * Recording Ids
+             * @description Записи-участники выборки на момент сохранения
+             */
+            recording_ids: string[];
         };
         /**
          * JobCreated
@@ -11411,6 +11560,38 @@ export interface components {
             bands?: {
                 [key: string]: components["schemas"]["RoiBandCellOut"];
             };
+        };
+        /**
+         * RuleDraftIn
+         * @description Вход шаблона «профиль → правило» (Т5): профиль пробы + полоса + выборка.
+         *
+         *     ``features`` — слепок признаков (ключи ``PROBE_FEATURES``); ``None`` —
+         *     «не измерено» и в черновик не идёт. Шаблон **без авто-вердикта**:
+         *     ``min_share`` не заполняется.
+         */
+        RuleDraftIn: {
+            /**
+             * Features
+             * @description Профиль пробы (измеренные признаки; None — не измерено)
+             */
+            features: {
+                [key: string]: number | null;
+            };
+            /**
+             * Band Key
+             * @description Полоса правила (одна — принцип 3)
+             */
+            band_key: string;
+            /**
+             * Recording Ids
+             * @description Записи-участники выборки
+             */
+            recording_ids: string[];
+            /**
+             * Label
+             * @description Имя черновика; None — подпись условий
+             */
+            label?: string | null;
         };
         /**
          * RunManifestOut
@@ -16983,6 +17164,183 @@ export interface operations {
                 "application/json": components["schemas"]["HypothesisCheckIn"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_rule_draft_api_v1_hypotheses_draft_rule_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleDraftIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisSaveIn"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_hypotheses_api_v1_hypotheses_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisOut"][];
+                };
+            };
+        };
+    };
+    post_hypothesis_api_v1_hypotheses_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HypothesisSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_hypothesis_api_v1_hypotheses__hypothesis_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hypothesis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HypothesisOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_hypothesis_api_v1_hypotheses__hypothesis_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hypothesis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    post_hypothesis_recheck_api_v1_hypotheses__hypothesis_id__recheck_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                hypothesis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

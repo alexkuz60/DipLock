@@ -21,7 +21,7 @@ from sqlalchemy import select
 from app.api.params import dipole_batch_bands, dipole_batch_params
 from app.core.config import settings
 from app.models import db as db_module
-from app.models.db import Analysis, AnalysisBand, DipolePoint, init_db
+from app.models.db import Analysis, AnalysisBand, DipoleCluster, DipolePoint, init_db
 from app.schemas.analysis import DipoleBatchResult
 from app.services import recording_store, results_store
 from app.services.dipole_batch import (
@@ -286,6 +286,60 @@ def test_dipole_batch_persists_analysis_rows(tmp_path, monkeypatch):
     assert len(points) == sum(b["n_points"] for b in result["bands"])
     # Точки неслись с вердиктом: без порогов — NULL «не оценено», не 0
     assert all(p.kd_passed is None for p in points)
+
+
+@_NEEDS_FSAVERAGE
+def test_dipole_batch_persists_clusters_with_features(tmp_path, monkeypatch):
+    """Т3/B8: кластеры пакета пишутся в ``dipole_clusters`` с профилем признаков.
+
+    ``features`` — JSON профиля (неизмерённое — ``None``, не 0);
+    ``cluster_params`` — паспорт кластеризации прогона. Нужен fsaverage
+    (MNI точки → кластеризация), как у ``test_batch_clusters_carry_feature_profile``.
+    """
+    monkeypatch.setattr(settings, "kd_moment_share", None)
+    recording = _register(tmp_path, _two_band_edf(tmp_path), "rec-batch-clusters")
+    params = _batch("alpha,beta")
+    result = run_dipole_batch(recording, settings, params)
+    asyncio.run(
+        results_store.persist_recording_result(
+            "dipole_batch", recording, params, result, "job-clusters-1",
+        ),
+    )
+
+    async def _read():
+        await init_db()
+        async with db_module.AsyncSessionLocal() as session:
+            analysis = (
+                await session.execute(select(Analysis).where(
+                    Analysis.job_id == "job-clusters-1",
+                ))
+            ).scalar_one()
+            clusters = (await session.execute(select(DipoleCluster).where(
+                DipoleCluster.analysis_id == analysis.id,
+            ))).scalars().all()
+            return analysis, clusters
+
+    analysis, clusters = asyncio.run(_read())
+    expected = result["clusters"]
+    assert expected, "синтетический ЭЭГ даёт кластеры пакета"
+    assert len(clusters) == len(expected)
+    for row, cluster in zip(clusters, expected, strict=True):
+        assert row.band_key == cluster["band_key"]
+        assert row.cluster_index == cluster["cluster_index"]
+        assert row.n_points == cluster["n_points"]
+        assert row.features is not None
+        assert row.features["n_points"] == cluster["features"]["n_points"]
+        # Неизмерённое в профиле — None, не 0
+        assert row.features.get("moment_mean_nam") is not None
+        assert row.cluster_params["basis"] == "share_of_search_sphere_diameter"
+
+    # Read-API (list_analysis_clusters): None — нет прогона, payload без NULL-достройки
+    assert asyncio.run(results_store.list_analysis_clusters(999999)) is None
+    payload = asyncio.run(results_store.list_analysis_clusters(analysis.id))
+    assert payload is not None
+    assert len(payload) == len(expected)
+    assert payload[0]["band_key"] == expected[0]["band_key"]
+    assert "features" in payload[0]
 
 
 # ---------- Роуты (202 → задача → результат) ----------

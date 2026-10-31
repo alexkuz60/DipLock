@@ -140,11 +140,12 @@
 | `GET /emolab/{track_id}/status` | поллинг анализа: `{status, stage, pct, message, error, duration_s}`; после рестарта поднимается из манифеста диска |
 | `GET /emolab/{track_id}/emo` | кадры «Эмо» аудиотрека (**`AudioEmoOut` v6** — `frames`, `key_track` (аккорды Chordino), `tempo_track`, `segment_track`, контракт рендера «Нейромузыки»); 404 — нет, 409 — идёт/упал |
 
-### Отдельный роутер «Гипотезы» (срез 4, 29.10.2026)
+### Отдельный роутер «Гипотезы» (срез 4, 29.10.2026; библиотека Т4, 31.10.2026)
 
 `backend/app/api/hypotheses.py` подключён в main с тем же `settings.api_prefix`;
 работа — `services/probe_context.py` (признаки пробы из последнего прогона
-автоотчёта) и `services/hypothesis_check.py` (правило «N из M», контрпримеры);
+автоотчёта), `services/hypothesis_check.py` (правило «N из M», контрпримеры) и
+`services/hypothesis_library.py` (библиотека сохранённых правил);
 правила — `docs/rules/hypotheses.md`. Паттерн — `PrivateRoute` Консилиума
 (без эха ввода в 422, без HTTP-кэша); шлюзы 400 — пустая выборка, неизвестная
 полоса/признак/оператор (как у группового агрегата).
@@ -153,6 +154,11 @@
 |---|---|
 | `POST /hypotheses/probe-context` | признаки выборки в одной полосе (`ProbeContextOut`): `features` (КД/вращение/поток/GOF/RIV) + `measured`; записи без прогона автоотчёта — честные `False` и предупреждения |
 | `POST /hypotheses/check` | проверка правила-гипотезы: `n`/`m`/`share`/`status` (`confirmed`/`rejected`/`descriptive`/`insufficient`) + построчные `records` (контрпримеры, неизмеренные признаки) + `warnings` |
+| `POST /hypotheses/draft-rule` | шаблон «профиль → правило» (Т5): кандидаты условий из измеренного профиля пробы (`HypothesisSaveIn` без `min_share` — авто-вердикта нет) |
+| `POST /hypotheses` | сохранить правило в библиотеку (Т4, 201): `HypothesisSaveIn` → `HypothesisOut`; append, не UPSERT; проверка не запускается |
+| `GET /hypotheses` / `GET /hypotheses/{id}` | список/строка библиотеки (новые сверху); 404 — нет правила |
+| `DELETE /hypotheses/{id}` | удалить правило (204; повторный — 404) |
+| `POST /hypotheses/{id}/recheck` | пересчёт сохранённого правила по текущим прогонам (`HypothesisCheckOut`; 404 — нет) |
 
 ## Инвентарь эндпоинтов (87 в `routes.py`, порядок файла)
 

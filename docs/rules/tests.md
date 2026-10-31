@@ -1895,3 +1895,20 @@ Vitest `shared/lib/clusterFeatures.test.ts` (4: «—» без профиля и
 fsaverage ветка гоняется, без него (CI) — честный skip. Базовый тест снова
 зелёный в CI. Локально `pytest -m "not integration"` — **1185 passed**
 (в CI кластерный скипнётся: 1184 + 1 skipped).
+
+**Шаг 3: исследовательский слой Т2–Т6 (31.10.2026):**
+`test_cluster_features.py` (+4: адаптеры строк эпох/событий/проб —
+`has_artifact` → `kd_passed`, `description` → `structure`, `median_gof` → `gof`,
+сквозной профиль без фабрикации), `test_probe_context.py` (+1:
+`probe_profile_rows` — только `measured=True`, доля не притворяется вердиктом),
+`test_dipole_batch.py` (+1 `_NEEDS_FSAVERAGE`: персист `dipole_clusters` с
+`features` и `cluster_params`, `list_analysis_clusters`),
+`test_recording_store.py` (каскад `drop_recording_rows` удаляет `dipole_clusters` —
+SQLite без FK), `test_migrations.py` (таблицы `dipole_clusters`/`hypotheses`),
+`test_hypotheses_library.py` (+3: append-библиотека, 404/delete/recheck,
+`draft-rule` без `min_share`), `test_hypothesis_check.py` (+3: черновик только из
+измеренного, `n_points` исключён, пустой профиль — 400).
+Vitest: `ClusterFeaturesTable.test.tsx` (3), `RuleDraftForm.test.tsx` (3),
+`clusterFeatures.test.ts` (+2 `clusterFeatureCells`), `BatchPanel.test.tsx`
+(таблица профилей; GOF-инвариант сужен до `band-comparison`).
+Итог: pytest **1218**, Vitest **1405** (129 файлов).

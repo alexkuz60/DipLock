@@ -3,6 +3,46 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 31.10.2026 — Шаг 3: исследовательский слой (Т2–Т6) и таблица признаков (Т1)
+
+Инструментарий поиска характерных признаков кластеров (Принцип 2.2) доведён
+до рабочего контура: смотрим профили → закрепляем находки правилами «N из M».
+
+* **Т1 — таблица признаков** (исследование на данных): 75 кластеров с
+  `features` на 4 записях (`data/results/jobs/`, пересчёт `dipole_batch`
+  теми же 13 полосами / эпоха 2000 мс / grid 3 мм). Описательно: КД = 1.0
+  у всех измеренных; mono H ≤ 0.7 — 15/75; |L−R| ≥ 40 п.п. — 35/75;
+  GOF ≥ 0.9 — 62/75; топ-структуры — мозжечок 29 / БВ 19 / ствол 17.
+  **Кандидаты descriptive**, не вердикты («не навреди»).
+* **Т2 — UI-таблица профилей** (`shared/ui/ClusterFeaturesTable.tsx` +
+  `clusterFeatureCells`): сравнение кластеров строками в «Диполи»
+  (`BatchPanel`) и «Группа» (колонки H / момент / GOF / КД / R);
+  «—» вместо 0. Vitest `ClusterFeaturesTable.test.tsx`.
+* **Т3 — персист кластеров (B8)**: таблица `dipole_clusters` (миграция
+  `0016`), write-API `kind=dipole_batch` пишет геометрию + `features` +
+  `cluster_params` (UNIQUE «полоса × номер»), read —
+  `results_store.list_analysis_clusters`. **Ловушка**: SQLite без FK →
+  `_delete_recording_rows` обязан явно удалять `dipole_clusters` (иначе
+  сироты + переиспользование rowid → UNIQUE).
+* **Т4 — библиотека гипотез**: таблица `hypotheses` (миграция `0017`),
+  `services/hypothesis_library.py` (append, не UPSERT); API
+  `POST/GET/DELETE /hypotheses`, `POST /hypotheses/{id}/recheck` (N/M
+  пересчитывается по текущим прогонам).
+* **Т5 — шаблон «профиль → правило»**: `draft_rule_from_profile` —
+  кандидаты условий из измеренного профиля пробы (порог — округлённое
+  наблюдение, шаг 0.05), `min_share` не заполняется (без авто-вердикта);
+  `POST /hypotheses/draft-rule`; UI `RuleDraftForm` рядом с таблицей профилей.
+* **Т6 — адаптеры строк эпох/событий/проб** к `feature_profile`:
+  `epoch_profile_row` (has_artifact → kd_passed), `event_profile_row`
+  (description → structure), `probe_profile_row` (median_gof → gof;
+  `kd_passed_share` — доля, не вердикт) + `probe_context.probe_profile_rows`.
+
+* **Проверки**: ruff/mypy/eslint/tsc чистые; pytest **1218 passed**,
+  Vitest **1405 passed** (129 файлов).
+* **Документы**: `docs/rules/hypotheses.md`, `docs/rules/api-jobs.md`,
+  `docs/rules/dipoles.md` (п.12), `docs/data-blocks.md` B8,
+  `docs/rules/tests.md`; OpenAPI **136 путей** + `schema.d.ts`.
+
 ## 30.10.2026 (2) — Фикс CI: кластеры пакета скипаются без fsaverage
 
 `test_run_dipole_batch_returns_band_sets` падал в GitHub Actions

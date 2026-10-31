@@ -42,6 +42,7 @@ from app.models.db import (
     AnalysisBand,
     AsyncSessionLocal,
     Dipole,
+    DipoleCluster,
     DipolePoint,
     EpochRecord,
     RecordingRecord,
@@ -443,14 +444,16 @@ async def _persist_dipole_batch(
     session: Any, recording: Recording, params: Any,
     result: dict[str, Any], job_id: str,
 ) -> None:
-    """С1: прогон пакета поддиапазонов → ``analyses``/``analysis_bands``/``dipole_points``.
+    """С1: прогон пакета поддиапазонов → ``analyses``/``analysis_bands``/``dipole_points``/``dipole_clusters``.
 
-    Кирпичи B7/B6 (§8.3 ``docs/data-blocks.md``): одна строка ``analyses`` на
+    Кирпичи B7/B6/B8 (§8.3 ``docs/data-blocks.md``): одна строка ``analyses`` на
     прогон (``params_sig`` — отпечаток пакета), ``analysis_bands`` — статус
     каждой полосы (включая ``moment_max_nam`` — базу КД внутри полосы),
-    ``dipole_points`` — точки с вердиктом КД (ключ «эпоха × поддиапазон»).
-    В отличие от отчёта, точки из результата **не** вынимаются: контракт
-    ``DipoleBatchResult`` несёт их в раздел «Диполи» (набор результатов С1).
+    ``dipole_points`` — точки с вердиктом КД (ключ «эпоха × поддиапазон»),
+    ``dipole_clusters`` — кластеры с **профилем признаков** (``features``;
+    неизмерённое — ``None``, не 0). В отличие от отчёта, точки из результата
+    **не** вынимаются: контракт ``DipoleBatchResult`` несёт их в раздел «Диполи»
+    (набор результатов С1).
     """
     bands = list(result.get("bands") or [])
     totals = [b.get("n_epochs_total") for b in bands if b.get("n_epochs_total") is not None]
@@ -511,6 +514,28 @@ async def _persist_dipole_batch(
                 kd_passed=int(verdict) if verdict is not None else None,
                 kd_basis=kd_basis,
             ))
+
+    # B8: кластеры + профиль признаков (Т3, 31.10.2026)
+    cluster_params = result.get("cluster_params")
+    for cluster in result.get("clusters") or []:
+        session.add(DipoleCluster(
+            analysis_id=analysis.id,
+            band_key=cluster.get("band_key"),
+            cluster_index=cluster.get("cluster_index"),
+            centroid_mni=cluster.get("centroid_mni"),
+            n_points=cluster.get("n_points"),
+            share=cluster.get("share"),
+            volume_cm3=cluster.get("volume_cm3"),
+            density_per_cm3=cluster.get("density_per_cm3"),
+            extent_mm=cluster.get("extent_mm"),
+            top_structures=list(cluster.get("top_structures") or []),
+            top_brodmann=list(cluster.get("top_brodmann") or []),
+            features=cluster.get("features"),
+            cluster_params=cluster_params,
+            n_bands_matched=cluster.get("n_bands_matched"),
+            band_share=cluster.get("band_share"),
+            matched_band_keys=list(cluster.get("matched_band_keys") or []),
+        ))
 
 
 _PERSISTERS: dict[
@@ -917,6 +942,36 @@ def _point_payload(row: DipolePoint) -> dict[str, Any]:
         "gof", "anatomical_structure", "brodmann_area", "method", "kd_passed",
         "kd_basis", "refined",
     ))
+
+
+def _cluster_payload(row: DipoleCluster) -> dict[str, Any]:
+    """Строка ``dipole_clusters`` под ``DipoleClusterOut``; NULL не достраивается."""
+    return _row_payload(row, (
+        "analysis_id", "band_key", "cluster_index", "centroid_mni", "n_points",
+        "share", "volume_cm3", "density_per_cm3", "extent_mm", "top_structures",
+        "top_brodmann", "features", "n_bands_matched", "band_share",
+        "matched_band_keys",
+    ))
+
+
+async def list_analysis_clusters(analysis_id: int) -> list[dict[str, Any]] | None:
+    """Кластеры пакета ``dipole_clusters`` (B8); ``None`` — нет прогона.
+
+    ``features`` — профиль признаков как есть (неизмерённое — ``None``,
+    не 0). ``cluster_params`` не дублируется в payload каждой строки —
+    паспорт прогона смотреть в ``get_analysis_detail``.
+    """
+    await init_db()
+    async with AsyncSessionLocal() as session:
+        found = await _analysis_with_recording(session, analysis_id)
+        if found is None:
+            return None
+        rows = (await session.scalars(select(DipoleCluster).where(
+            DipoleCluster.analysis_id == analysis_id,
+        ).order_by(
+            DipoleCluster.band_key, DipoleCluster.cluster_index, DipoleCluster.id,
+        ))).all()
+        return [_cluster_payload(row) for row in rows]
 
 
 async def list_analysis_points(

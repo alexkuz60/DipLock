@@ -64,7 +64,21 @@
 * `POST /hypotheses/probe-context` — признаки выборки в одной полосе
   (`ProbeContextOut`): что именно измерено, до проверки правила;
 * `POST /hypotheses/check` — проверка правила (`HypothesisCheckOut`):
-  N/M/`share`/`status` + построчные итоги `records` + `warnings`.
+  N/M/`share`/`status` + построчные итоги `records` + `warnings`;
+* `POST /hypotheses/draft-rule` — **шаблон «профиль → правило» (Т5)**:
+  кандидаты условий из **измеренного** профиля пробы (`RuleDraftIn` →
+  `HypothesisSaveIn`); пороги — округлённые наблюдения (доля/упорядоченность —
+  шаг 0.05), `n_points` и `None` в черновик не идут; `min_share` не заполняется
+  (авто-вердикта нет). Работа — `draft_rule_from_profile` в
+  `services/hypothesis_check.py`; UI — `RuleDraftForm` в «Диполи» (рядом с
+  таблицей профилей кластеров).
+* **Библиотека (Т4, 31.10.2026)** — накопление правил (`hypotheses`, append
+  не UPSERT): `POST /hypotheses` (201, `HypothesisSaveIn` → `HypothesisOut`),
+  `GET /hypotheses`, `GET /hypotheses/{id}`, `DELETE /hypotheses/{id}` (204/404),
+  `POST /hypotheses/{id}/recheck` — пересчёт сохранённого правила по текущим
+  прогонам (тот же контракт `HypothesisCheckOut`; 404 — нет правила).
+  Работа — `services/hypothesis_library.py`. В строке — правило + выборка
+  `recording_ids`, **без** интерпретации («не навреди»).
 
 Операторы условий: `>=`, `<=`, `>`, `<`, `==`, `!=` (`==`/`!=` — с допуском
 1e-9). Работа — `services/hypothesis_check.py` (правило, N/M, контрпримеры) и
@@ -90,4 +104,5 @@
 `tests/test_hypothesis_check.py` (трёхзначная логика, операторы, N/M и
 статусы, контрпримеры, шлюзы), `tests/test_probe_context.py` (последний
 прогон, сборка признаков, «не измерено» без нулей), `tests/test_hypotheses_api.py`
-(400-шлюзы и форма 200; инвентарь — `docs/rules/tests.md`).
+(400-шлюзы и форма 200), `tests/test_hypotheses_library.py` (библиотека:
+append, 404, recheck; инвентарь — `docs/rules/tests.md`).

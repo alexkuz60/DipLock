@@ -14,7 +14,12 @@
 не сравнимы (принцип 3 ``docs/rules/dipoles.md``) — контекст всегда одной
 полосы; не измерено — честные ``None`` (запись без прогона/полосы попадает в
 ``warnings``, а не в нули).
+
+Т6: ``probe_profile_rows`` адаптирует строки контекста к
+``cluster_features.feature_profile`` — кластер проб описывается тем же
+исследовательским профилем, что и кластер диполей/эпох/событий.
 """
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from sqlalchemy import select
@@ -26,6 +31,7 @@ from app.models.db import (
     ReportBandSummary,
     ReportRun,
 )
+from app.services.cluster_features import probe_profile_row
 
 # Признаки пробы: имя → описание (валидация правил-гипотез — по этим ключам).
 # Все значения — ``float | int | None`` (``None`` — «не измерено»).
@@ -206,3 +212,20 @@ async def probe_features_by_band(
         return {}
     probes = await _load_probes(ids, list(band_keys))
     return {rid: dict(probe["bands"]) for rid, probe in probes.items()}
+
+
+def probe_profile_rows(
+    rows: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Строки контекста проб → строки ``cluster_features.feature_profile`` (Т6).
+
+    Берётся только ``measured=True`` (незамеренная проба не тянет профиль
+    вниз); карта полей — ``probe_profile_row`` (медиана GOF, без ложного
+    ``kd_passed``). Потребитель — исследовательский слой: кластер проб
+    описывается тем же профилем, что и кластер диполей.
+    """
+    return [
+        probe_profile_row(row.get("features") or {})
+        for row in rows
+        if row.get("measured")
+    ]

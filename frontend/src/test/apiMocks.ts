@@ -553,6 +553,65 @@ export function mockApiFetch(options: MockApiOptions = {}) {
       // PUT возвращает присланное состояние (сервер его и сохраняет)
       return jsonResponse(options.llmRouter ?? llmRouterFixture())
     }
+    if (url.includes('/hypotheses/draft-rule')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        features?: Record<string, number | null>
+        band_key?: string
+        recording_ids?: string[]
+        label?: string | null
+      }
+      const features = body.features ?? {}
+      const conditions = Object.entries(features)
+        .filter(([, value]) => value != null && Number.isFinite(value))
+        .map(([feature, value]) => ({
+          feature,
+          op: (value as number) >= 0.5 ? '>=' : '<=',
+          value: Math.round((value as number) * 20) / 20,
+        }))
+      return jsonResponse({
+        label: body.label ?? null,
+        band_key: body.band_key ?? 'alpha',
+        conditions: conditions.length
+          ? conditions
+          : [{ feature: 'kd_passed_share', op: '>=', value: 0.8 }],
+        min_share: null,
+        recording_ids: body.recording_ids ?? [],
+      })
+    }
+    if (url.includes('/hypotheses/probe-context')) {
+      const body = JSON.parse(String(init?.body ?? '{}')) as {
+        recording_ids?: string[]
+        band_key?: string
+      }
+      return jsonResponse({
+        band_key: body.band_key ?? 'alpha',
+        band_hz: [8, 16],
+        records: (body.recording_ids ?? []).map((recording_id: string) => ({
+          recording_id,
+          filename: `${recording_id}.edf`,
+          report_run_id: 1,
+          report_created_at: null,
+          features: {
+            n_points: 42,
+            kd_passed_share: 0.9,
+            rotation_ccw_share: 0.82,
+            rotation_cw_share: null,
+            flow_orderliness: 0.6,
+            median_gof: 0.9,
+            median_riv: 0.12,
+          },
+          measured: true,
+        })),
+        warnings: [],
+      })
+    }
+    if (url.includes('/hypotheses')) {
+      if (method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+        return jsonResponse({ id: 1, created_at: null, ...body }, 201)
+      }
+      return jsonResponse([])
+    }
     if (url.includes('/meta')) {
       return jsonResponse(options.meta ?? metaFixture)
     }
