@@ -37,6 +37,18 @@ from tests.test_dipole_scanner import _register
 
 _PREFIX = "/api/v1"
 
+# Кластеры пакета требуют MNI (`_localize_point` → `mne.head_to_mni`): точки без
+# MNI не участвуют в кластеризации (`cluster_points` — честный пропуск), поэтому
+# без датасета fsaverage (CI) кластерная ветка скипается — прецедент
+# `_NEEDS_FSAVERAGE` (tests/test_api_contract.py; конвенция: ветки с реальными
+# данными скипаются без них). Нужны и поверхность, и transform.
+_FSAVERAGE_READY = os.path.exists(
+    os.path.join(settings.subjects_dir, "fsaverage", "surf", "lh.inflated")
+) and os.path.exists(settings.fsaverage_trans)
+_NEEDS_FSAVERAGE = pytest.mark.skipif(
+    not _FSAVERAGE_READY, reason="fsaverage недоступен (surface/transform)",
+)
+
 
 @pytest.fixture(autouse=True)
 def clean_state():
@@ -140,6 +152,22 @@ def test_run_dipole_batch_returns_band_sets(tmp_path, monkeypatch):
         # КД без порогов методики — честное «не оценено» (None), а не False
         assert band["n_kd_passed"] is None
         assert all(point["kd_passed"] is None for point in band["points"])
+    # Контракт валидируется на месте (как у DipoleScanResult в API)
+    DipoleBatchResult(**result)
+
+
+@_NEEDS_FSAVERAGE
+def test_batch_clusters_carry_feature_profile(tmp_path, monkeypatch):
+    """Кластеры пакета (С2) несут профиль признаков: синтетический ЭЭГ даёт кластеры.
+
+    Ветка требует fsaverage (`head_to_mni` — MNI-координаты точек): без MNI
+    точки не участвуют в кластеризации, поэтому без датасета (CI) тест
+    честно скипывается (`_NEEDS_FSAVERAGE`).
+    """
+    monkeypatch.setattr(settings, "kd_moment_share", None)
+    recording = _register(tmp_path, _two_band_edf(tmp_path), "rec-clusters")
+    result = run_dipole_batch(recording, settings, _batch("alpha,beta"))
+
     # Профиль признаков кластера (исследовательский слой) в каждом кластере
     assert result["clusters"], "синтетический ЭЭГ даёт кластеры пакета"
     for cluster in result["clusters"]:
@@ -147,8 +175,6 @@ def test_run_dipole_batch_returns_band_sets(tmp_path, monkeypatch):
         assert features is not None
         assert features["n_points"] == cluster["n_points"]
         assert features["moment_mean_nam"] is not None  # амплитуды измерены
-    # Контракт валидируется на месте (как у DipoleScanResult в API)
-    DipoleBatchResult(**result)
 
 
 def test_comparison_carries_only_normalized_measures(tmp_path):

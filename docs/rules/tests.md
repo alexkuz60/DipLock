@@ -1884,3 +1884,14 @@ Vitest `shared/lib/clusterFeatures.test.ts` (4: «—» без профиля и
 «Выкл» в панели; «Выкл» → сырые лучи кадра 10…70 % линейно; viewBox
 радара = квинтовому кругу), комментарии `neuromusic/NeuromusicSection.test.tsx`.
 Итог: Vitest — **1397** (127 файлов); pytest — **1204** (без изменений).
+
+**Фикс CI: кластеры пакета требуют fsaverage (30.10.2026 (2)):**
+`test_run_dipole_batch_returns_band_sets` падал в GitHub Actions
+(`assert result["clusters"] == []`): в CI нет датасета fsaverage →
+`_localize_point` → `mni_coords=None` → точки без MNI честно пропускаются
+кластеризацией (`cluster_points`). Кластерная ветка (профиль признаков в
+кластерах, срез 29.10) вынесена в `test_batch_clusters_carry_feature_profile`
+с `_NEEDS_FSAVERAGE` (прецедент `tests/test_api_contract.py`): локально с
+fsaverage ветка гоняется, без него (CI) — честный skip. Базовый тест снова
+зелёный в CI. Локально `pytest -m "not integration"` — **1185 passed**
+(в CI кластерный скипнётся: 1184 + 1 skipped).
