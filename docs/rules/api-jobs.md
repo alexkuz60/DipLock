@@ -5,7 +5,7 @@
 
 ## Где что лежит
 
-- `backend/app/api/routes.py` — **79 роутов** (74 уникальных пути; 5 путей принимают по два
+- `backend/app/api/routes.py` — **81 роутов** (76 уникальных пути; 5 путей принимают по два
   метода), префикс `/api/v1` из `settings.api_prefix`.
   Обработчик описывает форму (`Form`/`Query`) и контракт (`response_model`); всё остальное — рядом:
   - `api/assets.py` — отдача кэшируемых ассетов: `asset_response` (ETag, `Cache-Control`, 304);
@@ -26,7 +26,7 @@
   - `services/journal.py` — журнал шагов (`step`/`record`, `job_scope`): замеры шагов пайплайнов
     в `data/cache/journal.jsonl`, читается `GET /journal` (формат — `docs/data_map.md` §9).
 - `backend/app/main.py` — 4 пути уровня приложения: `GET /`, `GET /ui/{path}`,
-  `GET /init-status`, `GET /health`. Итого **121 уникальный HTTP-путь** (полный
+  `GET /init-status`, `GET /health`. Итого **123 уникальный HTTP-путь** (полный
   инвентарь путей — начало этого файла).
 - Контракт ответов — Pydantic-модели в `backend/app/schemas/` (всегда через `response_model`);
   из OpenAPI генерируются TS-типы `frontend/src/shared/api/schema.d.ts` (`npm run gen:api`;
@@ -160,7 +160,7 @@
 | `DELETE /hypotheses/{id}` | удалить правило (204; повторный — 404) |
 | `POST /hypotheses/{id}/recheck` | пересчёт сохранённого правила по текущим прогонам (`HypothesisCheckOut`; 404 — нет) |
 
-## Инвентарь эндпоинтов (87 в `routes.py`, порядок файла)
+## Инвентарь эндпоинтов (89 в `routes.py`, порядок файла)
 
 | # | Метод и путь | Назначение |
 |---|---|---|
@@ -267,6 +267,13 @@
 | 85 | `GET /recordings/{id}/dipole_batch/{job_id}` | набор результатов (`DipoleBatchResult`): полосы со своими точками, сопоставление нормированных величин (без GOF — принцип 3), кластеры с устойчивостью по поддиапазонам; 404/409 — как у задач записи |
 | 86 | `POST /archive/batches` | **пакетная обработка архива** (С8): серия прогонов пакета по `recording_ids` (пусто — весь каталог, лимит `archive_batch_max_recordings`) — задача `kind=archive_batch`, 404 на неизвестную запись (`require_recording`) |
 | 87 | `GET /archive/batches/{job_id}` | отчёт серии (`ArchiveBatchResult`): «обработано/ошибки/дубли» построчно, `params_sig` снимка параметров; 404 — чужой вид задачи на этом адресе, 409 — идёт/упал |
+
+### Готовность записей (раздел «БД», 13.11.2026)
+
+| № | Эндпоинт | Что делает |
+|---|---|---|
+| 88 | `GET /recordings/readiness` | **страница готовности записей** (раздел «БД»): паспорт + «k из N» стадий с записанными результатами и сводка параметров **последнего** прогона каждой (чистка/фильтр, эпохи, полосы, диполи, QC) — визуальный контроль обработанных ЭЭГ-записей без пересчёта; фильтры `only_processed`/`patient_alias`/`search`, сортировка `sort=created|name|readiness` (по готовности — производный ключ: набор собирается целиком и режется `offset:limit` в памяти, шаблон F `docs/rules/results-db.md`), честный `total`; работа — `readiness.list_recordings_readiness`. **Ловушка порядка**: роут объявлен **до** «Паспорт записи» (№ у паспорта ниже по файлу) — иначе `/recordings/readiness` проглотил бы `{recording_id}` (ловит `test_readiness.py::test_readiness_page_route_not_shadowed`) |
+| 89 | `GET /recordings/{id}/readiness` | **карточка готовности записи**: стадии с полной историей прогонов и параметрами каждого (новые сверху); 404 — записи нет в зеркале `recordings` (удалена или загружена до 4.4); работа — `readiness.get_recording_readiness` |
 
 
 ## Правила

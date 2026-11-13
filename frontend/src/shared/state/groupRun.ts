@@ -64,6 +64,8 @@ export type GroupRunState = {
 
   setMode: (mode: GroupMode) => void
   toggleRecording: (recordingId: string) => void
+  /** Полный набор участников (например выборка раздела «БД», порядок = порядок выбора). */
+  setRecordings: (recordingIds: string[]) => void
   clearRecordings: () => void
   setBandKey: (bandKey: string) => void
   setGofMin: (value: string) => void
@@ -119,6 +121,8 @@ export const useGroupRun = create<GroupRunState>()(
             ? state.recordingIds.filter((id) => id !== recordingId)
             : [...state.recordingIds, recordingId],
         })),
+      setRecordings: (recordingIds) =>
+        set({ recordingIds: [...new Set(recordingIds)] }),
       clearRecordings: () => set({ recordingIds: [] }),
       setBandKey: (bandKey) => set({ bandKey }),
       setGofMin: (gofMin) => set({ gofMin }),

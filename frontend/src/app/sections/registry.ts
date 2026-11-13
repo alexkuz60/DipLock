@@ -9,6 +9,7 @@ import {
   Activity,
   BookOpen,
   ClipboardList,
+  Database,
   Headphones,
   House,
   Layers,
@@ -25,6 +26,7 @@ import {
 
 export type SectionId =
   | 'home'
+  | 'db'
   | 'edf'
   | 'eeg'
   | 'dipoles'
@@ -69,6 +71,18 @@ export const SECTIONS: SectionConfig[] = [
     route: '/',
     hasToolHeader: false,
     hasRightPanel: false,
+    group: 'main',
+  },
+  {
+    id: 'db',
+    title: 'БД — записи и результаты',
+    shortTitle: 'БД',
+    hint: 'БД: записи, готовность результатов расчётов, выборка для группового анализа',
+    hotkey: '',
+    icon: Database,
+    route: '/db',
+    hasToolHeader: true,
+    hasRightPanel: true,
     group: 'main',
   },
   {

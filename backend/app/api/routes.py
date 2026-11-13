@@ -107,8 +107,11 @@ from app.schemas.analysis import (
     PreprocessResult,
     PreprocessStage,
     RecordingMeta,
+    RecordingReadinessDetailOut,
+    RecordingReadinessOut,
     RecordingSignalsHeader,
     RecordingsPageOut,
+    RecordingsReadinessPageOut,
     RecordingSummaryOut,
     ReportHtmlOut,
     ReportResult,
@@ -153,6 +156,7 @@ from app.services import (
     fsaverage_assets,
     gpu,
     journal,
+    readiness,
     recording_store,
     results_store,
     server_control,
@@ -509,6 +513,60 @@ async def get_session_dipoles(
     if rows is None:
         raise HTTPException(status_code=404, detail=f"Сессия {session_id} не найдена")
     return [DipoleOut(**row) for row in rows]
+
+
+# Внимание, порядок маршрутов: `GET /recordings/readiness` обязан быть объявлен
+# РАНЬШЕ `GET /recordings/{recording_id}` (роут паспорта ниже) — иначе Starlette
+# отдаст строку готовности параметру {recording_id} и ответит 404 «Запись
+# readiness не найдена». Ловит тест test_readiness.py::test_readiness_page_route_not_shadowed.
+
+
+@router.get(
+    "/recordings/readiness",
+    response_model=RecordingsReadinessPageOut,
+    summary="Готовность записей: результаты БД по стадиям (раздел «БД»)",
+)
+async def list_recordings_readiness(
+    only_processed: bool = Query(
+        default=False,
+        description="Только записи с записанными результатами (EXISTS по детям)",
+    ),
+    patient_alias: str | None = Query(
+        default=None, description="Фильтр по псевдониму испытуемого (точное совпадение)",
+    ),
+    search: str | None = Query(
+        default=None, description="Подстрока имени файла или псевдонима",
+    ),
+    sort: str = Query(
+        default="created",
+        pattern="^(created|name|readiness)$",
+        description="Порядок: created (новые сверху) | name | readiness (по готовности)",
+    ),
+    limit: int = Query(default=50, ge=1, le=500, description="Размер страницы"),
+    offset: int = Query(default=0, ge=0, description="Смещение (новые сверху)"),
+) -> RecordingsReadinessPageOut:
+    """Страница записей с готовностью результатов БД и параметрами прогонов.
+
+    Раздел «БД» (визуальный контроль обработанных ЭЭГ-записей): по каждой
+    записи — степень готовности ``readiness_ready`` из ``readiness_total``
+    стадий (препроцессинг/эпохи, диполи, пакет полос, отчёт, спектрограмма) и
+    сводка параметров **последнего** прогона каждой стадии (чистка, нарезка,
+    полосы, сетка диполей и т.д.). Работа —
+    ``readiness.list_recordings_readiness``; шаблоны сборки —
+    ``docs/rules/results-db.md``. Только чтение: ничего не пересчитывает.
+    """
+    total, items = await readiness.list_recordings_readiness(
+        only_processed=only_processed,
+        patient_alias=patient_alias,
+        search=search,
+        sort=sort,
+        limit=limit,
+        offset=offset,
+    )
+    return RecordingsReadinessPageOut(
+        total=total, limit=limit, offset=offset,
+        items=[RecordingReadinessOut(**item) for item in items],
+    )
 
 
 @router.get(
@@ -3127,4 +3185,22 @@ async def get_analysis_points(
     if rows is None:
         raise HTTPException(status_code=404, detail=f"Прогон {analysis_id} не найден")
     return [DipolePointOut(**row) for row in rows]
+
+
+@router.get(
+    "/recordings/{recording_id}/readiness",
+    response_model=RecordingReadinessDetailOut,
+    summary="Карточка готовности записи (раздел «БД»)",
+)
+async def get_recording_readiness(recording_id: str) -> RecordingReadinessDetailOut:
+    """Стадии готовности записи с полной историей прогонов и параметрами.
+
+    404 — записи нет в зеркале ``recordings`` (удалена или загружена до 4.4:
+    у таких строк результаты не привязаны к записи). Работа —
+    ``readiness.get_recording_readiness``; только чтение.
+    """
+    detail = await readiness.get_recording_readiness(recording_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Запись {recording_id} не найдена")
+    return RecordingReadinessDetailOut(**detail)
 

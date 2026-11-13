@@ -509,6 +509,125 @@
         }
       }
     },
+    "/api/v1/recordings/readiness": {
+      "get": {
+        "summary": "Готовность записей: результаты БД по стадиям (раздел «БД»)",
+        "description": "Страница записей с готовностью результатов БД и параметрами прогонов.\n\nРаздел «БД» (визуальный контроль обработанных ЭЭГ-записей): по каждой\nзаписи — степень готовности ``readiness_ready`` из ``readiness_total``\nстадий (препроцессинг/эпохи, диполи, пакет полос, отчёт, спектрограмма) и\nсводка параметров **последнего** прогона каждой стадии (чистка, нарезка,\nполосы, сетка диполей и т.д.). Работа —\n``readiness.list_recordings_readiness``; шаблоны сборки —\n``docs/rules/results-db.md``. Только чтение: ничего не пересчитывает.",
+        "operationId": "list_recordings_readiness_api_v1_recordings_readiness_get",
+        "parameters": [
+          {
+            "name": "only_processed",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Только записи с записанными результатами (EXISTS по детям)",
+              "default": false,
+              "title": "Only Processed"
+            },
+            "description": "Только записи с записанными результатами (EXISTS по детям)"
+          },
+          {
+            "name": "patient_alias",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Фильтр по псевдониму испытуемого (точное совпадение)",
+              "title": "Patient Alias"
+            },
+            "description": "Фильтр по псевдониму испытуемого (точное совпадение)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Подстрока имени файла или псевдонима",
+              "title": "Search"
+            },
+            "description": "Подстрока имени файла или псевдонима"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(created|name|readiness)$",
+              "description": "Порядок: created (новые сверху) | name | readiness (по готовности)",
+              "default": "created",
+              "title": "Sort"
+            },
+            "description": "Порядок: created (новые сверху) | name | readiness (по готовности)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Размер страницы",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Размер страницы"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Смещение (новые сверху)",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "Смещение (новые сверху)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingsReadinessPageOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/recordings/{recording_id}/signals": {
       "get": {
         "summary": "Сигналы записи: float32-огибающая уровня зума (ETag)",
@@ -4672,6 +4791,46 @@
                     "$ref": "#/components/schemas/DipolePointOut"
                   },
                   "title": "Response Get Analysis Points Api V1 Analyses  Analysis Id  Points Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/recordings/{recording_id}/readiness": {
+      "get": {
+        "summary": "Карточка готовности записи (раздел «БД»)",
+        "description": "Стадии готовности записи с полной историей прогонов и параметрами.\n\n404 — записи нет в зеркале ``recordings`` (удалена или загружена до 4.4:\nу таких строк результаты не привязаны к записи). Работа —\n``readiness.get_recording_readiness``; только чтение.",
+        "operationId": "get_recording_readiness_api_v1_recordings__recording_id__readiness_get",
+        "parameters": [
+          {
+            "name": "recording_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Recording Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingReadinessDetailOut"
                 }
               }
             }
@@ -23244,6 +23403,553 @@
         "title": "ProbeRecordOut",
         "description": "Контекст одной пробы: признаки полосы из последнего прогона автоотчёта."
       },
+      "ReadinessRunOut": {
+        "properties": {
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "params_sig": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params Sig"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadinessStageParamsOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "ReadinessRunOut",
+        "description": "Один прогон стадии в истории готовности (``runs`` карточки)."
+      },
+      "ReadinessStageOut": {
+        "properties": {
+          "stage": {
+            "type": "string",
+            "title": "Stage",
+            "description": "Ключ стадии: preprocess | dipoles | package | report | spectrogram"
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "ready | none"
+          },
+          "n_runs": {
+            "type": "integer",
+            "title": "N Runs",
+            "description": "Прогонов стадии записано в БД"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "params_sig": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params Sig",
+            "description": "Отпечаток прогона (package/report)"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadinessStageParamsOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Параметры последнего прогона; None — прогонов нет"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/ReadinessRunOut"
+            },
+            "type": "array",
+            "title": "Runs",
+            "description": "История прогонов (карточка); на странице пусто"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stage",
+          "state",
+          "n_runs"
+        ],
+        "title": "ReadinessStageOut",
+        "description": "Сводка стадии готовности записи (строка страницы «БД»).\n\n``state``: ``ready`` — есть хотя бы один записанный прогон, ``none`` —\nрезультатов в БД нет. Показываются **последний** прогон (``last_run_at``,\nпараметры) и ``n_runs`` — история не UPSERT (§8.4.2), повторный расчёт\nдобавляет прогон, а не перезаписывает прежний. ``runs`` — история прогонов\n(новые сверху): заполняется карточкой ``GET /recordings/{id}/readiness``,\nна странице — пусто."
+      },
+      "ReadinessStageParamsOut": {
+        "properties": {
+          "filter_band_hz": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter Band Hz",
+            "description": "Полоса фильтра [lo, hi] Гц; None — «без фильтра»"
+          },
+          "notch_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Hz",
+            "description": "Сетевой фильтр, Гц"
+          },
+          "notch_harmonics": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notch Harmonics",
+            "description": "Доп. гармоники notch"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference",
+            "description": "Референс (average и др.)"
+          },
+          "reference_channels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference Channels",
+            "description": "Каналы произвольного референса"
+          },
+          "clean_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clean Method",
+            "description": "Метод чистки: none | ica | ssp"
+          },
+          "ica_n_components": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ica N Components",
+            "description": "Компонент ICA (0 — auto)"
+          },
+          "interpolate_bads": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interpolate Bads",
+            "description": "Интерполяция bad-каналов"
+          },
+          "bad_channels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bad Channels",
+            "description": "Каналы «bad»"
+          },
+          "z_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Z Threshold",
+            "description": "Порог z-оценки детектора"
+          },
+          "pp_threshold_uv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pp Threshold Uv",
+            "description": "Порог амплитуды детектора, мкВ"
+          },
+          "flat_line_uv": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flat Line Uv",
+            "description": "Размах flat-line в окне, мкВ"
+          },
+          "flat_line_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flat Line Ms",
+            "description": "Окно flat-line, мс"
+          },
+          "epoch_length_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Length Ms",
+            "description": "Длина эпохи, мс"
+          },
+          "epoch_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Mode",
+            "description": "Режим нарезки: fixed | events"
+          },
+          "event_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id",
+            "description": "Событие режима events"
+          },
+          "epoch_pre_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Pre Ms",
+            "description": "Окно до события, мс"
+          },
+          "epoch_post_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Epoch Post Ms",
+            "description": "Окно после события, мс"
+          },
+          "n_epochs_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Epochs Total",
+            "description": "Эпох нарезано"
+          },
+          "n_epochs_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Epochs Used",
+            "description": "Эпох в расчёте"
+          },
+          "n_epochs_rejected": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Epochs Rejected",
+            "description": "Эпох отбраковано"
+          },
+          "grid_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grid Mm",
+            "description": "Шаг сетки поиска, мм"
+          },
+          "method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Method",
+            "description": "Метод: fast_grid | bem_fit"
+          },
+          "freq_band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Freq Band",
+            "description": "Полоса фильтра прогона, «lo-hi» Гц"
+          },
+          "n_dipoles": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Dipoles",
+            "description": "Строк dipoles (дипольный прогон) или точек пакета"
+          },
+          "bands": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AnalysisBandOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bands",
+            "description": "Полосы пакета (analysis_bands); None — пакет не считался"
+          },
+          "qc_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qc Status",
+            "description": "QC-статус прогона отчёта"
+          },
+          "good_data_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Good Data Percent",
+            "description": "Доля годных данных, %"
+          },
+          "html_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Html Path",
+            "description": "HTML отчёта относительно cache_dir"
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Channel",
+            "description": "Канал спектрограммы"
+          },
+          "window_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Ms",
+            "description": "Окно STFT, мс"
+          },
+          "overlap_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap Pct",
+            "description": "Перекрытие окон, %"
+          },
+          "fmax_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fmax Hz",
+            "description": "Верхняя частота, Гц"
+          }
+        },
+        "type": "object",
+        "title": "ReadinessStageParamsOut",
+        "description": "Курируемая сводка параметров прогона стадии (``GET …/readiness``).\n\n``sessions.params_json`` — свободный JSON разных dataclass'ов задач; наружу\nуходит **стабильный словарь** известных полей: чего в прогоне не было —\n``None`` («не измерено»), а не 0. Группы полей: чистка/фильтр → нарезка\nэпох → диполи/полосы → автоотчёт → спектрограмма."
+      },
       "RecordingEvent": {
         "properties": {
           "onset": {
@@ -23406,6 +24112,232 @@
         ],
         "title": "RecordingMeta",
         "description": "Паспорт загруженной для просмотра записи EDF (просмотр ≠ обработка)."
+      },
+      "RecordingReadinessDetailOut": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "patient_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patient Alias",
+            "description": "Псевдоним пациента (PHI в БД не хранится, §8.4.3)"
+          },
+          "n_channels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Channels"
+          },
+          "sfreq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sfreq"
+          },
+          "duration_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Sec"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "accessed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accessed At"
+          },
+          "readiness_ready": {
+            "type": "integer",
+            "title": "Readiness Ready",
+            "description": "Стадий с записанными результатами"
+          },
+          "readiness_total": {
+            "type": "integer",
+            "title": "Readiness Total",
+            "description": "Всего стадий (сетка STAGES сервиса)"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/ReadinessStageOut"
+            },
+            "type": "array",
+            "title": "Stages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "readiness_ready",
+          "readiness_total"
+        ],
+        "title": "RecordingReadinessDetailOut",
+        "description": "Карточка готовности (``GET /recordings/{id}/readiness``): в стадиях ``runs``."
+      },
+      "RecordingReadinessOut": {
+        "properties": {
+          "recording_id": {
+            "type": "string",
+            "title": "Recording Id"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "patient_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Patient Alias",
+            "description": "Псевдоним пациента (PHI в БД не хранится, §8.4.3)"
+          },
+          "n_channels": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N Channels"
+          },
+          "sfreq": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sfreq"
+          },
+          "duration_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Sec"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "accessed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accessed At"
+          },
+          "readiness_ready": {
+            "type": "integer",
+            "title": "Readiness Ready",
+            "description": "Стадий с записанными результатами"
+          },
+          "readiness_total": {
+            "type": "integer",
+            "title": "Readiness Total",
+            "description": "Всего стадий (сетка STAGES сервиса)"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/ReadinessStageOut"
+            },
+            "type": "array",
+            "title": "Stages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recording_id",
+          "readiness_ready",
+          "readiness_total"
+        ],
+        "title": "RecordingReadinessOut",
+        "description": "Строка страницы готовности (``GET /recordings/readiness``, раздел «БД»).\n\nПаспорт записи (зеркало ``recordings``) + степень готовности\n``readiness_ready`` из ``readiness_total`` записанных стадий и параметры\nпоследних прогонов каждой стадии."
       },
       "RecordingSignalsHeader": {
         "properties": {
@@ -23638,6 +24570,38 @@
         ],
         "title": "RecordingsPageOut",
         "description": "Страница записей: ``total`` честный (считается до limit/offset)."
+      },
+      "RecordingsReadinessPageOut": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Всего строк записей под фильтрами"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RecordingReadinessOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "limit",
+          "offset"
+        ],
+        "title": "RecordingsReadinessPageOut",
+        "description": "Страница готовности: ``total`` честный (считается до limit/offset)."
       },
       "ReportBandSummaryOut": {
         "properties": {

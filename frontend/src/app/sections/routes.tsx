@@ -21,6 +21,9 @@ import { DipolesSection } from './dipoles/DipolesSection'
 import { DipolesToolHeaderActions } from './dipoles/DipolesToolActions'
 import { EpochDipoleStrip } from './dipoles/EpochDipoleStrip'
 import { HomeSection } from './HomeSection'
+import { DbPanel } from './db/DbPanel'
+import { DbSection } from './db/DbSection'
+import { DbToolActions } from './db/DbToolActions'
 import { ServerStatusSection } from './ServerStatusSection'
 import { SettingsSection } from './SettingsSection'
 import { WikiSection } from './wiki/WikiSection'
@@ -67,6 +70,11 @@ type SectionModule = {
 
 const SECTION_MODULES: Record<SectionId, SectionModule> = {
   home: { Component: HomeSection },
+  db: {
+    Component: DbSection,
+    Panel: DbPanel,
+    ToolActions: DbToolActions,
+  },
   edf: {
     Component: EdfSection,
     Panel: EdfPanel,

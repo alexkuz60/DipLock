@@ -191,6 +191,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/recordings/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Готовность записей: результаты БД по стадиям (раздел «БД»)
+         * @description Страница записей с готовностью результатов БД и параметрами прогонов.
+         *
+         *     Раздел «БД» (визуальный контроль обработанных ЭЭГ-записей): по каждой
+         *     записи — степень готовности ``readiness_ready`` из ``readiness_total``
+         *     стадий (препроцессинг/эпохи, диполи, пакет полос, отчёт, спектрограмма) и
+         *     сводка параметров **последнего** прогона каждой стадии (чистка, нарезка,
+         *     полосы, сетка диполей и т.д.). Работа —
+         *     ``readiness.list_recordings_readiness``; шаблоны сборки —
+         *     ``docs/rules/results-db.md``. Только чтение: ничего не пересчитывает.
+         */
+        get: operations["list_recordings_readiness_api_v1_recordings_readiness_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/recordings/{recording_id}/signals": {
         parameters: {
             query?: never;
@@ -1993,6 +2021,30 @@ export interface paths {
          *     ``results_store.list_analysis_points``.
          */
         get: operations["get_analysis_points_api_v1_analyses__analysis_id__points_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/recordings/{recording_id}/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Карточка готовности записи (раздел «БД»)
+         * @description Стадии готовности записи с полной историей прогонов и параметрами.
+         *
+         *     404 — записи нет в зеркале ``recordings`` (удалена или загружена до 4.4:
+         *     у таких строк результаты не привязаны к записи). Работа —
+         *     ``readiness.get_recording_readiness``; только чтение.
+         */
+        get: operations["get_recording_readiness_api_v1_recordings__recording_id__readiness_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10904,6 +10956,239 @@ export interface components {
             measured: boolean;
         };
         /**
+         * ReadinessRunOut
+         * @description Один прогон стадии в истории готовности (``runs`` карточки).
+         */
+        ReadinessRunOut: {
+            /** Job Id */
+            job_id?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Params Sig */
+            params_sig?: string | null;
+            params?: components["schemas"]["ReadinessStageParamsOut"] | null;
+        };
+        /**
+         * ReadinessStageOut
+         * @description Сводка стадии готовности записи (строка страницы «БД»).
+         *
+         *     ``state``: ``ready`` — есть хотя бы один записанный прогон, ``none`` —
+         *     результатов в БД нет. Показываются **последний** прогон (``last_run_at``,
+         *     параметры) и ``n_runs`` — история не UPSERT (§8.4.2), повторный расчёт
+         *     добавляет прогон, а не перезаписывает прежний. ``runs`` — история прогонов
+         *     (новые сверху): заполняется карточкой ``GET /recordings/{id}/readiness``,
+         *     на странице — пусто.
+         */
+        ReadinessStageOut: {
+            /**
+             * Stage
+             * @description Ключ стадии: preprocess | dipoles | package | report | spectrogram
+             */
+            stage: string;
+            /**
+             * State
+             * @description ready | none
+             */
+            state: string;
+            /**
+             * N Runs
+             * @description Прогонов стадии записано в БД
+             */
+            n_runs: number;
+            /** Last Run At */
+            last_run_at?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /**
+             * Params Sig
+             * @description Отпечаток прогона (package/report)
+             */
+            params_sig?: string | null;
+            /** @description Параметры последнего прогона; None — прогонов нет */
+            params?: components["schemas"]["ReadinessStageParamsOut"] | null;
+            /**
+             * Runs
+             * @description История прогонов (карточка); на странице пусто
+             */
+            runs?: components["schemas"]["ReadinessRunOut"][];
+        };
+        /**
+         * ReadinessStageParamsOut
+         * @description Курируемая сводка параметров прогона стадии (``GET …/readiness``).
+         *
+         *     ``sessions.params_json`` — свободный JSON разных dataclass'ов задач; наружу
+         *     уходит **стабильный словарь** известных полей: чего в прогоне не было —
+         *     ``None`` («не измерено»), а не 0. Группы полей: чистка/фильтр → нарезка
+         *     эпох → диполи/полосы → автоотчёт → спектрограмма.
+         */
+        ReadinessStageParamsOut: {
+            /**
+             * Filter Band Hz
+             * @description Полоса фильтра [lo, hi] Гц; None — «без фильтра»
+             */
+            filter_band_hz?: number[] | null;
+            /**
+             * Notch Hz
+             * @description Сетевой фильтр, Гц
+             */
+            notch_hz?: number | null;
+            /**
+             * Notch Harmonics
+             * @description Доп. гармоники notch
+             */
+            notch_harmonics?: number | null;
+            /**
+             * Reference
+             * @description Референс (average и др.)
+             */
+            reference?: string | null;
+            /**
+             * Reference Channels
+             * @description Каналы произвольного референса
+             */
+            reference_channels?: string[] | null;
+            /**
+             * Clean Method
+             * @description Метод чистки: none | ica | ssp
+             */
+            clean_method?: string | null;
+            /**
+             * Ica N Components
+             * @description Компонент ICA (0 — auto)
+             */
+            ica_n_components?: number | null;
+            /**
+             * Interpolate Bads
+             * @description Интерполяция bad-каналов
+             */
+            interpolate_bads?: boolean | null;
+            /**
+             * Bad Channels
+             * @description Каналы «bad»
+             */
+            bad_channels?: string[] | null;
+            /**
+             * Z Threshold
+             * @description Порог z-оценки детектора
+             */
+            z_threshold?: number | null;
+            /**
+             * Pp Threshold Uv
+             * @description Порог амплитуды детектора, мкВ
+             */
+            pp_threshold_uv?: number | null;
+            /**
+             * Flat Line Uv
+             * @description Размах flat-line в окне, мкВ
+             */
+            flat_line_uv?: number | null;
+            /**
+             * Flat Line Ms
+             * @description Окно flat-line, мс
+             */
+            flat_line_ms?: number | null;
+            /**
+             * Epoch Length Ms
+             * @description Длина эпохи, мс
+             */
+            epoch_length_ms?: number | null;
+            /**
+             * Epoch Mode
+             * @description Режим нарезки: fixed | events
+             */
+            epoch_mode?: string | null;
+            /**
+             * Event Id
+             * @description Событие режима events
+             */
+            event_id?: string | null;
+            /**
+             * Epoch Pre Ms
+             * @description Окно до события, мс
+             */
+            epoch_pre_ms?: number | null;
+            /**
+             * Epoch Post Ms
+             * @description Окно после события, мс
+             */
+            epoch_post_ms?: number | null;
+            /**
+             * N Epochs Total
+             * @description Эпох нарезано
+             */
+            n_epochs_total?: number | null;
+            /**
+             * N Epochs Used
+             * @description Эпох в расчёте
+             */
+            n_epochs_used?: number | null;
+            /**
+             * N Epochs Rejected
+             * @description Эпох отбраковано
+             */
+            n_epochs_rejected?: number | null;
+            /**
+             * Grid Mm
+             * @description Шаг сетки поиска, мм
+             */
+            grid_mm?: number | null;
+            /**
+             * Method
+             * @description Метод: fast_grid | bem_fit
+             */
+            method?: string | null;
+            /**
+             * Freq Band
+             * @description Полоса фильтра прогона, «lo-hi» Гц
+             */
+            freq_band?: string | null;
+            /**
+             * N Dipoles
+             * @description Строк dipoles (дипольный прогон) или точек пакета
+             */
+            n_dipoles?: number | null;
+            /**
+             * Bands
+             * @description Полосы пакета (analysis_bands); None — пакет не считался
+             */
+            bands?: components["schemas"]["AnalysisBandOut"][] | null;
+            /**
+             * Qc Status
+             * @description QC-статус прогона отчёта
+             */
+            qc_status?: string | null;
+            /**
+             * Good Data Percent
+             * @description Доля годных данных, %
+             */
+            good_data_percent?: number | null;
+            /**
+             * Html Path
+             * @description HTML отчёта относительно cache_dir
+             */
+            html_path?: string | null;
+            /**
+             * Channel
+             * @description Канал спектрограммы
+             */
+            channel?: string | null;
+            /**
+             * Window Ms
+             * @description Окно STFT, мс
+             */
+            window_ms?: number | null;
+            /**
+             * Overlap Pct
+             * @description Перекрытие окон, %
+             */
+            overlap_pct?: number | null;
+            /**
+             * Fmax Hz
+             * @description Верхняя частота, Гц
+             */
+            fmax_hz?: number | null;
+        };
+        /**
          * RecordingEvent
          * @description Событие записи: аннотация EDF+ или маркер стим-канала (N2, шаг 2.7).
          *
@@ -11012,6 +11297,84 @@ export interface components {
             event_counts?: {
                 [key: string]: number;
             };
+        };
+        /**
+         * RecordingReadinessDetailOut
+         * @description Карточка готовности (``GET /recordings/{id}/readiness``): в стадиях ``runs``.
+         */
+        RecordingReadinessDetailOut: {
+            /** Recording Id */
+            recording_id: string;
+            /** Filename */
+            filename?: string | null;
+            /**
+             * Patient Alias
+             * @description Псевдоним пациента (PHI в БД не хранится, §8.4.3)
+             */
+            patient_alias?: string | null;
+            /** N Channels */
+            n_channels?: number | null;
+            /** Sfreq */
+            sfreq?: number | null;
+            /** Duration Sec */
+            duration_sec?: number | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Accessed At */
+            accessed_at?: string | null;
+            /**
+             * Readiness Ready
+             * @description Стадий с записанными результатами
+             */
+            readiness_ready: number;
+            /**
+             * Readiness Total
+             * @description Всего стадий (сетка STAGES сервиса)
+             */
+            readiness_total: number;
+            /** Stages */
+            stages?: components["schemas"]["ReadinessStageOut"][];
+        };
+        /**
+         * RecordingReadinessOut
+         * @description Строка страницы готовности (``GET /recordings/readiness``, раздел «БД»).
+         *
+         *     Паспорт записи (зеркало ``recordings``) + степень готовности
+         *     ``readiness_ready`` из ``readiness_total`` записанных стадий и параметры
+         *     последних прогонов каждой стадии.
+         */
+        RecordingReadinessOut: {
+            /** Recording Id */
+            recording_id: string;
+            /** Filename */
+            filename?: string | null;
+            /**
+             * Patient Alias
+             * @description Псевдоним пациента (PHI в БД не хранится, §8.4.3)
+             */
+            patient_alias?: string | null;
+            /** N Channels */
+            n_channels?: number | null;
+            /** Sfreq */
+            sfreq?: number | null;
+            /** Duration Sec */
+            duration_sec?: number | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Accessed At */
+            accessed_at?: string | null;
+            /**
+             * Readiness Ready
+             * @description Стадий с записанными результатами
+             */
+            readiness_ready: number;
+            /**
+             * Readiness Total
+             * @description Всего стадий (сетка STAGES сервиса)
+             */
+            readiness_total: number;
+            /** Stages */
+            stages?: components["schemas"]["ReadinessStageOut"][];
         };
         /**
          * RecordingSignalsHeader
@@ -11155,6 +11518,23 @@ export interface components {
             offset: number;
             /** Items */
             items?: components["schemas"]["RecordingSummaryOut"][];
+        };
+        /**
+         * RecordingsReadinessPageOut
+         * @description Страница готовности: ``total`` честный (считается до limit/offset).
+         */
+        RecordingsReadinessPageOut: {
+            /**
+             * Total
+             * @description Всего строк записей под фильтрами
+             */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Items */
+            items?: components["schemas"]["RecordingReadinessOut"][];
         };
         /**
          * ReportBandSummaryOut
@@ -12723,6 +13103,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DipoleOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recordings_readiness_api_v1_recordings_readiness_get: {
+        parameters: {
+            query?: {
+                /** @description Только записи с записанными результатами (EXISTS по детям) */
+                only_processed?: boolean;
+                /** @description Фильтр по псевдониму испытуемого (точное совпадение) */
+                patient_alias?: string | null;
+                /** @description Подстрока имени файла или псевдонима */
+                search?: string | null;
+                /** @description Порядок: created (новые сверху) | name | readiness (по готовности) */
+                sort?: string;
+                /** @description Размер страницы */
+                limit?: number;
+                /** @description Смещение (новые сверху) */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingsReadinessPageOut"];
                 };
             };
             /** @description Validation Error */
@@ -15327,6 +15749,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DipolePointOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_recording_readiness_api_v1_recordings__recording_id__readiness_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recording_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordingReadinessDetailOut"];
                 };
             };
             /** @description Validation Error */

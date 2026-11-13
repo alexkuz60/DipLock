@@ -43,7 +43,9 @@ import type {
   MetaResponse,
   PreprocessResult,
   RecordingMeta,
+  RecordingReadinessDetail,
   RecordingsPage,
+  RecordingsReadinessPage,
   ReportHtmlOut,
   ReportResult,
   ServerRestart,
@@ -380,6 +382,47 @@ export const api = {
       { signal },
     )
   },
+
+  /**
+   * Страница готовности записей (`GET /recordings/readiness`, раздел «БД»):
+   * стадии готовности (препроцессинг/эпохи, диполи, пакет полос, отчёт,
+   * спектрограмма) и параметры последних прогонов — визуальный контроль
+   * обработанных ЭЭГ-записей без пересчёта.
+   */
+  recordingsReadiness: (
+    query?: {
+      only_processed?: boolean
+      patient_alias?: string
+      search?: string
+      sort?: 'created' | 'name' | 'readiness'
+      limit?: number
+      offset?: number
+    },
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams()
+    if (query?.only_processed) params.set('only_processed', 'true')
+    if (query?.patient_alias) params.set('patient_alias', query.patient_alias)
+    if (query?.search) params.set('search', query.search)
+    if (query?.sort && query.sort !== 'created') params.set('sort', query.sort)
+    if (query?.limit) params.set('limit', String(query.limit))
+    if (query?.offset) params.set('offset', String(query.offset))
+    const search = params.toString()
+    return request<RecordingsReadinessPage>(
+      `${API_PREFIX}/recordings/readiness${search ? `?${search}` : ''}`,
+      { signal },
+    )
+  },
+
+  /**
+   * Карточка готовности записи (`GET /recordings/{id}/readiness`): стадии с
+   * полной историей прогонов и параметрами каждого (новые сверху).
+   */
+  recordingReadiness: (recordingId: string, signal?: AbortSignal) =>
+    request<RecordingReadinessDetail>(
+      `${API_PREFIX}/recordings/${recordingId}/readiness`,
+      { signal },
+    ),
 
   /**
    * Прогоны пакета диполей (`GET /analyses`, read-API 4.7, окончание):

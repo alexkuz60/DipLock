@@ -104,6 +104,54 @@
 **DEPRECATED** (OpenAPI `deprecated: true`): его читают только внутренние
 связки (`dipoles.csv`, материалы Консилиума) и старые клиенты.
 
+## Готовность записей (раздел «БД») и шаблоны сборки
+
+Визуальный контроль обработанных ЭЭГ-записей (раздел «БД», §3.10
+`docs/ui/db.md`) читает **готовность записанных результатов** по стадиям:
+`preprocess` (чистка + нарезка эпох), `dipoles` (быстрый расчёт/уточнение),
+`package` (пакет поддиапазонов), `report` (автоотчёт), `spectrogram`.
+Роуты — №88–89 (`docs/rules/api-jobs.md`), работа — `services/readiness.py`:
+`GET /recordings/readiness` (страница, сводка **последнего** прогона каждой
+стадии + `n_runs`) и `GET /recordings/{id}/readiness` (карточка с историей
+прогонов). Инварианты те же: «история, не UPSERT» (§8.4.2 — показываем
+последний прогон и число прогонов, а не «единственный»), `None` — «не
+измерено»; legacy-сессии без `recording_id` в готовность не входят.
+
+**Шаблоны сборки/фильтрации** (реиспользуемые запросы; реализация —
+`readiness.py`, все — групповые по странице `recording_id`, не N+1):
+
+* **A. Счётчики детей по видам** (сколько прогонов записано):
+  ```sql
+  SELECT recording_id, kind, COUNT(*) AS n_runs, MAX(created_at) AS last_run_at
+  FROM sessions WHERE recording_id IN (:ids) GROUP BY recording_id, kind;
+  -- и аналогично analyses / report_runs (без kind)
+  ```
+* **B. Последний прогон на (запись × стадия) с параметрами**: выборка строк
+  `ORDER BY created_at DESC, id DESC` по `:ids` + дедуп по `(recording_id, stage)`
+  в коде — оконные функции не нужны (прогонов на запись мало), а
+  `params_json` разных задач схлопывается в стабильный словарь
+  (`ReadinessStageParamsOut`; у `dipole_refine` параметры скана лежат в
+  `params_json.scan`).
+* **C. Дети последнего прогона** (одним запросом на вид):
+  `SELECT session_id, COUNT(*), SUM(has_artifact) FROM epochs WHERE session_id IN (:ids) GROUP BY session_id;`
+  `SELECT analysis_id, COUNT(*) FROM dipole_points WHERE analysis_id IN (:ids) GROUP BY analysis_id;`
+  полосы пакета — `analysis_bands WHERE analysis_id IN (:ids)` (у `report_runs`
+  полосы берутся через `report_runs.analyses_id`).
+* **D. Фильтр «только обработанные»** — `EXISTS` по трём детям:
+  ```sql
+  WHERE EXISTS (SELECT 1 FROM sessions s WHERE s.recording_id = recordings.recording_id)
+     OR EXISTS (SELECT 1 FROM analyses a WHERE a.recording_id = recordings.recording_id)
+     OR EXISTS (SELECT 1 FROM report_runs r WHERE r.recording_id = recordings.recording_id)
+  ```
+* **E. Фильтры паспорта**: `patient_alias = :alias` (точное совпадение
+  испытуемого) и `filename ILIKE :search OR patient_alias ILIKE :search`
+  (подстрока; в SQLite `ILIKE` → `LOWER LIKE LOWER`).
+* **F. Сортировка и пагинация**: `sort=created|name|readiness` — ключ
+  `readiness` производный (готовность собирается из детей), поэтому набор
+  сортируется в памяти и режется `offset:limit` (``_sort_items``; устойчивая
+  двойная сортировка: по дате, затем по готовности). `total` — размер
+  отсортированного набора до пагинации.
+
 ## Групповой анализ: персист прогонов (остаток 4.7, 03.10.2026)
 
 `services/group_analysis.py` — единственный писатель двух таблиц (роуты

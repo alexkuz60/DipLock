@@ -272,6 +272,24 @@ export type RecordingSummary = Schemas['RecordingSummaryOut']
 /** Страница списка записей (`GET /recordings`) */
 export type RecordingsPage = Schemas['RecordingsPageOut']
 
+/** Сводка стадии готовности записи (`GET /recordings/readiness`, раздел «БД») */
+export type ReadinessStage = Schemas['ReadinessStageOut']
+
+/** Прогон стадии в истории карточки готовности */
+export type ReadinessRun = Schemas['ReadinessRunOut']
+
+/** Параметры прогона стадии готовности (курируемый словарь) */
+export type ReadinessStageParams = Schemas['ReadinessStageParamsOut']
+
+/** Строка страницы готовности записей (раздел «БД») */
+export type RecordingReadiness = Schemas['RecordingReadinessOut']
+
+/** Карточка готовности записи: стадии с историей прогонов */
+export type RecordingReadinessDetail = Schemas['RecordingReadinessDetailOut']
+
+/** Страница готовности записей (`GET /recordings/readiness`) */
+export type RecordingsReadinessPage = Schemas['RecordingsReadinessPageOut']
+
 /** Строка списка прогонов пакета диполей (`GET /analyses`) */
 export type AnalysisSummary = Schemas['AnalysisSummaryOut']
 

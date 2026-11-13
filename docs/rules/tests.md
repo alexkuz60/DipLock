@@ -1912,3 +1912,42 @@ Vitest: `ClusterFeaturesTable.test.tsx` (3), `RuleDraftForm.test.tsx` (3),
 `clusterFeatures.test.ts` (+2 `clusterFeatureCells`), `BatchPanel.test.tsx`
 (таблица профилей; GOF-инвариант сужен до `band-comparison`).
 Итог: pytest **1218**, Vitest **1405** (129 файлов).
+
+**Раздел «БД»: готовность записей и параметры прогонов (13.11.2026):**
+pytest +6 (`test_readiness.py`): сводка стадий и «k из N» (история не UPSERT —
+два прогона нарезки → `n_runs=2`, параметры от последнего), честные `None`
+«не измерено», фильтры `only_processed`/`search`/`patient_alias`, `total` до
+пагинации, карточка `/recordings/{id}/readiness` с историей прогонов + 404,
+**ловушка порядка маршрутов** (`/recordings/readiness` не проглатывается
+`/recordings/{recording_id}`), legacy-сессии и сироты — вне таблицы. Vitest
++27: `dbTable.test.ts` (сводки параметров, «—», сортировка/поиск/группировка),
+`dbActions.test.ts` (выборка → пара A/B и группа N>2, дедуп),
+`DbSection.test.tsx` (таблица/пилюли/группы испытуемых, `only_processed` уходит
+на сервер и ни одного POST — раздел не запускает расчёты, раскрытие строки →
+карточка с историей, мультивыбор, пустая выдача и ошибка с кнопкой повтора),
+`DbPanel.test.tsx` (фильтры пишут состояние без запросов); обновлены
+`registry.test.ts` (15 разделов, «БД» без хоткея) и `AppShell.test.tsx` («БД»
+в рейле сразу после «Главная»). Итог: pytest **1204**
+(`-m 'not integration'`), Vitest **1426** (133 файла).
+
+**Раздел «БД», срез 2: серверная пагинация, экспорт CSV, открытие в EDF
+(13.11.2026 (2)):** pytest +1 (`test_readiness.py::test_sort_keys_and_paging_over_sorted_set`:
+сортировки `name`/`readiness`, страницы режут отсортированный набор, `total`
+честный, 422 на неизвестный ключ; сид — уникальные имена `ready-*.edf` для
+изоляции в общей tmp-БД). Vitest: `dbExport.test.ts` (+3: шапка 30 колонок,
+сводки стадий, экранирование RFC 4180), `DbSection.test.tsx` (+4: поиск и
+сортировка уходят на сервер, «Вперёд» переносит смещение, экспорт выборки через
+`downloadText`, «Открыть» вызывает `openRecordingById`; **ловушка мока**:
+`fetchMock` захватывается **после** `vi.stubGlobal` — иначе ссылка на стаб
+`beforeEach`), `dbTable.test.ts` (клиентские `filterRows`/`sortRows` удалены —
+серверные шаблоны E–F), `DbPanel.test.tsx` (размер страницы, сброс смещения).
+Итог: pytest **1205** (`-m 'not integration'`), Vitest **1431** (134 файла).
+
+**Раздел «БД», срез 3: JSON и сводный HTML-отчёт по выборке (13.11.2026 (3)):**
+клиентские выгрузки `dbExport.ts` без запросов. Vitest +4:
+`dbExport.test.ts` (+3: JSON — `schema_version` и строки контракта без потерь;
+HTML-отчёт — шапка/группы испытуемых/готовность, экранирование `<script>` в
+имени файла, «Параметры прогона не записаны» для пустой стадии),
+`DbSection.test.tsx` (+1: кнопки «Экспорт JSON»/«Отчёт HTML» — имя, MIME и
+содержимое через мок `downloadText`). Итог: pytest **1205** (без изменений),
+Vitest **1435** (134 файла).

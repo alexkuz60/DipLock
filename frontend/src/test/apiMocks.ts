@@ -28,7 +28,9 @@ import {
   reportHtmlOutFixture,
   reportResultFixture,
   bundleResultFixture,
+  recordingReadinessDetailFixture,
   recordingsFixture,
+  recordingsReadinessFixture,
   spectrogramResultFixture,
   spectrumResultFixture,
 } from './fixtures'
@@ -59,6 +61,8 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  RecordingReadinessDetail,
+  RecordingsReadinessPage,
   RecordingSummary,
   ReportHtmlOut,
   ReportResult,
@@ -130,6 +134,12 @@ export type MockApiOptions = {
   meta?: MetaResponse
   /** Паспорт записи для GET /recordings/{id} */
   recording?: RecordingMeta
+  /** Страница готовности записей (GET /recordings/readiness, раздел «БД») */
+  recordingsReadiness?: RecordingsReadinessPage
+  /** Смоделировать недоступность БД готовности (500 на /recordings/readiness) */
+  recordingsReadinessFails?: boolean
+  /** Карточка готовности записи (GET /recordings/{id}/readiness) */
+  recordingReadiness?: RecordingReadinessDetail
   /** Смоделировать недоступность сервера (500 на /init-status) */
   initStatusFails?: boolean
   /** Локальный ресурс для GET /resource (по умолчанию — рабочий GPU) */
@@ -492,6 +502,17 @@ export function mockApiFetch(options: MockApiOptions = {}) {
       }
       const items = options.groupRuns ?? []
       return jsonResponse({ total: items.length, items })
+    }
+    if (url.includes('/recordings/readiness')) {
+      // Страница готовности (раздел «БД»): раньше карточки и общей ветки `/recordings/`
+      if (options.recordingsReadinessFails) {
+        return jsonResponse({ detail: 'БД недоступна' }, 500)
+      }
+      return jsonResponse(options.recordingsReadiness ?? recordingsReadinessFixture)
+    }
+    if (url.includes('/readiness')) {
+      // Карточка готовности записи: `/recordings/{id}/readiness`
+      return jsonResponse(options.recordingReadiness ?? recordingReadinessDetailFixture())
     }
     if (method === 'GET' && /\/recordings(\?|$)/.test(url)) {
       // Список записей (`GET /recordings`) — кандидаты пары/группы (4.7-окончание)

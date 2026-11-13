@@ -2243,6 +2243,159 @@ class AnalysesPageOut(BaseModel):
     items: list[AnalysisSummaryOut] = Field(default_factory=list)
 
 
+# ---------- готовность записей (раздел «БД»): стадии и параметры прогонов ----------
+
+
+class ReadinessStageParamsOut(BaseModel):
+    """Курируемая сводка параметров прогона стадии (``GET …/readiness``).
+
+    ``sessions.params_json`` — свободный JSON разных dataclass'ов задач; наружу
+    уходит **стабильный словарь** известных полей: чего в прогоне не было —
+    ``None`` («не измерено»), а не 0. Группы полей: чистка/фильтр → нарезка
+    эпох → диполи/полосы → автоотчёт → спектрограмма.
+    """
+
+    # — чистка и фильтр (препроцессинг) —
+    filter_band_hz: list[float] | None = Field(
+        default=None, description="Полоса фильтра [lo, hi] Гц; None — «без фильтра»",
+    )
+    notch_hz: float | None = Field(default=None, description="Сетевой фильтр, Гц")
+    notch_harmonics: int | None = Field(default=None, description="Доп. гармоники notch")
+    reference: str | None = Field(default=None, description="Референс (average и др.)")
+    reference_channels: list[str] | None = Field(
+        default=None, description="Каналы произвольного референса",
+    )
+    clean_method: str | None = Field(
+        default=None, description="Метод чистки: none | ica | ssp",
+    )
+    ica_n_components: int | None = Field(
+        default=None, description="Компонент ICA (0 — auto)",
+    )
+    interpolate_bads: bool | None = Field(
+        default=None, description="Интерполяция bad-каналов",
+    )
+    bad_channels: list[str] | None = Field(default=None, description="Каналы «bad»")
+    z_threshold: float | None = Field(default=None, description="Порог z-оценки детектора")
+    pp_threshold_uv: float | None = Field(
+        default=None, description="Порог амплитуды детектора, мкВ",
+    )
+    flat_line_uv: float | None = Field(
+        default=None, description="Размах flat-line в окне, мкВ",
+    )
+    flat_line_ms: float | None = Field(default=None, description="Окно flat-line, мс")
+    # — нарезка эпох —
+    epoch_length_ms: float | None = Field(default=None, description="Длина эпохи, мс")
+    epoch_mode: str | None = Field(
+        default=None, description="Режим нарезки: fixed | events",
+    )
+    event_id: str | None = Field(default=None, description="Событие режима events")
+    epoch_pre_ms: float | None = Field(default=None, description="Окно до события, мс")
+    epoch_post_ms: float | None = Field(default=None, description="Окно после события, мс")
+    n_epochs_total: int | None = Field(default=None, description="Эпох нарезано")
+    n_epochs_used: int | None = Field(default=None, description="Эпох в расчёте")
+    n_epochs_rejected: int | None = Field(default=None, description="Эпох отбраковано")
+    # — диполи и полосы —
+    grid_mm: float | None = Field(default=None, description="Шаг сетки поиска, мм")
+    method: str | None = Field(default=None, description="Метод: fast_grid | bem_fit")
+    freq_band: str | None = Field(
+        default=None, description="Полоса фильтра прогона, «lo-hi» Гц",
+    )
+    n_dipoles: int | None = Field(
+        default=None, description="Строк dipoles (дипольный прогон) или точек пакета",
+    )
+    bands: list[AnalysisBandOut] | None = Field(
+        default=None, description="Полосы пакета (analysis_bands); None — пакет не считался",
+    )
+    # — автоотчёт —
+    qc_status: str | None = Field(default=None, description="QC-статус прогона отчёта")
+    good_data_percent: float | None = Field(
+        default=None, description="Доля годных данных, %",
+    )
+    html_path: str | None = Field(
+        default=None, description="HTML отчёта относительно cache_dir",
+    )
+    # — спектрограмма —
+    channel: str | None = Field(default=None, description="Канал спектрограммы")
+    window_ms: float | None = Field(default=None, description="Окно STFT, мс")
+    overlap_pct: float | None = Field(default=None, description="Перекрытие окон, %")
+    fmax_hz: float | None = Field(default=None, description="Верхняя частота, Гц")
+
+
+class ReadinessRunOut(BaseModel):
+    """Один прогон стадии в истории готовности (``runs`` карточки)."""
+
+    job_id: str | None = None
+    created_at: datetime | None = None
+    params_sig: str | None = None
+    params: ReadinessStageParamsOut | None = None
+
+
+class ReadinessStageOut(BaseModel):
+    """Сводка стадии готовности записи (строка страницы «БД»).
+
+    ``state``: ``ready`` — есть хотя бы один записанный прогон, ``none`` —
+    результатов в БД нет. Показываются **последний** прогон (``last_run_at``,
+    параметры) и ``n_runs`` — история не UPSERT (§8.4.2), повторный расчёт
+    добавляет прогон, а не перезаписывает прежний. ``runs`` — история прогонов
+    (новые сверху): заполняется карточкой ``GET /recordings/{id}/readiness``,
+    на странице — пусто.
+    """
+
+    stage: str = Field(
+        description="Ключ стадии: preprocess | dipoles | package | report | spectrogram",
+    )
+    state: str = Field(description="ready | none")
+    n_runs: int = Field(description="Прогонов стадии записано в БД")
+    last_run_at: datetime | None = None
+    job_id: str | None = None
+    params_sig: str | None = Field(
+        default=None, description="Отпечаток прогона (package/report)",
+    )
+    params: ReadinessStageParamsOut | None = Field(
+        default=None, description="Параметры последнего прогона; None — прогонов нет",
+    )
+    runs: list[ReadinessRunOut] = Field(
+        default_factory=list,
+        description="История прогонов (карточка); на странице пусто",
+    )
+
+
+class RecordingReadinessOut(BaseModel):
+    """Строка страницы готовности (``GET /recordings/readiness``, раздел «БД»).
+
+    Паспорт записи (зеркало ``recordings``) + степень готовности
+    ``readiness_ready`` из ``readiness_total`` записанных стадий и параметры
+    последних прогонов каждой стадии.
+    """
+
+    recording_id: str
+    filename: str | None = None
+    patient_alias: str | None = Field(
+        default=None, description="Псевдоним пациента (PHI в БД не хранится, §8.4.3)",
+    )
+    n_channels: int | None = None
+    sfreq: float | None = None
+    duration_sec: float | None = None
+    created_at: datetime | None = None
+    accessed_at: datetime | None = None
+    readiness_ready: int = Field(description="Стадий с записанными результатами")
+    readiness_total: int = Field(description="Всего стадий (сетка STAGES сервиса)")
+    stages: list[ReadinessStageOut] = Field(default_factory=list)
+
+
+class RecordingReadinessDetailOut(RecordingReadinessOut):
+    """Карточка готовности (``GET /recordings/{id}/readiness``): в стадиях ``runs``."""
+
+
+class RecordingsReadinessPageOut(BaseModel):
+    """Страница готовности: ``total`` честный (считается до limit/offset)."""
+
+    total: int = Field(description="Всего строк записей под фильтрами")
+    limit: int
+    offset: int
+    items: list[RecordingReadinessOut] = Field(default_factory=list)
+
+
 # --- Прогон по набору поддиапазонов (С1) и кластеры (С2) ---
 
 

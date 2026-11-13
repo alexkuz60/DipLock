@@ -33,7 +33,12 @@ import type {
   PreprocessResult,
   PreprocessStage,
   RecordingMeta,
+  RecordingReadiness,
+  RecordingReadinessDetail,
   RecordingSummary,
+  RecordingsReadinessPage,
+  ReadinessStage,
+  ReadinessStageParams,
   ReportBandSummary,
   ReportHtmlOut,
   ReportResult,
@@ -1011,6 +1016,114 @@ export const recordingsFixture: { total: number; items: RecordingSummary[] } = {
       n_sessions: 0, n_analyses: 0, n_report_runs: 0,
     },
   ],
+}
+
+/** Параметры прогона стадии готовности (раздел «БД») — полный словарь контракта. */
+export function readinessStageParamsFixture(
+  overrides: Partial<ReadinessStageParams> = {},
+): ReadinessStageParams {
+  return {
+    filter_band_hz: [0.5, 45], notch_hz: 50, notch_harmonics: 0,
+    reference: 'average', reference_channels: null, clean_method: 'ica',
+    ica_n_components: 0, interpolate_bads: true, bad_channels: ['T7'],
+    z_threshold: 5, pp_threshold_uv: 100, flat_line_uv: 1, flat_line_ms: 200,
+    epoch_length_ms: 2000, epoch_mode: 'fixed', event_id: null,
+    epoch_pre_ms: 200, epoch_post_ms: 800,
+    n_epochs_total: 12, n_epochs_used: 10, n_epochs_rejected: 2,
+    grid_mm: 7, method: 'fast_grid', freq_band: '0.5-45', n_dipoles: 10,
+    bands: null, qc_status: null, good_data_percent: null, html_path: null,
+    channel: null, window_ms: null, overlap_pct: null, fmax_hz: null,
+    ...overrides,
+  }
+}
+
+/** Сводка стадии готовности: готова (с параметрами) или пустая. */
+export function readinessStageFixture(
+  stage: ReadinessStage['stage'],
+  overrides: Partial<ReadinessStage> = {},
+): ReadinessStage {
+  return {
+    stage,
+    state: 'ready',
+    n_runs: 1,
+    last_run_at: '2026-10-01T10:05:00',
+    job_id: `job-${stage}`,
+    params_sig: null,
+    params: readinessStageParamsFixture(),
+    runs: [],
+    ...overrides,
+  }
+}
+
+/** Строки страницы готовности (`GET /recordings/readiness`) для моков/тестов. */
+export const recordingsReadinessFixture: RecordingsReadinessPage = {
+  total: 3,
+  limit: 50,
+  offset: 0,
+  items: [
+    {
+      recording_id: 'rec-rest', filename: 'rest.edf', patient_alias: 'Patient-aaa111',
+      n_channels: 10, sfreq: 250, duration_sec: 120,
+      created_at: '2026-10-01T10:00:00', accessed_at: '2026-10-01T10:05:00',
+      readiness_ready: 4, readiness_total: 5,
+      stages: [
+        readinessStageFixture('preprocess'),
+        readinessStageFixture('dipoles'),
+        readinessStageFixture('package'),
+        readinessStageFixture('report'),
+        readinessStageFixture('spectrogram', {
+          state: 'none', n_runs: 0, last_run_at: null, job_id: null, params: null,
+        }),
+      ],
+    },
+    {
+      recording_id: 'rec-task', filename: 'task.edf', patient_alias: 'Patient-aaa111',
+      n_channels: 10, sfreq: 250, duration_sec: 120,
+      created_at: '2026-10-01T11:00:00', accessed_at: '2026-10-01T11:00:00',
+      readiness_ready: 1, readiness_total: 5,
+      stages: [
+        readinessStageFixture('preprocess'),
+        readinessStageFixture('dipoles', {
+          state: 'none', n_runs: 0, last_run_at: null, job_id: null, params: null,
+        }),
+        readinessStageFixture('package', {
+          state: 'none', n_runs: 0, last_run_at: null, job_id: null, params: null,
+        }),
+        readinessStageFixture('report', {
+          state: 'none', n_runs: 0, last_run_at: null, job_id: null, params: null,
+        }),
+        readinessStageFixture('spectrogram', {
+          state: 'none', n_runs: 0, last_run_at: null, job_id: null, params: null,
+        }),
+      ],
+    },
+    {
+      recording_id: 'rec-empty', filename: 'empty.edf', patient_alias: null,
+      n_channels: 10, sfreq: 250, duration_sec: 60,
+      created_at: '2026-10-01T12:00:00', accessed_at: '2026-10-01T12:00:00',
+      readiness_ready: 0, readiness_total: 5,
+      stages: (['preprocess', 'dipoles', 'package', 'report', 'spectrogram'] as const).map(
+        (stage) => readinessStageFixture(stage, {
+          state: 'none', n_runs: 0, last_run_at: null, job_id: null, params: null,
+        }),
+      ),
+    },
+  ],
+}
+
+/** Карточка готовности (`GET /recordings/{id}/readiness`): стадии с историей. */
+export function recordingReadinessDetailFixture(): RecordingReadinessDetail {
+  const row = (recordingsReadinessFixture.items ?? [])[0] as RecordingReadiness
+  return {
+    ...row,
+    stages: (row.stages ?? []).map((stage) => ({
+      ...stage,
+      runs:
+        stage.n_runs > 0 && stage.params
+          ? [{ job_id: stage.job_id, created_at: stage.last_run_at, params_sig: null, params: stage.params }]
+          : [],
+    })),
+  }
 }
 
 /** Результат сравнения двух записей (B9): дельта по α + значимый кластер. */
