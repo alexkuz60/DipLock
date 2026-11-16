@@ -272,6 +272,23 @@ def _detect_pops(
     return zones
 
 
+def _single_channel_raw(raw: mne.io.BaseRaw, ch: str) -> mne.io.RawArray:
+    """Одноканальный Raw без копирования всего массива.
+
+    ``raw.copy().pick([ch])`` дублировал **все** каналы × все отсчёты, чтобы тут
+    же выбросить всё, кроме одного: на 64 каналах × 30 мин это ~460 МБ на канал
+    (≈29 ГБ аллокаций за прогон). ``RawArray`` собирается из одного столбца, а
+    ``annotations`` переносятся — ``annotate_muscle_zscore`` читает их через
+    ``reject_by_annotation="NaN"``.
+    """
+    index = raw.ch_names.index(ch)
+    single = mne.io.RawArray(
+        raw.get_data(picks=[index]), mne.pick_info(raw.info, [index]), verbose=False,
+    )
+    single.set_annotations(raw.annotations.copy())
+    return single
+
+
 def _detect_muscle(raw: mne.io.BaseRaw, settings: Settings) -> list[dict[str, Any]]:
     """Мышечный (ЭМГ): ``mne.preprocessing.annotate_muscle_zscore`` (MNE-only).
 
@@ -289,7 +306,7 @@ def _detect_muscle(raw: mne.io.BaseRaw, settings: Settings) -> list[dict[str, An
     for ch in raw.ch_names:
         try:
             result = mne.preprocessing.annotate_muscle_zscore(
-                raw.copy().pick([ch]), threshold=4.0, min_length_good=min_length,
+                _single_channel_raw(raw, ch), threshold=4.0, min_length_good=min_length,
                 filter_freq=band, verbose=False,
             )
         except Exception as exc:  # опциональный шаг: причина в лог, поиск не рвётся

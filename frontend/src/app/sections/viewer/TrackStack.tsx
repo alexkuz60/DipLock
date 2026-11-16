@@ -57,12 +57,18 @@ import {
   gridEpochLength,
   visibleZones,
   zonesForChannel,
+  type ArtifactZone,
   type EdfViewerLayers,
+  type EpochCell,
   type EventMark,
 } from '@/shared/lib/viewerLayers'
 import { TIME_LEVELS, useEdfParams, useEdfParamsValue, type ArtifactKind } from '@/shared/state/edfParams'
 import { channelDisplayName } from '@/shared/lib/channelNaming'
-import { channelQcStatus, channelQcTooltip } from '@/shared/lib/channelQc'
+import {
+  channelQcStatus,
+  channelQcTooltip,
+  type ChannelQcStatus,
+} from '@/shared/lib/channelQc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useEegParams } from '@/shared/state/eegParams'
 import { StatusPill } from '@/shared/ui/StatusPill'
@@ -79,6 +85,7 @@ import { ExportActions } from './ExportActions'
 import { HEART_RATE_TRACK_NAME, HeartRateTrack } from './HeartRateTrack'
 import { EPOCH_RULER_HEIGHT, EpochRuler, TimeRuler } from './TrackRulers'
 import { TrackRow } from './TrackRow'
+import { createWindowStore } from '@/shared/lib/windowStore'
 
 export type TrackStackProps = {
   signal: SignalFrame
@@ -98,6 +105,13 @@ export type TrackStackProps = {
 }
 
 /** Стек треков с общей осью времени: зум ×1…×16, панорамирование, курсор. */
+/** QC-точка канала: статус и подсказка (стабильный объект для `memo` на `TrackRow`) */
+type TrackQc = { status: ChannelQcStatus; tooltip: string }
+
+/** Пустые слои — модульные константы: литерал `[]` ломал `memo` на каждой строке */
+const NO_ZONES: ArtifactZone[] = []
+const NO_EPOCH_FRAMES: EpochCell[] = []
+
 export function TrackStack({
   signal,
   layers: layersProp,
@@ -325,6 +339,17 @@ export function TrackStack({
     [signal.durationSec, factor, centerSec],
   )
 
+  /**
+   * Окно для строк — через стор, а не проп: панорама меняет окно каждый кадр
+   * rAF, и проп `window` не давал `memo` на `TrackRow` пропустить ни одной
+   * строки (`docs/rules/frontend-perf.md`). Строки подписаны сами.
+   */
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const windowStore = useMemo(() => createWindowStore(window), [])
+  useEffect(() => {
+    windowStore.set(window)
+  }, [windowStore, window])
+
   // Линия уровня привязана и к окну (п. 3 среза): панорама/зум/листание сдвигают
   // шкалу, старый уровень перестаёт читаться — сбрасываем при любой смене окна
   useEffect(() => {
@@ -528,15 +553,15 @@ export function TrackStack({
    * уже выбран. Обработку клик не запускает: спектрограмма стартует только по
    * кнопке в шапке раздела «ЭЭГ».
    */
-  function handleLabelClick(name: string) {
+  const handleLabelClick = useCallback((name: string) => {
     useEegParams.getState().setChannel(name)
     navigate('/eeg')
-  }
+  }, [navigate])
 
   /** Клик по стрелке у названия: развернуть трек на фикс ×8 / свернуть */
-  function handleToggleExpand(name: string) {
+  const handleToggleExpand = useCallback((name: string) => {
     setExpandedChannel((current) => (current === name ? null : name))
-  }
+  }, [])
 
   /**
    * Клик по области треков ставит курсор в точку клика (срез 2.9): линия больше
@@ -648,6 +673,42 @@ export function TrackStack({
   const visible = signal.channels.filter(
     (name) => params.visibleChannels.includes(name) && signal.max[name],
   )
+  const visibleKey = visible.join(',')
+
+  /**
+   * QC-точка и рамки эпох по каналам — мемоизируются: новый объект/массив на
+   * каждый рендер ломал `memo` на `TrackRow` (проверка 16.11.2026).
+   */
+  const qcByChannel = useMemo(() => {
+    const result: Record<string, TrackQc | null> = {}
+    for (const name of visible) {
+      const qc = channelQc?.[name]
+      result[name] = qc
+        ? {
+            status: channelQcStatus(
+              qc.artifact_share,
+              qcThresholds.warn,
+              qcThresholds.bad,
+              qc.snr_db,
+              qc.dead,
+              qcThresholds.snrWarn,
+              qcThresholds.snrBad,
+            ),
+            tooltip: channelQcTooltip(channelDisplayName(name, params.channelNaming), qc),
+          }
+        : null
+    }
+    return result
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelQc, qcThresholds, params.channelNaming, visibleKey])
+
+  const epochFramesByChannel = useMemo(() => {
+    const result: Record<string, EpochCell[]> = {}
+    if (!params.droppedEpochsHatched) return result
+    for (const name of visible) result[name] = epochFramesForChannel(epochs, name)
+    return result
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [epochs, params.droppedEpochsHatched, visibleKey])
 
   /**
    * Трек ЧСС (пульс): ряд стадии `artifacts` — снизу стека, последним (общая
@@ -770,7 +831,7 @@ export function TrackStack({
                 // ключ состояния и data-testid — каноническое имя
                 displayName={channelDisplayName(name, params.channelNaming)}
                 frame={signal}
-                window={window}
+                windowStore={windowStore}
                 width={width}
                 height={trackHeight(name)}
                 expanded={name === expandedChannel}
@@ -779,34 +840,14 @@ export function TrackStack({
                 // Общая ось времени — у последнего трека: если виден трек ЧСС,
                 // он идёт последним и ось получает он
                 showXAxis={index === visible.length - 1 && !showHeartRate}
-                qc={
-                  channelQc?.[name]
-                    ? {
-                        status: channelQcStatus(
-                          channelQc[name].artifact_share,
-                          qcThresholds.warn,
-                          qcThresholds.bad,
-                          channelQc[name].snr_db,
-                          channelQc[name].dead,
-                          qcThresholds.snrWarn,
-                          qcThresholds.snrBad,
-                        ),
-                        tooltip: channelQcTooltip(
-                          channelDisplayName(name, params.channelNaming),
-                          channelQc[name],
-                        ),
-                      }
-                    : null
-                }
+                qc={qcByChannel[name] ?? null}
                 onLabelClick={handleLabelClick}
                 onToggleExpand={handleToggleExpand}
                 onCanvas={registerCanvas}
-                zones={name === expandedChannel ? expandedZones : []}
+                zones={name === expandedChannel ? expandedZones : NO_ZONES}
                 selectedZoneId={selectedZoneId}
                 onZoneSelect={handleZoneSelect}
-                epochFrames={
-                  params.droppedEpochsHatched ? epochFramesForChannel(epochs, name) : []
-                }
+                epochFrames={epochFramesByChannel[name] ?? NO_EPOCH_FRAMES}
                 levelMark={name === expandedChannel ? levelMark : null}
                 onPickLevel={handlePickLevel}
                 wasDragged={handleWasDragged}

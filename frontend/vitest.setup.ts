@@ -3,8 +3,18 @@
  */
 import '@testing-library/jest-dom/vitest'
 import { cleanup, configure } from '@testing-library/react'
-import { afterEach, vi } from 'vitest'
+import { afterEach, beforeAll, vi } from 'vitest'
+import { preloadSections } from './src/app/sections/sectionModules'
 import type { MockUPlotChart } from './src/test/uplot'
+
+/**
+ * Разделы грузятся лениво (`routes.tsx`), а `render` в RTL синхронный: без
+ * прогрева первый `getBy*` после рендера упирался бы в Suspense-фолбэк.
+ * Прогрев идёт после `vi.mock('uplot')` — мок уже поднят.
+ */
+beforeAll(async () => {
+  await preloadSections()
+})
 
 /**
  * Таймаут `findBy*`/`waitFor` (дефолт Testing Library — 1 с) поднят до 10 с:

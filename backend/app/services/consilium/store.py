@@ -4,9 +4,9 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, literal, select, union_all, update
 from sqlalchemy.engine import CursorResult, Result
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -276,6 +276,23 @@ async def list_entries(
         ])
 
 
+# Таблицы, которые сносит удаление кейса, и имена полей предпросмотра.
+_DELETION_TABLES: tuple[tuple[str, type[Any]], ...] = (
+    ("evidence_items", db.ConsiliumEvidenceRecord),
+    ("snapshots", db.ConsiliumSnapshotRecord),
+    ("answers", db.ConsiliumAnswer),
+    ("triage", db.ConsiliumTriage),
+    ("jev_marks", db.ConsiliumJevMark),
+    ("brainstorms", db.ConsiliumBrainstorm),
+    ("brainstorm_ideas", db.ConsiliumBrainstormIdea),
+    ("proposals", db.ConsiliumProposal),
+    ("decisions", db.ConsiliumDecision),
+    ("executions", db.ConsiliumExecution),
+    ("chats", db.ConsiliumChat),
+    ("chat_messages", db.ConsiliumChatMessage),
+)
+
+
 async def deletion_preview(case_id: str) -> ConsiliumDeletionPreview:
     """Показывает объём удаления, не удаляет источники ЭЭГ."""
     await db.init_db()
@@ -290,47 +307,32 @@ async def deletion_preview(case_id: str) -> ConsiliumDeletionPreview:
         rounds = (await session.scalars(select(db.ConsiliumRound).where(
             db.ConsiliumRound.case_id == case_id,
         ))).all()
+        # Один UNION ALL вместо 12 последовательных COUNT: на PostgreSQL это
+        # 1 RTT вместо 12 при том же результате.
+        table_counts = await session.execute(union_all(*(
+            select(
+                literal(name).label("name"), func.count().label("count"),
+            ).select_from(model).where(model.case_id == case_id)
+            for name, model in _DELETION_TABLES
+        )))
+        by_table = {str(item["name"]): int(item["count"]) for item in table_counts.mappings()}
         return ConsiliumDeletionPreview.model_validate({
             "case_id": case_id, "version": row.version,
             "context_revisions": by_kind.get("context", 0),
             "message_revisions": by_kind.get("message", 0),
-            "evidence_items": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumEvidenceRecord,
-            ).where(db.ConsiliumEvidenceRecord.case_id == case_id)) or 0),
-            "snapshots": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumSnapshotRecord,
-            ).where(db.ConsiliumSnapshotRecord.case_id == case_id)) or 0),
+            "evidence_items": by_table.get("evidence_items", 0),
+            "snapshots": by_table.get("snapshots", 0),
             "rounds": len(rounds),
-            "answers": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumAnswer,
-            ).where(db.ConsiliumAnswer.case_id == case_id)) or 0),
-            "triage": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumTriage,
-            ).where(db.ConsiliumTriage.case_id == case_id)) or 0),
-            "jev_marks": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumJevMark,
-            ).where(db.ConsiliumJevMark.case_id == case_id)) or 0),
-            "brainstorms": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumBrainstorm,
-            ).where(db.ConsiliumBrainstorm.case_id == case_id)) or 0),
-            "brainstorm_ideas": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumBrainstormIdea,
-            ).where(db.ConsiliumBrainstormIdea.case_id == case_id)) or 0),
-            "proposals": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumProposal,
-            ).where(db.ConsiliumProposal.case_id == case_id)) or 0),
-            "decisions": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumDecision,
-            ).where(db.ConsiliumDecision.case_id == case_id)) or 0),
-            "executions": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumExecution,
-            ).where(db.ConsiliumExecution.case_id == case_id)) or 0),
-            "chats": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumChat,
-            ).where(db.ConsiliumChat.case_id == case_id)) or 0),
-            "chat_messages": int(await session.scalar(select(func.count()).select_from(
-                db.ConsiliumChatMessage,
-            ).where(db.ConsiliumChatMessage.case_id == case_id)) or 0),
+            "answers": by_table.get("answers", 0),
+            "triage": by_table.get("triage", 0),
+            "jev_marks": by_table.get("jev_marks", 0),
+            "brainstorms": by_table.get("brainstorms", 0),
+            "brainstorm_ideas": by_table.get("brainstorm_ideas", 0),
+            "proposals": by_table.get("proposals", 0),
+            "decisions": by_table.get("decisions", 0),
+            "executions": by_table.get("executions", 0),
+            "chats": by_table.get("chats", 0),
+            "chat_messages": by_table.get("chat_messages", 0),
             "recording_ids": row.recording_ids,
             "warnings": [
                 "ЭЭГ-записи не удаляются. Все ревизии ручной истории, ответы советников, "

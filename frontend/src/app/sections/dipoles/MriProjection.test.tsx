@@ -43,6 +43,7 @@ import { PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { DIPOLE_PARAM_DEFAULTS, type DipoleLayerId } from '@/shared/state/dipoleParams'
 import { bandColor } from '@/shared/lib/bandColors'
+import { NO_AREAS_ON_SLICE } from '@/shared/lib/atlasContours'
 import { dipoleScanResultFixture, contourSliceFixture, dipoleBatchResultFixture } from '@/test/fixtures'
 import { renderWithProviders } from '@/test/renderWithProviders'
 import { MriProjection } from './MriProjection'
@@ -149,6 +150,16 @@ describe('проекция мозга', () => {
     expect(screen.getByTestId('projection-readout-sagittal')).toHaveTextContent(
       PROJECTION_HINTS.sagittal,
     )
+  })
+
+  it('объясняет пустой слой полей на срезе без меток (срединная сагитталь)', () => {
+    renderProjection('sagittal', {
+      slices: { axial: 0, sagittal: 0, coronal: 0 },
+      contours: contourSliceFixture({ areas: [] }),
+    })
+
+    expect(screen.queryByTestId('area-sagittal-BA17-lh')).not.toBeInTheDocument()
+    expect(screen.getByTestId('projection-readout-sagittal')).toHaveTextContent(NO_AREAS_ON_SLICE)
   })
 
   it('рисует включённые слои и убирает выключенные', () => {

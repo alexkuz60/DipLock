@@ -370,27 +370,38 @@ def _mri_head_transform(trans_path: str) -> Any | None:
         return None
 
 
+def _localize_points(positions_m: np.ndarray, cfg: Settings) -> list[list[float] | None]:
+    """MNI-координаты пачки позиций одним вызовом ``head_to_mni``.
+
+    ``head_to_mni`` принимает ``(n, 3)``, но на каждый вызов перечитывает
+    ``talairach.xfm`` и ``orig.mgz`` (``read_talxfm`` без кэша) — поточечный
+    вызов стоил 93 мс на точку (замер в ``docs/rules/frontend-perf.md`` §2).
+    Один вызов на пачку убирает и повторное чтение, и накладные расходы.
+    """
+    transform = _mri_head_transform(str(cfg.fsaverage_trans))
+    if transform is None:
+        return [None] * len(positions_m)
+    try:
+        mni = mne.head_to_mni(
+            np.asarray(positions_m, dtype=float).reshape(-1, 3),
+            subject="fsaverage",
+            mri_head_t=transform,
+            subjects_dir=str(cfg.subjects_dir),
+            verbose=False,
+        )
+    except Exception as exc:
+        logger.warning("MNI недоступно для пачки из %d точек: %s", len(positions_m), exc)
+        return [None] * len(positions_m)
+    return [[float(value) for value in row] for row in mni]
+
+
 def _localize_point(position_m: np.ndarray, cfg: Settings) -> list[float] | None:
     """MNI-координаты позиции; ``None`` — fsaverage недоступен.
 
     Ошибка локализации не отменяет расчёт: раздел покажет точку в системе
     головы и честное предупреждение вместо выдуманных координат MNI.
     """
-    transform = _mri_head_transform(str(cfg.fsaverage_trans))
-    if transform is None:
-        return None
-    try:
-        mni = mne.head_to_mni(
-            position_m.reshape(1, 3),
-            subject="fsaverage",
-            mri_head_t=transform,
-            subjects_dir=str(cfg.subjects_dir),
-            verbose=False,
-        )[0]
-    except Exception as exc:
-        logger.warning("MNI недоступно для точки %s: %s", position_m, exc)
-        return None
-    return [float(value) for value in mni]
+    return _localize_points(np.asarray(position_m, dtype=float).reshape(1, 3), cfg)[0]
 
 
 def _prepare_epochs(
@@ -617,6 +628,8 @@ def compute_dipole_scan(
     # RIV (2.6/N23): отбеливатель по in-band ковариации шума — один на запись
     # (полоса у всех эпох одна). `None` — данных мало, RIV остаётся пустым.
     whitener = epochs_whitener(data)
+    # Фит и локализация разведены: `head_to_mni` зовётся пачкой после цикла.
+    fits: list[tuple[int, int, Any]] = []
     for pos in range(n_epochs):
         # `pos` — строка данных (только выжившие эпохи), `epoch_index` — номер
         # эпохи нарезки включая отброшенные (сетка `drop_log`, см. выше).
@@ -630,13 +643,24 @@ def compute_dipole_scan(
             warnings.append(f"Эпоха {epoch_index + 1}: {exc}")
             continue
 
-        locate_started = time.perf_counter()
-        mni_coords = _localize_point(fit.position_m, cfg)
+        fits.append((epoch_index, sample, fit))
+        report(
+            "scan",
+            message=f"Диполи: {pos + 1} из {n_epochs}",
+            epochs_done=pos + 1,
+            epochs_total=n_epochs,
+        )
+
+    # Локализация — пачкой: `head_to_mni` принимает (n, 3), а поточечный вызов
+    # перечитывал talairach.xfm/orig.mgz на каждую точку (93 мс × n).
+    locate_started = time.perf_counter()
+    fit_positions = np.array([fit.position_m for _, _, fit in fits], dtype=float).reshape(-1, 3)
+    mni_list = _localize_points(fit_positions, cfg) if fits else []
+    for (epoch_index, sample, fit), mni_coords in zip(fits, mni_list, strict=True):
         # Атрибуция читается здесь же (шаг 1.4): первое обращение собирает объёмы
         # (≈1 с на test.edf — видно строкой `asset-contours`), и это время
         # принадлежит локализации, а не перебору сетки.
         attribution = attribution_fields(cfg, mni_coords)
-        localize_ms += (time.perf_counter() - locate_started) * 1000.0
         if mni_coords is None:
             mni_available = False
         points.append({
@@ -653,12 +677,8 @@ def compute_dipole_scan(
             "ci_mm": fit.ci_mm,
             **attribution,
         })
-        report(
-            "scan",
-            message=f"Диполи: {pos + 1} из {n_epochs}",
-            epochs_done=pos + 1,
-            epochs_total=n_epochs,
-        )
+
+    localize_ms += (time.perf_counter() - locate_started) * 1000.0
 
     # Срез 3.11: знаки моментов приводятся к непрерывной цепочке — инверсия
     # знака фита (Q ↔ −Q) не должна выглядеть как разворот тока в анимации.

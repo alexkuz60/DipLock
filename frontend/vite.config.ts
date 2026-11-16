@@ -19,6 +19,20 @@ export default defineConfig({
     outDir: fileURLToPath(new URL('../backend/app/static/ui', import.meta.url)),
     emptyOutDir: true,
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        /**
+         * Вендорные чанки отдельно от кода приложения: правка раздела не
+         * инвалидирует кэш React/Tone/uPlot, а браузер грузит их параллельно.
+         * Разделы уже режутся лениво в `app/sections/routes.tsx`.
+         */
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          charts: ['uplot'],
+          audio: ['tone'],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

@@ -30,7 +30,7 @@
 import json
 import logging
 import os
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -119,8 +119,17 @@ def save_record(cfg: Settings, record: dict[str, Any]) -> str | None:
     return path
 
 
-def load_records(cfg: Settings, limit: int | None = None) -> list[dict[str, Any]]:
+def load_records(
+    cfg: Settings,
+    limit: int | None = None,
+    predicate: Callable[[dict[str, Any]], bool] | None = None,
+) -> list[dict[str, Any]]:
     """Файлы задач от старых к новым (``limit`` — только последние N).
+
+    ``predicate`` отсекает записи до сборки списка: вызывающему не нужно
+    материализовать всю историю, чтобы оставить файлы одной записи или стадии.
+    Отбор идёт **после** разбора JSON — имена файлов uuid4, метаданных в них нет;
+    цена разбора снимается только переносом ``recording_id``/``kind`` в имя файла.
 
     Битый или чужой по версии файл пропускается: результат задачи — не источник
     истины, его всегда можно пересчитать.
@@ -151,8 +160,11 @@ def load_records(cfg: Settings, limit: int | None = None) -> list[dict[str, Any]
             continue
         if not isinstance(payload, dict) or payload.get("version") != RECORD_VERSION:
             continue
-        if payload.get("job_id"):
-            records.append(payload)
+        if not payload.get("job_id"):
+            continue
+        if predicate is not None and not predicate(payload):
+            continue
+        records.append(payload)
     return records
 
 

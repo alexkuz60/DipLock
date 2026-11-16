@@ -80,12 +80,14 @@ class BundleParams:
 
 def _bundle_jobs(cfg: Settings, recording_id: str) -> list[dict[str, Any]]:
     """Файлы задач записи, кроме самих пакетов (архив не несёт сам себя)."""
-    return [
-        record
-        for record in job_store.load_records(cfg)
-        if (record.get("meta") or {}).get("recording_id") == recording_id
-        and record.get("kind") != "bundle"
-    ]
+
+    def belongs(record: dict[str, Any]) -> bool:
+        return (
+            (record.get("meta") or {}).get("recording_id") == recording_id
+            and record.get("kind") != "bundle"
+        )
+
+    return job_store.load_records(cfg, predicate=belongs)
 
 
 def bundle_signature(

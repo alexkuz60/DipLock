@@ -4,136 +4,39 @@
  * Реестр (`registry.ts`) хранит только метаданные, здесь — React-компоненты.
  * Такой разрез позволяет тестировать реестр без рендера тяжёлых разделов.
  * Маршруты берутся из `SECTION_ROUTES` (там же, где реестр).
+ *
+ * Модули разделов грузятся **лениво** (`sectionModules.ts`): до 16.11.2026 все
+ * 15 разделов попадали в один чанк (1,8 МБ / 519 КБ gzip), и первая отрисовка
+ * любого маршрута тянула вьюер EDF, uPlot, Tone.js и глоссарий Wiki.
  */
-import type { ComponentType } from 'react'
+import { Suspense } from 'react'
 import { AppShell } from '@/app/layout/AppShell'
-import { EdfPanel } from './EdfPanel'
-import { EdfSection } from './EdfSection'
-import { EdfToolHeaderActions } from './EdfToolActions'
-import { EdfZoomSelect } from './EdfZoomSelect'
-import { EegPanel } from './eeg/EegPanel'
-import { EegSection } from './eeg/EegSection'
-import { EegToolHeaderActions } from './eeg/EegToolActions'
-import { EegWindowControls } from './eeg/EegWindowControls'
-import { DipolesDrawer } from './dipoles/DipolesDrawer'
-import { DipolesPanel } from './dipoles/DipolesPanel'
-import { DipolesSection } from './dipoles/DipolesSection'
-import { DipolesToolHeaderActions } from './dipoles/DipolesToolActions'
-import { EpochDipoleStrip } from './dipoles/EpochDipoleStrip'
-import { HomeSection } from './HomeSection'
-import { DbPanel } from './db/DbPanel'
-import { DbSection } from './db/DbSection'
-import { DbToolActions } from './db/DbToolActions'
-import { ServerStatusSection } from './ServerStatusSection'
-import { SettingsSection } from './SettingsSection'
-import { WikiSection } from './wiki/WikiSection'
-import { LocalizationTablePanel } from './table/LocalizationTablePanel'
-import { LocalizationTableSection } from './table/LocalizationTableSection'
-import { SummaryPanel } from './summary/SummaryPanel'
-import { SummarySection } from './summary/SummarySection'
-import { SummaryToolActions } from './summary/SummaryToolActions'
-import { GroupPanel } from './group/GroupPanel'
-import { GroupSection } from './group/GroupSection'
-import { GroupToolActions } from './group/GroupToolActions'
-import { NeuromusicPanel } from './neuromusic/NeuromusicPanel'
-import { NeuromusicSection } from './neuromusic/NeuromusicSection'
-import {
-  NeuromusicTitleFile,
-  NeuromusicTitleIcon,
-  NeuromusicToolActions,
-} from './neuromusic/NeuromusicToolActions'
-import { EmoLabPanel } from './emolab/EmoLabPanel'
-import { EmoLabSection } from './emolab/EmoLabSection'
-import { EmoLabTitleFile, EmoLabToolActions } from './emolab/EmoLabToolActions'
-import { NeuroAudioPanel, NeuroAudioSection } from './Stubs'
 import { getSection, type SectionId } from './registry'
-import { ConsiliumSection } from './consilium/ConsiliumSection'
-import { ConsiliumOptionsPanel } from './consilium/ConsiliumOptionsPanel'
+import { loadSection, loadedSection } from './sectionModules'
 
-type SectionModule = {
-  Component: ComponentType
-  /** Содержимое правого сайдбара раздела (если у него есть панель) */
-  Panel?: ComponentType
-  /** Дополнение тулс-хедера перед названием раздела (иконка и т.п.) */
-  TitleBefore?: ComponentType
-  /** Дополнение тулс-хедера после названия раздела (имя файла и т.п.) */
-  TitleAfter?: ComponentType
-  /** Кнопки-действия тулс-хедера (после заголовка раздела) */
-  ToolActions?: ComponentType
-  /** Вторичные контролы тулс-хедера (правый край, перед кнопкой панели) */
-  HeaderExtra?: ComponentType
-  /** Второй ряд тулс-хедера (полоса на всю ширину основной области) */
-  HeaderStrip?: ComponentType
-  /** Выдвижная панель раздела (полоса между шапкой и рабочей областью) */
-  Drawer?: ComponentType
+function useSectionModule(id: SectionId) {
+  const module = loadedSection(id)
+  if (module) return module
+  // Классический Suspense-контракт: бросаем промис, React повторит рендер.
+  throw loadSection(id)
 }
 
-const SECTION_MODULES: Record<SectionId, SectionModule> = {
-  home: { Component: HomeSection },
-  db: {
-    Component: DbSection,
-    Panel: DbPanel,
-    ToolActions: DbToolActions,
-  },
-  edf: {
-    Component: EdfSection,
-    Panel: EdfPanel,
-    ToolActions: EdfToolHeaderActions,
-    HeaderExtra: EdfZoomSelect,
-  },
-  eeg: {
-    Component: EegSection,
-    Panel: EegPanel,
-    ToolActions: EegToolHeaderActions,
-    HeaderExtra: EegWindowControls,
-  },
-  dipoles: {
-    Component: DipolesSection,
-    Panel: DipolesPanel,
-    ToolActions: DipolesToolHeaderActions,
-    HeaderStrip: EpochDipoleStrip,
-    Drawer: DipolesDrawer,
-  },
-  table: { Component: LocalizationTableSection, Panel: LocalizationTablePanel },
-  group: {
-    Component: GroupSection,
-    Panel: GroupPanel,
-    ToolActions: GroupToolActions,
-  },
-  summary: {
-    Component: SummarySection,
-    Panel: SummaryPanel,
-    ToolActions: SummaryToolActions,
-  },
-  emolab: {
-    Component: EmoLabSection,
-    Panel: EmoLabPanel,
-    TitleAfter: EmoLabTitleFile,
-    ToolActions: EmoLabToolActions,
-  },
-  consilium: { Component: ConsiliumSection, Panel: ConsiliumOptionsPanel },
-  neuroaudio: { Component: NeuroAudioSection, Panel: NeuroAudioPanel },
-  neuromusic: {
-    Component: NeuromusicSection,
-    Panel: NeuromusicPanel,
-    TitleBefore: NeuromusicTitleIcon,
-    TitleAfter: NeuromusicTitleFile,
-    ToolActions: NeuromusicToolActions,
-  },
-  wiki: { Component: WikiSection },
-  settings: { Component: SettingsSection },
-  server: { Component: ServerStatusSection },
+/** Каркас без содержимого: рейл и шапка не мигают при первой загрузке раздела. */
+function SectionSkeleton({ id }: { id: SectionId }) {
+  return (
+    <AppShell section={getSection(id)}>
+      <p className="p-4 text-sm text-fg-2">Загрузка раздела…</p>
+    </AppShell>
+  )
 }
 
-/** Раздел внутри каркаса: тулс-хедер + рабочая область + панель опций. */
-export function SectionRoute({ id }: { id: SectionId }) {
-  const section = getSection(id)
+function SectionContent({ id }: { id: SectionId }) {
   const { Component, Panel, TitleBefore, TitleAfter, ToolActions, HeaderExtra, HeaderStrip, Drawer } =
-    SECTION_MODULES[id]
+    useSectionModule(id)
 
   return (
     <AppShell
-      section={section}
+      section={getSection(id)}
       titleBefore={TitleBefore ? <TitleBefore /> : undefined}
       titleAfter={TitleAfter ? <TitleAfter /> : undefined}
       actions={ToolActions ? <ToolActions /> : undefined}
@@ -144,5 +47,14 @@ export function SectionRoute({ id }: { id: SectionId }) {
     >
       <Component />
     </AppShell>
+  )
+}
+
+/** Раздел внутри каркаса: тулс-хедер + рабочая область + панель опций. */
+export function SectionRoute({ id }: { id: SectionId }) {
+  return (
+    <Suspense fallback={<SectionSkeleton id={id} />}>
+      <SectionContent id={id} />
+    </Suspense>
   )
 }

@@ -1,26 +1,15 @@
-/**
- * Один трек вьюера ЭЭГ: uPlot-чарт канала с огибающей min/max.
- *
- * Вынесен из `TrackStack.tsx` (правило `docs/rules/frontend-state.md` п.6): стек
- * отвечает за окно, зум, панорамирование и слои, а строка — за свой чарт.
- * Расчёт огибающей и опции чарта — чистые функции (`shared/lib/viewerMath.ts`,
- * `shared/lib/trackOptions.ts`), здесь только жизненный цикл uPlot:
- *
- * * чарт создаётся при смене канала/размера/режима шкалы (окно и данные
- *   применяются отдельными эффектами — дешевле, чем пересоздание);
- * * canvas отдаётся наружу через `onCanvas` — из них собирается PNG-снапшот
- *   (срез 2.8), поэтому холст обязан быть тем же, что видит пользователь;
- * * подпись канала — кнопка перехода в раздел «ЭЭГ», стрелка под ней —
- *   разворот трека на фиксированную высоту ×8 (срез 2.9, решение 22.09.2026);
- * * клик по развёрнутому треку — линия уровня в мкВ (п. 3 среза: значение
- *   считает uPlot `posToVal`, подпись — `formatUvLevel`), а зоны артефактов
- *   рисуются на нём по-канально (п. 4, `zonesForChannel`).
- */
-import { useEffect, useMemo, useRef, type MouseEvent } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+  type MouseEvent,
+} from 'react'
 import uPlot from 'uplot'
 import 'uplot/dist/uPlot.min.css'
-import { frameEnvelope, pointsBudget, type TimeWindow } from '@/shared/lib/viewerMath'
+import { frameEnvelope, pointsBudget } from '@/shared/lib/viewerMath'
 import type { SignalFrame } from '@/shared/lib/signalFrame'
 import { perfCount } from '@/shared/lib/perf'
 import { formatUvLevel } from '@/shared/lib/eegView'
@@ -33,12 +22,14 @@ import {
 import type { ArtifactZone, EpochCell } from '@/shared/lib/viewerLayers'
 import type { ChannelQcStatus } from '@/shared/lib/channelQc'
 import { cx } from '@/shared/ui/cx'
+import { type ViewerWindowStore } from '@/shared/lib/windowStore'
 import { ArtifactZoneLayer, EpochFrameLayer } from './TrackLayers'
 
 export type TrackRowProps = {
   name: string
   frame: SignalFrame
-  window: TimeWindow
+  /** Окно времени: стор, а не проп — иначе `memo` не пропускает строки при панораме */
+  windowStore: ViewerWindowStore
   width: number
   /** Высота трека: `TRACK_HEIGHT` или фикс `EXPANDED_TRACK_HEIGHT` (×8) у развёрнутого */
   height: number
@@ -80,19 +71,41 @@ export type TrackRowProps = {
   wasDragged?: () => boolean
 }
 
-export function TrackRow({
+type TrackCanvasProps = Pick<
+  TrackRowProps,
+  | 'name'
+  | 'frame'
+  | 'windowStore'
+  | 'width'
+  | 'height'
+  | 'expanded'
+  | 'amplitudeMode'
+  | 'amplitudeScaleUv'
+  | 'showXAxis'
+  | 'onCanvas'
+  | 'zones'
+  | 'selectedZoneId'
+  | 'onZoneSelect'
+  | 'epochFrames'
+  | 'levelMark'
+  | 'onPickLevel'
+  | 'wasDragged'
+>
+
+/**
+ * Чарт трека и его слои. Подписан на стор окна: при панораме перерисовывается
+ * только он, подпись канала и кнопки остаются нетронутыми (`memo` на `TrackRow`).
+ */
+function TrackCanvas({
   name,
   frame,
-  window,
+  windowStore,
   width,
   height,
   expanded,
   amplitudeMode,
   amplitudeScaleUv,
   showXAxis,
-  qc,
-  onLabelClick,
-  onToggleExpand,
   onCanvas,
   zones = [],
   selectedZoneId = null,
@@ -101,10 +114,8 @@ export function TrackRow({
   levelMark = null,
   onPickLevel,
   wasDragged,
-  displayName,
-}: TrackRowProps) {
-  /** Что видит пользователь: подпись схемы имён, иначе каноническое имя */
-  const shown = displayName ?? name
+}: TrackCanvasProps) {
+  const window = useSyncExternalStore(windowStore.subscribe, windowStore.get, windowStore.get)
   const hostRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<uPlot | null>(null)
 
@@ -170,7 +181,7 @@ export function TrackRow({
     if (!host || !sized) return
     perfCount('edf.chart.create')
     const chart = new uPlot(
-      makeTrackOptions(width, height, window, yRange, showXAxis, showZeroRef),
+      makeTrackOptions(width, height, windowStore.get(), yRange, showXAxis, showZeroRef),
       [[], [], []] as uPlot.AlignedData,
       host,
     )
@@ -218,11 +229,100 @@ export function TrackRow({
   }
 
   return (
+    <div className="relative min-w-0 flex-1" onClick={handleRowClick}>
+      <div
+        ref={hostRef}
+        data-testid={`track-plot-${name}`}
+        className="pointer-events-none h-full w-full"
+      />
+      {/*
+        Слои развёрнутого трека: зоны артефактов его канала (п. 4) и линия уровня
+        (п. 3). Рисуются поверх canvas строки, кликов не перехватывают (кроме полос
+        зон — они кнопки, `ArtifactZoneLayer`), координаты те же, что у чарта.
+      */}
+      {/*
+        Рамки эпох-отбросов этого канала (причины блокировки): reject-фильтр ронял
+        эпохи именно по нему. Дополняют штриховку `EpochLayer`, клики не берут.
+      */}
+      {epochFrames.length > 0 ? (
+        <div
+          className="pointer-events-none absolute top-0 bottom-0"
+          style={{ left: 4, width }}
+        >
+          <EpochFrameLayer cells={epochFrames} geometry={{ window, trackWidth: width }} />
+        </div>
+      ) : null}
+      {expanded && zones.length > 0 && onZoneSelect ? (
+        <div
+          className="pointer-events-none absolute top-0 bottom-0"
+          style={{ left: 4, width }}
+        >
+          <ArtifactZoneLayer
+            zones={zones}
+            geometry={{ window, trackWidth: width }}
+            selectedId={selectedZoneId}
+            onSelect={onZoneSelect}
+          />
+        </div>
+      ) : null}
+      {expanded && levelMark ? (
+        <>
+          <div
+            aria-hidden
+            data-testid="level-line"
+            className="pointer-events-none absolute right-0 h-px bg-fg-2/70"
+            style={{ left: 4, top: levelMark.yPx }}
+          />
+          <div
+            data-testid="level-label"
+            className="tnum pointer-events-none absolute right-0 rounded bg-bg-3 px-1.5 py-0.5 text-xs text-fg-0"
+            style={{ top: levelMark.yPx, transform: 'translateY(-50%)' }}
+          >
+            {formatUvLevel(levelMark.levelUv)}
+          </div>
+        </>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Строка трека: подпись канала и кнопки — мемоизированная оболочка, чарт со
+ * слоями — `TrackCanvas` под подпиской на окно. При панораме окно меняется
+ * каждый кадр rAF, и без такого разреза `memo` не пропускал ни одной строки
+ * (`docs/rules/frontend-perf.md`).
+ */
+export const TrackRow = memo(function TrackRow({
+  name,
+  frame,
+  windowStore,
+  width,
+  height,
+  expanded,
+  amplitudeMode,
+  amplitudeScaleUv,
+  showXAxis,
+  qc,
+  onLabelClick,
+  onToggleExpand,
+  onCanvas,
+  zones = [],
+  selectedZoneId = null,
+  onZoneSelect,
+  epochFrames = [],
+  levelMark = null,
+  onPickLevel,
+  wasDragged,
+  displayName,
+}: TrackRowProps) {
+  /** Что видит пользователь: подпись схемы имён, иначе каноническое имя */
+  const shown = displayName ?? name
+
+  return (
     <div
       className="relative flex items-stretch gap-1"
       data-testid={`track-${name}`}
       style={{ height }}
-      onClick={handleRowClick}
     >
       <div
         className="relative flex shrink-0 flex-col items-end justify-center"
@@ -273,58 +373,25 @@ export function TrackRow({
           )}
         </button>
       </div>
-      <div
-        ref={hostRef}
-        data-testid={`track-plot-${name}`}
-        className="pointer-events-none min-w-0 flex-1"
+      <TrackCanvas
+        name={name}
+        frame={frame}
+        windowStore={windowStore}
+        width={width}
+        height={height}
+        expanded={expanded}
+        amplitudeMode={amplitudeMode}
+        amplitudeScaleUv={amplitudeScaleUv}
+        showXAxis={showXAxis}
+        onCanvas={onCanvas}
+        zones={zones}
+        selectedZoneId={selectedZoneId}
+        onZoneSelect={onZoneSelect}
+        epochFrames={epochFrames}
+        levelMark={levelMark}
+        onPickLevel={onPickLevel}
+        wasDragged={wasDragged}
       />
-      {/*
-        Слои развёрнутого трека: зоны артефактов его канала (п. 4) и линия уровня
-        (п. 3). Рисуются поверх canvas строки, кликов не перехватывают (кроме полос
-        зон — они кнопки, `ArtifactZoneLayer`), координаты те же, что у чарта.
-      */}
-      {/*
-        Рамки эпох-отбросов этого канала (причины блокировки): reject-фильтр ронял
-        эпохи именно по нему. Дополняют штриховку `EpochLayer`, клики не берут.
-      */}
-      {epochFrames.length > 0 ? (
-        <div
-          className="pointer-events-none absolute top-0 bottom-0"
-          style={{ left: LABEL_WIDTH + 4, width }}
-        >
-          <EpochFrameLayer cells={epochFrames} geometry={{ window, trackWidth: width }} />
-        </div>
-      ) : null}
-      {expanded && zones.length > 0 && onZoneSelect ? (
-        <div
-          className="pointer-events-none absolute top-0 bottom-0"
-          style={{ left: LABEL_WIDTH + 4, width }}
-        >
-          <ArtifactZoneLayer
-            zones={zones}
-            geometry={{ window, trackWidth: width }}
-            selectedId={selectedZoneId}
-            onSelect={onZoneSelect}
-          />
-        </div>
-      ) : null}
-      {expanded && levelMark ? (
-        <>
-          <div
-            aria-hidden
-            data-testid="level-line"
-            className="pointer-events-none absolute right-0 h-px bg-fg-2/70"
-            style={{ left: LABEL_WIDTH + 4, top: levelMark.yPx }}
-          />
-          <div
-            data-testid="level-label"
-            className="tnum pointer-events-none absolute right-0 rounded bg-bg-3 px-1.5 py-0.5 text-xs text-fg-0"
-            style={{ top: levelMark.yPx, transform: 'translateY(-50%)' }}
-          >
-            {formatUvLevel(levelMark.levelUv)}
-          </div>
-        </>
-      ) : null}
     </div>
   )
-}
+})

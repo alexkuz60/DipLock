@@ -89,7 +89,7 @@ import {
 // удалены (17.10.2026): панель закрыта реальными срезами/контурами атласа, и
 // модуль-заглушка `mriDemoShapes.ts` удалён целиком.
 import { MRI_SLICE_UNAVAILABLE, mriSliceRect, mriSliceUrl } from '@/shared/lib/mriSlices'
-import { shapeAtPoint } from '@/shared/lib/atlasContours'
+import { NO_AREAS_ON_SLICE, shapeAtPoint } from '@/shared/lib/atlasContours'
 import type { ContourSlice, MipOutline, MriSliceRef } from '@/shared/api/types'
 import {
   DIPOLE_DOT_STROKE_PX,
@@ -379,13 +379,22 @@ export function MriProjection({
   // пояснение плоскости; недоступная картинка среза важнее пояснения — о ней надо
   // сказать. Курсор на диполе — тултип узла с эпохами вместо подписи атласа.
   const hoverDipoleSiblings = hoverDipole ? dipoleNodeSiblings(points.points, hoverDipole) : null
+  /**
+   * Слой полей включён, ассет пришёл, но на этом срезе меток нет (срединная
+   * сагитталь x = 0 — метки PALS лежат на коре полушарий). Пустой слой обязан
+   * объясняться словами, иначе он читается как пропавшая отрисовка.
+   */
+  const areasMissing =
+    layerVisible(visibility, 'brodmann') && areaShapes !== null && areaShapes.length === 0
   const footnote = hoverDipole
     ? dipoleNodeTitle(hoverDipole, hoverDipoleSiblings ?? [hoverDipole])
     : hover
       ? [coordsLabel(hover), hoverLabel].filter(Boolean).join(' · ')
       : mriFailed
         ? MRI_SLICE_UNAVAILABLE
-        : PROJECTION_HINTS[plane]
+        : areasMissing
+          ? NO_AREAS_ON_SLICE
+          : PROJECTION_HINTS[plane]
 
   return (
     <figure

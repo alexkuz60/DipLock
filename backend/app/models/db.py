@@ -9,6 +9,7 @@ import asyncio
 import threading
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from alembic.config import Config
 from sqlalchemy import (
@@ -22,6 +23,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
@@ -35,8 +37,31 @@ from app.core.config import settings
 # URL берём из settings (загружает .env) для единой конфигурации.
 DATABASE_URL = settings.database_url
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+_IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+# SQLite: журнал по умолчанию `delete` — читатель блокирует писателя, и при
+# `max_concurrent_jobs=2` конкурентная запись отдавала `database is locked`
+# вместо ожидания. WAL + busy_timeout снимают это; PostgreSQL — pre_ping.
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_pre_ping=not _IS_SQLITE,
+    connect_args={"timeout": 30} if _IS_SQLITE else {},
+)
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+if _IS_SQLITE:
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_pragmas(dbapi_connection: Any, _record: Any) -> None:
+        """Прагмы на каждое соединение: WAL, NORMAL, ожидание блокировки 30 с."""
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+        finally:
+            cursor.close()
 
 # alembic.ini и каталог миграций лежат в backend/ (db.py → app/models/ → backend/).
 _BACKEND_DIR = Path(__file__).resolve().parents[2]

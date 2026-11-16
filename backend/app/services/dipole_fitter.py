@@ -245,26 +245,31 @@ def localize_dipoles(dipoles_result: list, settings: Settings) -> list:
 
         traj = result["trajectory"]
         localized = []
-        for dp in traj:
-            pos = np.array(dp["pos_head"]).reshape(1, 3)
-
-            # MNI — корректная сигнатура в MNE 1.13: (pos, subject, mri_head_t, ...)
-            mni = None
-            try:
-                mni = mne.head_to_mni(
-                    pos, subject="fsaverage",
+        # MNI — пачкой: `head_to_mni` принимает (n, 3), а поточечный вызов
+        # перечитывал talairach.xfm/orig.mgz на каждую точку траектории.
+        positions = np.array([dp["pos_head"] for dp in traj], dtype=float).reshape(-1, 3)
+        mni_all: list[list[float]] = []
+        try:
+            mni_all = [
+                row.tolist()
+                for row in mne.head_to_mni(
+                    positions, subject="fsaverage",
                     mri_head_t=transform,
                     subjects_dir=subjects_dir,
                 )
-                dp["mni_coords"] = mni[0].tolist()
-            except Exception:
-                dp["mni_coords"] = [0, 0, 0]
+            ]
+        except Exception:
+            mni_all = []
+
+        for index, dp in enumerate(traj):
+            mni = mni_all[index] if index < len(mni_all) else None
+            dp["mni_coords"] = mni if mni is not None else [0, 0, 0]
 
             # Анатомия одной функцией (шаг 1.4/N21): ближайшая структура и поле
             # Бродмана с расстояниями и признаком «вне мозга» — общий источник с
             # контурами среза (`atlas_contours`). Объёмы кэшируются, поэтому цена
             # точки — поиск в KD-дереве вместо чтения тома на точку (F19).
-            dp.update(attribution_fields(settings, mni[0] if mni is not None else None))
+            dp.update(attribution_fields(settings, mni))
             localized.append(dp)
 
         result["trajectory"] = localized

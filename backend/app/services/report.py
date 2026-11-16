@@ -498,19 +498,24 @@ def _edf_stage_match(
     поэтому расхождение здесь означает дефект пайплайна, а не шум.
     """
     best: dict[str, Any] | None = None
+
+    def matches(record: dict[str, Any]) -> bool:
+        """Отбор до сборки списка: история задач не материализуется целиком."""
+        if record.get("kind") != "preprocess" or record.get("status") != "succeeded":
+            return False
+        meta = record.get("meta") or {}
+        return (
+            meta.get("recording_id") == recording.recording_id
+            and meta.get("stage") == "artifacts"
+            and meta.get("params_sig") == artifacts_sig
+        )
+
     try:
-        records = job_store.load_records(cfg)
+        records = job_store.load_records(cfg, predicate=matches)
     except Exception:  # файлы истории — не источник истины, сверка не критична
         logger.warning("Файлы задач не прочитаны для сверки со стадией EDF", exc_info=True)
         records = []
     for record in records:
-        if record.get("kind") != "preprocess" or record.get("status") != "succeeded":
-            continue
-        meta = record.get("meta") or {}
-        if meta.get("recording_id") != recording.recording_id:
-            continue
-        if meta.get("stage") != "artifacts" or meta.get("params_sig") != artifacts_sig:
-            continue
         if isinstance(record.get("result"), dict):
             best = record  # load_records от старых к новым — остаётся последний
     if best is None:
