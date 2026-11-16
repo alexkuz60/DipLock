@@ -50,6 +50,15 @@ describe('настройки таблицы локализации', () => {
     expect(useTableParams.getState().params.columnVisibility.gof).toBe(true)
   })
 
+  it('вкладка просмотра переключается и возвращается к точкам сбросом', () => {
+    useTableParams.getState().setViewTab('clusters')
+
+    expect(useTableParams.getState().params.viewTab).toBe('clusters')
+
+    useTableParams.getState().reset()
+    expect(useTableParams.getState().params.viewTab).toBe('points')
+  })
+
   it('«Показать все» возвращает колонки, а «сбросить» — ещё и сортировку', () => {
     useTableParams.getState().setColumnVisible('area', false)
     useTableParams.getState().setColumnVisible('z', false)

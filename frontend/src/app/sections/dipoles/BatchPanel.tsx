@@ -1,6 +1,10 @@
 /**
- * Панель «Пакет поддиапазонов» (С1/С2): полосы прогона, их отображение,
- * сопоставление и кластеры.
+ * Панель «Пакет поддиапазонов» (С1/С2): полосы прогона и их отображение.
+ *
+ * Таблицы «Сопоставление полос» и «Кластеры диполей (С2)» — в разделе
+ * «Таблица локализации» (вкладки просмотра, 16.11.2026): в сайдбаре их
+ * приходилось прокручивать. Здесь остаётся форма «Черновик правила из
+ * профиля» (Т5) — она делает запросы, а раздел таблицы ничего не запрашивает.
  *
  * Прогон всегда идёт по **всему каталогу** полос (`freq_bands` +
  * `functional_bands`) кнопкой «Рассчитать пакет» в шапке — выбор полос для
@@ -8,24 +12,17 @@
  * полос анимации/облака **ничего не запускает** (правило раздела). Результат —
  * набор (`batch`), а не один `result`: активная полоса выбирается в разделе
  * «Таблица локализации» (её точки показывают таблица и подписи), а здесь —
- * чекбоксы отображения, сопоставление и кластеры. В сопоставлении — только
- * **нормированные** величины: GOF между полосами не сравним (принцип 3,
- * `docs/rules/dipoles.md`), и колонки GOF здесь нет.
+ * чекбоксы отображения. В сопоставлении — только **нормированные** величины:
+ * GOF между полосами не сравним (принцип 3, `docs/rules/dipoles.md`), и колонки
+ * GOF в его таблице нет.
  */
-import { bandLabel, shareLabel } from '@/shared/lib/dipoleBatch'
 import { bandColor } from '@/shared/lib/bandColors'
 import { calcJobSummary } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
-import { ClusterFeaturesTable } from '@/shared/ui/ClusterFeaturesTable'
 import { Panel } from '@/shared/ui/Panel'
 import { RuleDraftForm } from './RuleDraftForm'
-
-/** Ячейка сопоставления: число с единицами или «—» (не измерено). */
-function Cell({ value }: { value: string }) {
-  return <td className="px-2 py-1 text-right tabular-nums">{value}</td>
-}
 
 export function BatchPanel() {
   const batch = useDipoleCalc((state) => state.batch)
@@ -39,7 +36,6 @@ export function BatchPanel() {
   const bands = batch?.bands ?? []
   const comparison = batch?.comparison ?? []
   const clusters = batch?.clusters ?? []
-  const clusterParams = batch?.cluster_params
 
   return (
     <Panel
@@ -93,80 +89,14 @@ export function BatchPanel() {
         </>
       ) : null}
 
-      {comparison.length > 0 ? (
-        <>
-          <p className="mt-3 text-sm font-medium">Сопоставление полос</p>
-          <p className="mt-1 text-xs text-fg-2">
-            Только нормированные величины: GOF между полосами не сравним
-            (узкая полоса завышает R²), кросс-полосной фильтр доверия — RIV.
-          </p>
-          <div className="mt-1 overflow-x-auto" data-testid="band-comparison">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-fg-2">
-                  <th className="px-2 py-1">Полоса</th>
-                  <th className="px-2 py-1 text-right">Точек</th>
-                  <th className="px-2 py-1 text-right">Прошли КД</th>
-                  <th className="px-2 py-1 text-right">Момент, медиана</th>
-                  <th className="px-2 py-1 text-right">Пик, мс</th>
-                  <th className="px-2 py-1 text-right">RIV</th>
-                  <th className="px-2 py-1 text-right">Кластеров</th>
-                  <th className="px-2 py-1 text-right">В кластерах</th>
-                </tr>
-              </thead>
-              <tbody>
-                {comparison.map((row) => (
-                  <tr key={row.band_key} className="border-b border-line-soft">
-                    <td className="px-2 py-1">{bandLabel(row)}</td>
-                    <Cell value={String(row.n_points)} />
-                    <Cell value={shareLabel(row.kd_share)} />
-                    <Cell value={shareLabel(row.moment_share_median)} />
-                    <Cell
-                      value={
-                        row.peak_time_median_ms == null
-                          ? '—'
-                          : `${Math.round(row.peak_time_median_ms)}`
-                      }
-                    />
-                    <Cell value={row.median_riv == null ? '—' : row.median_riv.toFixed(2)} />
-                    <Cell value={String(row.n_clusters ?? 0)} />
-                    <Cell value={shareLabel(row.cluster_share)} />
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+      {comparison.length > 0 || clusters.length > 0 ? (
+        <p className="mt-3 text-xs text-fg-2">
+          Сопоставление полос и кластеры диполей — в разделе «Таблица
+          локализации» (вкладки просмотра).
+        </p>
       ) : null}
 
-      {clusters.length > 0 ? (
-        <>
-          <p className="mt-3 text-sm font-medium">Кластеры диполей (С2)</p>
-          {clusterParams ? (
-            <p className="mt-1 text-xs text-fg-2">
-              {`Воксель ${clusterParams.voxel_norm} от диаметра области поиска (${clusterParams.voxel_mm} мм), минимум ${clusterParams.min_points} точек`}
-              {clusterParams.kd_filter === 'kd_passed'
-                ? '; в кластеры взяты точки, прошедшие КД'
-                : '; пороги КД методикой не заданы — взяты все точки'}
-              .
-            </p>
-          ) : null}
-          <ClusterFeaturesTable
-            testId="batch-cluster-features"
-            rows={clusters.map((cluster) => ({
-              id: `${cluster.band_key}:${cluster.cluster_index}`,
-              label: cluster.band_key,
-              labelHint: `устойчивость ${cluster.n_bands_matched}/${bands.length} полос`,
-              features: cluster.features,
-            }))}
-          />
-          <p className="mt-1 text-xs text-fg-2">
-            Строка — один кластер: только измеренные признаки; «—» — не измерено
-            (не 0). Момент и GOF сравниваются внутри одной полосы.
-          </p>
-          <RuleDraftForm bandKey={activeBandKey} />
-        </>
-      ) : null}
+      {clusters.length > 0 ? <RuleDraftForm bandKey={activeBandKey} /> : null}
     </Panel>
   )
 }

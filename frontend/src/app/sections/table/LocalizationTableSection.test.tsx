@@ -308,4 +308,69 @@ describe('раздел «Таблица локализации»', () => {
     await user.click(screen.getByTestId('loc-row-2-60'))
     expect(useDipoleCalc.getState().selectedPointId).toBeNull()
   })
+
+  it('вкладка «Сопоставление полос»: нормированные величины, колонки GOF нет', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      batch: dipoleBatchResultFixture(),
+      activeBandKey: 'alpha',
+    })
+    renderWithProviders(<LocalizationTableSection />)
+
+    await user.click(screen.getByRole('button', { name: 'Сопоставление полос' }))
+
+    // Принцип 3: GOF между полосами не сравним — только нормированные величины
+    expect(screen.getByText(/GOF между полосами не сравним/)).toBeInTheDocument()
+    expect(screen.getByText('62%')).toBeInTheDocument()
+    const comparison = screen.getByTestId('band-comparison')
+    const headers = within(comparison)
+      .getAllByRole('columnheader')
+      .map((cell) => cell.textContent)
+    expect(headers.some((name) => name?.includes('GOF'))).toBe(false)
+    expect(headers).toContain('RIV') // единственный кросс-полосной фильтр доверия
+  })
+
+  it('вкладка «Кластеры диполей (С2)»: паспорт нормировки и профили признаков', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({
+      result: dipoleScanResultFixture(),
+      batch: dipoleBatchResultFixture(),
+      activeBandKey: 'alpha',
+    })
+    renderWithProviders(<LocalizationTableSection />)
+
+    await user.click(screen.getByRole('button', { name: 'Кластеры диполей (С2)' }))
+
+    expect(
+      screen.getByText(/Воксель 0.1 от диаметра области поиска \(14 мм\)/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/устойчивость 1\/2 полос/)).toBeInTheDocument()
+    // В кластеры взяты прошедшие КД — так подписано в паспорте
+    expect(screen.getByText(/в кластеры взяты точки, прошедшие КД/)).toBeInTheDocument()
+    // Т2: профили в сравнительной таблице, не в списке строк-«супов»
+    expect(screen.getByTestId('batch-cluster-features')).toBeInTheDocument()
+    expect(screen.getByText('Топ-структура')).toBeInTheDocument()
+    expect(screen.getByText(/таламус \(слева\)/)).toBeInTheDocument()
+    expect(screen.getByText('100 % (2/2)')).toBeInTheDocument()
+  })
+
+  it('без пакетного прогона вкладки объясняют, где взять сопоставление и кластеры', async () => {
+    const user = userEvent.setup()
+    useEdfRecording.setState({ recording: recordingFixture })
+    useDipoleCalc.setState({ result: dipoleScanResultFixture(), batch: null })
+    renderWithProviders(<LocalizationTableSection />)
+
+    await user.click(screen.getByRole('button', { name: 'Сопоставление полос' }))
+    expect(screen.getByText(/после пакетного прогона/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Кластеры диполей (С2)' }))
+    expect(screen.getByText(/после пакетного прогона/)).toBeInTheDocument()
+
+    // Возврат к точкам: строки таблицы снова на месте
+    await user.click(screen.getByRole('button', { name: 'Точки локализации' }))
+    expect(screen.getAllByTestId(/^loc-row-/)).toHaveLength(4)
+  })
 })

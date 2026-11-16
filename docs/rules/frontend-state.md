@@ -52,7 +52,7 @@
 | `eegParams.ts` | `useEegParams` | `diplock.eeg` | канал, окно, зум, `navMode`, `navKind`, `artifactNav`, палитра/дБ, `eegNav`, отпечаток расчёта |
 | `dipoleParams.ts` | `useDipoleParams` | `diplock.dipoles` | слои проекций, срезы, референс-точка, выделенное поле |
 | `dipoleCalc.ts` | `useDipoleCalc` | `diplock.dipoleCalc` | задача расчёта, результат, пороги отображения (GOF % / момент нА·м), окно FFT, окно уточнения (`refineHalfwinMs`), playback, `seekSeq`, **пакет поддиапазонов** (`batch`, `batchJob`, `batchBandKeys`, `activeBandKey` — С1) |
-| `tableParams.ts` | `useTableParams` | `diplock.table` | сортировка и состав колонок таблицы (только отображение) |
+| `tableParams.ts` | `useTableParams` | `diplock.table` | вкладка просмотра (точки/сопоставление/кластеры), сортировка и состав колонок таблицы (только отображение) |
 | `summaryReport.ts` | `useSummaryReport` | `diplock.summary` | параметры пакета автоотчёта (полосы `bandKeys`, шаг сетки), идущая задача `kind=report`, результат и ошибка (результат/задача сессионные — сбрасываются при смене записи, `SummarySection`); вид отчёта `kind` и отчёты группового анализа (выбор источника `compareJobId`/`groupRunId`, сборка `buildCompareReport`/`buildGroupReport` — только кнопка, §3.9.8; состояние сессии, не персистится) |
 | `consiliumOptions.ts` | `useConsiliumOptions` | `diplock.consilium` | разовые настройки Консилиума (срез 0014): роли запуска раунда, фильтр советников, «раскрывать разделы ответов сразу» — правая панель «Опции»; плюс срез 0015: выдвижной левый сайдбар рабочей области (открытость, ширина 240–640 px, вкладка «Чат»/«Дерево», советник чата) |
 

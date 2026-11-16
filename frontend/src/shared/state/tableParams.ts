@@ -1,5 +1,6 @@
 /**
- * Параметры таблицы локализации (срез 4): порядок строк и видимые колонки.
+ * Параметры таблицы локализации (срез 4): вкладка просмотра, порядок строк и
+ * видимые колонки.
  *
  * Живут в zustand-срезе, а не в компоненте, потому что настраиваются в правой
  * панели, а рисуются в рабочей области. Правка параметра, как и в остальных
@@ -37,7 +38,12 @@ export const TABLE_SORT_OPTIONS: { value: TableSortDirection; label: string; tit
   },
 ]
 
+/** Вкладки просмотра рабочей области: точки, сопоставление полос, кластеры. */
+export type TableViewTab = 'points' | 'bands' | 'clusters'
+
 export type TableParams = {
+  /** Активная вкладка просмотра (16.11.2026: таблицы пакета — вкладки раздела) */
+  viewTab: TableViewTab
   sortDirection: TableSortDirection
   columnVisibility: TableColumnVisibility
   /** Пороги фильтра доверия GOF/RIV (2.6/N23); `null` — порог не задан */
@@ -45,6 +51,7 @@ export type TableParams = {
 }
 
 export const TABLE_PARAM_DEFAULTS: TableParams = {
+  viewTab: 'points',
   sortDirection: 'asc',
   columnVisibility: defaultColumnVisibility(),
   filters: { ...TABLE_FILTERS_DEFAULT },
@@ -52,6 +59,8 @@ export const TABLE_PARAM_DEFAULTS: TableParams = {
 
 export type TableParamsState = {
   params: TableParams
+  /** Активная вкладка просмотра (точки / сопоставление / кластеры) */
+  setViewTab: (tab: TableViewTab) => void
   setSortDirection: (direction: TableSortDirection) => void
   setColumnVisible: (key: TableColumnKey, visible: boolean) => void
   /** Показать все колонки (быстрый возврат после скрытия) */
@@ -60,7 +69,7 @@ export type TableParamsState = {
   setMinGofPct: (value: number | null) => void
   /** Порог RIV сверху, % (`null` — снять порог) */
   setMaxRivPct: (value: number | null) => void
-  /** Вернуть параметры по умолчанию (сортировка, колонки и пороги) */
+  /** Вернуть параметры по умолчанию (вкладка, сортировка, колонки и пороги) */
   reset: () => void
 }
 
@@ -68,6 +77,9 @@ export const useTableParams = create<TableParamsState>()(
   persist(
     (set) => ({
       params: { ...TABLE_PARAM_DEFAULTS, columnVisibility: defaultColumnVisibility() },
+
+      setViewTab: (viewTab) =>
+        set((state) => ({ params: { ...state.params, viewTab } })),
 
       setSortDirection: (sortDirection) =>
         set((state) => ({ params: { ...state.params, sortDirection } })),

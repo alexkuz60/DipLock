@@ -39,13 +39,40 @@ import { calcJobSummary, refinedSummary, refineTooltip, resultMatchesParams } fr
 import { thresholdsActive, thresholdsLabel, type DisplayThresholds } from '@/shared/lib/dipolePoints'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
-import { useTableParams } from '@/shared/state/tableParams'
+import { useTableParams, type TableViewTab } from '@/shared/state/tableParams'
 import { filterBandText } from '@/shared/lib/calcFilter'
 import { Placeholder } from '@/shared/ui/Placeholder'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { Button } from '@/shared/ui/Button'
 import { SelectField } from '@/shared/ui/SelectField'
+import { SegmentedControl, type SegmentedOption } from '@/shared/ui/SegmentedControl'
+import { BandComparisonTable } from './BandComparisonTable'
+import { BatchClustersTable } from './BatchClustersTable'
 import { LocalizationTable } from './LocalizationTable'
+
+/**
+ * Вкладки просмотра (16.11.2026): таблицы «Сопоставление полос» и «Кластеры
+ * диполей (С2)» перенесены сюда из панели «Пакет поддиапазонов» — в сайдбаре
+ * они листались, а раздел «Таблица локализации» — место просмотра таблиц
+ * результата. Активная вкладка живёт в `tableParams` (переживает перезагрузку).
+ */
+const TABLE_VIEW_TABS: SegmentedOption<TableViewTab>[] = [
+  {
+    value: 'points',
+    label: 'Точки локализации',
+    title: 'Точки расчёта текущей полосы: эпоха, MNI, момент, GOF, поле Бродмана',
+  },
+  {
+    value: 'bands',
+    label: 'Сопоставление полос',
+    title: 'С1: нормированные величины полос пакета — GOF между полосами не сравним',
+  },
+  {
+    value: 'clusters',
+    label: 'Кластеры диполей (С2)',
+    title: 'Профили признаков кластеров с устойчивостью по поддиапазонам',
+  },
+]
 
 export function LocalizationTableSection() {
   const recording = useEdfRecording((state) => state.recording)
@@ -55,6 +82,8 @@ export function LocalizationTableSection() {
   const error = useDipoleCalc((state) => state.batchError)
   /** Полосы набора: таблица показывает точки одной (активной) полосы */
   const batchBands = useDipoleCalc((state) => state.batch?.bands ?? null)
+  /** Набор пакета: сопоставление и кластеры — вкладки просмотра (16.11.2026) */
+  const batch = useDipoleCalc((state) => state.batch)
   const activeBandKey = useDipoleCalc((state) => state.activeBandKey)
   const setActiveBand = useDipoleCalc((state) => state.setActiveBand)
   const gofThresholdPercent = useDipoleCalc((state) => state.gofThresholdPercent)
@@ -76,6 +105,14 @@ export function LocalizationTableSection() {
   const sortDirection = useTableParams((state) => state.params.sortDirection)
   const columnVisibility = useTableParams((state) => state.params.columnVisibility)
   const filters = useTableParams((state) => state.params.filters)
+  const viewTab = useTableParams((state) => state.params.viewTab)
+  const setViewTab = useTableParams((state) => state.setViewTab)
+
+  // Вкладки пакета: сопоставление и кластеры читают `batch` напрямую — это
+  // представления результата, они ничего не запрашивают (правило раздела).
+  const comparison = batch?.comparison ?? []
+  const clusters = batch?.clusters ?? []
+  const clusterParams = batch?.cluster_params ?? null
 
   // Строки — чистая функция от результата и настроек таблицы: ни запросов, ни
   // мутаций состояния, правка сортировки/колонок/порогов просто перерисовывает
@@ -161,7 +198,9 @@ export function LocalizationTableSection() {
     )
   }
 
-  if (allRows.length === 0) {
+  // Пустые точки блокируют только вкладку точек: сопоставление и кластеры
+  // пакета показываются и без строк (у полосы может не быть точек).
+  if (allRows.length === 0 && viewTab === 'points') {
     return (
       <Placeholder
         icon={<Table2 className="size-12" />}
@@ -183,6 +222,13 @@ export function LocalizationTableSection() {
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3">
       <div className="flex flex-wrap items-center gap-2">
+        <SegmentedControl
+          label="Вид"
+          layout="inline"
+          value={viewTab}
+          onChange={setViewTab}
+          options={TABLE_VIEW_TABS}
+        />
         {batchBands && batchBands.length > 1 ? (
           <SelectField
             layout="inline"
@@ -195,37 +241,47 @@ export function LocalizationTableSection() {
             onChange={setActiveBand}
           />
         ) : null}
-        <StatusPill tone={stale ? 'warn' : 'ok'}>
-          {stale
-            ? 'Параметры расчёта изменены — результат не пересчитан'
-            : `Строк: ${rows.length}${hiddenByFilter > 0 ? ` из ${allRows.length}` : ''} · расчёт актуален`}
-        </StatusPill>
-        {filtersActive(filters) ? (
-          <StatusPill tone="accent" title="Фильтр доверия GOF/RIV: скрытые строки остаются в результате">
-            {`Пороги: ${filtersSummary(filters)}${hiddenByFilter > 0 ? ` · скрыто ${hiddenByFilter}` : ''}`}
-          </StatusPill>
-        ) : null}
-        <StatusPill tone="accent" title={`Метод расчёта: ${result.method}`}>
-          {`Быстрый режим, сетка ${result.grid_mm} мм`}
-        </StatusPill>
-        <StatusPill tone="neutral">{`Сортировка: ${sortDirectionLabel(sortDirection)}`}</StatusPill>
-        <StatusPill tone="neutral">
-          {`Эпох в расчёте: ${result.n_epochs_used} из ${result.n_epochs_total}`}
-        </StatusPill>
-        <StatusPill tone="neutral">
-          {`Полоса: ${filterBandText(result.filter_band_hz ?? null)}${result.notch_hz ? ` · notch ${result.notch_hz} Гц` : ''}`}
-        </StatusPill>
-        {hiddenColumns > 0 ? (
-          <StatusPill tone="neutral">{`Скрыто колонок: ${hiddenColumns}`}</StatusPill>
-        ) : null}
-        {missingMni > 0 ? (
+        {viewTab === 'points' ? (
+          <>
+            <StatusPill tone={stale ? 'warn' : 'ok'}>
+              {stale
+                ? 'Параметры расчёта изменены — результат не пересчитан'
+                : `Строк: ${rows.length}${hiddenByFilter > 0 ? ` из ${allRows.length}` : ''} · расчёт актуален`}
+            </StatusPill>
+            {filtersActive(filters) ? (
+              <StatusPill tone="accent" title="Фильтр доверия GOF/RIV: скрытые строки остаются в результате">
+                {`Пороги: ${filtersSummary(filters)}${hiddenByFilter > 0 ? ` · скрыто ${hiddenByFilter}` : ''}`}
+              </StatusPill>
+            ) : null}
+            <StatusPill tone="accent" title={`Метод расчёта: ${result.method}`}>
+              {`Быстрый режим, сетка ${result.grid_mm} мм`}
+            </StatusPill>
+            <StatusPill tone="neutral">{`Сортировка: ${sortDirectionLabel(sortDirection)}`}</StatusPill>
+            <StatusPill tone="neutral">
+              {`Эпох в расчёте: ${result.n_epochs_used} из ${result.n_epochs_total}`}
+            </StatusPill>
+            <StatusPill tone="neutral">
+              {`Полоса: ${filterBandText(result.filter_band_hz ?? null)}${result.notch_hz ? ` · notch ${result.notch_hz} Гц` : ''}`}
+            </StatusPill>
+            {hiddenColumns > 0 ? (
+              <StatusPill tone="neutral">{`Скрыто колонок: ${hiddenColumns}`}</StatusPill>
+            ) : null}
+            {missingMni > 0 ? (
+              <StatusPill tone="warn">
+                {`Точек без MNI: ${missingMni} — координаты «—» (на проекции не наводятся)`}
+              </StatusPill>
+            ) : null}
+            {thresholdsActive(thresholds) ? (
+              <StatusPill tone="neutral">
+                {`Пороги «${thresholdsLabel(thresholds)}» — только на проекциях: в таблице все точки`}
+              </StatusPill>
+            ) : null}
+          </>
+        ) : stale ? (
+          // Предупреждение «не пересчитано» важно на любой вкладке: все три
+          // читают один результат и не должны выдавать старые числа за новые
           <StatusPill tone="warn">
-            {`Точек без MNI: ${missingMni} — координаты «—» (на проекции не наводятся)`}
-          </StatusPill>
-        ) : null}
-        {thresholdsActive(thresholds) ? (
-          <StatusPill tone="neutral">
-            {`Пороги «${thresholdsLabel(thresholds)}» — только на проекциях: в таблице все точки`}
+            Параметры расчёта изменены — результат не пересчитан
           </StatusPill>
         ) : null}
       </div>
@@ -233,27 +289,58 @@ export function LocalizationTableSection() {
       {refineError ? (
         <StatusPill tone="danger">{`Ошибка уточнения: ${refineError}`}</StatusPill>
       ) : null}
-      {rows.length === 0 ? (
-        <StatusPill tone="warn">
-          {`Пороги ${filtersSummary(filters)} скрыли все ${allRows.length} строк: снимите их в панели справа`}
-        </StatusPill>
-      ) : (
-        <LocalizationTable
-          rows={rows}
-          columns={columns}
-          renderRowAction={renderRowAction}
-          selectedRowId={selectedPointId}
-          onRowClick={(row) => toggleSelectedPoint(row.id)}
-        />
-      )}
 
-      <p className="text-sm text-fg-2">
-        Таблица читает результат задачи раздела «Диполи» и ничего не запрашивает: расчёт запускается
-        только кнопкой в шапке того раздела. Порядок строк задаёт панель справа (пока единственный
-        ключ — номер эпохи). Фильтр GOF/RIV — фильтр доверия: он скрывает строки, но не удаляет их
-        из результата. Переход к диполю по клику и сохранение выборки в БД — следующий срез:
-        сейчас показаны все точки результата, включая те, что без MNI.
-      </p>
+      {viewTab === 'points' ? (
+        <>
+          {rows.length === 0 ? (
+            <StatusPill tone="warn">
+              {`Пороги ${filtersSummary(filters)} скрыли все ${allRows.length} строк: снимите их в панели справа`}
+            </StatusPill>
+          ) : (
+            <LocalizationTable
+              rows={rows}
+              columns={columns}
+              renderRowAction={renderRowAction}
+              selectedRowId={selectedPointId}
+              onRowClick={(row) => toggleSelectedPoint(row.id)}
+            />
+          )}
+
+          <p className="text-sm text-fg-2">
+            Таблица читает результат задачи раздела «Диполи» и ничего не запрашивает: расчёт запускается
+            только кнопкой в шапке того раздела. Порядок строк задаёт панель справа (пока единственный
+            ключ — номер эпохи). Фильтр GOF/RIV — фильтр доверия: он скрывает строки, но не удаляет их
+            из результата. Переход к диполю по клику и сохранение выборки в БД — следующий срез:
+            сейчас показаны все точки результата, включая те, что без MNI.
+          </p>
+        </>
+      ) : null}
+
+      {viewTab === 'bands' ? (
+        comparison.length > 0 ? (
+          <BandComparisonTable comparison={comparison} />
+        ) : (
+          <StatusPill tone="neutral">
+            Сопоставление полос появляется после пакетного прогона: кнопка «Рассчитать пакет» в
+            шапке раздела «Диполи» (3)
+          </StatusPill>
+        )
+      ) : null}
+
+      {viewTab === 'clusters' ? (
+        clusters.length > 0 ? (
+          <BatchClustersTable
+            clusters={clusters}
+            clusterParams={clusterParams}
+            bandsCount={batchBands?.length ?? 0}
+          />
+        ) : (
+          <StatusPill tone="neutral">
+            Кластеры диполей появляются после пакетного прогона: кнопка «Рассчитать пакет» в шапке
+            раздела «Диполи» (3)
+          </StatusPill>
+        )
+      ) : null}
 
       {result.warnings?.length ? (
         <ul className="list-inside list-disc text-sm text-warn">

@@ -5,11 +5,12 @@
  * панели выбора полос прогона, чипов полос и кнопки запуска нет (правка
  * **ничего не запускает**, из запросов возможны только статические `/meta`).
  * Результат — набор: активная полоса (для таблицы) выбирается в разделе
- * «Таблица локализации», здесь — чекбоксы отображения, сопоставление только
- * нормированными величинами (колонки GOF нет — принцип 3) и кластеры с
- * устойчивостью по поддиапазонам.
+ * «Таблица локализации», здесь — чекбоксы отображения. Таблицы «Сопоставление
+ * полос» и «Кластеры диполей (С2)» — там же, во вкладках просмотра
+ * (16.11.2026); в панели остаётся форма «Черновик правила из профиля» (Т5) —
+ * она делает запросы.
  */
-import { screen, within } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { CALC_PARAM_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
@@ -48,7 +49,7 @@ describe('панель «Пакет поддиапазонов»', () => {
     expect(fetchSpy.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
   })
 
-  it('показывает набор: чекбоксы отображения и сопоставление', async () => {
+  it('показывает набор: чекбоксы отображения', async () => {
     useDipoleCalc.setState({
       batch: dipoleBatchResultFixture(),
       activeBandKey: 'alpha',
@@ -61,30 +62,33 @@ describe('панель «Пакет поддиапазонов»', () => {
     expect(screen.queryByRole('button', { name: 'alpha (8–13 Гц)' })).not.toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: 'alpha' })).toBeInTheDocument()
     expect(useDipoleCalc.getState().activeBandKey).toBe('alpha')
-    // Сопоставление: нормированные величины подписаны процентами
-    expect(screen.getByText('Сопоставление полос')).toBeInTheDocument()
-    expect(screen.getByText('62%')).toBeInTheDocument()
   })
 
-  it('в сопоставлении нет колонки GOF — GOF между полосами не сравним', async () => {
+  it('таблицы сопоставления и кластеров — в разделе «Таблица локализации»', async () => {
     useDipoleCalc.setState({
       batch: dipoleBatchResultFixture(),
       activeBandKey: 'alpha',
     })
     renderWithProviders(<BatchPanel />)
 
-    expect(screen.getByText('Сопоставление полос')).toBeInTheDocument()
+    // Таблицы перенесены во вкладки просмотра (16.11.2026): в панели остались
+    // чекбоксы отображения и форма черновика правила
+    expect(screen.queryByTestId('band-comparison')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('batch-cluster-features')).not.toBeInTheDocument()
     expect(
-      screen.getByText(/GOF между полосами не сравним/),
+      screen.getByText(/Сопоставление полос и кластеры диполей — в разделе «Таблица/),
     ).toBeInTheDocument()
-    // В сопоставлении полос — нет колонки GOF (принцип 3). Колонка GOF в
-    // таблице профилей кластеров (Т2) — внутриполосная, это другая таблица.
-    const comparison = screen.getByTestId('band-comparison')
-    const headers = within(comparison)
-      .getAllByRole('columnheader')
-      .map((cell) => cell.textContent)
-    expect(headers.some((name) => name?.includes('GOF'))).toBe(false)
-    expect(headers).toContain('RIV') // единственный кросс-полосной фильтр доверия
+  })
+
+  it('форма черновика правила остаётся в панели — она делает запросы', () => {
+    useDipoleCalc.setState({
+      batch: dipoleBatchResultFixture(),
+      activeBandKey: 'alpha',
+    })
+    renderWithProviders(<BatchPanel />)
+
+    expect(screen.getByTestId('rule-draft-form')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Собрать черновик' })).toBeInTheDocument()
   })
 
   it('переключение активной полосы — забота таблицы: панель её не трогает', async () => {
@@ -123,24 +127,15 @@ describe('панель «Пакет поддиапазонов»', () => {
     expect(useDipoleCalc.getState().playbackBandKeys).toEqual(['alpha', 'beta'])
   })
 
-  it('показывает кластеры с паспортом нормировки и устойчивостью по поддиапазонам', () => {
+  it('кластерных таблиц в панели нет — они во вкладке раздела «Таблица локализации»', () => {
     useDipoleCalc.setState({
       batch: dipoleBatchResultFixture(),
       activeBandKey: 'alpha',
     })
     renderWithProviders(<BatchPanel />)
 
-    expect(screen.getByText('Кластеры диполей (С2)')).toBeInTheDocument()
-    expect(
-      screen.getByText(/Воксель 0.1 от диаметра области поиска \(14 мм\)/),
-    ).toBeInTheDocument()
-    expect(screen.getByText(/устойчивость 1\/2 полос/)).toBeInTheDocument()
-    // В кластеры взяты прошедшие КД — так подписано в паспорте
-    expect(screen.getByText(/в кластеры взяты точки, прошедшие КД/)).toBeInTheDocument()
-    // Т2: профили в сравнительной таблице, не в списке строк-«супов»
-    expect(screen.getByTestId('batch-cluster-features')).toBeInTheDocument()
-    expect(screen.getByText('Топ-структура')).toBeInTheDocument()
-    expect(screen.getByText(/таламус \(слева\)/)).toBeInTheDocument()
-    expect(screen.getByText('100 % (2/2)')).toBeInTheDocument()
+    // Кластерные таблицы — во вкладке «Кластеры диполей (С2)» раздела
+    // «Таблица локализации» (проверяет LocalizationTableSection.test)
+    expect(screen.queryByTestId('batch-cluster-features')).not.toBeInTheDocument()
   })
 })
