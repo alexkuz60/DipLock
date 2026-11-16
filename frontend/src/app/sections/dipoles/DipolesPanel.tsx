@@ -53,6 +53,7 @@ import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { epochRuleWarnings, type EpochSignalInfo } from '@/shared/lib/epochRules'
 import { BatchPanel } from './BatchPanel'
+import { StoredRunsPanel } from './StoredRunsPanel'
 import { PlaybackAnatomyLine } from './PlaybackAnatomyLine'
 import { SelectedDipoleLine } from './SelectedDipoleLine'
 import {
@@ -413,6 +414,11 @@ export function DipolesPanel() {
       </Panel>
       {/* С0 (29.10.2026): пороги КД — вердикт годности точки диполя.
           Поля запоминаются и уходят в расчёт пакета и автоотчёт. */}
+      {/* Показ записанных прогонов из БД (16.11.2026): загрузка готового
+          результата без пересчёта — правило «правка не запускает обработку»
+          не нарушается, кнопка лишь открывает уже записанный прогон */}
+      <StoredRunsPanel recordingId={recording?.recording_id ?? null} />
+
       <Panel
         title="КД — критерий годности"
         hint="Вердикт точки: момент ≥ X % максимума своей полосы И GOF ≥ порога своей полосы. Пороги запоминаются и уходят в «Рассчитать пакет» и автоотчёт «Итоги»; правка ничего не запускает."

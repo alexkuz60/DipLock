@@ -3,6 +3,9 @@
  */
 import { vi } from 'vitest'
 import {
+  analysisDetailFixture,
+  analysisPointsFixture,
+  analysisSummaryFixture,
   calcJobFixture,
   compareResultFixture,
   dipoleBatchResultFixture,
@@ -37,10 +40,13 @@ import {
 import { encodeSignalBlob } from './signalBlob'
 import { spectrogramBlobFixture } from './spectrogramBlob'
 import type {
+  AnalysisDetail,
+  AnalysisSummary,
   ArchiveBatchResult,
   CompareResult,
   ContourSlice,
   DipoleBatchResult,
+  DipolePoint,
   DipoleRefineResult,
   DipoleScanResult,
   EloretaResult,
@@ -174,6 +180,18 @@ export type MockApiOptions = {
   dipoleScanResult?: DipoleScanResult
   /** Явный результат пакета поддиапазонов (`GET …/dipole_batch/{id}`, С1) */
   dipoleBatchResult?: DipoleBatchResult
+  /** Файл задачи пакета недоступен (409): показ прогона идёт точками из БД */
+  dipoleBatchResultFails?: string
+  /** Страница прогонов пакета (`GET /analyses`, показ прогонов в «Диполях») */
+  analyses?: { total: number; items: AnalysisSummary[] }
+  /** Паспорт прогона из БД (`GET /analyses/{id}`) */
+  analysisDetail?: AnalysisDetail
+  /** Точки прогона из БД (`GET /analyses/{id}/points`) */
+  analysisPoints?: DipolePoint[]
+  /** Ошибка чтения прогонов/прогона из БД (текст detail) */
+  analysesFails?: string
+  /** Ошибки удаления записей (`DELETE /recordings/{id}`): id → текст detail */
+  deleteRecordingFails?: Record<string, string>
   /** Явный отчёт пакетной обработки архива (`GET /archive/batches/{id}`, С8) */
   archiveBatchResult?: ArchiveBatchResult
   /** Явный результат точного уточнения эпохи (кнопка «Уточнить…») */
@@ -374,6 +392,10 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         }
         return jsonResponse(calcJobCreated('job-batch-1', 'dipole_batch'), 202)
       }
+      if (options.dipoleBatchResultFails) {
+        // Файл задачи не сохранился (лимит/очистка) — показ прогона идёт точками БД
+        return jsonResponse({ detail: options.dipoleBatchResultFails }, 409)
+      }
       return jsonResponse(options.dipoleBatchResult ?? dipoleBatchResultFixture())
     }
     // Пакетная обработка архива (С8): задача принадлежит серии, её результат —
@@ -502,6 +524,32 @@ export function mockApiFetch(options: MockApiOptions = {}) {
       }
       const items = options.groupRuns ?? []
       return jsonResponse({ total: items.length, items })
+    }
+    // Прогоны пакета в БД (read-API 4.7): показ сохранённого прогона в «Диполях».
+    // Ветки идут **после** `/group/analyses` — иначе её URL ловит `/analyses/\d+`.
+    if (/\/analyses\/\d+\/points/.test(url)) {
+      if (options.analysesFails) {
+        return jsonResponse({ detail: options.analysesFails }, 500)
+      }
+      return jsonResponse(options.analysisPoints ?? analysisPointsFixture())
+    }
+    if (/\/analyses\/\d+/.test(url)) {
+      if (options.analysesFails) {
+        return jsonResponse({ detail: options.analysesFails }, 500)
+      }
+      return jsonResponse(options.analysisDetail ?? analysisDetailFixture())
+    }
+    if (/\/analyses(\?|$)/.test(url)) {
+      if (options.analysesFails) {
+        return jsonResponse({ detail: options.analysesFails }, 500)
+      }
+      const items = options.analyses?.items ?? [analysisSummaryFixture()]
+      return jsonResponse({
+        total: options.analyses?.total ?? items.length,
+        limit: 10,
+        offset: 0,
+        items,
+      })
     }
     if (url.includes('/recordings/readiness')) {
       // Страница готовности (раздел «БД»): раньше карточки и общей ветки `/recordings/`
@@ -637,6 +685,15 @@ export function mockApiFetch(options: MockApiOptions = {}) {
       return jsonResponse(options.meta ?? metaFixture)
     }
     if (url.includes('/recordings/')) {
+      if (method === 'DELETE') {
+        // Удаление записи (раздел «БД»): 204 пустым телом, отказ — по options
+        const recordingId = url.split('/').filter(Boolean).at(-1) ?? ''
+        const fail = options.deleteRecordingFails?.[recordingId]
+        if (fail) {
+          return jsonResponse({ detail: fail }, 404)
+        }
+        return new Response(null, { status: 204 })
+      }
       return jsonResponse(options.recording ?? recordingFixture)
     }
     return jsonResponse({ detail: `Нет мока для ${url}` }, 404)

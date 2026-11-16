@@ -30,6 +30,11 @@
  * результаты задач и выделения относятся к конкретной записи и после перезагрузки
  * страницы бессмысленны.
  *
+ * Показ сохранённого прогона из БД (секция «Прогоны в БД», 16.11.2026) —
+ * **не расчёт**: `showStoredRun` лишь загружает уже записанный результат
+ * (полный контракт из файла задачи или точки БД, `shared/lib/storedRuns.ts`),
+ * поэтому правило «правка параметра ничего не запускает» это не нарушает.
+ *
  * Воспроизведение траектории (срез 3.7) — тоже состояние **просмотра**, но с
  * командой из шапки: `playback` хранит идущее воспроизведение, скорость,
  * номер эпохи и счётчик пользовательских переходов (`seekSeq` — как `navRequest.seq`
@@ -64,7 +69,9 @@ import {
   type CalcParams,
   type CalcView,
   type PlaybackState,
+  type StoredRunView,
 } from '@/shared/lib/dipoleCalcModel'
+import { batchFromStoredPoints } from '@/shared/lib/storedRuns'
 import { cancelRemoteJob, createRunToken, isCancelled, waitForJob } from '@/shared/lib/jobPolling'
 import {
   buildDipoleBatchForm,
@@ -72,7 +79,15 @@ import {
 } from '@/shared/lib/dipoleBatch'
 import { normalizeFreqWindow, type FreqWindow } from '@/shared/lib/spectrum'
 import { canPlayback, clampEpochIndex, normalizePlaybackSpeed } from '@/shared/lib/playback'
-import type { DipoleBatchResult, DipoleRefineResult, DipoleScanResult, EloretaResult, SpectrumResult } from '@/shared/api/types'
+import type {
+  AnalysisSummary,
+  DipoleBatchResult,
+  DipolePoint,
+  DipoleRefineResult,
+  DipoleScanResult,
+  EloretaResult,
+  SpectrumResult,
+} from '@/shared/api/types'
 
 /**
  * Токен запуска расчёта: новый расчёт, новый спектр или сброс делают ответы
@@ -129,6 +144,16 @@ export type DipoleCalcState = {
   batchJob: CalcJob | null
   /** Текст последней ошибки расчёта (пакет — единственный расчёт диполей) */
   batchError: string | null
+  /**
+   * Показанный прогон из БД (секция «Прогоны в БД», 16.11.2026): результат
+   * **загружен**, а не посчитан — кнопка «Показать» открывает уже записанный
+   * прогон без пересчёта (история не UPSERT, §8.4.2).
+   */
+  storedRun: StoredRunView | null
+  /** Идёт загрузка сохранённого прогона (кнопки прогонов заняты) */
+  restoring: boolean
+  /** Текст ошибки показа прогона — отдельно от ошибки расчёта */
+  restoreError: string | null
   /**
    * Активная полоса пакета: её точки показывают проекции, playback и таблица
    * (`result` держит скан активной полосы — прежняя отрисовка работает без правок).
@@ -238,6 +263,13 @@ export type DipoleCalcState = {
    * пакет всегда считает весь каталог).
    */
   runBatch: (recordingId: string | null, bandKeys: string[]) => Promise<void>
+  /**
+   * Показать сохранённый прогон из БД (не расчёт): полный контракт берётся из
+   * файла задачи прогона (`result_url`), при его отсутствии — точки из БД
+   * (`shared/lib/storedRuns.ts`: без кластеров, сопоставления полос и
+   * отбраковки эпох — их БД не хранит).
+   */
+  showStoredRun: (recordingId: string | null, run: AnalysisSummary) => Promise<void>
   /** Смена активной полосы пакета: `result` = скан её точек, кадр снимается */
   setActiveBand: (bandKey: string) => void
   /** Переключить полосу в анимации/облаке (чекбокс панели пакета) */
@@ -287,6 +319,9 @@ export const useDipoleCalc = create<DipoleCalcState>()(
       batch: null,
       batchJob: null,
       batchError: null,
+      storedRun: null,
+      restoring: false,
+      restoreError: null,
       activeBandKey: null,
       playbackBandKeys: [],
       spectrumJob: null,
@@ -470,43 +505,70 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           if (!isCurrent()) return
           const batch = await api.dipoleBatch.result(recordingId, created.job_id)
           if (!isCurrent()) return
-          const bands = batch.bands ?? []
-          const first = bands.find((band) => band.state === 'ok') ?? bands[0]
-          set({
-            batch,
+          set((state) => ({
+            ...applyBatchState(batch, state.playback),
             batchJob: succeededJob(get().batchJob),
-            activeBandKey: first?.band_key ?? null,
-            // Чекбоксы анимации/облака (п.1.4): после прогона отмечены все полосы
-            playbackBandKeys: bands.map((band) => band.band_key),
-            // Проекции/таблица/подписи читают `result` — кладём в него скан
-            // активной полосы набора (та же нарезка, свои точки)
-            result: first ? scanResultOfBand(batch, first) : null,
-            // Уточнения/eLORETA/кадр/выбор эпохи привязаны к прежней нарезке —
-            // снимаются (новая нарезка делает их чужими)
-            refinedPoints: {},
-            refineJob: null,
-            refiningEpoch: null,
-            refineError: null,
-            eloretaResults: {},
-            eloretaJob: null,
-            eloretaEpochIndex: null,
-            eloretaError: null,
-            selectedPointId: null,
-            selectedEpochIndex: null,
-            playback: {
-              ...get().playback,
-              playing: false,
-              active: false,
-              epochIndex: 0,
-              seekSeq: 0,
-            },
-          })
+            // Свежий расчёт подменяет и показанный ранее прогон из БД
+            storedRun: null,
+            restoreError: null,
+          }))
         } catch (error) {
           if (isCancelled(error) || !isCurrent()) return
           set({
             batchJob: failedJob(get().batchJob, apiErrorText(error)),
             batchError: apiErrorText(error),
           })
+        }
+      },
+
+      showStoredRun: async (recordingId, run) => {
+        if (!recordingId || run.id == null) return
+        const token = calcRunToken.next()
+        const isCurrent = () => calcRunToken.isCurrent(token)
+        set({ restoring: true, restoreError: null })
+        try {
+          // Источник 1 (полный контракт): файл задачи прогона (`result_url`).
+          // Источник 2 (запасной): точки из БД — когда файл не сохранился
+          // (лимит размера/очистка) — без кластеров/сопоставления/отбраковки.
+          let batch: DipoleBatchResult | null = null
+          let source: StoredRunView['source'] = 'job-file'
+          let skippedPoints = 0
+          if (run.job_id) {
+            try {
+              batch = await api.dipoleBatch.result(recordingId, run.job_id)
+            } catch {
+              if (!isCurrent()) return
+            }
+          }
+          if (!batch) {
+            source = 'db-points'
+            const [detail, rows] = await Promise.all([
+              api.analysis(run.id),
+              fetchStoredPoints(run.id),
+            ])
+            if (!isCurrent()) return
+            const stored = batchFromStoredPoints(detail, rows)
+            batch = stored.batch
+            skippedPoints = stored.skippedPoints
+          }
+          if (!isCurrent()) return
+          set((state) => ({
+            ...applyBatchState(batch, state.playback),
+            // Показ прогона — не задача: статус прошлого расчёта не описывает его
+            batchJob: null,
+            batchError: null,
+            storedRun: {
+              analysisId: run.id,
+              jobId: run.job_id ?? null,
+              source,
+              skippedPoints,
+            },
+            restoring: false,
+            restoreError: null,
+          }))
+        } catch (error) {
+          if (isCancelled(error) || !isCurrent()) return
+          set({ restoring: false, restoreError: apiErrorText(error) })
         }
       },
 
@@ -670,6 +732,10 @@ export const useDipoleCalc = create<DipoleCalcState>()(
           batch: null,
           batchJob: null,
           batchError: null,
+          // Показанный прогон из БД держится на том же результате — снимается с ним
+          storedRun: null,
+          restoring: false,
+          restoreError: null,
           activeBandKey: null,
           playbackBandKeys: [],
           spectrumJob: null,
@@ -737,6 +803,57 @@ export const useDipoleCalc = create<DipoleCalcState>()(
     },
   ),
 )
+
+/**
+ * Частичное состояние «набор пакета показан»: общий финал задачи пакета и
+ * показа сохранённого прогона — набор, активная полоса, чекбоксы облака и
+ * снятие уточнений/eLORETA/кадра/выделения (они привязаны к прежней нарезке).
+ */
+function applyBatchState(
+  batch: DipoleBatchResult,
+  playback: PlaybackState,
+): Partial<DipoleCalcState> {
+  const bands = batch.bands ?? []
+  const first = bands.find((band) => band.state === 'ok') ?? bands[0]
+  return {
+    batch,
+    activeBandKey: first?.band_key ?? null,
+    // Чекбоксы анимации/облака (п.1.4): после прогона отмечены все полосы
+    playbackBandKeys: bands.map((band) => band.band_key),
+    // Проекции/таблица/подписи читают `result` — кладём в него скан
+    // активной полосы набора (та же нарезка, свои точки)
+    result: first ? scanResultOfBand(batch, first) : null,
+    // Уточнения/eLORETA/кадр/выбор эпохи привязаны к прежней нарезке —
+    // снимаются (новая нарезка делает их чужими)
+    refinedPoints: {},
+    refineJob: null,
+    refiningEpoch: null,
+    refineError: null,
+    eloretaResults: {},
+    eloretaJob: null,
+    eloretaEpochIndex: null,
+    eloretaError: null,
+    selectedPointId: null,
+    selectedEpochIndex: null,
+    playback: { ...playback, playing: false, active: false, epochIndex: 0, seekSeq: 0 },
+  }
+}
+
+/**
+ * Все точки прогона из БД (страницы `GET /analyses/{id}/points`): точек
+ * «эпоха × поддиапазон» тысячи (эпохи × полосы), поэтому чтение постранично
+ * (лимит страницы сервера — 5000, берём 1000 с потолком обхода).
+ */
+async function fetchStoredPoints(analysisId: number): Promise<DipolePoint[]> {
+  const rows: DipolePoint[] = []
+  const limit = 1000
+  for (let page = 0; page < 50; page += 1) {
+    const chunk = await api.analysisPoints(analysisId, { limit, offset: rows.length })
+    rows.push(...chunk)
+    if (chunk.length < limit) break
+  }
+  return rows
+}
 
 function runningJob(): CalcJob {
   return {

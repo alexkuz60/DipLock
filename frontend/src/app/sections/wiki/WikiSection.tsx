@@ -23,6 +23,7 @@ import { EloretaArticle } from './articles/EloretaArticle'
 import { EmolabArticle } from './articles/EmolabArticle'
 import { EpochsArticle } from './articles/EpochsArticle'
 import { FilterArticle } from './articles/FilterArticle'
+import { FaqArticle } from './articles/FaqArticle'
 import { FeaturesRulesArticle } from './articles/FeaturesRulesArticle'
 import { GlossaryArticle } from './articles/GlossaryArticle'
 import { GroupAnalysisArticle } from './articles/GroupAnalysisArticle'
@@ -72,6 +73,7 @@ const ARTICLE_COMPONENTS: Record<WikiArticleId, ComponentType> = {
   emolab: EmolabArticle,
   neuromusic: NeuromusicArticle,
   table: TableArticle,
+  faq: FaqArticle,
   settings: SettingsArticle,
   server: ServerArticle,
   export: SessionExportArticle,

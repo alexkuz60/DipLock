@@ -16,7 +16,10 @@ import { deferred } from '@/test/deferred'
 import { CALC_PARAM_DEFAULTS, PLAYBACK_DEFAULTS } from '@/shared/lib/dipoleCalcModel'
 import { useDipoleCalc } from './dipoleCalc'
 import {
+  analysisPointsFixture,
+  analysisSummaryFixture,
   calcJobFixture,
+  dipoleBatchResultFixture,
   dipoleScanResultFixture,
   jobFixture,
   spectrumResultFixture,
@@ -35,6 +38,9 @@ function resetState() {
     batch: null,
     batchJob: null,
     batchError: null,
+    storedRun: null,
+    restoring: false,
+    restoreError: null,
     activeBandKey: null,
     playbackBandKeys: [],
     spectrumJob: null,
@@ -673,5 +679,107 @@ describe('пакет поддиапазонов (С1)', () => {
     expect(state.selectedEpochIndex).toBeNull()
     expect(state.playback.playing).toBe(false)
     expect(state.playback.epochIndex).toBe(0)
+  })
+})
+
+describe('показ сохранённого прогона из БД (16.11.2026)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetState()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('показывает прогон из файла задачи: полный контракт без пересчёта', async () => {
+    const fetchSpy = mockApiFetch({
+      dipoleBatchResult: dipoleBatchResultFixture({ params_sig: 'sig-stored-1' }),
+    })
+    const run = analysisSummaryFixture({ id: 7, job_id: 'job-batch-1' })
+
+    await useDipoleCalc.getState().showStoredRun('rec-1', run)
+
+    const state = useDipoleCalc.getState()
+    expect(state.batch?.params_sig).toBe('sig-stored-1')
+    expect(state.batchJob).toBeNull()
+    expect(state.storedRun).toEqual({
+      analysisId: 7,
+      jobId: 'job-batch-1',
+      source: 'job-file',
+      skippedPoints: 0,
+    })
+    // Показ — чтение готового: ни одного POST (расчёт не запускается)
+    expect(
+      fetchSpy.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST'),
+    ).toHaveLength(0)
+  })
+
+  it('файл задачи не сохранился — прогон собирается из точек БД с честными пустыми', async () => {
+    mockApiFetch({ dipoleBatchResultFails: 'Результат не сохранён' })
+    const run = analysisSummaryFixture({ id: 7, job_id: 'job-batch-1' })
+
+    await useDipoleCalc.getState().showStoredRun('rec-1', run)
+
+    const state = useDipoleCalc.getState()
+    expect(state.storedRun?.source).toBe('db-points')
+    const bands = state.batch?.bands ?? []
+    expect(bands.map((band) => band.band_key)).toEqual(['alpha', 'beta'])
+    expect(bands[0]?.points ?? []).toHaveLength(3)
+    // Агрегаты, которых БД не хранит, честно пусты
+    expect(state.batch?.comparison).toEqual([])
+    expect(state.batch?.clusters).toEqual([])
+    expect(state.batch?.notch_hz).toBeNull()
+    // Проекции читают `result` — скан активной полосы на месте
+    expect(state.result?.points).toHaveLength(3)
+  })
+
+  it('точки без координат не показываются и считаются в skippedPoints', async () => {
+    const rows = analysisPointsFixture()
+    mockApiFetch({
+      dipoleBatchResultFails: 'Результат не сохранён',
+      analysisPoints: [...rows, { ...rows[0], epoch_index: 9, head_coords: null }],
+    })
+
+    await useDipoleCalc
+      .getState()
+      .showStoredRun('rec-1', analysisSummaryFixture({ id: 7, job_id: 'job-batch-1' }))
+
+    expect(useDipoleCalc.getState().storedRun?.skippedPoints).toBe(1)
+  })
+
+  it('ошибка чтения прогонов — restoreError, прежний результат не трогается', async () => {
+    mockApiFetch({ analysesFails: 'БД недоступна' })
+    useDipoleCalc.setState({ result: dipoleScanResultFixture() })
+
+    await useDipoleCalc
+      .getState()
+      .showStoredRun('rec-1', analysisSummaryFixture({ id: 7, job_id: null }))
+
+    const state = useDipoleCalc.getState()
+    expect(state.restoreError).toBe('БД недоступна')
+    expect(state.storedRun).toBeNull()
+    expect(state.restoring).toBe(false)
+    expect(state.result).not.toBeNull()
+  })
+
+  it('новый расчёт подменяет показанный прогон, reset снимает его целиком', async () => {
+    mockApiFetch({ calcJob: calcJobFixture })
+    await useDipoleCalc
+      .getState()
+      .showStoredRun('rec-1', analysisSummaryFixture({ id: 7, job_id: 'job-batch-1' }))
+    expect(useDipoleCalc.getState().storedRun).not.toBeNull()
+
+    await useDipoleCalc.getState().runBatch('rec-1', CATALOG_BANDS)
+    expect(useDipoleCalc.getState().storedRun).toBeNull()
+
+    useDipoleCalc
+      .getState()
+      .showStoredRun('rec-1', analysisSummaryFixture({ id: 7, job_id: 'job-batch-1' }))
+    useDipoleCalc.getState().reset()
+    const state = useDipoleCalc.getState()
+    expect(state.storedRun).toBeNull()
+    expect(state.restoreError).toBeNull()
+    expect(state.batch).toBeNull()
   })
 })

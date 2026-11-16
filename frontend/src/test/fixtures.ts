@@ -2,6 +2,8 @@
  * Фикстуры ответов бэкенда для тестов UI (совпадают по форме со схемами API).
  */
 import type {
+  AnalysisDetail,
+  AnalysisSummary,
   BundleResult,
   CompareResult,
   ContourSlice,
@@ -13,6 +15,7 @@ import type {
   DipoleBandRun,
   DipoleBatchResult,
   DipoleCluster,
+  DipolePoint,
   DipoleScanPoint,
   DipoleRefineResult,
   EloretaResult,
@@ -1582,6 +1585,101 @@ export function dipoleBatchResultFixture(
     duration_sec_calc: 6.2,
     ...overrides,
   }
+}
+
+/** Строка прогонов пакета из БД (`GET /analyses`, read-API 4.7). */
+export function analysisSummaryFixture(
+  overrides: Partial<AnalysisSummary> = {},
+): AnalysisSummary {
+  return {
+    id: 7,
+    recording_id: recordingFixture.recording_id,
+    filename: 'test.edf',
+    patient_alias: 'Patient-aaa111',
+    kind: 'fast_grid',
+    params_sig: 'sig-batch-1',
+    created_at: '2026-11-16T10:00:00',
+    job_id: 'job-batch-1',
+    epoch_length_ms: 1000,
+    grid_mm: 7,
+    n_epochs_total: 3,
+    n_epochs_used: 3,
+    n_bands: 2,
+    n_points: 3,
+    ...overrides,
+  }
+}
+
+/** Паспорт прогона с полосами (`GET /analyses/{id}`): alpha с точками, beta пустая. */
+export function analysisDetailFixture(
+  overrides: Partial<AnalysisDetail> = {},
+): AnalysisDetail {
+  return {
+    ...analysisSummaryFixture(),
+    reference: 'average',
+    channels: recordingFixture.channels ?? [],
+    sfreq: recordingFixture.sfreq,
+    warnings: [],
+    duration_sec_calc: 6.2,
+    bands: [
+      {
+        band_key: 'alpha',
+        band_hz_lo: 8,
+        band_hz_hi: 13,
+        state: 'ok',
+        n_points: 3,
+        n_kd_passed: 2,
+        n_errors: 0,
+        moment_max_nam: 250,
+      },
+      {
+        band_key: 'beta',
+        band_hz_lo: 13,
+        band_hz_hi: 30,
+        state: 'empty',
+        n_points: 0,
+        n_kd_passed: null,
+        n_errors: 0,
+        moment_max_nam: null,
+      },
+    ],
+    ...overrides,
+  }
+}
+
+/**
+ * Точки прогона (`GET /analyses/{id}/points`): три строки alpha (эпохи 0–2).
+ * КД — «2 из 3»: одна NULL («не оценено»), одна 1, одна 0.
+ */
+export function analysisPointsFixture(): DipolePoint[] {
+  return [0, 1, 2].map((epoch) => ({
+    analysis_id: 7,
+    band_key: 'alpha',
+    band_hz_lo: 8,
+    band_hz_hi: 13,
+    epoch_index: epoch,
+    peak_time_ms: 120 + epoch,
+    head_coords: [-30 + epoch, -20, 50],
+    mni_coords: [-42 + epoch, -18, 58],
+    moment_dir: [0, 0, 1],
+    amplitude_nam: 100 + epoch * 10,
+    gof: 0.9 - epoch * 0.05,
+    anatomical_structure: 'таламус (слева)',
+    brodmann_area: 'BA7-lh',
+    method: 'fast_grid',
+    kd_passed: epoch === 0 ? null : epoch === 1 ? 1 : 0,
+    kd_basis:
+      epoch === 0
+        ? null
+        : {
+            moment_share_x: 0.05,
+            gof_min: 0.8,
+            moment_max_nam: 250,
+            moment_basis: 'доля от максимума поддиапазона',
+            gof_basis: 'абсолютный',
+          },
+    refined: null,
+  }))
 }
 
 /**

@@ -21,6 +21,7 @@ import {
   Flag,
   GitCompareArrows,
   Layers,
+  Lightbulb,
   MessagesSquare,
   Monitor,
   Music2,
@@ -62,6 +63,7 @@ export type WikiArticleId =
   | 'emolab'
   | 'neuromusic'
   | 'table'
+  | 'faq'
   | 'settings'
   | 'server'
   | 'export'
@@ -240,6 +242,13 @@ export const WIKI_ARTICLES: WikiArticle[] = [
     short: 'Таблица',
     hint: 'Все точки расчёта диполей: MNI, структура, поле Бродмана, сортировка, фильтры',
     icon: Table2,
+  },
+  {
+    id: 'faq',
+    title: 'Частые вопросы: параметры, прогоны и пересчёт',
+    short: 'Частые вопросы',
+    hint: 'Свои параметры расчёта, история прогонов, показ готового результата из БД',
+    icon: Lightbulb,
   },
   {
     id: 'settings',

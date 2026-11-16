@@ -425,6 +425,13 @@ export const api = {
     ),
 
   /**
+   * Удалить запись целиком (`DELETE /recordings/{id}`, 204): файл, кэши и
+   * строки БД каскадом (§8.4.3 `docs/rules/results-db.md`). 404 — уже удалена.
+   */
+  deleteRecording: (recordingId: string, signal?: AbortSignal) =>
+    request<void>(`${API_PREFIX}/recordings/${recordingId}`, { method: 'DELETE', signal }),
+
+  /**
    * Прогоны пакета диполей (`GET /analyses`, read-API 4.7, окончание):
    * фильтры `recording_id`/`kind`, пагинация, счётчики полос/точек.
    */

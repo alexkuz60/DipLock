@@ -145,6 +145,26 @@ export const GOF_THRESHOLD_RANGE: [number, number] = [0, 100]
 export const KD_GOF_RANGE: [number, number] = [0, 100]
 export const KD_MOMENT_SHARE_RANGE: [number, number] = [0, 100]
 
+/**
+ * Показанный прогон из БД (секция «Прогоны в БД», 16.11.2026): результат
+ * **загружен**, а не посчитан — кнопка «Показать» лишь открывает уже записанный
+ * прогон (история не UPSERT, §8.4.2 `docs/rules/results-db.md`).
+ *
+ * `source` — откуда взяты данные: полный контракт из файла задачи
+ * (`result_url` прогона) или только точки из БД (файл задачи не сохранился —
+ * лимит размера/очистка; тогда кластеры, сопоставление полос, отбраковка эпох
+ * и сетевой фильтр честно отсутствуют, см. `shared/lib/storedRuns.ts`).
+ */
+export type StoredRunView = {
+  /** id прогона в БД (`analyses.id`) */
+  analysisId: number
+  /** id задачи прогона (`analyses.job_id`); `null` — строка без задачи */
+  jobId: string | null
+  source: 'job-file' | 'db-points'
+  /** Точек без координат не показано (только для `db-points`) */
+  skippedPoints: number
+}
+
 /** Состояние одной фоновой задачи раздела: прогресс по этапам и эпохам. */
 export type CalcJob = {
   status: 'running' | 'succeeded' | 'failed' | 'cancelled'

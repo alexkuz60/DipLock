@@ -355,9 +355,13 @@ describe('панель раздела «Диполи»', () => {
     fireEvent.change(gofField, { target: { value: '90' } })
     // Правка запоминается в параметрах расчёта (персист localStorage)
     expect(useDipoleCalc.getState().params.kdGofByBand.alpha).toBe(90)
-    // Правка параметра не запускает расчёт: запросы только за метаданными
+    // Правка параметра не запускает обработку: запросы — только чтение
+    // (метаданные `/meta` и список прогонов из БД секции «Прогоны в БД»)
     const urls = fetchSpy.mock.calls.map(([input]) => String(input))
-    expect(urls.filter((url) => !url.includes('/meta'))).toEqual([])
+    expect(urls.filter((url) => !url.includes('/meta') && !url.includes('/analyses'))).toEqual([])
+    expect(
+      fetchSpy.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'POST'),
+    ).toHaveLength(0)
   })
 
   it('секция «КД»: «Момент ≥» хранит правку, а 0 возвращает дефолт методики', async () => {
