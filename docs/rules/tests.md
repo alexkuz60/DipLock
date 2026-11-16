@@ -1951,3 +1951,13 @@ HTML-отчёт — шапка/группы испытуемых/готовно�
 `DbSection.test.tsx` (+1: кнопки «Экспорт JSON»/«Отчёт HTML» — имя, MIME и
 содержимое через мок `downloadText`). Итог: pytest **1205** (без изменений),
 Vitest **1435** (134 файла).
+
+**Оптимизации производительности (16.11.2026):** кодосплиттинг разделов
+(`sectionModules.ts` + vendor-чанки), `windowStore` + `memo(TrackRow)`/`TrackCanvas`,
+батчинг `head_to_mni`, `_single_channel_raw` в детекторе ЭМГ, predicate
+`load_records`, прагмы SQLite/WAL, group-by `deletion_preview`, кэш `code_freshness`
+(10 с), подпись `NO_AREAS_ON_SLICE`. Vitest +1 (`MriProjection.test.tsx`: пустой слой
+Бродмана на срединной сагиттали); `vitest.setup.ts` — `preloadSections` (ленивые
+разделы в тестах загружаются синхронно). Новых pytest-тестов нет — оптимизации не
+меняют поведение, регрессию держит прежний набор. Итог: pytest **1225**
+(1205 без маркера `integration`), Vitest **1436** (134 файла).

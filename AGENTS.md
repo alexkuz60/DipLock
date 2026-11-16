@@ -90,8 +90,8 @@ audits/                # архив аудитов (версируется; ли
   `prepared_signal.py`, версии ассетов — `asset_versions.py`, результат задачи — `job_store.py`,
   сироты — `orphans.py`, **строки БД результатов — `recording_store.py`/`results_store.py`**;
   инварианты — `docs/rules/data-and-caches.md`, `docs/rules/results-db.md`.
-- **Frontend**: новый раздел UI = запись в `frontend/src/app/sections/registry.ts` + компонент
-  в `routes.tsx`; тексты — на русском; ожидание и отмена задач — общие
+- **Frontend**: новый раздел UI = запись в `registry.ts` + ленивый модуль в
+  `sectionModules.ts`; тексты — на русском; ожидание и отмена задач — общие
   (`shared/lib/jobPolling.ts`), адреса — парами (`recordingJob(kind)`); контролы — из
   `shared/ui/` (состав — `docs/rules/frontend-state.md`).
 
