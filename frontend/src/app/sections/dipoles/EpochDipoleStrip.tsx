@@ -20,13 +20,15 @@
  *   кадр на неё же (так индикатор заменяет покадровые кнопки «<»/«>»), а в Плей
  *   выделение **следует за кадром** — рамка едет по эпохам, и проекции показывают
  *   пакет диполей той эпохи, где стоит анимация. На паузе рамка фиксируется;
- *   play/pause и скорость остаются в шапке.
+ *   play/pause и скорость остаются в шапке. **Стрелки ←/→** при фокусе на
+ *   индикаторе шагают позицию кадра на эпоху влево/вправо (ручное
+ *   позиционирование, зажим к краям) — фокус переезжает на ячейку новой позиции.
  *
  * Данные — чистые функции `shared/lib/epochStrip.ts`; компонент только рисует
  * и шлёт команды стора (`toggleSelectedEpoch`). Расчёт запускается кнопкой
  * шапки, индикатор — отображение.
  */
-import { useMemo } from 'react'
+import { useCallback, useMemo, useRef, type KeyboardEvent } from 'react'
 import { useDipoleCalc } from '@/shared/state/dipoleCalc'
 import { bandTagOf } from '@/shared/lib/dipoleBatch'
 import {
@@ -39,6 +41,7 @@ import {
   type EpochStripCell,
   type EpochStripMixLayer,
 } from '@/shared/lib/epochStrip'
+import { clampEpochIndex } from '@/shared/lib/playback'
 import type { DipoleBatchResult } from '@/shared/api/types'
 import { cx } from '@/shared/ui/cx'
 
@@ -145,6 +148,8 @@ export function EpochDipoleStrip() {
   const batchJob = useDipoleCalc((state) => state.batchJob)
   const selectedEpochIndex = useDipoleCalc((state) => state.selectedEpochIndex)
   const toggleSelectedEpoch = useDipoleCalc((state) => state.toggleSelectedEpoch)
+  const playback = useDipoleCalc((state) => state.playback)
+  const rowRef = useRef<HTMLDivElement | null>(null)
 
   const bands = useMemo(() => stripBands(batch, playbackBandKeys), [batch, playbackBandKeys])
   // Сетка эпох — из результата (`n_epochs_total` включает BAD); до первого
@@ -157,11 +162,42 @@ export function EpochDipoleStrip() {
     ? stripProgressCells(totalEpochs, batchJob?.epochsDone ?? 0, batchJob?.epochsTotal ?? 0)
     : 0
 
+  /**
+   * Ручное позиционирование стрелками ←/→ — шаг позиции кадра на эпоху: то же
+   * действие, что клик по ячейке (выбор пакета диполей + перемотка + пауза
+   * анимации), но шаг никогда не «снимает» выбор — на краях сетки позиция
+   * зажимается. До первого кадра (и после «Снять кадр») нажатие в любую сторону
+   * включает кадр на первой эпохе. Фокус переезжает на ячейку новой позиции,
+   * чтобы зажатая клавиша продолжала шагать.
+   */
+  const handleRowKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      if (totalEpochs <= 0) return
+      event.preventDefault()
+      // Позиция: выбор эпохи, иначе кадр; до первого кадра — «перед» первой
+      // эпохой (обе стрелки входят на неё же)
+      const base = selectedEpochIndex ?? (playback.active ? playback.epochIndex : -1)
+      const target = clampEpochIndex(base + (event.key === 'ArrowRight' ? 1 : -1), totalEpochs)
+      if (target === base) return
+      toggleSelectedEpoch(target)
+      rowRef.current?.querySelector<HTMLButtonElement>(`[data-epoch="${target}"]`)?.focus()
+    },
+    [totalEpochs, selectedEpochIndex, playback, toggleSelectedEpoch],
+  )
+
   // Ни результата, ни идущей задачи — показывать нечего (а не «пустой ряд»)
   if (totalEpochs <= 0) return null
 
   return (
-    <div className="w-full" data-testid="epoch-strip">
+    <div
+      className="w-full"
+      data-testid="epoch-strip"
+      ref={rowRef}
+      role="group"
+      aria-label="Индикатор эпох: стрелки влево/вправо — шаг позиции анимации"
+      onKeyDown={handleRowKeyDown}
+    >
       <div className="flex w-full items-end gap-[2px]">
         {cells.map((cell) => (
           <EpochCell

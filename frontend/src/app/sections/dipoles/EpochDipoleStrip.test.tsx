@@ -86,6 +86,64 @@ describe('индикатор эпох/диполей', () => {
     expect(useDipoleCalc.getState().playback.epochIndex).toBe(1)
   })
 
+  it('стрелки ←/→ шагают позицию кадра на эпоху (ручное позиционирование)', async () => {
+    const user = userEvent.setup()
+    setBatchState()
+    renderWithProviders(<EpochDipoleStrip />)
+
+    const cells = screen.getAllByTestId('epoch-strip-cell')
+    cells[0].focus()
+    // До первого кадра нажатие в любую сторону включает кадр на первой эпохе
+    await user.keyboard('{ArrowRight}')
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(0)
+    expect(useDipoleCalc.getState().playback).toMatchObject({
+      active: true,
+      playing: false,
+      epochIndex: 0,
+    })
+
+    await user.keyboard('{ArrowRight}')
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(1)
+    expect(useDipoleCalc.getState().playback.epochIndex).toBe(1)
+    // Фокус переезжает на ячейку новой позиции — зажатая клавиша продолжает шагать
+    expect(screen.getAllByTestId('epoch-strip-cell')[1]).toHaveFocus()
+
+    await user.keyboard('{ArrowLeft}')
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(0)
+    expect(useDipoleCalc.getState().playback.epochIndex).toBe(0)
+  })
+
+  it('стрелки зажимают позицию к краям, и повтор на краю не снимает выбор', async () => {
+    const user = userEvent.setup()
+    setBatchState()
+    renderWithProviders(<EpochDipoleStrip />)
+
+    screen.getAllByTestId('epoch-strip-cell')[0].focus()
+    await user.keyboard('{ArrowLeft}') // «влево» от начала — зажим к первой эпохе
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(0)
+
+    for (let step = 0; step < 4; step += 1) await user.keyboard('{ArrowRight}')
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(3) // последняя из четырёх
+    // Повтор на краю: шага нет, но и выбор не «снимается» (в отличие от клика)
+    await user.keyboard('{ArrowRight}')
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(3)
+  })
+
+  it('шаг стрелкой ставит идущую анимацию на паузу', async () => {
+    const user = userEvent.setup()
+    setBatchState()
+    useDipoleCalc.setState({
+      playback: { ...PLAYBACK_DEFAULTS, playing: true, active: true, epochIndex: 1 },
+      selectedEpochIndex: 1,
+    })
+    renderWithProviders(<EpochDipoleStrip />)
+
+    screen.getAllByTestId('epoch-strip-cell')[1].focus()
+    await user.keyboard('{ArrowRight}')
+    expect(useDipoleCalc.getState().playback).toMatchObject({ playing: false, epochIndex: 2 })
+    expect(useDipoleCalc.getState().selectedEpochIndex).toBe(2)
+  })
+
   it('белая рамка следует за кадром анимации в Плей (3.3/3.4)', () => {
     setBatchState()
     useDipoleCalc.setState({

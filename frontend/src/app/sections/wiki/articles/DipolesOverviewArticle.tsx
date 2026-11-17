@@ -90,7 +90,8 @@ export function DipolesOverviewArticle() {
           <td className="px-3 py-2 font-medium whitespace-nowrap text-fg-0">Кластер кадра</td>
           <td className="px-3 py-2">
             Play/pause (<Kbd>Space</Kbd>), скорость ×0.25…×4, «Снять кадр» — воспроизведение
-            траектории; кадр перематывается кликом по ячейке индикатора эпох (второй ряд шапки),{' '}
+            траектории; кадр перематывается кликом по ячейке индикатора эпох (второй ряд шапки) или
+            шагается стрелками ←/→ при фокусе на индикаторе,{' '}
             <WikiLink to="dipole-playback">отдельная статья</WikiLink>.
           </td>
         </tr>
