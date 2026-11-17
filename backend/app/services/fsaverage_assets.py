@@ -21,6 +21,7 @@ import os
 from typing import TYPE_CHECKING
 
 import mne
+import mne.datasets
 import numpy as np
 
 if TYPE_CHECKING:  # аннотации без цикла импортов (модуль тянет только mne)
@@ -59,6 +60,19 @@ _SRC_FILE_NAMES: tuple[str, ...] = (
     "fsaverage-ico-5-src.fif",
     "oct6-src.fif",
 )
+
+
+def ensure_fsaverage(subjects_dir: str) -> str:
+    """Путь к fsaverage, при отсутствии — загрузка в ``subjects_dir``.
+
+    MNE 1.13 убрал ``mne.datasets.fsaverage.data_path``: загрузка теперь
+    ``mne.datasets.fetch_fsaverage(subjects_dir=...)``. Держим обе формы,
+    чтобы код не падал на актуальной версии (дрейф API, docs/rules/safety.md).
+    """
+    fetch = getattr(mne.datasets, "fetch_fsaverage", None)
+    if fetch is not None:
+        return str(fetch(subjects_dir=subjects_dir))
+    return str(mne.datasets.fsaverage.data_path())
 
 
 def _bem_cache_path(cfg: "Settings") -> str:

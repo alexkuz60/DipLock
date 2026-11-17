@@ -5,6 +5,7 @@ import os
 import mne
 
 from app.core.config import settings as default_settings
+from app.services.fsaverage_assets import ensure_fsaverage
 
 
 def export_fsaverage_surface(settings=None):
@@ -17,7 +18,7 @@ def export_fsaverage_surface(settings=None):
     subjects_dir = settings.subjects_dir
 
     if not os.path.isdir(f"{subjects_dir}/fsaverage"):
-        mne.datasets.fsaverage.data_path()
+        ensure_fsaverage(subjects_dir)
 
     surfaces = {}
     for hemi in ["lh", "rh"]:

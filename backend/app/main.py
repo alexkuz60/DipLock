@@ -17,7 +17,7 @@ from app.api.routes import router as api_router
 from app.core.config import Settings, settings
 from app.models.db import init_db
 from app.services import recording_store
-from app.services.fsaverage_assets import bem_source, trans_source
+from app.services.fsaverage_assets import bem_source, ensure_fsaverage, trans_source
 from app.services.job_manager import job_manager
 from app.services.orphans import sweep_orphans
 from app.utils.versions import code_freshness, library_versions
@@ -250,7 +250,7 @@ async def init_status() -> dict:
             checks["fsaverage"] = "ready"
         else:
             # Пытаемся получить путь (без принудительной загрузки)
-            mne.datasets.fsaverage.data_path()
+            ensure_fsaverage(subjects_dir)
             checks["fsaverage"] = "ready"
     except Exception:
         checks["fsaverage"] = "loading"
