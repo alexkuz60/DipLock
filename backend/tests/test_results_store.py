@@ -127,6 +127,32 @@ def test_repeat_run_appends_history_not_upsert():
     asyncio.run(_check())
 
 
+def test_list_dipoles_for_sessions_batches_and_orders():
+    """Пакетный экспорт: один запрос на набор сессий, порядок — как в ``session_ids``."""
+    rec = _recording("rec-batch")
+    params = DipoleScanParams(filter_band=(0.5, 2.0), epoch_length_ms=1000.0)
+    for job_id in ("job-batch-a", "job-batch-b"):
+        asyncio.run(results_store.persist_recording_result(
+            "dipoles", rec, params, _scan_result(), job_id,
+        ))
+
+    async def _check():
+        sessions = await _rows(Session, recording_id="rec-batch", kind="dipoles")
+        first, second = (str(row.id) for row in sorted(sessions, key=lambda row: row.job_id))
+        rows = await results_store.list_dipoles_for_sessions([second, first])
+        # Сессии идут в запрошенном порядке, внутри — по эпохам (time_ms точек)
+        assert [row["session_id"] for row in rows] == [second, second, first, first]
+        assert [row["time_ms"] for row in rows] == [120.0, 122.0, 120.0, 122.0]
+        # Паритет payload с поштучным read-API (CSV и страница диполей — один контракт)
+        single = await results_store.list_session_dipoles(first, limit=100, offset=0)
+        assert [row for row in rows if row["session_id"] == first] == single
+        # Несуществующие id молча пропускаются (экспорт добирает страницу сессий)
+        assert len(await results_store.list_dipoles_for_sessions(["no-such", first])) == 2
+        assert await results_store.list_dipoles_for_sessions([]) == []
+
+    asyncio.run(_check())
+
+
 def test_preprocess_epochs_stage_writes_grid_with_rejects():
     """Стадия epochs: сетка окон + флаги отбраковки; мощности остаются NULL."""
     rec = _recording("rec-pp")

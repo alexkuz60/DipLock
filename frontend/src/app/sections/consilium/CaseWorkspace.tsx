@@ -43,7 +43,10 @@ export function CaseWorkspace({
   const detail = useQuery({
     queryKey: ['consilium', caseId, 'case'],
     queryFn: ({ signal }) => consiliumApi.case(caseId, signal),
-    gcTime: 0,
+    // Кэш вкладок: возврат к делу переиспользует карточку, а не качает заново;
+    // мутации (`useCaseAction`) инвалидируют кэш сами (аудит 17.11.2026, Ф5).
+    staleTime: 5_000,
+    gcTime: 60_000,
   })
   const update = useCaseAction(caseId, (payload: ConsiliumCaseUpdate) =>
     consiliumApi.update(caseId, payload),

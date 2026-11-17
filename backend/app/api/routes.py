@@ -1738,12 +1738,9 @@ async def export_dipoles_csv(recording_id: str) -> Response:
     _, sessions = await results_store.list_sessions(
         recording_id=recording.recording_id, limit=1000, offset=0,
     )
-    rows: list[dict[str, Any]] = []
-    for session in sessions:
-        session_rows = await results_store.list_session_dipoles(
-            str(session["id"]), limit=100_000, offset=0,
-        )
-        rows.extend(session_rows or [])
+    rows = await results_store.list_dipoles_for_sessions(
+        [str(session["id"]) for session in sessions],
+    )
     text = dipoles_csv(rows)
     return Response(
         content=text,
@@ -1931,7 +1928,7 @@ async def get_mri_slices() -> dict[str, Any]:
     отдаются картинками (``/surface/mri/slice/...``), а не в этом ответе.
     """
     try:
-        return mri_meta(settings)
+        return await asyncio.to_thread(mri_meta, settings)
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
 
@@ -1955,7 +1952,7 @@ async def get_mri_slice(
     ``If-None-Match`` — 304.
     """
     try:
-        data, version, actual_mm = mri_slice_png(settings, plane, mm)
+        data, version, actual_mm = await asyncio.to_thread(mri_slice_png, settings, plane, mm)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (FileNotFoundError, OSError) as exc:
@@ -1988,7 +1985,7 @@ async def get_mri_mip_outline(
     503, повторный запрос с тем же ``If-None-Match`` — 304.
     """
     try:
-        payload = brain_silhouette_outlines(settings)
+        payload = await asyncio.to_thread(brain_silhouette_outlines, settings)
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
 
@@ -2017,7 +2014,7 @@ async def get_mri_mip(
     же ``If-None-Match`` — 304.
     """
     try:
-        data, version = mri_mip_png(settings, plane)
+        data, version = await asyncio.to_thread(mri_mip_png, settings, plane)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (FileNotFoundError, OSError) as exc:
@@ -2077,7 +2074,7 @@ async def get_contours() -> dict[str, Any]:
     мгновенный. Сами контуры отдаются по срезу (``/surface/contours/{plane}/{mm}``).
     """
     try:
-        return contours_meta(settings)
+        return await asyncio.to_thread(contours_meta, settings)
     except (FileNotFoundError, OSError) as exc:
         raise HTTPException(status_code=503, detail=f"Данные fsaverage недоступны: {exc}") from exc
 
@@ -2100,7 +2097,7 @@ async def get_contour_slice(
     живут на поверхности коры, в объём они переносятся по ближайшей вершине.
     """
     try:
-        payload = slice_contours(settings, plane, mm)
+        payload = await asyncio.to_thread(slice_contours, settings, plane, mm)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (FileNotFoundError, OSError) as exc:

@@ -86,6 +86,10 @@ class Session(Base):
     """
 
     __tablename__ = "sessions"
+    __table_args__ = (
+        # Страницы готовности/сессий: фильтр по записи + «новые сверху».
+        Index("ix_sessions_recording_created", "recording_id", "created_at", "id"),
+    )
     id = Column(String, primary_key=True, index=True)
     filename = Column(String)
     n_channels = Column(Integer)
@@ -175,6 +179,8 @@ class RecordingRecord(Base):
     __table_args__ = (
         # Дедуп по содержимому: один отпечаток — одна запись.
         Index("ix_recordings_digest", "digest", unique=True),
+        # Страница готовности: сортировка «новые сверху» без сортировки всей таблицы.
+        Index("ix_recordings_created", "created_at", "recording_id"),
     )
     recording_id = Column(String, primary_key=True)
     filename = Column(String, nullable=True)
@@ -197,6 +203,10 @@ class Analysis(Base):
     """
 
     __tablename__ = "analyses"
+    __table_args__ = (
+        # Список прогонов: фильтр по записи + «новые сверху».
+        Index("ix_analyses_recording_created", "recording_id", "created_at", "id"),
+    )
     id = Column(Integer, primary_key=True)
     recording_id = Column(
         String, ForeignKey("recordings.recording_id", ondelete="CASCADE"),
@@ -550,6 +560,10 @@ class ConsiliumRound(Base):
     """
 
     __tablename__ = "consilium_rounds"
+    __table_args__ = (
+        # Раунды дела: фильтр по делу + хронология (created_at, id).
+        Index("ix_consilium_rounds_case_created", "case_id", "created_at", "id"),
+    )
     id = Column(String, primary_key=True)
     case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
     kind = Column(String, nullable=False)  # initial | remarks | summary
@@ -783,6 +797,10 @@ class ConsiliumChatMessage(Base):
     """
 
     __tablename__ = "consilium_chat_messages"
+    __table_args__ = (
+        # Переписка нити: фильтр по нити + порядок (created_at, id).
+        Index("ix_consilium_chat_messages_chat_created", "chat_id", "created_at", "id"),
+    )
     id = Column(String, primary_key=True)
     case_id = Column(String, ForeignKey("consilium_cases.id"), nullable=False, index=True)
     chat_id = Column(String, ForeignKey("consilium_chats.id"), nullable=False, index=True)

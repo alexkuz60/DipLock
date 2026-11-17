@@ -180,25 +180,38 @@ function pointInPolygon(ring: MniPoint2[], point: MniPoint2): boolean {
 }
 
 /**
- * Попадание точки фигуры в метку: полигоны пересчитываются в нормализованные
- * координаты и складываются по правилу even-odd (дырки вычитаются).
+ * Попадание точки фигуры в метку: полигоны складываются по правилу even-odd
+ * (дырки вычитаются). Нормализованные кольца кэшируются по фигуре и плоскости:
+ * раньше хит-тест на hover трансформировал каждую вершину заново — на детальных
+ * контурах это заметно на каждый pointermove (аудит 17.11.2026, Ф2).
  */
+const normalizedRingsCache = new WeakMap<object, Map<ProjectionPlane, MniPoint2[][]>>()
+
+function normalizedRings(plane: ProjectionPlane, shape: ContourShape): MniPoint2[][] {
+  let byPlane = normalizedRingsCache.get(shape.hulls as unknown as object)
+  if (!byPlane) {
+    byPlane = new Map()
+    normalizedRingsCache.set(shape.hulls as unknown as object, byPlane)
+  }
+  const cached = byPlane.get(plane)
+  if (cached) return cached
+  const rings: MniPoint2[][] = []
+  for (const hull of shape.hulls) {
+    rings.push(hull.map((vertex) => contourPointToNormalized(plane, vertex as [number, number])))
+  }
+  byPlane.set(plane, rings)
+  return rings
+}
+
 export function shapeContainsPoint(
   plane: ProjectionPlane,
   shape: ContourShape,
   point: MniPoint2,
 ): boolean {
   let inside = false
-  for (const hull of shape.hulls) {
-    if (hull.length < 3) continue
-    if (
-      pointInPolygon(
-        hull.map((vertex) => contourPointToNormalized(plane, vertex as [number, number])),
-        point,
-      )
-    ) {
-      inside = !inside
-    }
+  for (const ring of normalizedRings(plane, shape)) {
+    if (ring.length < 3) continue
+    if (pointInPolygon(ring, point)) inside = !inside
   }
   return inside
 }

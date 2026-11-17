@@ -631,8 +631,9 @@ export function TrackStack({
     return name === expandedChannel ? EXPANDED_TRACK_HEIGHT : TRACK_HEIGHT
   }
 
-  // Зоны/эпохи живут в пикселях области треков — та же геометрия, что у курсора
-  const geometry = { window, trackWidth: width }
+  // Зоны/эпохи живут в пикселях области треков — та же геометрия, что у курсора.
+  // Объект стабилен между рендерами (кроме панорамы/ресайза) — `memo` линеек и слоёв.
+  const geometry = useMemo(() => ({ window, trackWidth: width }), [window, width])
   const handleZoneSelect = useCallback((id: string | null) => setSelectedZoneId(id), [])
 
   /**
@@ -669,10 +670,12 @@ export function TrackStack({
   /** Панорама только что двигала окно — клик не ставит ни курсор, ни уровень */
   const handleWasDragged = useCallback(() => draggedRef.current, [])
 
-  // Порядок отображения — порядок каналов сигнала (монтаж), а не порядок кликов
-  const visible = signal.channels.filter(
-    (name) => params.visibleChannels.includes(name) && signal.max[name],
-  )
+  // Порядок отображения — порядок каналов сигнала (монтаж), а не порядок кликов;
+  // Set вместо includes — O(каналы) на рендер, а не O(каналы × видимые)
+  const visible = useMemo(() => {
+    const selected = new Set(params.visibleChannels)
+    return signal.channels.filter((name) => selected.has(name) && signal.max[name])
+  }, [signal.channels, signal.max, params.visibleChannels])
   const visibleKey = visible.join(',')
 
   /**

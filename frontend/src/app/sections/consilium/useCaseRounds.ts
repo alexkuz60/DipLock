@@ -10,7 +10,9 @@ export function useCaseRounds(caseId: string) {
   return useQuery({
     queryKey: ['consilium', caseId, 'rounds'],
     queryFn: ({ signal }) => consiliumApi.rounds(caseId, 0, signal),
-    gcTime: 0,
+    // Возврат к «Обсуждению» переиспользует ленту; поллинг продолжит её освежать
+    staleTime: 5_000,
+    gcTime: 60_000,
     refetchInterval: (query) =>
       query.state.data?.items.some((item) => item.status === 'running') ? 2000 : false,
   })

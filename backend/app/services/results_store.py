@@ -35,6 +35,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import case, func, select
+from sqlalchemy.orm import load_only
 
 from app.core.config import settings
 from app.models.db import (
@@ -735,6 +736,22 @@ async def list_session_epochs(
         ]
 
 
+def _dipole_payload(row: Dipole) -> dict[str, Any]:
+    """Строка ``dipoles`` под ``DipoleRowOut``; MNI — тройка или ``None``."""
+    return {
+        "session_id": row.session_id,
+        "epoch_id": row.epoch_id,
+        "time_ms": row.time_ms,
+        "mni": _dipole_mni(row),
+        "amplitude_nam": row.amplitude_nam,
+        "gof": row.gof,
+        "anatomical_roi": row.anatomical_roi,
+        "brodmann_area": row.brodmann_area,
+        "freq_band": row.freq_band,
+        "method": row.method,
+    }
+
+
 async def list_session_dipoles(
     session_id: str, *,
     freq_band: str | None = None,
@@ -756,21 +773,29 @@ async def list_session_dipoles(
             .limit(limit)
             .offset(offset)
         )).all())
-        return [
-            {
-                "session_id": row.session_id,
-                "epoch_id": row.epoch_id,
-                "time_ms": row.time_ms,
-                "mni": _dipole_mni(row),
-                "amplitude_nam": row.amplitude_nam,
-                "gof": row.gof,
-                "anatomical_roi": row.anatomical_roi,
-                "brodmann_area": row.brodmann_area,
-                "freq_band": row.freq_band,
-                "method": row.method,
-            }
-            for row in rows
-        ]
+        return [_dipole_payload(row) for row in rows]
+
+
+async def list_dipoles_for_sessions(session_ids: list[str]) -> list[dict[str, Any]]:
+    """Диполи набора сессий **одним** запросом — пакетный CSV-экспорт (не N+1).
+
+    Порядок — как в ``session_ids`` (сессии выгрузки идут подряд), внутри
+    сессии — по эпохам (``epoch_id, id``), как в ``list_session_dipoles``.
+    Несуществующие id молча пропускаются: экспорт добирает страницу сессий.
+    """
+    await init_db()
+    ids = [str(session_id) for session_id in session_ids]
+    if not ids:
+        return []
+    order_index = {session_id: index for index, session_id in enumerate(ids)}
+    async with AsyncSessionLocal() as session:
+        rows = list((await session.scalars(
+            select(Dipole)
+            .where(Dipole.session_id.in_(ids))
+            .order_by(Dipole.session_id, Dipole.epoch_id, Dipole.id)
+        )).all())
+        rows.sort(key=lambda row: order_index.get(str(row.session_id), len(ids)))
+        return [_dipole_payload(row) for row in rows]
 
 
 def _dipole_mni(row: Dipole) -> list[float] | None:
@@ -887,6 +912,12 @@ async def list_analyses(
         )
         rows: list[Any] = list((await session.execute(
             select(Analysis, RecordingRecord.filename, RecordingRecord.patient_alias)
+            # Узкая выборка: JSON channels/warnings сводке не нужны (листинг).
+            .options(load_only(
+                Analysis.id, Analysis.recording_id, Analysis.kind, Analysis.params_sig,
+                Analysis.created_at, Analysis.job_id, Analysis.epoch_length_ms,
+                Analysis.grid_mm, Analysis.n_epochs_total, Analysis.n_epochs_used,
+            ))
             .join(
                 RecordingRecord,
                 RecordingRecord.recording_id == Analysis.recording_id,

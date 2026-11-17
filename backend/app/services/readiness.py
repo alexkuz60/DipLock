@@ -19,7 +19,6 @@
 ``recording_id`` в таблицу не входят: у них нет записи в зеркале ``recordings``.
 """
 import logging
-from datetime import datetime
 from typing import Any
 
 from sqlalchemy import exists, func, or_, select
@@ -433,10 +432,15 @@ async def list_recordings_readiness(
     только записи с записанными результатами (``EXISTS`` по детям),
     ``patient_alias`` — точное совпадение псевдонима, ``search`` — подстрока
     файла/псевдонима. Сортировка (шаблон F) — ``created`` (новые сверху),
-    ``name`` (по имени файла), ``readiness`` (по готовности, затем новые сверху):
-    ключ производный (готовность собирается из детей), поэтому набор
-    собирается целиком и режется ``offset:limit`` в памяти — ``total`` честный
-    и при сортировке по готовности.
+    ``name`` (по имени файла), ``readiness`` (по готовности, затем новые сверху).
+
+    Пагинация — срез строк ``recordings`` **до** сборки стадий: ``_stages_for``
+    работает только со страницей, стоимость ответа привязана к размеру
+    страницы, а не к накопленной истории прогонов. Ключ ``readiness``
+    производный (готовность собирается из детей) — он считается узкими
+    EXISTS-признаками (``_ready_counts``, без сборки стадий), после чего набор
+    id сортируется устойчивой двойной сортировкой (новые сверху → по готовности)
+    и режется ``offset:limit``; ``total`` честный при любой сортировке.
     """
     await init_db()
     async with AsyncSessionLocal() as session:
@@ -451,11 +455,14 @@ async def list_recordings_readiness(
                 RecordingRecord.filename.ilike(pattern),
                 RecordingRecord.patient_alias.ilike(pattern),
             ))
-        rows = list((await session.scalars(
-            select(RecordingRecord)
-            .where(*conditions)
-            .order_by(RecordingRecord.created_at.desc(), RecordingRecord.recording_id)
-        )).all())
+        total = int(
+            (await session.execute(
+                select(func.count()).select_from(RecordingRecord).where(*conditions)
+            )).scalar() or 0
+        )
+        rows = await _page_rows(
+            session, conditions, sort=sort, limit=limit, offset=offset,
+        )
         stages_by_recording = await _stages_for(
             session, [str(row.recording_id) for row in rows], full_history=False,
         )
@@ -470,31 +477,91 @@ async def list_recordings_readiness(
                 "readiness_total": total_stages,
                 "stages": stages,
             })
-        items = _sort_items(items, sort)
-        return len(items), items[offset:offset + limit]
+        return total, items
 
 
-def _sort_items(items: list[dict[str, Any]], sort: str) -> list[dict[str, Any]]:
-    """Сортировка собранного набора (шаблон F): устойчивая, без SQL-агрегатов.
+async def _page_rows(
+    session: AsyncSession, conditions: list[Any], *, sort: str, limit: int, offset: int,
+) -> list[RecordingRecord]:
+    """Страница строк ``recordings`` в порядке сортировки (шаблон F), без стадий.
 
-    ``created`` — новые сверху (исходный порядок выборки); ``name`` — по имени
-    файла (без учёта регистра, запись без имени — по id); ``readiness`` — по
-    числу готовых стадий (уб.), равные — «новые сверху» (двойная сортировка:
-    сначала по дате, затем стабильная — по готовности).
+    ``created``/``name`` — SQL ``ORDER BY`` + ``LIMIT/OFFSET``; ``readiness`` —
+    производный ключ: сначала готовность по всему отбору узкими признаками
+    (``_ready_counts``), затем устойчивая двойная сортировка id (новые сверху →
+    по готовности) и срез страницы.
     """
-    if sort == "name":
-        return sorted(
-            items,
-            key=lambda item: str(item.get("filename") or item["recording_id"]).lower(),
-        )
     if sort == "readiness":
-        by_created = sorted(
-            items,
-            key=lambda item: item.get("created_at") or datetime.min,
-            reverse=True,
-        )
-        return sorted(by_created, key=lambda item: -int(item["readiness_ready"]))
-    return items  # created: «новые сверху» — порядок ORDER BY выборки
+        ready_counts = await _ready_counts(session, conditions)
+        # list() + аннотация: SQLAlchemy >= 2.1 (var-annotated в CI).
+        id_rows: list[str] = list((await session.scalars(
+            select(RecordingRecord.recording_id)
+            .where(*conditions)
+            .order_by(RecordingRecord.created_at.desc(), RecordingRecord.recording_id)
+        )).all())
+        ordered = sorted(id_rows, key=lambda rid: -ready_counts.get(str(rid), 0))
+        page_ids = ordered[offset:offset + limit]
+        if not page_ids:
+            return []
+        page_rows: list[RecordingRecord] = list((await session.scalars(
+            select(RecordingRecord).where(RecordingRecord.recording_id.in_(page_ids))
+        )).all())
+        by_id = {str(row.recording_id): row for row in page_rows}
+        return [by_id[rid] for rid in page_ids if rid in by_id]
+    if sort == "name":
+        # Без учёта регистра, запись без имени — по id (nullif: пустое имя = NULL).
+        name_key = func.lower(func.coalesce(
+            func.nullif(RecordingRecord.filename, ""), RecordingRecord.recording_id,
+        ))
+        order_by: list[Any] = [name_key, RecordingRecord.recording_id]
+    else:  # created: «новые сверху» — порядок ORDER BY выборки
+        order_by = [RecordingRecord.created_at.desc(), RecordingRecord.recording_id]
+    return list((await session.scalars(
+        select(RecordingRecord)
+        .where(*conditions)
+        .order_by(*order_by)
+        .limit(limit)
+        .offset(offset)
+    )).all())
+
+
+async def _ready_counts(
+    session: AsyncSession, conditions: list[Any],
+) -> dict[str, int]:
+    """``recording_id → готовых стадий`` — узкий запрос пяти EXISTS-признаков.
+
+    Стадия «готова», если есть хотя бы один её прогон — та же семантика, что и
+    у ``_readiness_counts`` по сводкам стадий, но без сборки стадий и их
+    параметров (нужно только сортировке ``readiness``, шаблон D). Порядок
+    признаков повторяет ``STAGES``: preprocess, dipoles, package, report,
+    spectrogram.
+    """
+    rows: Any = await session.execute(
+        select(
+            RecordingRecord.recording_id,
+            exists(select(Session.id).where(
+                Session.recording_id == RecordingRecord.recording_id,
+                Session.kind == "preprocess",
+            )),
+            exists(select(Session.id).where(
+                Session.recording_id == RecordingRecord.recording_id,
+                Session.kind.in_(("dipoles", "dipole_refine")),
+            )),
+            exists(select(Analysis.id).where(
+                Analysis.recording_id == RecordingRecord.recording_id,
+            )),
+            exists(select(ReportRun.id).where(
+                ReportRun.recording_id == RecordingRecord.recording_id,
+            )),
+            exists(select(Session.id).where(
+                Session.recording_id == RecordingRecord.recording_id,
+                Session.kind == "spectrogram",
+            )),
+        ).where(*conditions)
+    )
+    return {
+        str(recording_id): sum(1 for flag in flags if flag)
+        for recording_id, *flags in rows.all()
+    }
 
 
 async def get_recording_readiness(recording_id: str) -> dict[str, Any] | None:

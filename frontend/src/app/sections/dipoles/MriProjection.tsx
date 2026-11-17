@@ -356,14 +356,40 @@ export function MriProjection({
     onPick(pointFromProjectionClick(plane, sliceMm, px), area, structure)
   }
 
-  const handleHover = (event: MouseEvent<SVGSVGElement>) => {
-    const px = pxOf(event)
-    const point = pointFromProjectionClick(plane, sliceMm, px)
+  /**
+   * Hover схлопывается до кадра экрана: мышь шлёт события чаще, чем браузер
+   * рисует, а каждый кадр рендерит все три проекции (курсор общий, срез 3.5).
+   * Первое движение в пачке — сразу (кроссхейр не отстаёт), остальные
+   * схлопываются к следующему кадру (аудит 17.11.2026, Ф2).
+   */
+  const hoverFrameRef = useRef<number | null>(null)
+  const pendingHoverRef = useRef<{ px: PixelPoint; point: MniVector } | null>(null)
+  useEffect(() => () => {
+    if (hoverFrameRef.current !== null) cancelAnimationFrame(hoverFrameRef.current)
+  }, [])
+
+  const applyHover = (px: PixelPoint, point: MniVector) => {
     setHover(point)
     setHoverDipole(dipoleAt(px)?.point ?? null)
     // Совместный курсор (срез 3.5): точка под мышью этой проекции видна
     // перекрестием на всех трёх фигурах и как кроссхейр в 3D-виде.
     onCursorChange?.(point)
+  }
+
+  const handleHover = (event: MouseEvent<SVGSVGElement>) => {
+    const px = pxOf(event)
+    const point = pointFromProjectionClick(plane, sliceMm, px)
+    if (hoverFrameRef.current === null) {
+      applyHover(px, point)
+      hoverFrameRef.current = requestAnimationFrame(() => {
+        hoverFrameRef.current = null
+        const pending = pendingHoverRef.current
+        pendingHoverRef.current = null
+        if (pending) applyHover(pending.px, pending.point)
+      })
+    } else {
+      pendingHoverRef.current = { px, point }
+    }
   }
 
   /** Метка под курсором: структура атласа, иначе поле (та же геометрия, что нарисована). */
@@ -421,6 +447,11 @@ export function MriProjection({
         onClick={handleClick}
         onMouseMove={handleHover}
         onMouseLeave={() => {
+          if (hoverFrameRef.current !== null) {
+            cancelAnimationFrame(hoverFrameRef.current)
+            hoverFrameRef.current = null
+          }
+          pendingHoverRef.current = null
           setHover(null)
           setHoverDipole(null)
           // Курсор сбрасывается: мышь покинула все проекции

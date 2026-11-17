@@ -17,6 +17,7 @@
  * Обе полосы несут метку роли («эпохи»/«секунды»): это интерактивные оси, а не
  * подписи треков.
  */
+import { memo } from 'react'
 import { timeToX } from '@/shared/lib/viewerMath'
 import { LABEL_WIDTH } from '@/shared/lib/trackOptions'
 import {
@@ -81,7 +82,7 @@ function RulerTag({ text }: { text: string }) {
  * тоггл её блокировки, `aria-pressed` несёт текущий вердикт. Номера показываются,
  * пока ячейки шире `RULER_NUMBER_MIN_PX` — иначе остаётся hover-подсветка.
  */
-export function EpochRuler({
+export const EpochRuler = memo(function EpochRuler({
   cells,
   geometry,
   onToggle,
@@ -140,7 +141,7 @@ export function EpochRuler({
       </div>
     </div>
   )
-}
+})
 
 /**
  * Нижняя шкала секунд: полоса поверх оси времени последнего трека (прижата к
@@ -148,7 +149,7 @@ export function EpochRuler({
  * Клик по секунде — тоггл эпохи, содержащей её; тултип объявляет и секунду, и
  * эпоху с её причиной.
  */
-export function TimeRuler({
+export const TimeRuler = memo(function TimeRuler({
   cells,
   geometry,
   durationSec,
@@ -209,4 +210,4 @@ export function TimeRuler({
       </div>
     </div>
   )
-}
+})

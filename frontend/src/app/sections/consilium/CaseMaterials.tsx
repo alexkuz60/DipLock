@@ -52,25 +52,31 @@ export function CaseMaterials({ current }: { current: ConsiliumCase }) {
   const [contextIds, setContextIds] = useState<string[]>([])
   const [preview, setPreview] = useState<ConsiliumEvidenceDeletion | null>(null)
   const readOnly = current.status !== 'open'
+  // Кэш вкладок: возврат к «Материалам» переиспользует страницы, а не качает их
+  // заново; мутации (`useCaseAction`) инвалидируют кэш сами (аудит 17.11.2026, Ф5).
   const sources = useQuery({
     queryKey: ['consilium', current.id, 'sources', sourceOffset],
     queryFn: ({ signal }) => consiliumApi.sources(current.id, sourceOffset, signal),
-    gcTime: 0,
+    staleTime: 5_000,
+    gcTime: 60_000,
   })
   const evidence = useQuery({
     queryKey: ['consilium', current.id, 'evidence', materialOffset],
     queryFn: ({ signal }) => consiliumApi.evidence(current.id, materialOffset, signal),
-    gcTime: 0,
+    staleTime: 5_000,
+    gcTime: 60_000,
   })
   const context = useQuery({
     queryKey: ['consilium', current.id, 'context', contextOffset],
     queryFn: ({ signal }) => consiliumApi.context(current.id, contextOffset, signal),
-    gcTime: 0,
+    staleTime: 5_000,
+    gcTime: 60_000,
   })
   const snapshots = useQuery({
     queryKey: ['consilium', current.id, 'snapshots', snapshotOffset],
     queryFn: ({ signal }) => consiliumApi.snapshots(current.id, snapshotOffset, signal),
-    gcTime: 0,
+    staleTime: 5_000,
+    gcTime: 60_000,
   })
   const add = useCaseAction(current.id, (payload: ConsiliumEvidenceCreate) =>
     consiliumApi.addEvidence(current.id, payload),

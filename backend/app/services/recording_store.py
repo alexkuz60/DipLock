@@ -49,21 +49,27 @@ from app.services.recordings import Recording, recording_registry
 logger = logging.getLogger(__name__)
 
 
-async def _delete_recording_rows(session: AsyncSession, recording_id: str) -> None:
-    """Каскад одной записи: ребёнок → родитель, все таблицы одним коммитом."""
+async def _delete_recordings_rows(session: AsyncSession, recording_ids: list[str]) -> None:
+    """Каскад набора записей: ребёнок → родитель, все таблицы одним коммитом.
+
+    Set-based вариант: по одному ``DELETE ... WHERE ... IN (...)`` на таблицу,
+    а не 13 запросов на каждую запись (на удалённом PostgreSQL экономит RTT
+    на запись; на очистке сирот — на весь набор сразу).
+    """
+    ids = list(recording_ids)
+    if not ids:
+        return
     # Аннотация обязательна для SQLAlchemy >= 2.1 (иначе var-annotated в CI).
-    session_ids: Select[Any] = select(Session.id).where(
-        Session.recording_id == recording_id
-    )
+    session_ids: Select[Any] = select(Session.id).where(Session.recording_id.in_(ids))
     await session.execute(
         delete(EpochRecord).where(EpochRecord.session_id.in_(session_ids))
     )
     await session.execute(
         delete(Dipole).where(Dipole.session_id.in_(session_ids))
     )
-    await session.execute(delete(Session).where(Session.recording_id == recording_id))
+    await session.execute(delete(Session).where(Session.recording_id.in_(ids)))
 
-    analysis_ids = select(Analysis.id).where(Analysis.recording_id == recording_id)
+    analysis_ids: Select[Any] = select(Analysis.id).where(Analysis.recording_id.in_(ids))
     await session.execute(
         delete(DipolePoint).where(DipolePoint.analysis_id.in_(analysis_ids))
     )
@@ -73,23 +79,19 @@ async def _delete_recording_rows(session: AsyncSession, recording_id: str) -> No
     await session.execute(
         delete(AnalysisBand).where(AnalysisBand.analysis_id.in_(analysis_ids))
     )
-    await session.execute(delete(Analysis).where(Analysis.recording_id == recording_id))
+    await session.execute(delete(Analysis).where(Analysis.recording_id.in_(ids)))
 
-    run_ids = select(ReportRun.id).where(ReportRun.recording_id == recording_id)
+    run_ids: Select[Any] = select(ReportRun.id).where(ReportRun.recording_id.in_(ids))
     for model in (ReportBandSummary, ReportNameCount, ReportDynamics):
         await session.execute(
             delete(model).where(model.report_run_id.in_(run_ids))
         )
-    await session.execute(
-        delete(ReportRun).where(ReportRun.recording_id == recording_id)
-    )
-    await session.execute(
-        delete(RecordingRecord).where(RecordingRecord.recording_id == recording_id)
-    )
+    await session.execute(delete(ReportRun).where(ReportRun.recording_id.in_(ids)))
+    await session.execute(delete(RecordingRecord).where(RecordingRecord.recording_id.in_(ids)))
     # Членство в групповых прогонах (остаток 4.7): сам прогон — история и
     # остаётся, состав убывает вместе с записью (§8.4.3, явный DELETE).
     await session.execute(
-        delete(GroupAnalysisMember).where(GroupAnalysisMember.recording_id == recording_id)
+        delete(GroupAnalysisMember).where(GroupAnalysisMember.recording_id.in_(ids))
     )
 
 
@@ -134,7 +136,7 @@ async def drop_recording_rows(recording_id: str) -> None:
     """Удаляет строку записи и все дочерние строки (каскад §8.4.3)."""
     await init_db()
     async with AsyncSessionLocal() as session:
-        await _delete_recording_rows(session, recording_id)
+        await _delete_recordings_rows(session, [recording_id])
         await session.commit()
 
 
@@ -161,11 +163,10 @@ async def drop_orphan_rows() -> list[str]:
         ids: list[str] = list(
             (await session.scalars(select(RecordingRecord.recording_id))).all()
         )
-        for recording_id in ids:
-            if recording_id in protected:
-                continue
-            await _delete_recording_rows(session, recording_id)
-            orphans.append(recording_id)
+        orphans.extend(
+            recording_id for recording_id in ids if recording_id not in protected
+        )
+        await _delete_recordings_rows(session, orphans)
         await session.commit()
     if orphans:
         logger.info("Строки записей-сирот удалены: %s", ", ".join(orphans))

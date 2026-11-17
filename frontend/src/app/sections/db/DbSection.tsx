@@ -239,20 +239,21 @@ export function DbSection() {
    */
   const resolveSelection = async (): Promise<RecordingReadiness[]> => {
     const loaded = new Map(rows.map((row) => [row.recording_id, row]))
-    const resolved: RecordingReadiness[] = []
-    for (const id of selectedIds) {
-      const row = loaded.get(id)
-      if (row) {
-        resolved.push(row)
-        continue
-      }
-      try {
-        resolved.push(await api.recordingReadiness(id))
-      } catch {
-        // Запись могла быть удалена между выбором и выгрузкой — пропускаем
-      }
-    }
-    return resolved
+    // Добор карточек с других страниц — параллельно: последовательные RTT перед
+    // выгрузкой не нужны (аудит 17.11.2026, Ф4); порядок выбора сохраняется.
+    const fetched = await Promise.all(
+      selectedIds.map(async (id) => {
+        const row = loaded.get(id)
+        if (row) return row
+        try {
+          return await api.recordingReadiness(id)
+        } catch {
+          // Запись могла быть удалена между выбором и выгрузкой — пропускаем
+          return null
+        }
+      }),
+    )
+    return fetched.filter((row): row is RecordingReadiness => row !== null)
   }
 
   /** Выгрузка выборки одним из форматов: CSV, JSON или сводный HTML-отчёт. */

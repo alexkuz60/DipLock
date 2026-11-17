@@ -9,7 +9,7 @@
  * Геометрия общая с курсором и мышью вьюера: колонка подписей (``LABEL_WIDTH``)
  * вычитается из координат один раз, дальше всё живёт в пикселях трека.
  */
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { ARTIFACT_COLORS, ARTIFACT_KINDS, ARTIFACT_SHORT_LABELS, artifactFill } from '@/shared/lib/artifacts'
 import type { NavMode } from '@/shared/state/edfParams'
 import { timeToX, type TimeWindow } from '@/shared/lib/viewerMath'
@@ -200,7 +200,7 @@ function hatchImage(density: number): string {
  * пользователя, а не слой результата: `manual: 'blocked'` даёт свою штриховку
  * с акцентной границей, `manual: 'allowed'` — пунктирный контур «разблокировано».
  */
-export function EpochLayer({
+export const EpochLayer = memo(function EpochLayer({
   cells,
   geometry,
   showBoundaries,
@@ -273,7 +273,7 @@ export function EpochLayer({
         : null}
     </>
   )
-}
+})
 
 /**
  * Рамки эпох-отбросов в треке канала-виновника (причины блокировки): reject-

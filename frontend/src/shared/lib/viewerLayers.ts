@@ -235,10 +235,17 @@ export function toggleEpochMark(
 
 /** Эпоха, в интервал которой попадает момент времени (курсор вьюера). */
 export function cellAtTime(cells: readonly EpochCell[], timeSec: number): EpochCell | null {
-  const hit = cells.find(
-    (cell) => timeSec >= cell.onsetSec && timeSec < cell.onsetSec + cell.durationSec,
-  )
-  if (hit) return hit
+  // Ячейки идут по времени (onsetSec не убывает) — бинарный поиск вместо find:
+  // на кадр панорамы линейный проход делал O(секунды × эпохи) в TimeRuler.
+  let lo = 0
+  let hi = cells.length - 1
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1
+    if (cells[mid].onsetSec <= timeSec) lo = mid
+    else hi = mid - 1
+  }
+  const hit = cells.at(lo)
+  if (hit && timeSec >= hit.onsetSec && timeSec < hit.onsetSec + hit.durationSec) return hit
   // Хвост последней эпохи может быть короче: правый край относим к ней
   const last = cells.at(-1)
   if (last && timeSec >= last.onsetSec && timeSec <= last.onsetSec + last.durationSec) return last

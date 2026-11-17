@@ -8,6 +8,7 @@
  * Значения по умолчанию приходят из `/api/v1/meta` (пороги, длины эпох, каналы
  * монтажа) — конфигурация остаётся в `backend/.env`, UI её не дублирует.
  */
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { RotateCcw } from 'lucide-react'
 import { api } from '@/shared/api/client'
@@ -137,8 +138,12 @@ export function EdfPanel() {
   const cancelEvoked = useEdfRecording((state) => state.cancelEvoked)
 
   /** События записи (N2/2.7): источник селектов нарезки и ERP */
-  const eventOptions = Object.entries(recording?.event_counts ?? {}).map(
-    ([description, count]) => ({ value: description, label: `${description} — ${count}` }),
+  const eventOptions = useMemo(
+    () =>
+      Object.entries(recording?.event_counts ?? {}).map(
+        ([description, count]) => ({ value: description, label: `${description} — ${count}` }),
+      ),
+    [recording],
   )
 
   const meta = useQuery({
@@ -149,11 +154,13 @@ export function EdfPanel() {
   })
 
   // Пока запись не загружена, показываем монтаж 10-20 из конфигурации сервера —
-  // панель должна быть осмысленной до загрузки файла.
-  const channels = availableChannels.length
-    ? availableChannels
-    : (meta.data?.standard_channels ?? [])
-  const epochLengths = meta.data?.epoch_lengths_ms ?? []
+  // панель должна быть осмысленной до загрузки файла. Источники селектов
+  // мемоизированы: раньше массивы собирались на каждый рендер (аудит 17.11.2026, Ф3).
+  const channels = useMemo(
+    () => (availableChannels.length ? availableChannels : (meta.data?.standard_channels ?? [])),
+    [availableChannels, meta.data],
+  )
+  const epochLengths = useMemo(() => meta.data?.epoch_lengths_ms ?? [], [meta.data])
   // sfreq/каналы записи — половина правила N ≥ 3C (п.4): в демо и без записи
   // она молчит, период-правило работает по полосе фильтра
   const signal: EpochSignalInfo =
@@ -165,16 +172,24 @@ export function EdfPanel() {
   /** Канал графика ERP: свой выбор, иначе первый видимый канал */
   const erpChannel = params.erpChannel || params.visibleChannels[0] || channels[0] || ''
   // Подписи селекта — по схеме имён (10-10/10-20); value — каноническое имя
-  const channelOptions = channels.map((name) => ({
-    value: name,
-    label: channelDisplayName(name, params.channelNaming),
-  }))
+  const channelOptions = useMemo(
+    () =>
+      channels.map((name) => ({
+        value: name,
+        label: channelDisplayName(name, params.channelNaming),
+      })),
+    [channels, params.channelNaming],
+  )
   /** ERP требует событийный режим и выбранное событие (иначе кнопка disabled) */
   const canRunErp = Boolean(recording) && params.epochMode === 'events' && params.eventId !== ''
-  const epochOptions = (epochLengths.length ? epochLengths : [params.epochLengthMs]).map((value) => ({
-    value: String(value),
-    label: `${value} мс`,
-  }))
+  const epochOptions = useMemo(
+    () =>
+      (epochLengths.length ? epochLengths : [params.epochLengthMs]).map((value) => ({
+        value: String(value),
+        label: `${value} мс`,
+      })),
+    [epochLengths, params.epochLengthMs],
+  )
 
   const status = { tone: recalc.tone, text: recalc.text }
   const stageHint = RECALC_STAGES.map(
