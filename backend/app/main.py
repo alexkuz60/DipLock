@@ -14,7 +14,7 @@ from app.api.emolab import router as emolab_router
 from app.api.hypotheses import router as hypotheses_router
 from app.api.llm_router import router as llm_router_api
 from app.api.routes import router as api_router
-from app.core.config import settings
+from app.core.config import Settings, settings
 from app.models.db import init_db
 from app.services import recording_store
 from app.services.fsaverage_assets import bem_source, trans_source
@@ -99,11 +99,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+def _docs_kwargs(cfg: Settings) -> dict[str, str | None]:
+    """URL-ы документации API: в облаке выключены (``ENABLE_DOCS=false``)."""
+    if not cfg.enable_docs:
+        return {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    return {"docs_url": "/docs", "redoc_url": None, "openapi_url": "/openapi.json"}
+
+
+_docs = _docs_kwargs(settings)
 app = FastAPI(
     title=settings.app_name,
     description="Анализ ЭЭГ и расчёт токовых диполей в 3D",
     version=settings.app_version,
     lifespan=lifespan,
+    docs_url=_docs["docs_url"],
+    redoc_url=_docs["redoc_url"],
+    openapi_url=_docs["openapi_url"],
 )
 
 
@@ -235,10 +246,7 @@ async def init_status() -> dict:
     try:
         subjects_dir = settings.subjects_dir
         fsaverage_dir = os.path.join(subjects_dir, "fsaverage")
-        mne_data = os.path.expanduser("~/mne_data/MNE-fsaverage-data")
-        # Локальный fallback: ищем в ~/mne_data/fsaverage
-        local_fsaverage = os.path.join(mne_data, "fsaverage")
-        if os.path.isdir(fsaverage_dir) or os.path.isdir(mne_data) or os.path.isdir(local_fsaverage):
+        if os.path.isdir(fsaverage_dir):
             checks["fsaverage"] = "ready"
         else:
             # Пытаемся получить путь (без принудительной загрузки)
@@ -291,7 +299,7 @@ async def init_status() -> dict:
         "cache": await _cache_usage(),
         "api": {
             "prefix": settings.api_prefix,
-            "docs_url": "/docs",
+            "docs_url": "/docs" if settings.enable_docs else "",
             "meta_url": f"{settings.api_prefix}/meta",
         },
     }

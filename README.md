@@ -163,6 +163,24 @@ bash desktop/install-desktop.sh remove   # удалить ярлык
 
 ---
 
+## ☁️ Публикация в Abacus AI Cloud
+
+Схема: HTTPS облака → nginx (basic auth, лимит тела 210 МБ, таймауты 3600 с) →
+uvicorn `127.0.0.1:8000` (один воркер) → FastAPI + собранный UI `/ui/`.
+Пошаговая инструкция — `deploy/README.md`, инварианты — `docs/rules/deploy.md`.
+
+```bash
+cd /srv/diplock/repo
+./deploy/cloud-setup.sh          # пакеты, venv, fsaverage, сборка UI
+sudo cp deploy/nginx.conf /etc/nginx/conf.d/diplock.conf
+sudo cp deploy/diplock.service /etc/systemd/system/
+```
+
+В облаке обязательны `ENABLE_DOCS=false`, абсолютные пути в `backend/.env`
+и basic auth на nginx: в приложении аутентификации нет.
+
+---
+
 ## 🐳 Docker (не поддерживается)
 
 `docker-compose.yml`/`init_db.sql`/`Dockerfile` удалены 15.10.2026 как нерабочий второй

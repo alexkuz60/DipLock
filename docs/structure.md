@@ -83,6 +83,7 @@ backend/alembic/       # миграции схемы БД: env.py (URL из sett
 backend/alembic.ini    # конфиг alembic (запуск из backend/)
 backend/pyproject.toml # конфиг ruff + mypy
 frontend/              # UI (Vite+React+TS), сборка → backend/app/static/ui
+deploy/                # публикация в Abacus AI Cloud: nginx, systemd, cloud-setup.sh
 data/                  # локальные данные (edf/results/cache) — НЕ коммитить
 docs/ui.md             # спецификация UI и дорожная карта фаз
 .github/workflows/     # CI: ruff+mypy+pytest и lint+tsc+Vitest+build

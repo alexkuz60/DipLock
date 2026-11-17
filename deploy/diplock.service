@@ -1,0 +1,20 @@
+# systemd-юнит DipLock для облака: start.sh пишет PID-файл, поэтому Type=forking
+# сохраняет кнопку «Перезапустить бэкенд» (server_control → os.execv).
+# Пути /srv/diplock/repo замените на фактический каталог репозитория.
+[Unit]
+Description=DipLock (FastAPI + UI)
+After=network.target
+
+[Service]
+Type=forking
+PIDFile=/srv/diplock/repo/data/logs/server.pid
+Environment=DIPLOCK_HOST=127.0.0.1
+Environment=DIPLOCK_PORT=8000
+Environment=DIPLOCK_NO_BROWSER=1
+ExecStart=/srv/diplock/repo/start.sh start
+ExecStop=/srv/diplock/repo/start.sh stop
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

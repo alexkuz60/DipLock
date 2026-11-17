@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     api_prefix: str = "/api/v1"
     debug: bool = True
+    # Документация API (/docs, /openapi.json): локально включена, в облаке
+    # выключается ENABLE_DOCS=false — публичный URL не отдаёт схему API.
+    enable_docs: bool = Field(default=True)
 
     # Логирование (N29): без конфигурации root-logger не имеет handlers, а
     # эффективный уровень `app.*` — WARNING, поэтому все logger.info сервисов

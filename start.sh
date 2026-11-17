@@ -18,6 +18,8 @@ LOG_DIR="$ROOT/data/logs"
 LOG_FILE="$LOG_DIR/server.log"
 PID_FILE="$LOG_DIR/server.pid"
 PORT="${DIPLOCK_PORT:-8000}"
+HOST="${DIPLOCK_HOST:-127.0.0.1}"
+# Health-check всегда на loopback: даже если слушаем 0.0.0.0, проверяем себя.
 BASE_URL="http://127.0.0.1:$PORT"
 UI_URL="$BASE_URL/ui/"
 HEALTH_TIMEOUT="${DIPLOCK_HEALTH_TIMEOUT:-30}"
@@ -37,6 +39,11 @@ server_healthy() {
 }
 
 open_ui() {
+  # В облаке браузера нет: DIPLOCK_NO_BROWSER=1 или пустой DISPLAY.
+  if [[ "${DIPLOCK_NO_BROWSER:-0}" == "1" || -z "${DISPLAY:-}" ]]; then
+    echo "UI: $UI_URL"
+    return 0
+  fi
   if command -v xdg-open >/dev/null 2>&1; then
     xdg-open "$UI_URL" >/dev/null 2>&1 || true
   else
@@ -68,11 +75,13 @@ cmd_start() {
   fi
 
   mkdir -p "$LOG_DIR"
-  echo "Старт uvicorn на $BASE_URL (лог: $LOG_FILE)"
+  echo "Старт uvicorn на $HOST:$PORT (health: $BASE_URL/health, лог: $LOG_FILE)"
   # Запуск из backend/ — там лежат .env и рабочие пути кэшей/БД.
   (
     cd "$BACKEND_DIR"
-    nohup "$UVICORN" app.main:app --host 127.0.0.1 --port "$PORT" \
+    nohup "$UVICORN" app.main:app --host "$HOST" --port "$PORT" \
+      --workers 1 --proxy-headers \
+      --forwarded-allow-ips "${DIPLOCK_FORWARDED_ALLOW_IPS:-127.0.0.1}" \
       >>"$LOG_FILE" 2>&1 &
     echo $! >"$PID_FILE"
   )
