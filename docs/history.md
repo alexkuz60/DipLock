@@ -3,6 +3,79 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 17.11.2026 (3) — Публикация в облаке Abacus AI Cloud: nginx, systemd, fsaverage, E2E-проверка
+
+Приложение опубликовано по адресу **https://diplock.abacusai.cloud** (он же
+`44b313054.abacusai.cloud`): вход по basic-auth, TLS облака, интерфейс на `/ui/`.
+Локальный запуск (`./start.sh`, `127.0.0.1:8000`) не изменился.
+
+### Код и файлы деплоя
+
+* **`deploy/`** — новый каталог публикации: `nginx.conf` (basic auth,
+  `client_max_body_size 210m`, таймауты 3600 с, `proxy_pass 127.0.0.1:8000`),
+  `diplock.service` (systemd, `Type=forking` + `PIDFile` — кнопка
+  «Перезапустить бэкенд» через `os.execv` продолжает работать),
+  `cloud-setup.sh` (идемпотентная подготовка ВМ) и `README.md` — пошаговая
+  инструкция «терминал / личный кабинет / десктоп».
+* **`backend/app/core/config.py`** — поле `enable_docs` (дефолт `true`):
+  в облаке `ENABLE_DOCS=false`, `/docs` и `/openapi.json` не отдаются.
+* **`backend/app/main.py`** — `_docs_kwargs(settings)` для `FastAPI(...)`;
+  `init-status.api.docs_url` пуст при выключенной документации; проверка
+  fsaverage идёт по `settings.subjects_dir` (без хардкода `~/mne_data`).
+* **`start.sh`** — `DIPLOCK_HOST`, `DIPLOCK_NO_BROWSER`, `--workers 1`
+  (реестр задач в памяти), `--proxy-headers --forwarded-allow-ips`,
+  health-проверка всегда на loopback.
+* **`backend/.env.example`** — закомментированный cloud-блок с абсолютными
+  путями постоянного диска.
+* **`backend/tests/test_docs_gating.py`** — гейтинг документации: `/docs` и
+  `/openapi.json` при `enable_docs=false` дают 404, `init-status` не публикует
+  адрес документации.
+* **`docs/rules/deploy.md`** — схема, инварианты (один воркер, аутентификация
+  на nginx, `default_server`, абсолютные пути, данные раньше старта,
+  `data/cache` не переносится) и команды проверки; строка в карте `AGENTS.md`.
+
+### Дрейф MNE 1.13 (найдено на облаке)
+
+`mne.datasets.fsaverage.data_path` удалён. `ensure_fsaverage`
+(`backend/app/services/fsaverage_assets.py`) переведён на
+`mne.datasets.fetch_fsaverage(subjects_dir=...)`, причём аргумент обязан быть
+`Path`, а не `str` (внутри вызывается `.expanduser()`); `brain_export.py`
+использует ту же функцию. fsaverage (762 МБ) скачан на ВМ в
+`/home/ubuntu/mne_data/MNE-fsaverage-data`.
+
+### Настройка ВМ (Ubuntu 24.04, 2 CPU, 7.8 ГБ RAM, 48 ГБ диска)
+
+* Код и данные — `/srv/diplock/repo`, `backend/venv` (Python 3.12.3, mne 1.13.2),
+  UI собран в `backend/app/static/ui`, БД — снимок `sqlite3 .backup`.
+* `diplock.service` — enabled, `User=ubuntu`/`Group=ubuntu`: без этого сервис
+  работал от root и файлы задач, логи и PID в `data/` становились root-owned.
+* nginx: `/etc/nginx/conf.d/diplock.conf` с `listen 80 default_server`;
+  в `/etc/nginx/nginx.conf` у блока «READY» (`/var/www/html`) `default_server`
+  снят (бэкап `nginx.conf.bak.1794917818`) — ingress облака не передаёт `Host`,
+  и трафик уходил на заглушку.
+* `/etc/nginx/.htpasswd` — `root:ubuntu 640`: nginx работает как `user ubuntu`,
+  иначе 500 «Permission denied».
+
+### Проверка end-to-end (тестовые данные)
+
+| Что | Результат |
+|---|---|
+| `/health`, `/api/v1/meta`, `/api/v1/recordings` | 200 |
+| `/ui/`, `/ui/dipoles`, `/ui/table`, бандл `assets/*.js` | 200, ETag → 304 |
+| `/docs`, `/openapi.json` | 404 |
+| без пароля | 401 |
+| загрузка EDF | 200, дубликат распознан (`deduplicated=true`) |
+| фильтр → артефакты → эпохи | три задачи `succeeded` (239 артефактов, 52 эпохи) |
+| `dipoles.csv` | 200, реальные BEM-диполи |
+| спектрограмма (после `User=ubuntu`) | `succeeded`, файл задачи `ubuntu:ubuntu` |
+| `POST /api/v1/server/restart` | 202, сервис `active`, задачи и записи на месте |
+
+### Что осталось
+
+* Визуальная проверка кнопок в браузере и полная перезагрузка ВМ — за владельцем.
+* Тестовые записи, задачи и расчёты в облачной БД вычищаются перед реальной
+  работой нейрофизиолога (владелец подтвердил, что данные тестовые).
+
 ## 17.11.2026 (2) — Стрелки ←/→ для индикатора эпох в «Диполях» (ручное позиционирование кадра)
 
 Прогресс-индикатор эпох (второй ряд шапки «Диполей») научился управлять позицией

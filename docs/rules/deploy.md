@@ -32,6 +32,10 @@
 - **`ENABLE_DOCS=false`** в облаке: `/docs` и `/openapi.json` не отдаются.
 - **PID-файл и перезапуск.** `start.sh` пишет PID uvicorn; systemd `Type=forking`
   + `PIDFile` сохраняют кнопку «Перезапустить бэкенд» (`os.execv`, PID не меняется).
+- **`User=ubuntu` в юните.** Без него сервис работает от root: файлы задач, логи
+  и PID в `data/` становятся root-owned, и `ubuntu` не может их удалить без sudo.
+  После смены пользователя — `chown -R ubuntu:ubuntu data/logs` и проверка
+  `systemctl show diplock -p User`.
 
 ## Что меняется в коде
 
