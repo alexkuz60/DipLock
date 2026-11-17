@@ -146,6 +146,8 @@ sudo systemctl enable --now diplock
 
 `Type=forking` + `PIDFile` сохраняют кнопку «Перезапустить бэкенд»: `start.sh`
 пишет PID uvicorn, `server_control` делает `os.execv`, PID не меняется.
+`User=ubuntu` обязателен: без него сервис работает от root и файлы задач, логи
+и PID в `data/` становятся root-owned — `ubuntu` не сможет их удалить без sudo.
 
 Если systemd в среде нет — `supervisord`:
 

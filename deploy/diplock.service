@@ -8,6 +8,10 @@ After=network.target
 [Service]
 Type=forking
 PIDFile=/srv/diplock/repo/data/logs/server.pid
+# Без User= сервис работает от root: файлы задач, логи и PID в data/ становятся
+# root-owned, и `ubuntu` не может их удалить без sudo. Порт 8000 непривилегированный.
+User=ubuntu
+Group=ubuntu
 Environment=DIPLOCK_HOST=127.0.0.1
 Environment=DIPLOCK_PORT=8000
 Environment=DIPLOCK_NO_BROWSER=1
