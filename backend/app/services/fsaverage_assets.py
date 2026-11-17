@@ -18,6 +18,7 @@
 """
 import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import mne
@@ -71,7 +72,8 @@ def ensure_fsaverage(subjects_dir: str) -> str:
     """
     fetch = getattr(mne.datasets, "fetch_fsaverage", None)
     if fetch is not None:
-        return str(fetch(subjects_dir=subjects_dir))
+        # fetch_fsaverage ждёт Path (вызывает .expanduser()), а не str.
+        return str(fetch(subjects_dir=Path(subjects_dir)))
     return str(mne.datasets.fsaverage.data_path())
 
 
