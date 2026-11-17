@@ -3,6 +3,31 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 17.11.2026 (5) — Sonic Annotator и VAMP-плагины на облачной ВМ («ЕмоЛаб»)
+
+Раздел «ЕмоЛаб» на сервере работал без карт аккордов и темпа: в
+`/srv/diplock/repo/tools/` не было бинаря, `~/vamp` отсутствовал, `VAMP_PATH`
+в `backend/.env` не задан. Анализ не падал (best-effort), но `key_track`,
+`tempo_track` и `segment_track` приходили пустыми.
+
+* **Бинарь** `tools/sonic-annotator/` (22 669 240 Б, статическая AppImage-сборка)
+  скопирован на ВМ с сохранением бита исполнения.
+* **FUSE:** AppImage падал с `dlopen(): error loading libfuse.so.2` —
+  `sudo apt-get install -y libfuse2t64` (Ubuntu 24.04).
+* **Плагины:** `~/vamp` (117 файлов, 17 МБ) перенесён в `/home/ubuntu/vamp`;
+  передача tar-потоком рвалась по `Broken pipe`, прошла через `scp` архива.
+* **`backend/.env`:** добавлен `VAMP_PATH=/home/ubuntu/vamp` (chown ubuntu,
+  chmod 600) — без явного пути статическая сборка 1.7 падает с
+  «buffer overflow detected» (ловушка 09.10.2026).
+* **`deploy/README.md`, `docs/rules/deploy.md`** — абзац про FUSE, `~/vamp` и
+  обязательный `VAMP_PATH`.
+
+Проверка на ВМ: `sonic-annotator -l` → **276** плагинов (было 0); живой прогон
+цепочки на синтетических аккордах C → Am → G7 (моно 32 кГц) дал
+`key_track` = C (0.1 с), Am (4.1 с), G7 (8.1 с); `tempo_track` = 136.0 и
+139.7 bpm; `segment_track` = A / B / C. Служба после `systemctl restart
+diplock` — `active`, loopback `/health` 200.
+
 ## 17.11.2026 (4) — Отчёты падали с Permission denied: root-owned `data/cache` и страховка `cache_build_path`
 
 После перехода службы на `User=ubuntu` каталог `data/cache` остался `root:root`

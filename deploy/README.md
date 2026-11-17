@@ -80,6 +80,13 @@ ssh user@cloud 'chmod 600 /srv/diplock/repo/data/llm_router.json'
 VAMP опционален: без `tools/sonic-annotator/sonic-annotator` и `~/vamp`
 «ЕмоЛаб»/«Нейромузыка» теряют карты аккордов и темпа, но расчёт не падает.
 
+Установка VAMP на ВМ (Ubuntu 24.04): бинарь — AppImage, ему нужен FUSE
+(`sudo apt-get install -y libfuse2t64`), иначе `dlopen(): error loading
+libfuse.so.2`. Плагины — каталог `~/vamp` (117 файлов, 17 МБ) плюс
+`VAMP_PATH=/home/<user>/vamp` в `backend/.env`: без явного `VAMP_PATH`
+статическая сборка 1.7 падает с «buffer overflow detected». Проверка —
+`VAMP_PATH=~/vamp tools/sonic-annotator/sonic-annotator -l` (276 выходов).
+
 ## 4. `backend/.env`
 
 Скопируйте `backend/.env.example` в `backend/.env` и раскомментируйте

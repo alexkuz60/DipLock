@@ -38,6 +38,12 @@
   `systemctl show diplock -p User`. `data/cache` обязателен: каталог создаётся при
   первом расчёте, и root-owned `cache` роняет сборку отчётов (`os.makedirs` →
   `PermissionError`), хотя сам расчёт проходит.
+- **VAMP (ЕмоЛаб).** Бинарь `tools/sonic-annotator/sonic-annotator` — AppImage,
+  ему нужен FUSE: `sudo apt-get install -y libfuse2t64`, иначе
+  `dlopen(): error loading libfuse.so.2`. Плагины — `~/vamp` (117 файлов, 17 МБ),
+  в `backend/.env` обязателен `VAMP_PATH=/home/<user>/vamp`: без явного пути
+  статическая сборка 1.7 падает с «buffer overflow detected». Проверка —
+  `VAMP_PATH=~/vamp tools/sonic-annotator/sonic-annotator -l` (276 выходов).
 
 ## Что меняется в коде
 
