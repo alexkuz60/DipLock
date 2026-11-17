@@ -269,6 +269,38 @@ def state_of(render_id: str) -> RenderState:
     return state
 
 
+def _vamp_tracks(
+    blob: bytes,
+) -> tuple[
+    list[dict[str, Any]] | None,
+    list[dict[str, Any]] | None,
+    list[dict[str, Any]] | None,
+]:
+    """Аккорды, темп и сегменты мастера (VAMP, best-effort: нет — ``None``)."""
+    return (
+        vamp_analysis.key_track_from_wav(blob),
+        vamp_analysis.tempo_track_from_wav(blob),
+        vamp_analysis.segment_track_from_wav(blob),
+    )
+
+
+def _vamp_tracks_missing(payload: dict[str, Any]) -> bool:
+    """Кэш посчитан без VAMP, а инструмент уже доступен — кадры устарели.
+
+    ``emo.json`` пишется один раз и читается как есть; если в момент рендера
+    плагинов не было, ``key_track``/``tempo_track``/``segment_track`` остаются
+    пустыми навсегда (случай 17.11.2026: VAMP поставили после рендера, UI
+    показывал «нет данных»). Такой кэш пересобирается из ``master.wav``.
+    """
+    if not vamp_analysis.available():
+        return False
+    return (
+        not payload.get("key_track")
+        or not payload.get("tempo_track")
+        or not payload.get("segment_track")
+    )
+
+
 def emo_payload_of(state: RenderState) -> dict[str, Any] | None:
     """Кадры «Эмо» готового рендера: артефакт либо добивка из ``master.wav``.
 
@@ -285,17 +317,17 @@ def emo_payload_of(state: RenderState) -> dict[str, Any] | None:
     blob = artifacts.read(store.EMO_NAME)
     if blob is not None:
         payload = emo_radar.parse_emo(blob)
-        if payload is not None:
+        if payload is not None and not _vamp_tracks_missing(payload):
             return payload
     master_blob = artifacts.read(store.MASTER_NAME)
     if master_blob is None:
         return None
-    # Трек тональности и темп (VAMP) по байтам мастера; инструмент
-    # недоступен → треки None, кадры всё равно добиваются.
-    key_track = vamp_analysis.key_track_from_wav(master_blob)
-    tempo_track = vamp_analysis.tempo_track_from_wav(master_blob)
+    # Треки тональности, темпа и сегментов (VAMP) по байтам мастера;
+    # инструмент недоступен → треки None, кадры всё равно добиваются.
+    key_track, tempo_track, segment_track = _vamp_tracks(master_blob)
     payload = emo_radar.frames_from_wav(
         master_blob, key_track=key_track, tempo_track=tempo_track,
+        segment_track=segment_track,
     )
     fresh = emo_radar.emo_bytes(payload)
     if artifacts.directory is None:
@@ -515,10 +547,10 @@ def _run_render(
         # Трек тональности для вращения звезды и темп для её коррекции (VAMP) —
         # по тем же байтам мастера; инструмент недоступен → треки None
         # (вращение/коррекция в UI нулевые), рендер не падает (best-effort).
-        key_track = vamp_analysis.key_track_from_wav(master_wav)
-        tempo_track = vamp_analysis.tempo_track_from_wav(master_wav)
+        key_track, tempo_track, segment_track = _vamp_tracks(master_wav)
         emo_payload = emo_radar.frames_from_master(
             master, key_track=key_track, tempo_track=tempo_track,
+            segment_track=segment_track,
         )
         del master
 

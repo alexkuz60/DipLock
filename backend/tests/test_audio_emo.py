@@ -5,6 +5,7 @@
 мастера, WAV-фоллбэк и сериализация; API — ``emo.json`` в манифесте рендера,
 ``GET …/emo`` (контракт, 404) и добивка кадров для старого манифеста.
 """
+import json
 import os
 import shutil
 import time
@@ -393,6 +394,59 @@ def test_emo_backfills_old_manifest_without_emo(client, tmp_path, edf_file):
     again = client.get(f"{_PREFIX}/render/{render_id}/emo")
     assert again.status_code == 200
     assert again.json()["frame_count"] == payload["frame_count"]
+
+
+def test_emo_rebuilds_cache_when_vamp_appears(client, tmp_path, edf_file, monkeypatch):
+    """Кэш без VAMP пересобирается, когда плагины появились (случай 17.11.2026).
+
+    ``emo.json`` пишется один раз: рендер, посчитанный до установки
+    sonic-annotator, навсегда оставался с пустыми ``key_track``/``tempo_track``/
+    ``segment_track``, и UI показывал «нет данных». Теперь такой кэш
+    пересобирается из ``master.wav``, как только бинарь на месте.
+    """
+    recording = _register(tmp_path, edf_file, recording_id="rec-emo-vamp-late")
+    started = client.post(
+        f"{_PREFIX}/render",
+        json={"recording_id": recording.recording_id, "boost_db": 0.0, "loudness_phon": None},
+    )
+    render_id = started.json()["render_id"]
+    assert _wait_render(client, render_id)["status"] == "succeeded"
+
+    directory = neuro_store.render_dir(settings, recording.recording_id, render_id)
+    path = os.path.join(directory, neuro_store.EMO_NAME)
+    with open(path, encoding="utf-8") as fh:
+        stale = json.load(fh)
+    assert stale["key_track"] is None
+    stale["segment_track"] = []
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(stale, fh)
+
+    monkeypatch.setattr(vamp_analysis, "available", lambda cfg=None: True)
+    monkeypatch.setattr(
+        vamp_analysis, "key_track_from_wav",
+        lambda blob, cfg=None, transform_name=None: [
+            {"t_sec": 0.0, "key_code": 1, "label": "C"},
+        ],
+    )
+    monkeypatch.setattr(
+        vamp_analysis, "tempo_track_from_wav",
+        lambda blob, cfg=None: [{"t_sec": 0.0, "bpm": 120.0}],
+    )
+    monkeypatch.setattr(
+        vamp_analysis, "segment_track_from_wav",
+        lambda blob, cfg=None: [{"t_sec": 0.0, "segment_type": 1, "name": "A"}],
+    )
+    neuro_render.clear_renders()
+
+    body = client.get(f"{_PREFIX}/render/{render_id}/emo")
+    assert body.status_code == 200, body.text
+    payload = body.json()
+    assert payload["key_track"][0]["label"] == "C"
+    assert payload["tempo_track"][0]["bpm"] == 120.0
+    assert payload["segment_track"][0]["name"] == "A"
+
+    with open(path, encoding="utf-8") as fh:
+        assert json.load(fh)["segment_track"][0]["name"] == "A"
 
 
 

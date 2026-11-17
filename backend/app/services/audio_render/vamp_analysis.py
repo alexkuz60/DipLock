@@ -230,6 +230,17 @@ def parse_chord_csv(text: str) -> list[dict[str, Any]]:
     return segments
 
 
+def available(cfg: Settings | None = None) -> bool:
+    """Sonic Annotator на месте: бинарь существует (плагины видны при запуске).
+
+    Нужен вызывающей стороне, чтобы отличить «инструмента нет» от «инструмент
+    есть, но трек пуст»: кэш, посчитанный без VAMP, пересобирается, когда
+    бинарь появился (случай 17.11.2026 — плагины поставили после рендера).
+    """
+    cfg = cfg or settings
+    return bool(cfg.sonic_annotator_bin) and os.path.isfile(cfg.sonic_annotator_bin)
+
+
 def key_track_from_wav(
     blob: bytes,
     cfg: Settings | None = None,

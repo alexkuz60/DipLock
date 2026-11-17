@@ -121,9 +121,25 @@ def _emo_cache_valid(cfg: Settings, track_id: str) -> bool:
     отвергает старые версии (кадры v5 при контракте v6) — кэш с устаревшим
     либо битым ``emo.json`` считается промахом и честно пересчитывается
     (иначе трек навсегда остался бы без данных нового контракта).
+
+    Тот же промах — кэш, посчитанный без VAMP, когда инструмент уже доступен
+    (случай 17.11.2026: плагины поставили после анализа, UI показывал «нет
+    данных» навсегда). Пустые треки при отсутствии инструмента остаются
+    законным кэшем: пересчёт ничего бы не изменил.
     """
     blob = store.read_artifact(cfg, track_id, store.EMO_NAME)
-    return blob is not None and emo_radar.parse_emo(blob) is not None
+    if blob is None:
+        return False
+    payload = emo_radar.parse_emo(blob)
+    if payload is None:
+        return False
+    if not vamp_analysis.available(cfg):
+        return True
+    return bool(
+        payload.get("key_track")
+        and payload.get("tempo_track")
+        and payload.get("segment_track")
+    )
 
 
 def start_analysis(
