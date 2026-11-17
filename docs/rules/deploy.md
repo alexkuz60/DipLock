@@ -34,8 +34,10 @@
   + `PIDFile` сохраняют кнопку «Перезапустить бэкенд» (`os.execv`, PID не меняется).
 - **`User=ubuntu` в юните.** Без него сервис работает от root: файлы задач, логи
   и PID в `data/` становятся root-owned, и `ubuntu` не может их удалить без sudo.
-  После смены пользователя — `chown -R ubuntu:ubuntu data/logs` и проверка
-  `systemctl show diplock -p User`.
+  После смены пользователя — `chown -R ubuntu:ubuntu data/logs data/cache` и проверка
+  `systemctl show diplock -p User`. `data/cache` обязателен: каталог создаётся при
+  первом расчёте, и root-owned `cache` роняет сборку отчётов (`os.makedirs` →
+  `PermissionError`), хотя сам расчёт проходит.
 
 ## Что меняется в коде
 

@@ -9,7 +9,13 @@ import os
 
 import pytest
 
-from app.services.cache_store import cache_clear, cache_path, cache_read, cache_write
+from app.services.cache_store import (
+    cache_build_path,
+    cache_clear,
+    cache_path,
+    cache_read,
+    cache_write,
+)
 
 
 def test_cache_path_lives_under_cache_dir(tmp_path):
@@ -82,3 +88,34 @@ def test_cache_clear_without_parts_is_refused(tmp_path):
     """Опечатка не должна сносить весь `data/cache` — части пути обязательны."""
     with pytest.raises(ValueError, match="cache_clear"):
         cache_clear(str(tmp_path))
+
+
+def test_cache_build_path_falls_back_to_temp_dir(tmp_path, monkeypatch, caplog):
+    """Недоступный каталог кэша не валит сборку отчёта (случай 17.11.2026).
+
+    ``data/cache`` остался root-owned после смены ``User=`` в systemd-юните, и
+    ``mne.Report.save`` падал на ``os.makedirs``. Сборка обязана уехать во
+    временный каталог, а не уронить задачу.
+    """
+    target = cache_path(str(tmp_path), "reports", "rec", "sig.html")
+
+    def broken_makedirs(*args, **kwargs):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(os, "makedirs", broken_makedirs)
+
+    with caplog.at_level("WARNING"):
+        build_path = cache_build_path(target)
+
+    assert build_path != target
+    assert os.path.basename(build_path) == "sig.html"
+    assert os.path.isdir(os.path.dirname(build_path))
+    assert "Каталог сборки недоступен" in caplog.text
+
+
+def test_cache_build_path_keeps_target_when_dir_is_writable(tmp_path):
+    """Обычный случай: каталог создаётся, путь остаётся рядом с кэшем."""
+    target = cache_path(str(tmp_path), "reports", "rec", "sig.html")
+
+    assert cache_build_path(target) == target
+    assert os.path.isdir(os.path.dirname(target))

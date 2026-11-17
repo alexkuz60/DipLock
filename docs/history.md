@@ -3,6 +3,40 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 17.11.2026 (4) — Отчёты падали с Permission denied: root-owned `data/cache` и страховка `cache_build_path`
+
+После перехода службы на `User=ubuntu` каталог `data/cache` остался `root:root`
+(создан 12:31–12:44, когда сервис работал от root). Автоотчёт «Итоги» падал:
+
+```
+File "app/services/report.py", line 1344, in _build_report
+    os.makedirs(os.path.dirname(build_path), exist_ok=True)
+PermissionError: [Errno 13] Permission denied: '.../data/cache/reports'
+```
+
+Падала не сборка `mne.Report`, а подготовка каталога; побочно не писался журнал
+шагов (`cache/journal.jsonl`). Прошлый `chown` касался только `data/logs`.
+
+* **ВМ:** `sudo chown -R ubuntu:ubuntu /srv/diplock/repo/data` — под `data/`
+  не осталось ни одной root-записи (`find … -user root | wc -l` = 0), включая
+  `cache`, `results/jobs` и `edf/*/recording.json`.
+* **`services/cache_store.py`** — `cache_build_path(path)`: пробует создать
+  каталог рядом с кэшем, при `OSError` пишет warning и отдаёт путь во временном
+  каталоге (`tempfile.mkdtemp`). Инвариант «кэш — оптимизация, а не источник
+  истины» (п.9 `docs/rules/data-and-caches.md`) теперь держится и для сборки.
+* **`services/report.py`, `services/group_reports.py`** — `build_path` через
+  `cache_build_path`, ручной `os.makedirs` убран.
+* **`tests/test_cache_store.py`** — недоступный каталог уводит сборку во
+  временный (warning в логе), доступный — оставляет путь рядом с кэшем.
+
+Проверка на ВМ после `systemctl restart diplock`: автоотчёт
+`4ca17c63` — `succeeded`, HTML 1 090 563 Б `ubuntu:ubuntu` в
+`data/cache/reports/<id>/`, `GET …/report/html` → 200 `text/html`; групповой
+отчёт прогона №4 → 200, 1 064 733 Б; `journal.jsonl` пишется от `ubuntu`;
+строк «Permission denied» после 19:00 — 0. Локально: `ruff` чисто,
+`mypy` 128 файлов OK, `pytest tests/test_cache_store.py` 9 passed,
+`test_report/test_group_reports/test_report_store` 33 passed.
+
 ## 17.11.2026 (3) — Публикация в облаке Abacus AI Cloud: nginx, systemd, fsaverage, E2E-проверка
 
 Приложение опубликовано по адресу **https://diplock.abacusai.cloud** (он же

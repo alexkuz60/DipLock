@@ -36,7 +36,12 @@ import numpy as np
 
 from app.core.config import Settings
 from app.services import journal
-from app.services.cache_store import cache_path, cache_read, cache_write
+from app.services.cache_store import (
+    cache_build_path,
+    cache_path,
+    cache_read,
+    cache_write,
+)
 from app.services.report import (
     THEME_CSS,
     THEME_JS,
@@ -223,8 +228,7 @@ def _save_to_bytes(rep: Any, figures: list[Any], target_path: str) -> bytes:
     """
     from matplotlib import pyplot as plt
 
-    build_path = target_path[: -len(".html")] + ".building.html"
-    os.makedirs(os.path.dirname(build_path), exist_ok=True)
+    build_path = cache_build_path(target_path[: -len(".html")] + ".building.html")
     try:
         rep.save(build_path, open_browser=False, overwrite=True)
         with open(build_path, "rb") as fh:

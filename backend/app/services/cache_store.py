@@ -30,6 +30,7 @@ import contextlib
 import logging
 import os
 import shutil
+import tempfile
 from collections.abc import Callable
 from typing import BinaryIO
 
@@ -103,6 +104,27 @@ def cache_write_stream(
         with contextlib.suppress(OSError):
             os.remove(tmp)
         return False
+
+
+def cache_build_path(path: str) -> str:
+    """Путь для промежуточной сборки: рядом с кэшем, иначе — во временном каталоге.
+
+    ``mne.Report.save`` требует существующий каталог, а каталог кэша может
+    оказаться недоступен на запись (например, остался root-owned после смены
+    ``User=`` в systemd-юните). Ронять из-за этого расчёт нельзя: кэш —
+    оптимизация, а не источник истины, поэтому сборка уходит во временный
+    каталог, а ``cache_write`` затем честно сообщит промах записи.
+    """
+    directory = os.path.dirname(path) or "."
+    try:
+        os.makedirs(directory, exist_ok=True)
+        return path
+    except OSError as exc:
+        logger.warning(
+            "Каталог сборки недоступен (%s): %s — собираем во временном каталоге",
+            directory, exc,
+        )
+        return os.path.join(tempfile.mkdtemp(prefix="diplock-build-"), os.path.basename(path))
 
 
 def cache_clear(cache_dir: str, *parts: str) -> None:

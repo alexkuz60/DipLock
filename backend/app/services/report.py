@@ -42,7 +42,13 @@ from app.core.config import Settings
 from app.schemas.analysis import PreprocessStage
 from app.services import job_store, journal
 from app.services.artifact_detector import annotations_from_zones
-from app.services.cache_store import cache_clear, cache_path, cache_read, cache_write
+from app.services.cache_store import (
+    cache_build_path,
+    cache_clear,
+    cache_path,
+    cache_read,
+    cache_write,
+)
 from app.services.dipole_scanner import (
     GRID_STEP_MM,
     DipoleScanParams,
@@ -1266,7 +1272,7 @@ def _build_report(
 
     signature = report_signature(cfg, params, band_keys)
     path = report_html_path(cfg, recording.recording_id, signature)
-    build_path = path[: -len(".html")] + ".building.html"
+    build_path = cache_build_path(path[: -len(".html")] + ".building.html")
     built_at = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime())
     section1 = "Часть 1 — качество и препроцессинг"
     section2 = "Часть 2 — диполи по полосам"
@@ -1341,7 +1347,6 @@ def _build_report(
 
     # MNE сам каталог не создаёт (FileNotFoundError на первом отчёте), поэтому
     # путь подготавливаем до save; запись в кэш всё равно атомарная (cache_write).
-    os.makedirs(os.path.dirname(build_path), exist_ok=True)
     try:
         rep.save(build_path, open_browser=False, overwrite=True)
         with open(build_path, "rb") as fh:
