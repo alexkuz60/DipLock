@@ -18,7 +18,11 @@
 - **Один воркер.** Реестр задач живёт в памяти, БД — SQLite, обход сирот
   выполняется при старте. `--workers > 1` разъедет историю задач и сирот.
 - **Аутентификация — на nginx.** В приложении её нет: basic auth обязателен,
-  иначе публичный URL отдаёт EDF, историю и журнал с путями.
+  иначе публичный URL отдаёт EDF, историю и журнал с путями. Файл паролей
+  должен принадлежать пользователю nginx (`root:ubuntu` в облаке), иначе 500.
+- **`listen 80 default_server` — у блока DipLock.** Ingress облака не передаёт
+  `Host`, поэтому `server_name` не совпадает; у блока «READY» в
+  `/etc/nginx/nginx.conf` `default_server` нужно снять.
 - **Абсолютные пути.** `DATABASE_URL`, `UPLOAD_DIR`, `RESULTS_DIR`, `CACHE_DIR`,
   `ANALYTICS_DB_PATH`, `SERVER_PID_FILE` — на постоянном диске. Для SQLite —
   четыре слэша: `sqlite+aiosqlite:////srv/...`.

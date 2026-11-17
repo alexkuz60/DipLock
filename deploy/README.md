@@ -110,9 +110,23 @@ DIPOLE_REFINE_N_JOBS=1
 
 ```bash
 sudo htpasswd -c /etc/nginx/.htpasswd diplock
+# nginx в облаке работает под `user ubuntu` (nginx.conf, строка 1), не www-data:
+sudo chown root:ubuntu /etc/nginx/.htpasswd && sudo chmod 640 /etc/nginx/.htpasswd
 sudo cp deploy/nginx.conf /etc/nginx/conf.d/diplock.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+Две ловушки облачной установки, проверенные 17.11.2026:
+
+- **`default_server`.** В `/etc/nginx/nginx.conf` уже есть `listen 80 default_server`
+  с `root /var/www/html` (страница «READY»). Ingress не передаёт заголовок
+  `Host`, поэтому совпадения по `server_name` нет и выигрывает этот блок:
+  снаружи отдавалось «READY», а `/health` и `/ui/` — 404. Лечение: снять
+  `default_server` у блока «READY» (`sed -i '37s/listen 80 default_server;/listen 80;/'`,
+  с бэкапом) и поставить его нашему блоку — в `deploy/nginx.conf` он уже стоит.
+- **Права `htpasswd`.** При `root:www-data` nginx пишет в `error.log`
+  `open() "/etc/nginx/.htpasswd" failed (13: Permission denied)` и отдаёт 500
+  на все пути. Владелец должен быть `root:ubuntu`.
 
 Если облачный прокси уже слушает 80/443, добавьте `location` в его `server`
 или поднимите этот server на отдельном порту (например, `listen 8080`) и
