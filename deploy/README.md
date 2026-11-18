@@ -174,6 +174,15 @@ DIPLOCK_NO_BROWSER=1 /srv/diplock/repo/start.sh start
 
 ## 7. Проверка
 
+Все проверки одной командой — `deploy/check.sh` (пароль только из env
+`DIPLOCK_CHECK_PASSWORD`, не аргументом: аргументы видны в `ps`):
+
+```bash
+DIPLOCK_CHECK_PASSWORD='<pass>' ./deploy/check.sh
+```
+
+Вручную:
+
 ```bash
 curl -fsS https://<id>.abacusai.cloud/health
 curl -fsS -u diplock:<pass> https://<id>.abacusai.cloud/init-status \
@@ -190,10 +199,22 @@ curl -fsS -u diplock:<pass> -X POST -F "stage=filter" \
 
 Ожидаемо: `checks` все `ready`, `sources.bem`/`sources.transform` не `missing`,
 `code.stale=false`, `/ui/` → 200, загрузка → 201, задача доходит до `done`.
+
+Доступ: `/health` — **без пароля** → 200 (открыт для мониторинга, B4);
+`/ui/`, `/api/v1/*`, `/init-status` без пароля → 401, с паролем → 200;
+`/docs` и `/openapi.json` → 404 (`ENABLE_DOCS=false`).
 После `POST /api/v1/server/restart` (202) меняется
 `code.server_started_at`, история задач сохраняется.
 
 ## 8. Обновление
+
+Одной командой — `deploy/update.sh` (`--dry-run` печатает шаги без выполнения):
+
+```bash
+./deploy/update.sh
+```
+
+Вручную:
 
 ```bash
 cd /srv/diplock/repo
@@ -201,7 +222,17 @@ git pull
 backend/venv/bin/pip install -r backend/requirements.txt
 (cd frontend && npm ci && npm run build)
 sudo systemctl restart diplock
+./deploy/check.sh
 ```
+
+Схема БД поднимается **автоматически** при старте: `init_db` в `lifespan`
+доводит файл до `alembic head` (мемоизирован). Ручной `alembic upgrade head`
+после `git pull` не нужен — он нужен только при отладке миграций.
+
+Git remote на ВМ — `origin` на репозиторий проекта; URL без реквизитов,
+доступ по deploy key (приватный ключ лежит у пользователя `ubuntu`, публичный
+добавлен в репозиторий). Проверка: `git -C /srv/diplock/repo remote -v` и
+`git -C /srv/diplock/repo fetch --dry-run`.
 
 Правки backend видны только после перезапуска процесса; признак старого кода —
 `init-status.code.stale=true`.
@@ -215,3 +246,37 @@ sudo systemctl restart diplock
 - GPU не ускоряет `mne.fit_dipole`; включайте только после проверки драйверов.
 - EDF — персональные данные: basic auth не заменяет правовую оценку и согласие.
 - При отмене подписки диск хранится 30 дней — это не бэкап.
+
+## 10. Резервное копирование и восстановление
+
+Снимок — `deploy/backup.sh`: база только через `sqlite3 .backup` (копия живой
+WAL-базы `cp`-ом неконсистентна), плюс архив `data/edf`, `data/results`,
+`backend/.env`, `data/llm_router.json`. Каталог — `data/backups/`, имена
+`diplock-<дата>-<время>.db` и `.tar.gz`, права 600 (внутри секреты), ротация —
+последние `DIPLOCK_BACKUP_KEEP` (дефолт 7) снимков каждого вида.
+
+```bash
+./deploy/backup.sh                       # снимок сейчас
+DIPLOCK_BACKUP_KEEP=14 ./deploy/backup.sh
+```
+
+Расписание — cron (точка решения владельца B2), пример на 03:00:
+
+```cron
+0 3 * * * /srv/diplock/repo/deploy/backup.sh >> /srv/diplock/repo/data/logs/backup.log 2>&1
+```
+
+Восстановление на чистой ВМ:
+
+1. Код и окружение: `git clone <repo-url> /srv/diplock/repo`, затем
+   `./deploy/cloud-setup.sh` (§1–2). Node 22 — заранее.
+2. Данные: распаковать архив в корень репозитория
+   (`tar -xzf diplock-<дата>.tar.gz -C /srv/diplock/repo`), снимок БД положить
+   как `data/diplock.db`; проверить `sqlite3 data/diplock.db "PRAGMA integrity_check;"`.
+3. `backend/.env` — из архива (`backend/.env`), пути сверить с §4: на новой ВМ
+   домашний каталог может отличаться (`SUBJECTS_DIR`, `FSAVERAGE_TRANS`,
+   `VAMP_PATH`).
+4. nginx и basic auth — §5 (`htpasswd` заново: хэши в архив не входят),
+   systemd — §6.
+5. Проверка — `DIPLOCK_CHECK_PASSWORD='<pass>' ./deploy/check.sh` (§7), затем
+   `init-status`: все `checks` = `ready`, `code.stale=false`.

@@ -68,3 +68,9 @@ curl -fsS -u diplock:<pass> -o /dev/null -w '%{http_code}\n' \
 
 Ожидаемо: `checks` все `ready`, `sources.bem`/`sources.transform` не `missing`,
 `code.stale=false`, `/ui/` → 200, загрузка EDF → 201, задача → `done`.
+
+Доступ: `/health` — без пароля → 200 (`location = /health` с `auth_basic off`:
+эндпоинт нужен внешнему мониторингу и данных не раскрывает); `/ui/`,
+`/api/v1/*`, `/init-status` без пароля → 401, с паролем → 200; `/docs` и
+`/openapi.json` → 404 (`ENABLE_DOCS=false`). Все проверки одной командой —
+`deploy/check.sh` (пароль из env `DIPLOCK_CHECK_PASSWORD`).
