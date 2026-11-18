@@ -78,6 +78,7 @@ ehthumbs.db
 # test.edf хранится в репо как тестовый файл, а каталоги загрузок (uuid) — нет
 data/edf/*/
 data/results/
+data/backups/
 # Кэш тяжёлых ассетов (меш fsaverage, атлас Brodmann) — пересчитывается автоматически
 data/cache/
 backend/data/cache/
