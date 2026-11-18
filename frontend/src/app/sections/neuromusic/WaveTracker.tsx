@@ -71,6 +71,7 @@ export function WaveTracker({ renderId, tracks, emo = null }: WaveTrackerProps) 
   const zoom = useNeuromusicPlayer((state) => state.zoom)
   const ready = useNeuromusicPlayer((state) => state.ready)
   const loading = useNeuromusicPlayer((state) => state.loading)
+  const progress = useNeuromusicPlayer((state) => state.progress)
   const error = useNeuromusicPlayer((state) => state.error)
   /** Для слайдера прокрутки: максимум зависит от длительности (state, не ref). */
   const duration = useNeuromusicPlayer((state) => state.duration)
@@ -146,6 +147,8 @@ export function WaveTracker({ renderId, tracks, emo = null }: WaveTrackerProps) 
       widthPct: renderStore.spatialWidthPct,
       spreadPct: renderStore.spatialSpreadPct,
       wetPct: renderStore.spatialWetPct,
+      onProgress: (loaded, total) =>
+        useNeuromusicPlayer.getState().setProgress(loaded, total),
     })
       .then((player) => {
         if (cancelled) {
@@ -482,7 +485,8 @@ export function WaveTracker({ renderId, tracks, emo = null }: WaveTrackerProps) 
 
       {loading && (
         <p className="text-sm text-fg-2" data-testid="tracker-loading">
-          Загрузка сигнала…
+          Загрузка сигнала
+          {progress === null ? '...' : `: ${Math.round(progress * 100)} %`}
         </p>
       )}
       {error && (

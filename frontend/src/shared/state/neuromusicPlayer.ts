@@ -52,6 +52,8 @@ export type NeuromusicPlayerState = {
   ready: boolean
   /** Грузится движок/буфер/граф — трекер показывает «Загрузка…» */
   loading: boolean
+  /** Доля скачанных байт WAV (0…1); `null` — размер ещё неизвестен */
+  progress: number | null
   /** Текст ошибки сети/декодирования — рисуется трекером */
   error: string | null
   /** Длительность текущего источника, сек (из движка, для шага seek) */
@@ -78,6 +80,8 @@ export type NeuromusicPlayerState = {
   beginLoad: () => void
   /** Завершилась без ошибки (например, перестройка 3D-графа) */
   endLoad: () => void
+  /** Прогресс докачки WAV: байты получены из всего (доля 0…1) */
+  setProgress: (loaded: number, total: number) => void
   /** Ошибка загрузки/построения */
   fail: (error: string) => void
   /**
@@ -94,6 +98,7 @@ export const useNeuromusicPlayer = create<NeuromusicPlayerState>()((set, get) =>
   playing: false,
   ready: false,
   loading: false,
+  progress: null,
   error: null,
   duration: 0,
 
@@ -159,6 +164,7 @@ export const useNeuromusicPlayer = create<NeuromusicPlayerState>()((set, get) =>
     set({
       ready: true,
       loading: false,
+      progress: null,
       error: null,
       duration: player.duration,
       source: player.currentSource,
@@ -167,14 +173,20 @@ export const useNeuromusicPlayer = create<NeuromusicPlayerState>()((set, get) =>
 
   detach: () => {
     activePlayer = null
-    set({ ready: false, playing: false, loading: false, duration: 0 })
+    set({ ready: false, playing: false, loading: false, progress: null, duration: 0 })
   },
 
-  beginLoad: () => set({ loading: true, error: null }),
+  beginLoad: () => set({ loading: true, progress: null, error: null }),
 
-  endLoad: () => set({ loading: false }),
+  endLoad: () => set({ loading: false, progress: null }),
 
-  fail: (error) => set({ loading: false, ready: false, playing: false, error }),
+  setProgress: (loaded, total) => {
+    if (total <= 0) return
+    set({ progress: Math.min(1, loaded / total) })
+  },
+
+  fail: (error) =>
+    set({ loading: false, progress: null, ready: false, playing: false, error }),
 
   reset: () => {
     activePlayer = null
@@ -183,6 +195,7 @@ export const useNeuromusicPlayer = create<NeuromusicPlayerState>()((set, get) =>
       playing: false,
       ready: false,
       loading: false,
+      progress: null,
       error: null,
       duration: 0,
     })

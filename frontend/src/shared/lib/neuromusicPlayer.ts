@@ -61,12 +61,24 @@ export type NeuromusicPlayerOptions = {
   spreadPct: number
   /** Влажность реверберации, % (0 — сухой сигнал) */
   wetPct: number
+  /** Прогресс докачки WAV (байты) — трекер показывает проценты загрузки */
+  onProgress?: WavProgress
 }
 
 /** Размер куска докачки WAV: один ответ на 30 МБ не доходит через ingress. */
 export const WAV_CHUNK_BYTES = 4 * 1024 * 1024
 /** Попыток на кусок: облачный прокси рвёт длинные ответы, повтор лечит. */
 const CHUNK_ATTEMPTS = 2
+/**
+ * Параллельных кусков: последовательная докачка 30 МБ через Cloudflare
+ * занимает минуты (замер 18.11.2026 — 2.2 МБ/с на один поток), четыре
+ * потока сокращают ожидание почти вчетверо. Порядок склейки не зависит от
+ * порядка ответов — куски раскладываются по индексам.
+ */
+const CHUNK_CONCURRENCY = 4
+
+/** Прогресс докачки: сколько байт уже получено из сколько всего. */
+export type WavProgress = (loaded: number, total: number) => void
 
 /** Размер файла из `Content-Range: bytes a-b/total`. */
 function totalOf(response: Response): number {
@@ -95,34 +107,55 @@ async function fetchChunk(url: string, start: number, end: number): Promise<Resp
 }
 
 /**
- * Качает WAV кусками по `Range` и склеивает в один `ArrayBuffer`.
+ * Качает WAV кусками по `Range` (до 4 параллельно) и склеивает в `ArrayBuffer`.
  *
  * Мастер рендера — десятки мегабайт (48 кГц, PCM_24, стерео): один такой ответ
  * через облачный ingress (Cloudflare + Envoy) обрывается, и `fetch` падает
- * `NetworkError`. Куски по 4 МиБ проходят, а повтор лечит разовый обрыв.
- * Сервер без поддержки `Range` отвечает `200` — тело берётся целиком.
+ * `NetworkError`. Куски по 4 МиБ проходят, повтор лечит разовый обрыв, а
+ * параллельные потоки сокращают ожидание. Сервер без поддержки `Range`
+ * отвечает `200` — тело берётся целиком.
  */
-export async function fetchWavChunks(url: string): Promise<ArrayBuffer> {
+export async function fetchWavChunks(
+  url: string,
+  onProgress?: WavProgress,
+): Promise<ArrayBuffer> {
   const first = await fetchChunk(url, 0, WAV_CHUNK_BYTES - 1)
-  if (first.status === 200) return first.arrayBuffer()
+  if (first.status === 200) {
+    const body = await first.arrayBuffer()
+    onProgress?.(body.byteLength, body.byteLength)
+    return body
+  }
   if (first.status !== 206) throw new Error(`HTTP ${first.status}`)
   const total = totalOf(first)
   const parts: Uint8Array[] = [new Uint8Array(await first.arrayBuffer())]
   let received = parts[0].byteLength
-  while (received < total) {
-    const end = Math.min(received + WAV_CHUNK_BYTES, total) - 1
-    const response = await fetchChunk(url, received, end)
-    if (response.status !== 206) {
-      throw new Error(`HTTP ${response.status} (кусок ${received}-${end})`)
-    }
-    const part = new Uint8Array(await response.arrayBuffer())
-    if (part.byteLength === 0) throw new Error(`пустой кусок ${received}-${end}`)
-    parts.push(part)
-    received += part.byteLength
+  onProgress?.(received, total)
+  const ranges: Array<[number, number]> = []
+  for (let start = received; start < total; start += WAV_CHUNK_BYTES) {
+    ranges.push([start, Math.min(start + WAV_CHUNK_BYTES, total) - 1])
   }
+  const tail = new Array<Uint8Array>(ranges.length)
+  let next = 0
+  const worker = async (): Promise<void> => {
+    for (let index = next++; index < ranges.length; index = next++) {
+      const [start, end] = ranges[index]
+      const response = await fetchChunk(url, start, end)
+      if (response.status !== 206) {
+        throw new Error(`HTTP ${response.status} (кусок ${start}-${end})`)
+      }
+      const part = new Uint8Array(await response.arrayBuffer())
+      if (part.byteLength === 0) throw new Error(`пустой кусок ${start}-${end}`)
+      tail[index] = part
+      received += part.byteLength
+      onProgress?.(received, total)
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(CHUNK_CONCURRENCY, ranges.length) }, worker),
+  )
   const merged = new Uint8Array(received)
   let offset = 0
-  for (const part of parts) {
+  for (const part of [...parts, ...tail]) {
     merged.set(part, offset)
     offset += part.byteLength
   }
@@ -141,6 +174,8 @@ export class NeuromusicPlayer {
   private widthPct: number
   private spreadPct: number
   private wetPct: number
+  /** Прогресс докачки WAV — общий для старта, смены источника и 3D-графа. */
+  private readonly onProgress: WavProgress | undefined
 
   /** Общий выход графа: создаётся один раз, переживает перестройки режима. */
   private readonly out: Tone.Gain
@@ -179,6 +214,7 @@ export class NeuromusicPlayer {
     this.widthPct = options.widthPct
     this.spreadPct = options.spreadPct
     this.wetPct = options.wetPct
+    this.onProgress = options.onProgress
     this.out = new Tone.Gain(1).toDestination()
   }
 
@@ -215,11 +251,14 @@ export class NeuromusicPlayer {
   }
 
   /** Загрузка одного WAV кусками по `Range` с кэшем; reject — HTTP/декод. */
-  private async loadBuffer(url: string): Promise<Tone.ToneAudioBuffer> {
+  private async loadBuffer(
+    url: string,
+    onProgress: WavProgress | undefined = this.onProgress,
+  ): Promise<Tone.ToneAudioBuffer> {
     const cached = this.buffers.get(url)
     if (cached) return cached
     try {
-      const arrayBuffer = await fetchWavChunks(url)
+      const arrayBuffer = await fetchWavChunks(url, onProgress)
       const audioBuffer = await Tone.getContext().decodeAudioData(arrayBuffer)
       const buffer = new Tone.ToneAudioBuffer(audioBuffer)
       this.buffers.set(url, buffer)

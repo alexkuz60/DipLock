@@ -2,7 +2,8 @@
  * Тесты кусочной загрузки WAV (`fetchWavChunks`): мастер рендера — десятки
  * мегабайт, и один такой ответ через облачный ingress обрывается
  * (`NetworkError` в `fetch`). Здесь проверяется контракт докачки: `Range`,
- * склейка, повтор упавшего куска и фоллбэк на сервер без `Range`.
+ * параллельные куски, склейка по порядку, повтор упавшего куска, прогресс и
+ * фоллбэк на сервер без `Range`.
  *
  * Tone не поднимается: jsdom без Web Audio, а `fetchWavChunks` работает с
  * байтами и `fetch` — движок мокается пустой заглушкой.
@@ -65,6 +66,38 @@ describe('fetchWavChunks', () => {
     expect(rangeOf(fetchMock.mock.calls[1][1])).toBe(
       `bytes=${WAV_CHUNK_BYTES}-${WAV_CHUNK_BYTES * 2 - 1}`,
     )
+  })
+
+  it('держит не больше четырёх кусков в полёте и отдаёт прогресс до 100 %', async () => {
+    const body = payload(WAV_CHUNK_BYTES * 9)
+    const server = rangeServer(body)
+    let inFlight = 0
+    let peak = 0
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await Promise.resolve()
+      try {
+        return await server(url, init)
+      } finally {
+        inFlight -= 1
+      }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const seen: number[] = []
+
+    const merged = new Uint8Array(
+      await fetchWavChunks('/master.wav', (loaded, total) => {
+        expect(total).toBe(body.byteLength)
+        seen.push(loaded)
+      }),
+    )
+
+    expect(checksum(merged)).toBe(checksum(body))
+    expect(peak).toBeLessThanOrEqual(4)
+    expect(peak).toBeGreaterThan(1) // куски действительно идут параллельно
+    expect(seen.at(-1)).toBe(body.byteLength)
+    expect([...seen].sort((a, b) => a - b)).toEqual(seen) // прогресс не откатывается
   })
 
   it('повторяет упавший кусок и не теряет байты', async () => {
