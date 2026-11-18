@@ -141,6 +141,24 @@ sudo nginx -t && sudo systemctl reload nginx
 1 МБ сломает загрузку EDF. `proxy_read_timeout` обязателен: дефолтные 60 с
 оборвут синхронный `/analyze`.
 
+### Состав логинов
+
+Решение владельца 18.11.2026: один логин `diplock` на всех, кто работает с
+записями. Отдельные логины не заводим — basic auth не даёт журнала «кто
+смотрел запись», а лишние учётные записи только расширяют поверхность подбора.
+
+Второй логин, если понадобится (пароль вводится в промпте, не аргументом —
+аргумент виден в `ps` и в истории оболочки):
+
+```bash
+sudo htpasswd /etc/nginx/.htpasswd <логин>   # без -c: -c перезаписал бы файл
+sudo chown root:ubuntu /etc/nginx/.htpasswd && sudo chmod 640 /etc/nginx/.htpasswd
+```
+
+Смена пароля существующего логина — та же команда с его именем. Проверка:
+`curl -s -o /dev/null -w '%{http_code}\n' -u <логин>:<пароль> https://<id>.abacusai.cloud/ui/`
+→ 200. Перебор паролей банит fail2ban (`deploy/fail2ban-diplock.conf`).
+
 ## 6. Супервизор
 
 systemd:
@@ -280,3 +298,32 @@ DIPLOCK_BACKUP_KEEP=14 ./deploy/backup.sh
    systemd — §6.
 5. Проверка — `DIPLOCK_CHECK_PASSWORD='<pass>' ./deploy/check.sh` (§7), затем
    `init-status`: все `checks` = `ready`, `code.stale=false`.
+
+## 11. Сторож доступности
+
+`deploy/watchdog.sh` опрашивает `/health` и пишет строку в
+`data/logs/watchdog.log`, когда сервис не отвечает или отвечает не 200.
+Внешний сервис не нужен: расписание — cron на самой ВМ, канал оповещения
+подключается переменной `DIPLOCK_ALERT_WEBHOOK` (текст уходит телом POST,
+адрес не попадает ни в журнал, ни в `ps`).
+
+```bash
+./deploy/watchdog.sh                      # проверка сейчас, код возврата 1 при сбое
+DIPLOCK_ALERT_WEBHOOK='<url>' ./deploy/watchdog.sh
+```
+
+Расписание — каждые 5 минут:
+
+```cron
+*/5 * * * * /srv/diplock/repo/deploy/watchdog.sh >/dev/null 2>&1
+```
+
+Проверка, что сторож видит сбой, без остановки сервиса:
+
+```bash
+DIPLOCK_CHECK_URL=http://127.0.0.1:9 ./deploy/watchdog.sh; echo "rc=$?"
+tail -1 data/logs/watchdog.log
+```
+
+Ожидаемо: `rc=1` и строка `FAIL http://127.0.0.1:9/health code=000`. Ротация
+журнала — тот же `deploy/logrotate-diplock` (`data/logs/*.log`).
