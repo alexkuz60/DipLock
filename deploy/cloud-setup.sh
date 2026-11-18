@@ -29,8 +29,14 @@ fi
 "$REPO_DIR/backend/venv/bin/pip" install -r "$REPO_DIR/backend/requirements.txt"
 
 echo "== FSAverage =="
+# MNE 1.13 убрал старый загрузчик mne.datasets.fsaverage — загрузка через
+# fetch_fsaverage, аргумент обязан быть Path (внутри вызывается .expanduser()).
+# Каталог — тот же, что settings.subjects_dir: SUBJECTS_DIR из окружения, иначе
+# ~/mne_data/MNE-fsaverage-data. Шаг идёт раньше backend/.env (README §2 и §4),
+# поэтому env запуска — единственный источник пути.
 "$REPO_DIR/backend/venv/bin/python" -c \
-  "import mne; mne.datasets.fsaverage.data_path(download=True)"
+  "from pathlib import Path; import os; import mne; \
+mne.datasets.fetch_fsaverage(subjects_dir=Path(os.environ.get('SUBJECTS_DIR') or Path.home() / 'mne_data' / 'MNE-fsaverage-data'))"
 
 echo "== UI =="
 if command -v npm >/dev/null 2>&1; then

@@ -84,8 +84,8 @@ python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
-# Авто-скачивание FSAverage (один раз, ~500 МБ)
-python -c "import mne; mne.datasets.fsaverage.data_path(download=True)"
+# Авто-скачивание FSAverage (один раз, ~500 МБ); каталог — settings.subjects_dir
+python -c "from pathlib import Path; import mne; mne.datasets.fetch_fsaverage(subjects_dir=Path.home() / 'mne_data' / 'MNE-fsaverage-data')"
 
 # Старт сервера
 uvicorn app.main:app --reload --port 8000
