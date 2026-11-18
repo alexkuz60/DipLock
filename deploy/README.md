@@ -278,10 +278,10 @@ WAL-базы `cp`-ом неконсистентна), плюс архив `data/
 DIPLOCK_BACKUP_KEEP=14 ./deploy/backup.sh
 ```
 
-Расписание — cron (точка решения владельца B2), пример на 03:00:
+Расписание — cron на ВМ, установлено 18.11.2026 (B2): ежедневно 03:30.
 
 ```cron
-0 3 * * * /srv/diplock/repo/deploy/backup.sh >> /srv/diplock/repo/data/logs/backup.log 2>&1
+30 3 * * * /srv/diplock/repo/deploy/backup.sh >> /srv/diplock/repo/data/logs/backup.log 2>&1
 ```
 
 Восстановление на чистой ВМ:
