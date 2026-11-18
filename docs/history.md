@@ -3,6 +3,54 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 18.11.2026 — Деплой: `fetch_fsaverage`, `/health` без auth, бэкапы, ротация логов, fail2ban
+
+Замечания приёмки публикации (`data/protocols/2026-11-18-deploy-followup.md`)
+закрыты в два контура: код — коммитами, ВМ — применением тех же файлов.
+
+* **`deploy/cloud-setup.sh`, `README.md`** — `mne.datasets.fsaverage.data_path`
+  удалён в MNE 1.13; загрузка через `fetch_fsaverage(subjects_dir=Path(...))`,
+  каталог из `SUBJECTS_DIR` либо `~/mne_data/MNE-fsaverage-data` (как
+  `settings.subjects_dir`). Шаг идёт раньше `backend/.env`, поэтому путь берётся
+  из окружения запуска.
+* **`deploy/nginx.conf`** — `location = /health` с `auth_basic off` и
+  `proxy_pass` (без него nginx отдал бы 404 из root); `/docs` и `/openapi.json`
+  → 404 без пароля. Тексты проверки синхронизированы в `deploy/README.md` §7 и
+  `docs/rules/deploy.md`.
+* **`deploy/backup.sh`** — снимок БД только `sqlite3 .backup` (копия живой
+  WAL-базы неконсистентна), архив `data/edf`, `data/results`, `backend/.env`,
+  права 600, ротация `DIPLOCK_BACKUP_KEEP` (7). `deploy/README.md` §10 —
+  восстановление на чистой ВМ.
+* **`deploy/logrotate-diplock`** — `copytruncate` (файл держит uvicorn),
+  `weekly`/`size 100M`/`rotate 4`.
+* **`deploy/check.sh`** — все проверки §7 одной командой, пароль только из
+  `DIPLOCK_CHECK_PASSWORD` (аргумент виден в `ps`). **`deploy/update.sh`** —
+  `git pull` → зависимости → UI → перезапуск → проверки, есть `--dry-run`.
+  §8 уточнён: схема БД поднимается в `lifespan` (`init_db` → alembic head),
+  ручной `alembic upgrade` не нужен.
+* **`deploy/fail2ban-diplock.conf`** — jail `diplock-nginx-http-auth` на
+  `nginx-http-auth`, `maxretry 5`, `findtime 10m`, `bantime 1h`. `limit_req`
+  отклонён: лимит в nginx идёт до `auth_basic` и задушил бы опрос задач UI.
+  `backend = auto` обязателен — Debian ставит `systemd`, и фильтр читал journal
+  вместо `/var/log/nginx/error.log`.
+* **`tests/test_deploy_scripts.py`** — стражи: `bash -n` всех `deploy/*.sh`,
+  отсутствие удалённого вызова, `auth_basic off` + `proxy_pass` у `/health`,
+  `copytruncate`, пароль `check.sh` из env.
+
+Проверка на ВМ (`:23003`): каталог `/srv/diplock/repo` не был git-репозиторием
+и deploy key к GitHub отсутствует — создан `.git`, `origin` прописан, история
+залита бандлом, `HEAD` = `ec49c13`, `git status` пуст. `nginx -t` успешно,
+reload; публично `/health` → 200, `/ui/` и `/api/v1/meta` → 401, `/docs` и
+`/openapi.json` → 404. `logrotate -d` разбирает конфиг и видит `server.log`.
+fail2ban active, джейл читает `error.log`: три попытки с неверным паролем дали
+`Total failed: 3`. `backup.sh` — БД 84 МБ `integrity=ok`, архив 117 МБ
+(`backend/.env`, `data/edf`, `data/results`), права 600. `check.sh` — все
+проверки совпали. `init-status` локально: `status=ready`, `code.stale=false`.
+Локально: `ruff` чисто, `mypy` 147 файлов OK, `pytest` 1236 passed.
+
+Открыто (решает владелец): пин MNE в `requirements.txt`, расписание cron для
+`backup.sh`, внешний мониторинг `/health`, состав логинов `htpasswd`.
+
 ## 17.11.2026 (6) — «ЕмоЛаб»: кэш без VAMP пересобирается, сегменты доходят до кадров
 
 После установки Sonic Annotator и плагинов UI «ЕмоЛаб» продолжал показывать
