@@ -37,6 +37,18 @@
   отсутствие удалённого вызова, `auth_basic off` + `proxy_pass` у `/health`,
   `copytruncate`, пароль `check.sh` из env.
 
+* **`backend/requirements.txt`** — `mne==1.13.2` вместо `mne>=1.7.0`: дрейф
+  API между минорными версиями уже ломал деплой (удалённый
+  `fsaverage.data_path`), диапазон оставлял патч-дрейф. Обновление — только
+  вместе с прогоном тестов.
+* **`deploy/watchdog.sh`** — сторож доступности: опрос `/health`, строка в
+  `data/logs/watchdog.log` при сбое, опциональный POST в
+  `DIPLOCK_ALERT_WEBHOOK` (текст телом, адрес не попадает в журнал и `ps`).
+  Расписание — cron на ВМ каждые 5 минут (`deploy/README.md` §11).
+* **`deploy/README.md` §5** — состав логинов: один `diplock` на всех (basic
+  auth не даёт журнала «кто смотрел запись»), процедура второго логина без
+  `-c` и с паролем в промпте, не аргументом.
+
 Проверка на ВМ (`:23003`): каталог `/srv/diplock/repo` не был git-репозиторием
 и deploy key к GitHub отсутствует — создан `.git`, `origin` прописан, история
 залита бандлом, `HEAD` = `ec49c13`, `git status` пуст. `nginx -t` успешно,
@@ -46,10 +58,15 @@ fail2ban active, джейл читает `error.log`: три попытки с �
 `Total failed: 3`. `backup.sh` — БД 84 МБ `integrity=ok`, архив 117 МБ
 (`backend/.env`, `data/edf`, `data/results`), права 600. `check.sh` — все
 проверки совпали. `init-status` локально: `status=ready`, `code.stale=false`.
+`watchdog.sh` на ВМ: здоровый сервис → `rc=0` без записи, закрытый порт →
+`rc=1` и строка `FAIL ... code=000`; cron active/enabled, запись
+`*/5 * * * *`. Deploy key `diplock-vm-deploy` добавлен в GitHub (read-only,
+id 170298751), `git ls-remote origin` с ВМ отвечает.
 Локально: `ruff` чисто, `mypy` 147 файлов OK, `pytest` 1236 passed.
 
-Открыто (решает владелец): пин MNE в `requirements.txt`, расписание cron для
-`backup.sh`, внешний мониторинг `/health`, состав логинов `htpasswd`.
+Открыто (решает владелец): расписание cron для `backup.sh`; push `main` в
+GitHub — репозиторий публичный, а `origin` отстаёт на пять коммитов, поэтому
+`git pull` на ВМ пока не приносит обновлений.
 
 ## 17.11.2026 (6) — «ЕмоЛаб»: кэш без VAMP пересобирается, сегменты доходят до кадров
 
