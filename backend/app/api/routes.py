@@ -30,6 +30,7 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
+    Request,
     Response,
     UploadFile,
 )
@@ -40,6 +41,7 @@ from app.api.assets import (
     CACHE_PUBLIC_DAY,
     CACHE_PUBLIC_WEEK,
     asset_response,
+    byte_range_response,
 )
 from app.api.params import (
     archive_batch_params,
@@ -2789,13 +2791,13 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
     responses={200: {"content": {"audio/wav": {}}}},
     summary="WAV мастера партитуры (48 кГц, PCM_24, стерео)",
 )
-async def audio_render_master(render_id: str) -> Response:
+async def audio_render_master(render_id: str, request: Request) -> Response:
     """Мастер-трек из дискового кэша рендера (плеер и «Скачать WAV»)."""
     state = await _audio_state(render_id)
     data = await _artifact_bytes(state, neuro_store.MASTER_NAME)
     # Без Content-Disposition: файл должен проигрываться в <audio src=...>,
     # а скачивание UI инициирует атрибутом download (same-origin).
-    return Response(content=data, media_type="audio/wav")
+    return byte_range_response(data, range_header=request.headers.get("range"))
 
 
 @router.get(
@@ -2804,7 +2806,7 @@ async def audio_render_master(render_id: str) -> Response:
     responses={200: {"content": {"audio/wav": {}}}},
     summary="WAV отдельного трека партитуры (инструмент одной полосы)",
 )
-async def audio_render_track(render_id: str, band: str) -> Response:
+async def audio_render_track(render_id: str, band: str, request: Request) -> Response:
     """Соль-прослушивание: каждый трек полосы отдельным файлом (концепция M6)."""
     state = await _audio_state(render_id)
     artifacts = state.artifacts
@@ -2824,7 +2826,7 @@ async def audio_render_track(render_id: str, band: str) -> Response:
             detail=f"Трек {band} не найден; доступны: {', '.join(artifacts.bands)}",
         )
     data = await _artifact_bytes(state, neuro_store.track_name(band))
-    return Response(content=data, media_type="audio/wav")
+    return byte_range_response(data, range_header=request.headers.get("range"))
 
 
 @router.get(
@@ -2833,7 +2835,7 @@ async def audio_render_track(render_id: str, band: str) -> Response:
     responses={200: {"content": {"audio/wav": {}}}},
     summary="WAV рядового трека «Монтажа» (ряд × полоса)",
 )
-async def audio_render_row_track(render_id: str, row: str, band: str) -> Response:
+async def audio_render_row_track(render_id: str, row: str, band: str, request: Request) -> Response:
     """Рядовой трек «Монтажа»: 4 ряда схемы × полосы (варианты рендера)."""
     state = await _audio_state(render_id)
     artifacts = state.artifacts
@@ -2856,7 +2858,7 @@ async def audio_render_row_track(render_id: str, row: str, band: str) -> Respons
             ),
         )
     data = await _artifact_bytes(state, neuro_store.row_track_name(row, band))
-    return Response(content=data, media_type="audio/wav")
+    return byte_range_response(data, range_header=request.headers.get("range"))
 
 
 @router.get(
@@ -2998,7 +3000,7 @@ async def audio_bake_status(render_id: str, bake_id: str) -> AudioBakeStatus:
     responses={200: {"content": {"audio/wav": {}}}},
     summary="WAV запечённой 3D-сцены (48 кГц, PCM_24, стерео)",
 )
-async def audio_bake_wav(render_id: str, bake_id: str) -> Response:
+async def audio_bake_wav(render_id: str, bake_id: str, request: Request) -> Response:
     """Скачивание результата; 409 — ещё печатается/упал/файл вычищен квотой."""
     try:
         state = await asyncio.to_thread(neuro_bake.state_of, bake_id)
@@ -3023,7 +3025,7 @@ async def audio_bake_wav(render_id: str, bake_id: str) -> Response:
             detail="Файл 3D-bake не найден в кэше — запеките заново",
         )
     # Без Content-Disposition: файл играет в <audio src>, скачивание — download.
-    return Response(content=data, media_type="audio/wav")
+    return byte_range_response(data, range_header=request.headers.get("range"))
 
 
 # --- IR для пространственной обработки (docs/rules/spatial-audio.md) -----------

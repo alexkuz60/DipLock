@@ -112,6 +112,25 @@ def test_full_render_cycle(client, tmp_path, edf_file):
     # Детерминизм: тот же render_id → те же байты.
     assert client.get(f"{_PREFIX}/render/{render_id}/master.wav").content == master.content
 
+    # Range: плеер качает мастер кусками (один ответ на десятки МБ не доходит
+    # через облачный ingress). 206 + Content-Range, байты — срез полного тела.
+    part = client.get(
+        f"{_PREFIX}/render/{render_id}/master.wav", headers={"Range": "bytes=0-1023"},
+    )
+    assert part.status_code == 206
+    assert part.headers["accept-ranges"] == "bytes"
+    assert part.headers["content-range"] == f"bytes 0-1023/{len(master.content)}"
+    assert part.content == master.content[:1024]
+    tail = client.get(
+        f"{_PREFIX}/render/{render_id}/master.wav", headers={"Range": "bytes=-16"},
+    )
+    assert tail.status_code == 206
+    assert tail.content == master.content[-16:]
+    assert client.get(
+        f"{_PREFIX}/render/{render_id}/master.wav",
+        headers={"Range": f"bytes={len(master.content)}-"},
+    ).status_code == 416
+
 
 def test_render_validates_gains_and_recording(client, tmp_path, edf_file):
     """400 — гейн/boost вне диапазона / неизвестная полоса; 404 — нет записи."""

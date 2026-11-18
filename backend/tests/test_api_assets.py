@@ -15,6 +15,7 @@ from app.api.assets import (
     CACHE_PUBLIC_DAY,
     CACHE_PUBLIC_WEEK,
     asset_response,
+    byte_range_response,
     etag_matches,
     normalize_etag,
 )
@@ -108,3 +109,40 @@ def test_304_condition_lives_only_in_assets_module():
     ]
 
     assert offenders == []
+
+
+@pytest.mark.parametrize("header,status,span", [
+    (None, 200, None),
+    ("bytes=0-9", 206, (0, 9)),
+    ("bytes=10-", 206, (10, 19)),
+    ("bytes=-5", 206, (15, 19)),
+    # Конец за файлом обрезается, а не отвергается (RFC 9110).
+    ("bytes=15-999", 206, (15, 19)),
+    # Мусор и многодиапазонный заголовок — файл целиком, как разрешает RFC.
+    ("items=0-9", 200, None),
+    ("bytes=abc", 200, None),
+    ("bytes=5-2", 200, None),
+    ("bytes=0-1,4-5", 200, None),
+])
+def test_byte_range_response_slices(header, status, span):
+    """``Range`` режется по границам; непонятный заголовок не ломает отдачу."""
+    response = byte_range_response(b"0123456789abcdefghij", range_header=header)
+
+    assert response.status_code == status
+    assert response.headers["accept-ranges"] == "bytes"
+    if span is None:
+        assert response.body == b"0123456789abcdefghij"
+        assert "content-range" not in response.headers
+    else:
+        start, end = span
+        assert response.body == b"0123456789abcdefghij"[start : end + 1]
+        assert response.headers["content-range"] == f"bytes {start}-{end}/20"
+
+
+def test_byte_range_response_416_reports_size():
+    """Диапазон за пределами файла — ``416`` и размер в ``Content-Range``."""
+    response = byte_range_response(b"0123456789", range_header="bytes=10-")
+
+    assert response.status_code == 416
+    assert not response.body
+    assert response.headers["content-range"] == "bytes */10"

@@ -28,6 +28,12 @@
   четыре слэша: `sqlite+aiosqlite:////srv/...`.
 - **Данные раньше старта.** Сначала `data/edf` и `data/results`, потом первый
   запуск: иначе `sweep_orphans`/`drop_orphan_rows` удалят строки как сирот.
+- **Большие WAV — только по `Range`.** Между nginx и браузером стоят Cloudflare
+  и Envoy; один ответ на десятки мегабайт (мастер рендера ≈ 30 МБ) до браузера
+  не доходит — `fetch` падает `NetworkError`, плеер пишет «Не удалось загрузить
+  аудио». Роуты `master.wav`/`track`/`bake` отдают `206` (`byte_range_response`),
+  клиент качает кусками по 4 МиБ (`fetchWavChunks`). Проверка после деплоя:
+  `curl -r 0-1023 -u diplock … /master.wav` → `206` и `Content-Range`.
 - **`data/cache` не переносится** — пересоздаётся, квота `CACHE_QUOTA_MB`.
 - **`ENABLE_DOCS=false`** в облаке: `/docs` и `/openapi.json` не отдаются.
 - **PID-файл и перезапуск.** `start.sh` пишет PID uvicorn; systemd `Type=forking`

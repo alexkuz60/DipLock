@@ -17,6 +17,7 @@
 по URL + ETag, сам ответ отдаётся готовыми байтами из дискового кэша.
 """
 from collections.abc import Mapping
+from typing import Literal
 
 from fastapi import Response
 
@@ -81,3 +82,67 @@ def asset_response(
     if etag_matches(if_none_match, version):
         return Response(status_code=304, headers=response_headers)
     return Response(content=data, media_type=media_type, headers=response_headers)
+
+
+def _parse_byte_range(header: str | None, size: int) -> tuple[int, int] | Literal["unsatisfiable"] | None:
+    """Разбирает ``Range`` в границы ``[start, end]`` включительно.
+
+    ``None`` — заголовка нет, он не наш или многодиапазонный (отдаём файл
+    целиком, как разрешает RFC 9110); ``"unsatisfiable"`` — диапазон за
+    пределами файла (ответ ``416``).
+    """
+    if not header:
+        return None
+    unit, _, spec = header.partition("=")
+    if unit.strip().lower() != "bytes" or not spec.strip():
+        return None
+    if "," in spec:  # многодиапазонный ответ не собираем: 200 целиком
+        return None
+    start_text, _, end_text = spec.strip().partition("-")
+    start_text, end_text = start_text.strip(), end_text.strip()
+    if not start_text:  # bytes=-N: последние N байт
+        if not end_text.isdigit() or int(end_text) == 0:
+            return None
+        return max(0, size - int(end_text)), size - 1
+    if not start_text.isdigit():
+        return None
+    start = int(start_text)
+    if start >= size:
+        return "unsatisfiable"
+    if not end_text:
+        return start, size - 1
+    if not end_text.isdigit() or int(end_text) < start:
+        return None
+    return start, min(int(end_text), size - 1)
+
+
+def byte_range_response(
+    data: bytes,
+    *,
+    media_type: str = "audio/wav",
+    range_header: str | None = None,
+) -> Response:
+    """Отдаёт байты с поддержкой ``Range``: ``206`` куском, ``416`` за пределами.
+
+    Большой WAV (мастер рендера — десятки мегабайт) одним ответом не доходит
+    до браузера через облачный ingress, поэтому клиент качает его кусками
+    (``neuromusicPlayer.loadBuffer``). ``Accept-Ranges: bytes`` стоит и в
+    ``200``: по нему клиент понимает, что куски поддержаны.
+    """
+    size = len(data)
+    headers = {"Accept-Ranges": "bytes"}
+    span = _parse_byte_range(range_header, size)
+    if span is None:
+        return Response(content=data, media_type=media_type, headers=headers)
+    if span == "unsatisfiable":
+        return Response(
+            status_code=416,
+            headers={**headers, "Content-Range": f"bytes */{size}"},
+        )
+    start, end = span
+    return Response(
+        status_code=206,
+        content=data[start : end + 1],
+        media_type=media_type,
+        headers={**headers, "Content-Range": f"bytes {start}-{end}/{size}"},
+    )

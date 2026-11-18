@@ -457,7 +457,10 @@ EDF при разных сторах), `viewer/TrackStack.test.tsx` (перех�
 вытеснением реестра). Этап 3 (17.09.2026) — тонкие роуты и единый ETag/304:
 `tests/test_api_assets.py` (нормализация и разбор `If-None-Match` — список тегов, слабый тег,
 `*`, отсутствие подстрочного совпадения `"v1"`↔`"v10"`; 200/304 с метаданными и без тела;
-составная версия одним тегом; **сторож**: `status_code=304` не встречается вне `api/assets.py`),
+составная версия одним тегом; **сторож**: `status_code=304` не встречается вне `api/assets.py`;
+`byte_range_response` — `200` без `Range`, `206` + `Content-Range` для `a-b`/`a-`/`-n`, обрезка
+конца за файлом, `416` + `bytes */len` за пределами, мусор и многодиапазонный заголовок → файл
+целиком),
 `tests/test_api_params.py` (пара границ полосы и односторонняя полоса, разбор каналов референса,
 длина эпохи из настроек, `single_freq` только с `freq_band='all'`, сборка `PreprocessParams` /
 `SpectrumParams` / `DipoleScanParams` / `SpectrogramParams` с проверкой окна, параметры сетки из
@@ -1118,7 +1121,7 @@ N×96, огибающая ≥0.99 с дробным выравниванием �
 `test_audio_export.py` (6: WAV roundtrip 48k/PCM_24, детерминизм байтов,
 sha256 входа, sidecar по схеме ТЗ, сетка ×128 из config), `test_api_audio.py` (5:
 полный цикл POST → статус → мастер/трек/sidecar, 400/404/409, один активный
-рендер). Vitest **+3** — `NeuromusicSection.test.tsx` (подсказка без записи,
+рендер; `Range` мастера — `206`/`Content-Range`/срез байтов, `bytes=-16` и `416`). Vitest **+3** — `NeuromusicSection.test.tsx` (подсказка без записи,
 кнопка → прогресс с шагом → плеер и 7 треков, выбор трека меняет `src`),
 `registry.test.ts`/`AppShell.test.tsx` обновлены под 13 разделов и хоткей 0.
 Контракт: `schemas/audio.py` + `export_openapi` (68 путей) + `gen:api`.
@@ -1212,6 +1215,9 @@ pytest — **811** (без `integration`; всего с ними — **829**), V
 `shared/state/neuromusicPlayer.ts` (транспорт/вид без позиции — она в rAF
 трекера), `WaveTracker.tsx` в рабочей области, Play/Pause и Stop — в хедере
 раздела, ссылки «Скачать…» — панель «Файлы» сайдбара. Backend не менялся.
+**Кусочная загрузка WAV (18.11.2026):** `shared/lib/neuromusicPlayer.test.ts`
+(4: `fetchWavChunks` — куски по `Range` и склейка, повтор упавшего куска,
+фоллбэк на `200` без `Range`, `HTTP 404` в тексте ошибки без повтора).
 Vitest **+19** — новый `waveformView.test.ts` (15) и переписанный
 `NeuromusicSection.test.tsx` (13 вместо 9: загрузка движка с URL, транспорт
 хедера, зум без сети/скорость→`setRate`/источник→`setSource` + откат при ошибке,

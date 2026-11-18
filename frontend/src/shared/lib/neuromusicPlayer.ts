@@ -15,7 +15,9 @@
  * Буферы грузятся ДО построения графа (`load`/`setSource`/`setSpatial`) —
  * reject без осиротевших AudioNode; закэшированные `ToneAudioBuffer`
  * переиспользуются и отдаются трекеру для волны (`bufferFor`; для полосы
- * «Монтажа» — сумма её рядовых стемов).
+ * «Монтажа» — сумма её рядовых стемов). WAV качается кусками по `Range`
+ * (`fetchWavChunks`): один ответ на десятки мегабайт не доходит через
+ * облачный ingress.
  *
  * Скорость — только `player.playbackRate` (×0.5 для слухового контроля быстрых
  * перемещений; в результат не попадает, питч при замедлении падает — допустимо,
@@ -59,6 +61,72 @@ export type NeuromusicPlayerOptions = {
   spreadPct: number
   /** Влажность реверберации, % (0 — сухой сигнал) */
   wetPct: number
+}
+
+/** Размер куска докачки WAV: один ответ на 30 МБ не доходит через ingress. */
+export const WAV_CHUNK_BYTES = 4 * 1024 * 1024
+/** Попыток на кусок: облачный прокси рвёт длинные ответы, повтор лечит. */
+const CHUNK_ATTEMPTS = 2
+
+/** Размер файла из `Content-Range: bytes a-b/total`. */
+function totalOf(response: Response): number {
+  const header = response.headers.get('content-range') ?? ''
+  const total = Number(header.split('/')[1])
+  if (!Number.isFinite(total) || total <= 0) {
+    throw new Error('сервер не сообщил размер файла (Content-Range)')
+  }
+  return total
+}
+
+/** Один кусок с повтором на сетевой сбой и 5xx; 4xx — сразу наверх. */
+async function fetchChunk(url: string, start: number, end: number): Promise<Response> {
+  let lastError: unknown = null
+  for (let attempt = 1; attempt <= CHUNK_ATTEMPTS; attempt++) {
+    try {
+      const response = await fetch(url, { headers: { Range: `bytes=${start}-${end}` } })
+      if (response.ok || response.status === 416) return response
+      lastError = new Error(`HTTP ${response.status}`)
+      if (response.status < 500) break
+    } catch (cause) {
+      lastError = cause
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError))
+}
+
+/**
+ * Качает WAV кусками по `Range` и склеивает в один `ArrayBuffer`.
+ *
+ * Мастер рендера — десятки мегабайт (48 кГц, PCM_24, стерео): один такой ответ
+ * через облачный ingress (Cloudflare + Envoy) обрывается, и `fetch` падает
+ * `NetworkError`. Куски по 4 МиБ проходят, а повтор лечит разовый обрыв.
+ * Сервер без поддержки `Range` отвечает `200` — тело берётся целиком.
+ */
+export async function fetchWavChunks(url: string): Promise<ArrayBuffer> {
+  const first = await fetchChunk(url, 0, WAV_CHUNK_BYTES - 1)
+  if (first.status === 200) return first.arrayBuffer()
+  if (first.status !== 206) throw new Error(`HTTP ${first.status}`)
+  const total = totalOf(first)
+  const parts: Uint8Array[] = [new Uint8Array(await first.arrayBuffer())]
+  let received = parts[0].byteLength
+  while (received < total) {
+    const end = Math.min(received + WAV_CHUNK_BYTES, total) - 1
+    const response = await fetchChunk(url, received, end)
+    if (response.status !== 206) {
+      throw new Error(`HTTP ${response.status} (кусок ${received}-${end})`)
+    }
+    const part = new Uint8Array(await response.arrayBuffer())
+    if (part.byteLength === 0) throw new Error(`пустой кусок ${received}-${end}`)
+    parts.push(part)
+    received += part.byteLength
+  }
+  const merged = new Uint8Array(received)
+  let offset = 0
+  for (const part of parts) {
+    merged.set(part, offset)
+    offset += part.byteLength
+  }
+  return merged.buffer
 }
 
 export class NeuromusicPlayer {
@@ -146,20 +214,20 @@ export class NeuromusicPlayer {
     return urls.length > 0 ? urls : null
   }
 
-  /** Загрузка одного WAV через Tone (fetch + decode) с кэшем; reject — HTTP/декод. */
-  private loadBuffer(url: string): Promise<Tone.ToneAudioBuffer> {
+  /** Загрузка одного WAV кусками по `Range` с кэшем; reject — HTTP/декод. */
+  private async loadBuffer(url: string): Promise<Tone.ToneAudioBuffer> {
     const cached = this.buffers.get(url)
-    if (cached) return Promise.resolve(cached)
-    return new Promise((resolve, reject) => {
-      const buffer = new Tone.ToneAudioBuffer(
-        url,
-        () => {
-          this.buffers.set(url, buffer)
-          resolve(buffer)
-        },
-        (error) => reject(new Error(`Не удалось загрузить аудио «${url}»: ${error.message}`)),
-      )
-    })
+    if (cached) return cached
+    try {
+      const arrayBuffer = await fetchWavChunks(url)
+      const audioBuffer = await Tone.getContext().decodeAudioData(arrayBuffer)
+      const buffer = new Tone.ToneAudioBuffer(audioBuffer)
+      this.buffers.set(url, buffer)
+      return buffer
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause)
+      throw new Error(`Не удалось загрузить аудио «${url}»: ${message}`)
+    }
   }
 
   /**

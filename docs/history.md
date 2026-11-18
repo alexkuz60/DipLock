@@ -3,6 +3,34 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 18.11.2026 — «Нейромузыка»: кусочная загрузка WAV (`Range`), `NetworkError` в облаке
+
+Приёмка облачной публикации: в разделе «Нейромузыка» плеер падал
+«Плеер: Не удалось загрузить аудио «/api/v1/audio/render/<id>/master.wav»:
+NetworkError when attempting to fetch resource». Логи ВМ: nginx отдаёт `200` и
+все 30009644 байта (трижды, записей `499` нет), uvicorn — `200 OK`, файл на
+диске целый; между nginx и браузером стоят Cloudflare и Envoy. Вывод: один
+ответ на десятки мегабайт не доходит до браузера, а `Tone.ToneAudioBuffer`
+(`fetch` → `arrayBuffer`) падает на сетевом уровне.
+
+* **`app/api/assets.py`** — `byte_range_response`: `200` без `Range`,
+  `206` + `Content-Range` для `a-b`/`a-`/`-n`, обрезка конца за файлом,
+  `416` + `bytes */len` за пределами, мусор и многодиапазонный заголовок →
+  файл целиком; `Accept-Ranges: bytes` и в `200`. `asset_response` (ETag/304)
+  не тронут.
+* **`app/api/routes.py`** — `Range` у четырёх WAV-роутов: `master.wav`,
+  `track/{band}.wav`, `track/{row}/{band}.wav`, `bake/{bake_id}.wav`.
+* **`shared/lib/neuromusicPlayer.ts`** — `fetchWavChunks`: куски по 4 МиБ,
+  повтор упавшего куска (2 попытки), фоллбэк на `200` без `Range`, склейка в
+  `ArrayBuffer` → `decodeAudioData` → `ToneAudioBuffer`; текст ошибки несёт
+  HTTP-статус и границы куска.
+* **Тесты** — `test_api_assets.py` (+11: параметризованные срезы, `416`,
+  размер в `Content-Range`), `test_api_audio.py` (+1: `206`/срез/`bytes=-16`/
+  `416` на мастере), `neuromusicPlayer.test.ts` (+4).
+* **Документация** — `docs/rules/neuromusic.md` (инвариант «WAV качается
+  кусками»), `api-jobs.md` (роуты 70/71/76/79), `deploy.md` (инвариант
+  «большие WAV — только по `Range`»), `tests.md`.
+
 ## 18.11.2026 — Деплой: `fetch_fsaverage`, `/health` без auth, бэкапы, ротация логов, fail2ban
 
 Замечания приёмки публикации (`data/protocols/2026-11-18-deploy-followup.md`)
