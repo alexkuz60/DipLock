@@ -245,10 +245,6 @@ export const api = {
   audioTrackUrl: (renderId: string, band: string) =>
     `${API_PREFIX}/audio/render/${renderId}/track/${band}.wav`,
 
-  /** URL рядового трека «Монтажа» (ряд × полоса, 4 ряда × 7 полос). */
-  audioRowTrackUrl: (renderId: string, row: string, band: string) =>
-    `${API_PREFIX}/audio/render/${renderId}/track/${row}/${band}.wav`,
-
   /**
    * 3D-bake (spatial-audio, п.3): параметры цепочки → детерминированный WAV
    * на бэкенде; 202 + bake_id, статус — `audioBakeStatus`, файл — по URL ниже.
@@ -298,6 +294,16 @@ export const api = {
    */
   audioEmo: (renderId: string, signal?: AbortSignal) =>
     request<AudioEmo>(`${API_PREFIX}/audio/render/${renderId}/emo`, { signal }),
+
+  /**
+   * Sidecar-«партитура» рендера: параметры и `extensions` (дипольная сцена
+   * «Монтажа» — `extensions.dipoles`, `shared/lib/dipoleScene.ts`).
+   */
+  audioSidecar: (renderId: string, signal?: AbortSignal) =>
+    request<{ extensions?: { dipoles?: unknown } }>(
+      `${API_PREFIX}/audio/render/${renderId}/sidecar.json`,
+      { signal },
+    ),
 
   /**
    * «ЕмоЛаб» (шаг 1): загрузка внешнего аудиотрека (wav/mp3) → анализ

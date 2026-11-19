@@ -16,8 +16,10 @@ import soundfile as sf
 from app.services.audio_render.core import FS_AUDIO
 
 # Версия контракта sidecar (ТЗ §6): поле schema_version, расширение по
-# semver-логике «новые ключи — minor, ломающие — major».
-SIDECAR_SCHEMA_VERSION = 1
+# semver-логике «новые ключи — minor, ломающие — major». 2 — ключ ``rows``
+# упразднён («Монтаж» — дипольный рендер, срез 19.11.2026), траектории
+# диполей рендера легли в ``extensions.dipoles``.
+SIDECAR_SCHEMA_VERSION = 2
 
 
 def wav_bytes(data: np.ndarray, fs: int = FS_AUDIO) -> bytes:
@@ -60,7 +62,7 @@ def build_sidecar(
     groups: dict[str, list[str]] | None = None,
     octave_shift: int = 7,
     variant: str = "express",
-    rows: list[dict[str, Any]] | None = None,
+    dipole: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Собирает sidecar по схеме ТЗ §6 (+ детали эксперимента для воспроизводимости).
 
@@ -68,9 +70,10 @@ def build_sidecar(
     ключи схемы не меняются, поэтому ``schema_version`` остаётся прежним —
     меняются только значения ``octave_shift``/``pitch_factor``.
 
-    ``variant`` — вариант рендера («Экспресс»/«Монтаж»); ``rows`` — веса
-    рядов монтажа для «Монтажа» (каждый ряд: id/label/веса по каналам) —
-    для «Экспресса» ``None``. Новые ключи — minor, ``schema_version`` = 1.
+    ``variant`` — вариант рендера («Экспресс»/«Монтаж»); ``dipole`` — блок
+    дипольной сцены «Монтажа» (``extensions.dipoles``: траектории диполей,
+    стереобазы полос, границы глубины — «Диполи»), для «Экспресса» ``None``.
+    Ключ ``rows`` (ряды 4×7) упразднён схемой 2 (срез 19.11.2026).
     """
     return {
         "schema_version": SIDECAR_SCHEMA_VERSION,
@@ -83,7 +86,6 @@ def build_sidecar(
         "bands": bands,
         "channel_order": list(channels),
         "busses": {name: list(members) for name, members in (groups or {}).items()},
-        "rows": list(rows) if rows is not None else None,
         "input_checksum_sha256": checksum,
         "gains_db": {name: float(value) for name, value in sorted(gains_db.items())},
         "boost_db": float(boost_db),
@@ -94,5 +96,5 @@ def build_sidecar(
         "notch_harmonics": int(notch_harmonics),
         "reference": "none",
         "warnings": list(warnings),
-        "extensions": {"dipoles": None, "intracranial_ir": None, "doppler": None},
+        "extensions": {"dipoles": dipole, "intracranial_ir": None, "doppler": None},
     }

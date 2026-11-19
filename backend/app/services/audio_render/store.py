@@ -34,7 +34,10 @@ logger = logging.getLogger(__name__)
 
 # Версия формата кэша и математики рендера: меняется код конвейера
 # (очистка, ядро, психоакустика) — поднимите, иначе старый кэш «повиснет».
-RENDER_FORMAT_VERSION = 1
+# 2 — «Монтаж» переписан на дипольный алгоритм (ряды 4×7 → 7 входов по
+# траекториям диполей, срез 19.11.2026): старые рядовые комплекты
+# пересчитываются честно (кэш-промах по формату).
+RENDER_FORMAT_VERSION = 2
 
 # Каталог кэша записей (ключ верхнего уровня — recording_id, как у других
 # производных кэшей: чистится с записью и обходом сирот).
@@ -57,11 +60,6 @@ def track_name(band: str) -> str:
     return f"track_{band}.wav"
 
 
-def row_track_name(row: str, band: str) -> str:
-    """Имя файла рядового трека («Монтаж»: ряд × полоса) внутри каталога."""
-    return f"track_{row}_{band}.wav"
-
-
 def render_sig(
     recording: Recording,
     cfg: Settings,
@@ -71,6 +69,7 @@ def render_sig(
     loudness_autobase: bool,
     octave_shift: int,
     variant: str = "express",
+    dipole_job_id: str | None = None,
 ) -> str:
     """Ключ рендера: sha256 от дешёвых входов (без запуска конвейера).
 
@@ -78,9 +77,11 @@ def render_sig(
     ``{}`` и ``{band: 0}`` ведут себя одинаково), **вариант рендера**
     («Экспресс»/«Монтаж» — у них разные конвейеры и файлы, ключ обязан
     различаться; добавление поля меняет все ключи — старые рендеры честно
-    пересчитываются, байты «Экспресса» при этом не меняются), частотные
-    полосы конфига, версии контракта (формат кэша, схема sidecar) и научных
-    библиотек (детерминизм байтов зависит от numpy/scipy/mne).
+    пересчитываются, байты «Экспресса» при этом не меняются), **источник
+    дипольных траекторий** («Монтаж»: другой прогон диполей — другая сцена и
+    другие байты), частотные полосы конфига, версии контракта (формат кэша,
+    схема sidecar) и научных библиотек (детерминизм байтов зависит от
+    numpy/scipy/mne).
     """
     payload: dict[str, Any] = {
         "v": RENDER_FORMAT_VERSION,
@@ -91,6 +92,7 @@ def render_sig(
         "loudness_autobase": bool(loudness_autobase),
         "octave_shift": int(octave_shift),
         "variant": variant,
+        "dipole_job_id": dipole_job_id,
         "freq_bands": {
             band: [float(bounds[0]), float(bounds[1])]
             for band, bounds in sorted(cfg.freq_bands.items())

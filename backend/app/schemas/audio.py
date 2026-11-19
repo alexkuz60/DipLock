@@ -78,8 +78,15 @@ class AudioRenderParams(BaseModel):
         default="express",
         description=(
             "Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, "
-            "дефолт) или «montage» (Монтаж — 4 ряда схемы × 7 полос = 28 "
-            "рядовых треков для 3D-обработки); иное значение — 400"
+            "дефолт) или «montage» (Монтаж — дипольный рендер: 7 входов "
+            "полос локализуются по данным анимации диполей); иное значение — 400"
+        ),
+    )
+    dipole_job_id: str | None = Field(
+        default=None,
+        description=(
+            "Источник дипольных траекторий (variant=montage): id задачи "
+            "dipole_batch; None — последний прогон пакета диполей записи"
         ),
     )
 
@@ -139,13 +146,10 @@ class AudioRenderStatus(BaseModel):
     variant: str = Field(
         default="express",
         description=(
-            "Вариант рендера: «montage» — файлы треков отдаются как "
-            "track/{row}/{band}.wav по списку rows; «express» — track/{band}.wav"
+            "Вариант рендера: «montage» — дипольный рендер (7 треков "
+            "track/{band}.wav с локализацией по диполям); «express» — "
+            "track/{band}.wav по шинам L/C/R"
         ),
-    )
-    rows: list[str] = Field(
-        default_factory=list,
-        description="Для «Монтажа»: id рядов, по которым есть треки (иначе пусто)",
     )
 
 

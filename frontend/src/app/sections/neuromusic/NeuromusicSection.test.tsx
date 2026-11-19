@@ -132,13 +132,14 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-/** Параметры мока рендера: вариант/ряды статуса, cached ответа POST. */
+/** Параметры мока рендера: вариант статуса, cached ответа POST, сцена sidecar. */
 type AudioFetchOptions = {
   variant?: 'express' | 'montage'
-  rows?: string[]
   cached?: boolean
   /** Кадры «Эмо»: null — 404 (фоллбэк графика), иначе payload (дефолт — свой). */
   emo?: AudioEmo | null
+  /** Дипольная сцена sidecar (`extensions.dipoles`) для «Монтажа». */
+  dipoleScene?: unknown
 }
 
 /** Мок рендера: POST 202, статус — running → succeeded, файлы — заглушки.
@@ -148,7 +149,6 @@ type AudioFetchOptions = {
  * отвечают по своему контракту (spatial-audio, п.3). */
 function audioFetchMock(tracks: string[] = TRACKS, opts: AudioFetchOptions = {}) {
   const variant = opts.variant ?? 'express'
-  const rows = opts.rows ?? []
   let statusCalls = 0
   let bakeStatusCalls = 0
   const postBodies: string[] = []
@@ -197,7 +197,6 @@ function audioFetchMock(tracks: string[] = TRACKS, opts: AudioFetchOptions = {})
           error: null,
           tracks: [],
           variant: 'express',
-          rows: [],
         })
       }
       return jsonResponse({
@@ -209,7 +208,6 @@ function audioFetchMock(tracks: string[] = TRACKS, opts: AudioFetchOptions = {})
         error: null,
         tracks,
         variant,
-        rows,
       })
     }
     if (url.includes('/emo')) {
@@ -217,7 +215,7 @@ function audioFetchMock(tracks: string[] = TRACKS, opts: AudioFetchOptions = {})
       if (opts.emo === null) return jsonResponse({ detail: 'нет кадров' }, 404)
       return jsonResponse(opts.emo ?? EMO_PAYLOAD)
     }
-    if (url.includes('/audio/render')) {
+    if (url.includes('/audio/render') && !url.includes('sidecar')) {
       return jsonResponse(
         { render_id: 'r-1', status: 'running', cached: opts.cached ?? false },
         202,
@@ -239,6 +237,9 @@ function audioFetchMock(tracks: string[] = TRACKS, opts: AudioFetchOptions = {})
       })
     }
     if (url.endsWith('.json')) {
+      if (url.includes('sidecar')) {
+        return jsonResponse({ schema_version: 2, extensions: { dipoles: opts.dipoleScene ?? null } })
+      }
       return jsonResponse({ schema_version: 1 })
     }
     return jsonResponse({ detail: `неизвестный путь в моке: ${url}` }, 404)
@@ -816,47 +817,63 @@ describe('Нейромузыка — раздел', () => {
     expect(JSON.parse(fetchMock.postBodies[0])).toMatchObject({ variant: 'montage' })
   })
 
-  it('«Монтаж»: файлы по рядам, движок получает рядовые треки, силуэт — модули', async () => {
+  it('«Монтаж»: дипольный рендер — 7 треков движка, файлы без рядов, восьмёрки на силуэте', async () => {
     useEdfRecording.setState({ recording: recordingFixture })
     const fetchMock = audioFetchMock(TRACKS, {
       variant: 'montage',
-      rows: ['frontal', 'temporal'],
+      dipoleScene: {
+        source_job_id: 'job-1',
+        epoch_length_ms: 500,
+        mni_half_x_mm: 70,
+        depth_z_mm: { top: 70, bottom: -70 },
+        bands: {
+          delta: {
+            stereo_base: 0.8,
+            frames: [
+              { t: 0, x: 0, y: 40, z: 30, theta: 0, strength: 0.5 },
+              { t: 1, x: 20, y: 10, z: -60, theta: 1.5708, strength: 1 },
+            ],
+          },
+          alpha: {
+            stereo_base: 0.45,
+            frames: [{ t: 0, x: -40, y: 0, z: 0, theta: 0.5, strength: 0.8 }],
+          },
+        },
+      },
     })
     vi.stubGlobal('fetch', fetchMock)
     await renderSucceeded(fetchMock)
     await waitFor(() => expect(screen.getByLabelText('Сигнал')).not.toBeDisabled())
 
-    // Файлы сгруппированы по рядам: 2 ряда × 7 полос = 14 рядовых ссылок.
-    const files = screen.getByTestId('montage-files')
-    expect(within(files).getByText('Лобной')).toBeInTheDocument()
-    expect(within(files).getByText('Височной')).toBeInTheDocument()
-    expect(screen.getAllByRole('link', { name: 'Скачать .wav' })).toHaveLength(14)
-    expect(within(files).getAllByRole('link', { name: 'Скачать .wav' })[0]).toHaveAttribute(
-      'href',
-      expect.stringContaining('/track/frontal/'),
-    )
+    // Файлы: 7 соль-треков, без группировки по рядам (ряды упразднены).
+    expect(screen.queryByTestId('montage-files')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Скачать .wav' })).toHaveLength(7)
 
-    // Движок: 14 стемов row-major, каждый несёт ряд модуля.
+    // Движок: 7 треков полос (пространство запечено в самих треках).
     const options = loadMock.load.mock.calls.at(-1)?.[0] as {
-      tracks: { key: string; url: string; row?: string }[]
+      variant: string
+      tracks: { key: string; url: string }[]
     }
-    expect(options.tracks).toHaveLength(14)
+    expect(options.variant).toBe('montage')
+    expect(options.tracks).toHaveLength(7)
     expect(options.tracks[0]).toMatchObject({
       key: 'delta',
-      row: 'frontal',
-      url: expect.stringContaining('/track/frontal/delta.wav'),
+      url: expect.stringContaining('/track/delta.wav'),
     })
-    expect(options.tracks[7]).toMatchObject({ key: 'delta', row: 'temporal' })
 
-    // Силуэт BrainRoom: точки по геометрии рядов, а текста под силуэтом
-    // больше нет (легенда убрана — экономия места, правка 10.10.2026).
+    // Силуэт головы: маркеры ∞ дипольной сцены (вид сверху).
     expect(screen.getByTestId('brainroom-view')).toHaveAttribute(
       'aria-label',
-      expect.stringContaining('модули рядов'),
+      expect.stringContaining('дипольная сцена'),
     )
-    expect(screen.queryByTestId('brainroom-legend')).not.toBeInTheDocument()
-    expect(screen.queryByText('Дуга ±60° перед слушателем')).not.toBeInTheDocument()
-    expect(screen.queryByText('вид сверху, стены 1.0 : 1.3')).not.toBeInTheDocument()
+    const delta = screen.getByTestId('dipole-marker-delta')
+    // Сила 0.5 и глубина z=30 → (70−30)/140 ≈ 0.286 — атрибуты слайда t=0.
+    expect(delta).toHaveAttribute('data-strength', '0.500')
+    expect(delta).toHaveAttribute('data-depth', '0.286')
+    expect(screen.getByTestId('dipole-marker-alpha')).toBeInTheDocument()
+    // Восьмёрка: путь ∞ внутри маркера, окружность — граница с размытием.
+    expect(delta.querySelector('path')).not.toBeNull()
+    expect(delta.querySelector('circle')).not.toBeNull()
   })
 
   it('cached из ответа POST — пилюля «Готово (из кэша)»', async () => {

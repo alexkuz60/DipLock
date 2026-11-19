@@ -5,6 +5,7 @@
 WAV → cached), валидация 400/404 и конфликт 409.
 """
 import io
+import json
 import shutil
 import threading
 import time
@@ -76,28 +77,29 @@ def _wait_bake(client, render_id: str, bake_id: str, timeout: float = 60.0) -> d
 
 
 def _memory_artifacts(
-    variant: str = "express", rows: tuple[str, ...] = (),
+    variant: str = "express", dipole: dict | None = None,
 ) -> neuro_render.RenderArtifacts:
     """Артефакты с WAV в памяти (без диска) — вход юнит-печати.
 
     Амплитуда стема падает с индексом полосы — иначе симметричные гейны
     панорамы делают каналы равными и тест панорамы ничего не проверяет.
+    Для «Монтажа» в память кладётся sidecar с блоком ``extensions.dipoles``
+    (средние позиции диполей — геометрия печати).
     """
     bands = ["delta", "alpha"]
     memory: dict[str, bytes] = {}
     for index, band in enumerate(bands):
         amp = 0.5 / (index + 1)
         stem = np.stack([np.full(480, amp), np.full(480, amp / 2)], axis=1)
-        blob = wav_bytes(stem)
-        memory[neuro_store.track_name(band)] = blob
-        for row in rows:
-            memory[neuro_store.row_track_name(row, band)] = blob
+        memory[neuro_store.track_name(band)] = wav_bytes(stem)
+    if variant == "montage":
+        sidecar = {"extensions": {"dipoles": dipole or {}}}
+        memory[neuro_store.SIDECAR_NAME] = json.dumps(sidecar).encode("utf-8")
     return neuro_render.RenderArtifacts(
         bands=bands,
         recording_id="rec-unit",
         sig="sig-unit",
         variant=variant,
-        rows=list(rows),
         memory=memory,
     )
 
@@ -105,53 +107,32 @@ def _memory_artifacts(
 # --- юнит: геометрия и формулы -------------------------------------------------
 
 
-def test_module_geometry_matches_owner_spec():
-    """4 модуля «Монтажа»: дуга/линия/тыл/зеркало, spread схлопывает к центру."""
-    count = 7
-    frontal = [neuro_bake.module_position("frontal", i, count, 1.0) for i in range(count)]
-    temporal = [neuro_bake.module_position("temporal", i, count, 1.0) for i in range(count)]
-    parietal = [neuro_bake.module_position("parietal", i, count, 1.0) for i in range(count)]
-    occipital = [neuro_bake.module_position("occipital", i, count, 1.0) for i in range(count)]
+def test_montage_azimuths_follow_dipole_mean_positions():
+    """«Монтаж»: азимут полосы — средняя позиция её диполя; spread схлопывает.
 
-    # Лобной: узкая дуга к лбу (Z < 0), радиус 1.5, |азимут| ≤ 30°, зеркальность.
-    for index, (x, z) in enumerate(frontal):
-        assert np.hypot(x, z) == pytest.approx(neuro_bake.SOURCE_DISTANCE_M)
-        assert z < 0
-        az = neuro_bake.azimuth_deg(x, z)
-        assert abs(az) <= neuro_bake.FRONTAL_HALF_DEG + 1e-9
-        mirror_az = neuro_bake.azimuth_deg(*frontal[count - 1 - index])
-        assert az == pytest.approx(-mirror_az)
-    # Височный: прямая линия на уровне ушей — Z=0, X −1.5…+1.5 (широко).
-    assert [x for x, _ in temporal] == pytest.approx(
-        np.linspace(-neuro_bake.TEMPORAL_HALF_M, neuro_bake.TEMPORAL_HALF_M, count)
-    )
-    assert all(z == 0.0 for _, z in temporal)
-    assert neuro_bake.azimuth_deg(temporal[-1][0], 0.0) == pytest.approx(90.0)
-    # Теменной: смещён в тыл (Z > 0), позади |азимут| ≥ 120° — широкая дуга.
-    for x, z in parietal:
-        assert z > 0
-        assert np.hypot(x, z) == pytest.approx(neuro_bake.SOURCE_DISTANCE_M)
-        assert abs(neuro_bake.azimuth_deg(x, z)) >= 120.0 - 1e-9
-    # Затылочный — зеркало лобной: поворот сцены на 180°: (x,z) → (−x,−z).
-    for (x, z), (ox, oz) in zip(frontal, occipital, strict=True):
-        assert ox == pytest.approx(-x)
-        assert oz == pytest.approx(-z)
+    Азимут ``atan2(x, y)`` MNI: 0° — фронт (+y), +90° — вправо (+x).
+    """
+    dipole = {
+        "bands": {
+            # Фронт (x=0, y>0) → 0°; правое ухо (x>0, y=0) → +90°;
+            # тыл (y<0) → ±180°.
+            "delta": {"frames": [{"x": 0.0, "y": 70.0}, {"x": 0.0, "y": 70.0}]},
+            "alpha": {"frames": [{"x": 70.0, "y": 0.0}, {"x": 70.0, "y": 0.0}]},
+        }
+    }
+    artifacts = _memory_artifacts(variant="montage", dipole=dipole)
+    sources = neuro_bake._source_azimuths(artifacts, spread=1.0)
+    assert sources == [
+        (neuro_store.track_name("delta"), pytest.approx(0.0)),
+        (neuro_store.track_name("alpha"), pytest.approx(90.0)),
+    ]
+    # spread 0 схлопывает азимуты к фронту (0°).
+    collapsed = neuro_bake._source_azimuths(artifacts, spread=0.0)
+    assert [azimuth for _, azimuth in collapsed] == pytest.approx([0.0, 0.0])
 
-    # spread=0 схлопывает каждый модуль к его центру.
-    assert neuro_bake.module_position("frontal", 3, count, 0.0) == pytest.approx((0.0, -1.5))
-    assert neuro_bake.module_position("temporal", 3, count, 0.0) == pytest.approx((0.0, 0.0))
-    assert neuro_bake.module_position("parietal", 3, count, 0.0) == pytest.approx((0.0, 1.5))
-
-    # Все точки полного разброса живут в комнате-силуэте (1.0 : 1.3).
-    semi_a = neuro_bake.SOURCE_DISTANCE_M
-    semi_b = semi_a * 1.3
-    for row in ("frontal", "temporal", "parietal", "occipital"):
-        for i in range(count):
-            x, z = neuro_bake.module_position(row, i, count, 1.0)
-            assert x**2 / semi_a**2 + z**2 / semi_b**2 <= 1.0 + 1e-9
-
-    with pytest.raises(ValueError):
-        neuro_bake.module_position("nope", 0, count, 1.0)
+    # Нет дипольной сцены (старый формат) — честная ошибка статуса.
+    with pytest.raises(ValueError, match="дипольной сцены"):
+        neuro_bake._source_azimuths(_memory_artifacts(variant="montage"), spread=1.0)
 
 
 def test_arc_position_and_pan_gains():
@@ -219,20 +200,26 @@ def test_bake_wav_is_deterministic_and_bounded():
 
 
 def test_bake_wav_montage_widens_and_counts_sources():
-    """«Монтаж»: печатаются все рядовые стемы; spread 0 + width 0 → моно."""
-    artifacts = _memory_artifacts(variant="montage", rows=("frontal", "temporal"))
+    """«Монтаж»: печатаются треки полос по дипольным позициям; spread 0 + width 0 → моно."""
+    dipole = {
+        "bands": {
+            "delta": {"frames": [{"x": -40.0, "y": 30.0}]},
+            "alpha": {"frames": [{"x": 40.0, "y": -30.0}]},
+        }
+    }
+    artifacts = _memory_artifacts(variant="montage", dipole=dipole)
     stages: list[str] = []
 
     def _progress(pct: float, stage: str) -> None:
         assert 0.0 <= pct <= 1.0
         stages.append(stage)
 
-    # spread 0 сворачивает модули к центру (азимут 0) — панорама не раскидывает
+    # spread 0 схлопывает азимуты диполей к фронту (0°) — панорама не раскидывает
     # моно-сигнал по каналам, и M/S-формула width 0 видна в равенстве L/R.
     params = neuro_bake.BakeParams(width_pct=0.0, spread_pct=0.0, wet_pct=0.0)
     wav = neuro_bake.bake_wav(artifacts, params, _IR_BLOB, on_progress=_progress)
-    # 2 ряда × 2 полосы = 4 стема + служебные шаги.
-    assert sum("стем" in stage for stage in stages) == 4
+    # 2 полосы = 2 стема + служебные шаги.
+    assert sum("стем" in stage for stage in stages) == 2
     with sf.SoundFile(io.BytesIO(wav)) as handle:
         data = handle.read(dtype="float64")
     assert data.shape == (480, 2)

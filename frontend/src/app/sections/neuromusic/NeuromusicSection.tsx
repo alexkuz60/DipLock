@@ -28,6 +28,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Music2 } from 'lucide-react'
 import { api } from '@/shared/api/client'
 import type { AudioRenderVariant } from '@/shared/api/types'
+import { parseDipoleScene } from '@/shared/lib/dipoleScene'
 import { useEdfRecording } from '@/shared/state/edfRecording'
 import { useNeuromusic } from '@/shared/state/neuromusic'
 import { useNeuromusicPlayer } from '@/shared/state/neuromusicPlayer'
@@ -35,7 +36,6 @@ import { Placeholder } from '@/shared/ui/Placeholder'
 import { BrainRoomView } from './BrainRoomView'
 import { EmoCounters } from './EmoCounters'
 import { RadialChart } from './RadialChart'
-import { MONTAGE_ROW_IDS } from './rowMeta'
 import { WaveTracker } from './WaveTracker'
 
 export function NeuromusicSection() {
@@ -69,13 +69,20 @@ export function NeuromusicSection() {
   // секции нет, но логика осталась прежней (панель «Пространства»).
   const sceneVariant: AudioRenderVariant =
     (status?.variant ?? variant) === 'montage' ? 'montage' : 'express'
-  const sceneRows: readonly string[] = status
-    ? status.variant === 'montage'
-      ? (status.rows ?? [])
-      : []
-    : variant === 'montage'
-      ? MONTAGE_ROW_IDS
-      : []
+  // Дипольная сцена «Монтажа» (sidecar.extensions.dipoles, срез 19.11.2026):
+  // маркеры ∞ на силуэте головы во время плей — один GET на готовый рендер
+  // (ключ render_id, данные неизменяемы, staleTime ∞, ошибки не повторяем).
+  const sidecarQuery = useQuery({
+    queryKey: ['audio-sidecar', renderId],
+    queryFn: ({ signal }) => api.audioSidecar(renderId ?? '', signal),
+    enabled: Boolean(succeeded && renderId),
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
+  const dipoleScene = useMemo(
+    () => parseDipoleScene(sidecarQuery.data?.extensions?.dipoles ?? null),
+    [sidecarQuery.data],
+  )
 
   // Новый запуск кнопкой в хедере (busy=true): плеер снова с мастера —
   // как и раньше при нажатии «Создать аудио» внутри секции.
@@ -176,14 +183,14 @@ export function NeuromusicSection() {
             className="grid min-h-0 flex-1 grid-cols-1 grid-rows-2 gap-3 md:grid-cols-2 md:grid-rows-1"
             data-testid="visualization-columns"
           >
-            {/* Колонка 1: голова вид сверху — та же геометрия сцены, что
-                играет/будет посчитано (вариант/разброс — из стора). */}
+            {/* Колонка 1: голова вид сверху — маркеры дипольной сцены
+                «Монтажа» (∞ по траекториям диполей) либо дуга «Экспресса». */}
             <div className="h-full min-h-0 overflow-hidden">
               <BrainRoomView
                 variant={sceneVariant}
-                rows={sceneRows}
                 bands={tracks.length}
                 spreadPct={spatialSpreadPct}
+                scene={dipoleScene}
               />
             </div>
             {/* Колонка 2: радиальный график — 7 сегментов от π/2 + π/7

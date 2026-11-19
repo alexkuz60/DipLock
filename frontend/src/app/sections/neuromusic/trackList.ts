@@ -1,6 +1,7 @@
 /**
- * Список треков для движка плеера «Нейромузыки»: «Экспресс» — трек на полосу,
- * «Монтаж» — ряд × полоса (28 стемов) с указанием ряда модуля.
+ * Список треков для движка плеера «Нейромузыки»: трек на полосу (оба
+ * варианта рендера — «Экспресс» и дипольный «Монтаж» отдают
+ * `track/{band}.wav`; пространство «Монтажа» запечено в самих треках).
  *
  * Чистая функция поверх URL-адресов API — рендерится трекером
  * (`WaveTracker`) при построении движка и покрыта тестами.
@@ -12,17 +13,6 @@ export function buildTrackList(options: {
   renderId: string
   /** Ключи полос в порядке партитуры (`status.tracks`) */
   bands: readonly string[]
-  /** Вариант рендера из статуса (`status.variant`) */
-  variant: string
-  /** id рядов «Монтажа» (`status.rows`) */
-  rows: readonly string[]
 }): NeuromusicTrack[] {
-  const { renderId, bands, variant, rows } = options
-  if (variant === 'montage' && rows.length > 0) {
-    // row-major: ряд → его полосы (слоты в модуле считает сам движок).
-    return rows.flatMap((row) =>
-      bands.map((key) => ({ key, url: api.audioRowTrackUrl(renderId, row, key), row })),
-    )
-  }
-  return bands.map((key) => ({ key, url: api.audioTrackUrl(renderId, key) }))
+  return options.bands.map((key) => ({ key, url: api.audioTrackUrl(options.renderId, key) }))
 }

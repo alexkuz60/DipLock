@@ -13,6 +13,7 @@ import pytest
 import soundfile as sf
 
 from app.core.config import settings
+from app.services import job_store
 from app.services.audio_render import render as neuro_render
 from app.services.prepared_signal import clear_prepared_cache
 from app.services.recordings import recording_registry
@@ -51,6 +52,43 @@ def _wait_render(client, render_id: str, timeout: float = 30.0) -> dict:
             return body
         time.sleep(0.05)
     raise AssertionError(f"Рендер не завершился за {timeout} с: {body}")
+
+
+def _seed_dipole_job(recording_id: str, job_id: str = "job-dipole", n_epochs: int = 4) -> str:
+    """Пишет job-файл пакета диполей — данные анимации для «Монтажа».
+
+    Точки «эпоха × полоса» для всех полос ``freq_bands``: позиция MNI едет
+    по кругу и уходит вниз (глубина «колодца»), момент вращается, амплитуда
+    растёт — все четыре канала визуализации/звука заняты.
+    """
+    bands = []
+    for band_index, band in enumerate(settings.freq_bands):
+        points = []
+        for epoch in range(n_epochs):
+            angle = 0.3 * epoch + 0.5 * band_index
+            points.append({
+                "epoch_index": epoch,
+                "time_ms": 150.0,
+                "head_coords": [10.0 * epoch, 0.0, 20.0],
+                "mni_coords": [
+                    30.0 * float(np.sin(angle)),
+                    40.0 * float(np.cos(angle)),
+                    40.0 - 25.0 * epoch,
+                ],
+                "moment": [float(np.cos(angle)), float(np.sin(angle)), 0.0],
+                "amplitude_nam": 30.0 + 15.0 * epoch,
+                "gof": 0.75,
+            })
+        bands.append({"band_key": band, "label": band, "points": points})
+    record = {
+        "job_id": job_id,
+        "kind": "dipole_batch",
+        "status": "succeeded",
+        "meta": {"recording_id": recording_id},
+        "result": {"recording_id": recording_id, "epoch_length_ms": 500.0, "bands": bands},
+    }
+    assert job_store.save_record(settings, record) is not None
+    return job_id
 
 
 def test_full_render_cycle(client, tmp_path, edf_file):
@@ -97,7 +135,7 @@ def test_full_render_cycle(client, tmp_path, edf_file):
     sidecar = client.get(f"{_PREFIX}/render/{render_id}/sidecar.json")
     assert sidecar.status_code == 200
     body = sidecar.json()
-    assert body["schema_version"] == 1
+    assert body["schema_version"] == 2
     assert body["fs_audio"] == 48000 and body["pitch_factor"] == 128
     assert len(body["bands"]) == 7
     assert body["channel_order"] == list(recording.meta.get("channels") or body["channel_order"])
@@ -333,14 +371,14 @@ def test_unknown_render_id_is_404(client):
     assert client.get(f"{_PREFIX}/render/deadbeef/sidecar.json").status_code == 404
 
 
-def test_montage_variant_full_cycle(client, tmp_path, edf_file):
-    """«Монтаж»: 202 → статус с rows → мастер → рядовые треки → sidecar.
+def test_montage_variant_full_cycle(client, tmp_path, edf_file, isolated_io):
+    """«Монтаж» (дипольный рендер): 202 → статус → мастер → 7 треков → sidecar-сцена.
 
-    Тестовый EDF (5 каналов: Fp1/Fp2/F3/F4/C3) даёт два непустых ряда
-    (лобной и височной) — пустые ряды пропускаются с предупреждением в
-    sidecar, варианты рендера не делят кэш (разные render_id).
+    Локализация — данные анимации диполей (`_seed_dipole_job`): фазы L/R от
+    момента, стереобаза полосы, панорама по x, «колодец» от глубины z.
     """
     recording = _register(tmp_path, edf_file)
+    _seed_dipole_job(recording.recording_id)
     started = client.post(
         f"{_PREFIX}/render",
         json={
@@ -356,7 +394,6 @@ def test_montage_variant_full_cycle(client, tmp_path, edf_file):
     assert done["status"] == "succeeded", done.get("error")
 
     # Вариант — часть ключа: тот же POST без variant (Экспресс) — другой id.
-    # Рендеры идут по одному, поэтому Экспресс стартуем после завершения.
     express = client.post(
         f"{_PREFIX}/render",
         json={"recording_id": recording.recording_id, "boost_db": 0.0, "loudness_phon": None},
@@ -365,53 +402,101 @@ def test_montage_variant_full_cycle(client, tmp_path, edf_file):
     assert express.json()["render_id"] != render_id
 
     assert done["variant"] == "montage"
-    assert done["rows"] == ["frontal", "temporal"]
-    # 2 ряда × 7 полос = 14 рядовых треков; tracks — полосы (как в Экспрессе).
+    # 7 входов полос: файлы треков — те же, что у «Экспресса» (track/{band}.wav).
     assert set(done["tracks"]) == set(settings.freq_bands)
-    assert "14 треков + мастер" in done["message"]
+    assert "7 треков + мастер" in done["message"]
 
-    # Мастер отдаётся тем же роутом, что и у Экспресса.
     master = client.get(f"{_PREFIX}/render/{render_id}/master.wav")
     assert master.status_code == 200
     with sf.SoundFile(io.BytesIO(master.content)) as handle:
         assert handle.samplerate == 48000 and handle.channels == 2
 
-    # Рядовой трек: track/{row}/{band}.wav.
-    row_track = client.get(f"{_PREFIX}/render/{render_id}/track/frontal/alpha.wav")
-    assert row_track.status_code == 200
-    with sf.SoundFile(io.BytesIO(row_track.content)) as handle:
+    # Трек полосы: нормализованный стерео-вход с дипольной локализацией.
+    band_track = client.get(f"{_PREFIX}/render/{render_id}/track/alpha.wav")
+    assert band_track.status_code == 200
+    with sf.SoundFile(io.BytesIO(band_track.content)) as handle:
         assert handle.channels == 2
         data = handle.read(dtype="float64")
-    # Группа рядов одной полосы на целевом −18 dBFS (normalize_group).
     assert float(np.sqrt(np.mean(data**2))) > 0.0
-    # Неверные пара ряд/полоса и старый путь — 404 с подсказкой.
+    # Рядовой путь старого «Монтажа» удалён → 404.
     assert client.get(
-        f"{_PREFIX}/render/{render_id}/track/nope/alpha.wav",
-    ).status_code == 404
-    assert client.get(
-        f"{_PREFIX}/render/{render_id}/track/alpha.wav",
+        f"{_PREFIX}/render/{render_id}/track/frontal/alpha.wav",
     ).status_code == 404
 
-    # Sidecar: вариант, ряды с весами, предупреждения о пустых рядах.
+    # Sidecar: variant, дипольная сцена в extensions.dipoles (кадры + стереобазы).
     sidecar = client.get(f"{_PREFIX}/render/{render_id}/sidecar.json").json()
     assert sidecar["variant"] == "montage"
-    assert sidecar["rows"] is not None
-    assert [row["id"] for row in sidecar["rows"]] == ["frontal", "temporal"]
-    frontal = next(row for row in sidecar["rows"] if row["id"] == "frontal")
-    # Частичный лобной ряд EDF (Fp1/Fp2/F3/F4, без F7/Fz/F8): сумма L/R = 2.0,
-    # нормировка на среднее = 2.0 — формула владельца в нормированных весах.
-    assert frontal["members"]["Fp1"][0] == pytest.approx(1.0 / 2.0)
-    assert frontal["members"]["F3"][0] == pytest.approx(0.75 / 2.0)
-    assert frontal["members"]["F4"][1] == pytest.approx(0.75 / 2.0)
-    assert any("пропущен" in item for item in sidecar["warnings"])
+    assert "rows" not in sidecar
+    dipole = sidecar["extensions"]["dipoles"]
+    assert dipole["source_job_id"] == "job-dipole"
+    assert dipole["epoch_length_ms"] == 500.0
+    assert set(dipole["bands"]) == set(settings.freq_bands)
+    # Стереобаза обратно зависима от полосы: 0.8 у дельты … 0.1 у высокой гаммы.
+    assert dipole["bands"]["delta"]["stereo_base"] == pytest.approx(0.8)
+    assert dipole["bands"]["high_gamma"]["stereo_base"] == pytest.approx(0.1)
+    frames = dipole["bands"]["delta"]["frames"]
+    assert len(frames) == 4  # 4 эпохи фикстуры
+    assert frames[1]["t"] == pytest.approx(0.5)  # сетка эпох 500 мс
+    assert {"x", "y", "z", "theta", "strength"} <= set(frames[0])
+    assert frames[0]["strength"] == pytest.approx(30.0 / 75.0)  # амплитуда/пик полосы
 
     # Старый путь трека на «Экспресс»-рендере работает (регрессия не сломана).
     express_id = express.json()["render_id"]
     _wait_render(client, express_id)
     assert client.get(f"{_PREFIX}/render/{express_id}/track/alpha.wav").status_code == 200
-    assert client.get(
-        f"{_PREFIX}/render/{express_id}/track/frontal/alpha.wav",
-    ).status_code == 404
+
+
+def test_montage_requires_dipole_data(client, tmp_path, edf_file, isolated_io):
+    """«Монтаж» без данных анимации диполей → 400 с подсказкой (конвейер не стартует)."""
+    recording = _register(tmp_path, edf_file)
+    bad = client.post(
+        f"{_PREFIX}/render",
+        json={"recording_id": recording.recording_id, "variant": "montage"},
+    )
+    assert bad.status_code == 400
+    assert "дипол" in bad.json()["detail"].lower()
+
+
+def test_montage_dipole_job_id_selects_source(client, tmp_path, edf_file, isolated_io):
+    """dipole_job_id: явный прогон — свой ключ рендера; неизвестный — 400."""
+    recording = _register(tmp_path, edf_file)
+    _seed_dipole_job(recording.recording_id, job_id="job-dipole-a")
+    _seed_dipole_job(recording.recording_id, job_id="job-dipole-b", n_epochs=3)
+
+    first = client.post(
+        f"{_PREFIX}/render",
+        json={
+            "recording_id": recording.recording_id,
+            "variant": "montage",
+            "boost_db": 0.0,
+            "loudness_phon": None,
+            "dipole_job_id": "job-dipole-a",
+        },
+    )
+    assert first.status_code == 202, first.text
+    assert _wait_render(client, first.json()["render_id"])["status"] == "succeeded"
+
+    # Тот же запрос с другим прогоном диполей — другой render_id (сцена другая).
+    second = client.post(
+        f"{_PREFIX}/render",
+        json={
+            "recording_id": recording.recording_id,
+            "variant": "montage",
+            "boost_db": 0.0,
+            "loudness_phon": None,
+            "dipole_job_id": "job-dipole-b",
+        },
+    )
+    assert second.status_code == 202
+    assert second.json()["render_id"] != first.json()["render_id"]
+    assert _wait_render(client, second.json()["render_id"])["status"] == "succeeded"
+
+    unknown = client.post(
+        f"{_PREFIX}/render",
+        json={"recording_id": recording.recording_id, "variant": "montage", "dipole_job_id": "nope"},
+    )
+    assert unknown.status_code == 400
+    assert "nope" in unknown.json()["detail"]
 
 
 def test_montage_variant_validates_value(client, tmp_path, edf_file):
@@ -426,9 +511,10 @@ def test_montage_variant_validates_value(client, tmp_path, edf_file):
     assert "montage" in bad.json()["detail"]
 
 
-def test_montage_repeated_hits_cache(client, tmp_path, edf_file, monkeypatch):
+def test_montage_repeated_hits_cache(client, tmp_path, edf_file, monkeypatch, isolated_io):
     """Повторный POST «Монтажа» тех же параметров → cached=true, без конвейера."""
     recording = _register(tmp_path, edf_file)
+    _seed_dipole_job(recording.recording_id)
     body = {"recording_id": recording.recording_id, "variant": "montage"}
     first = client.post(f"{_PREFIX}/render", json=body)
     assert first.status_code == 202
@@ -449,7 +535,8 @@ def test_second_render_is_rejected_while_running(client, tmp_path, edf_file, mon
     recording = _register(tmp_path, edf_file)
     release = threading.Event()
 
-    def _slow(state, rec, cfg, gains, boost=0.0, phon=None, autobase=True, octave=7, variant="express"):
+    def _slow(state, rec, cfg, gains, boost=0.0, phon=None, autobase=True, octave=7,
+              variant="express", dipole_job_id=None):
         release.wait(timeout=10)
         state.status = "succeeded"
         state.stage = "Готово"

@@ -1,21 +1,34 @@
 /**
- * Силуэт BrainRoom для секции «Визуализация» «Нейромузыки» (спецификация
- * владельца 07.10.2026; перенесён сюда из секции «Пространство» правого
- * сайдбара): вид сверху, стены комнаты в пропорциях 1.0 : 1.3,
- * контур мозга с продольной щелью и слушатель в центре; точки — позиции
- * источников текущей сцены (дуга «Экспресса» или 4 модуля «Монтажа»).
+ * Силуэт BrainRoom для секции «Визуализация» «Нейромузыки» (вид сверху):
+ * стены комнаты 1.0 : 1.3, контур мозга с продольной щелью, слушатель в центре.
  *
- * Без МРТ-срезов — чистая векторная схема: координаты идут из
- * `spatialLayout.brainroomProject` («деформация сферы» — нормировка на
- * пропорции комнаты), поэтому силуэт и звук стоят в одной геометрии.
+ * **«Монтаж» (дипольный рендер, срез 19.11.2026):** вместо точек сцены —
+ * маркеры полос из `extensions.dipoles` sidecar (`dipoleScene.ts`):
+ * вращающаяся вокруг собственного центра **восьмёрка (∞)** по углу момента
+ * диполя; цвет — полосный (`bandColors`), размер — стереобаза полосы,
+ * прозрачность заливки — сила диполя, размытость границы окружности —
+ * глубина (уход z вниз по коронарному срезу). Анимация по позиции плеера —
+ * `rAF` пишет атрибуты **через refs, без ре-рендеров React**
+ * (`docs/rules/frontend-perf.md`, паттерн `RadialChart`); до плей и на паузе
+ * показывается слайд текущей позиции. Без сцены (старый рендер/ошибка
+ * sidecar) — прежние статичные точки дуги.
  *
- * Экономия места (правка 10.10.2026): текст-легенда под силуэтом убрана,
- * SVG — `h-full w-full` с `preserveAspectRatio="xMidYMid meet"` — голова
- * вписывается по высоте ячейки и держит **ту же высоту, что соседний график
- * «Эмо»** (`RadialChart` — тот же `h-full w-full` в ячейке той же строки).
+ * Экономия места (правка 10.10.2026): текст-легенда убрана, SVG —
+ * `h-full w-full` с `preserveAspectRatio="xMidYMid meet"`.
  */
+import { useEffect, useMemo, useRef } from 'react'
+import { bandColor } from '@/shared/lib/bandColors'
+import {
+  dipoleSceneAt,
+  infinityPath,
+  markerBlurPx,
+  markerRadius,
+  type DipoleScene,
+  type DipoleSceneSample,
+} from '@/shared/lib/dipoleScene'
 import { brainroomProject, scenePoints } from '@/shared/lib/spatialLayout'
-import { ROW_COLORS } from './rowMeta'
+import { getActivePlayer } from '@/shared/state/neuromusicPlayer'
+import { BAND_HZ, BAND_ORDER } from './bandLabels'
 
 /** Размер viewBox: ширина 1.0, длина 1.3 — ровно пропорции стен. */
 const VIEW_W = 200
@@ -27,26 +40,94 @@ const WALL_RY = WALL_RX * 1.3
 /** Контур мозга чуть меньше стен. */
 const BRAIN_RX = WALL_RX - 10
 const BRAIN_RY = BRAIN_RX * 1.3
+/** Максимальная размытость границы окружности (полная глубина «колодца»). */
+const MAX_BLUR_PX = 6
 
 export type BrainRoomViewProps = {
-  /** Вариант рендера: у «Монтажа» точки стоят по модулям рядов */
+  /** Вариант рендера: «Монтаж» — маркеры дипольной сцены, «Экспресс» — дуга */
   variant: 'express' | 'montage'
-  /** id рядов «Монтажа» (`status.rows`) — порядок показа как на сервере */
-  rows: readonly string[]
-  /** Число полос (источников в модуле/на дуге) */
+  /** Число полос (точки дуги «Экспресса») */
   bands: number
-  /** Разброс из «Пространства», % — силуэт живёт от ползунка */
+  /** Разброс из «Пространства», % — дуга «Экспресса» живёт от ползунка */
   spreadPct: number
+  /** Дипольная сцена «Монтажа» (sidecar.extensions.dipoles); без неё — дуга */
+  scene?: DipoleScene | null
 }
 
-export function BrainRoomView({ variant, rows, bands, spreadPct }: BrainRoomViewProps) {
+/** Маркер полосы: центр ∞ (px viewBox) из позиции MNI + поворот в градусах. */
+function markerCenter(
+  sample: DipoleSceneSample,
+  scene: DipoleScene,
+): { cx: number; cy: number; rotationDeg: number } {
+  const center = { x: VIEW_W / 2, y: VIEW_H / 2 }
+  const u = Math.min(1, Math.max(-1, sample.x / scene.mni_half_x_mm))
+  const v = Math.min(1, Math.max(-1, sample.y / (scene.mni_half_x_mm * 1.3)))
+  return {
+    cx: center.x + u * WALL_RX,
+    cy: center.y - v * WALL_RY,
+    rotationDeg: (sample.theta * 180) / Math.PI,
+  }
+}
+
+export function BrainRoomView({ variant, bands, spreadPct, scene }: BrainRoomViewProps) {
   const bandCount = Math.max(1, bands)
-  const points = scenePoints({
-    variant,
-    rows,
-    bands: bandCount,
-    spread: Math.min(1, Math.max(0, spreadPct / 100)),
-  })
+  const dipoleBands = useMemo(
+    () => (variant === 'montage' && scene ? BAND_ORDER.filter((band) => scene.bands[band]) : []),
+    [variant, scene],
+  )
+  /** Refs маркеров ∞: rAF пишет transform/атрибуты без ре-рендеров. */
+  const markerRefs = useRef(new Map<string, SVGGElement | null>())
+  const circleRefs = useRef(new Map<string, SVGCircleElement | null>())
+  const pathRefs = useRef(new Map<string, SVGPathElement | null>())
+  const infinityD = useMemo(() => infinityPath(1), [])
+
+  // Статичная позиция монтирования (слайд позиции 0) — ре-рендеры не «прыгают».
+  const initialSamples = useMemo(() => {
+    const map = new Map<
+      string,
+      { sample: DipoleSceneSample; cx: number; cy: number; rotationDeg: number }
+    >()
+    if (!scene) return map
+    for (const band of dipoleBands) {
+      const sample = dipoleSceneAt(scene.bands[band], 0, scene.depth_z_mm)
+      if (sample) map.set(band, { sample, ...markerCenter(sample, scene) })
+    }
+    return map
+  }, [dipoleBands, scene])
+
+  useEffect(() => {
+    if (!scene || dipoleBands.length === 0) return
+    let frame = 0
+    const paint = () => {
+      const tSec = getActivePlayer()?.position ?? 0
+      for (const band of dipoleBands) {
+        const sample = dipoleSceneAt(scene.bands[band], tSec, scene.depth_z_mm)
+        const group = markerRefs.current.get(band)
+        if (!sample || !group) continue
+        const { cx, cy, rotationDeg } = markerCenter(sample, scene)
+        group.setAttribute('transform', `translate(${cx}, ${cy}) rotate(${rotationDeg})`)
+        group.setAttribute('data-strength', sample.strength.toFixed(3))
+        group.setAttribute('data-depth', sample.depth.toFixed(3))
+        const circle = circleRefs.current.get(band)
+        if (circle) {
+          circle.style.filter = `blur(${markerBlurPx(sample.depth, MAX_BLUR_PX).toFixed(2)}px)`
+        }
+        const path = pathRefs.current.get(band)
+        if (path) path.setAttribute('opacity', sample.strength.toFixed(3))
+      }
+      frame = requestAnimationFrame(paint)
+    }
+    frame = requestAnimationFrame(paint)
+    return () => cancelAnimationFrame(frame)
+  }, [dipoleBands, scene])
+
+  const points =
+    variant === 'montage' && scene
+      ? []
+      : scenePoints({
+          bands: bandCount,
+          spread: Math.min(1, Math.max(0, spreadPct / 100)),
+        })
   const center = { x: VIEW_W / 2, y: VIEW_H / 2 }
   /** Точка сцены → SVG: u вправо, v вверх (фронт наверху схемы). */
   const toXY = (x: number, z: number) => {
@@ -61,7 +142,11 @@ export function BrainRoomView({ variant, rows, bands, spreadPct }: BrainRoomView
       viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
       preserveAspectRatio="xMidYMid meet"
       role="img"
-      aria-label={`Силуэт BrainRoom: вид сверху, ${variant === 'montage' ? 'модули рядов' : 'дуга ±60°'}`}
+      aria-label={
+        variant === 'montage' && scene
+          ? 'Силуэт головы: вид сверху, дипольная сцена «Монтажа» — восьмёрки полос'
+          : `Силуэт BrainRoom: вид сверху, ${variant === 'montage' ? 'модули рядов' : 'дуга ±60°'}`
+      }
       data-testid="brainroom-view"
       className="h-full w-full"
     >
@@ -116,19 +201,58 @@ export function BrainRoomView({ variant, rows, bands, spreadPct }: BrainRoomView
         strokeWidth={1}
       />
       <circle cx={center.x} cy={center.y} r={3.5} fill="var(--color-fg-0)" />
-      {/* Источники сцены. */}
+      {/* Маркеры дипольной сцены («Монтаж»): восьмёрка + окружность на полосу. */}
+      {scene &&
+        dipoleBands.map((band) => {
+          const initial = initialSamples.get(band)
+          const base = scene.bands[band]
+          const radius = markerRadius(base.stereo_base)
+          const color = bandColor(BAND_HZ[band] ?? [1, 2])
+          const position = initial
+            ? `translate(${initial.cx}, ${initial.cy}) rotate(${initial.rotationDeg})`
+            : undefined
+          return (
+            <g
+              key={band}
+              ref={(node) => {
+                markerRefs.current.set(band, node)
+              }}
+              transform={position}
+              data-testid={`dipole-marker-${band}`}
+              data-strength={initial ? initial.sample.strength.toFixed(3) : undefined}
+              data-depth={initial ? initial.sample.depth.toFixed(3) : undefined}
+            >
+              <circle
+                ref={(node) => {
+                  circleRefs.current.set(band, node)
+                }}
+                r={radius}
+                fill="none"
+                stroke={color}
+                strokeWidth={1.5}
+              />
+              <path
+                ref={(node) => {
+                  pathRefs.current.set(band, node)
+                }}
+                d={infinityD}
+                transform={`scale(${radius * 0.72})`}
+                fill={color}
+                opacity={initial ? initial.sample.strength : 1}
+              />
+            </g>
+          )
+        })}
+      {/* Источники сцены «Экспресса» (и фоллбэк без сцены). */}
       {points.map((point, index) => {
         const { cx, cy } = toXY(point.x, point.z)
-        const color = point.row
-          ? (ROW_COLORS[point.row] ?? 'var(--color-accent)')
-          : 'var(--color-accent)'
         return (
           <circle
-            key={`${point.row ?? 'arc'}-${index}`}
+            key={`arc-${index}`}
             cx={cx}
             cy={cy}
             r={3.2}
-            fill={color}
+            fill="var(--color-accent)"
             stroke="var(--color-bg-0)"
             strokeWidth={1}
           />

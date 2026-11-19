@@ -4240,60 +4240,6 @@
         }
       }
     },
-    "/api/v1/audio/render/{render_id}/track/{row}/{band}.wav": {
-      "get": {
-        "summary": "WAV рядового трека «Монтажа» (ряд × полоса)",
-        "description": "Рядовой трек «Монтажа»: 4 ряда схемы × полосы (варианты рендера).",
-        "operationId": "audio_render_row_track_api_v1_audio_render__render_id__track__row___band__wav_get",
-        "parameters": [
-          {
-            "name": "render_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Render Id"
-            }
-          },
-          {
-            "name": "row",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Row"
-            }
-          },
-          {
-            "name": "band",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Band"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "audio/wav": {}
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/audio/render/{render_id}/sidecar.json": {
       "get": {
         "summary": "Sidecar-«партитура» рендера (веса, гейны, checksum, extensions)",
@@ -9812,8 +9758,20 @@
           "variant": {
             "type": "string",
             "title": "Variant",
-            "description": "Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — 4 ряда схемы × 7 полос = 28 рядовых треков для 3D-обработки); иное значение — 400",
+            "description": "Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — дипольный рендер: 7 входов полос локализуются по данным анимации диполей); иное значение — 400",
             "default": "express"
+          },
+          "dipole_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dipole Job Id",
+            "description": "Источник дипольных траекторий (variant=montage): id задачи dipole_batch; None — последний прогон пакета диполей записи"
           }
         },
         "type": "object",
@@ -9864,8 +9822,20 @@
           "variant": {
             "type": "string",
             "title": "Variant",
-            "description": "Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — 4 ряда схемы × 7 полос = 28 рядовых треков для 3D-обработки); иное значение — 400",
+            "description": "Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — дипольный рендер: 7 входов полос локализуются по данным анимации диполей); иное значение — 400",
             "default": "express"
+          },
+          "dipole_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dipole Job Id",
+            "description": "Источник дипольных траекторий (variant=montage): id задачи dipole_batch; None — последний прогон пакета диполей записи"
           },
           "recording_id": {
             "type": "string",
@@ -9965,16 +9935,8 @@
           "variant": {
             "type": "string",
             "title": "Variant",
-            "description": "Вариант рендера: «montage» — файлы треков отдаются как track/{row}/{band}.wav по списку rows; «express» — track/{band}.wav",
+            "description": "Вариант рендера: «montage» — дипольный рендер (7 треков track/{band}.wav с локализацией по диполям); «express» — track/{band}.wav по шинам L/C/R",
             "default": "express"
-          },
-          "rows": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Rows",
-            "description": "Для «Монтажа»: id рядов, по которым есть треки (иначе пусто)"
           }
         },
         "type": "object",

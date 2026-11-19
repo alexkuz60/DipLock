@@ -42,6 +42,54 @@ _PHASE_EPS_REL = 1e-12
 _PHASE_EPS_FLOOR = 1e-30
 
 
+def _analytic_stem(mono: np.ndarray, steps: int) -> tuple[np.ndarray, np.ndarray]:
+    """Ядро одного моно-входа: (a, u) — амплитуда и единичная фаза после питча.
+
+    Порядок операций — ТЗ §1 (не менять): ``hilbert`` → ресемпл ×96 по Re/Im →
+    ``steps`` последовательных комплексных квадратов. ``a · u.real`` — трек
+    «Экспресса»; пространственный слой «Монтажа» берёт ту же пару и строит
+    L/R фазовым вращением ``u · e^{±iθ/2}`` (dipole_spatial).
+    """
+    z = hilbert(mono)
+    # Ресемпл ×96: Re и Im независимо (комплексный resample_poly не меняет
+    # математику, но эталон ТЗ требует явного разноса вещественной/мнимой).
+    z48 = (
+        resample_poly(z.real, RESAMPLE_UP, 1, window=RESAMPLE_WINDOW)
+        + 1j * resample_poly(z.imag, RESAMPLE_UP, 1, window=RESAMPLE_WINDOW)
+    )
+    a = np.abs(z48)
+    eps = _PHASE_EPS_REL * max(float(a.max()), _PHASE_EPS_FLOOR)
+    u = z48 / np.maximum(a, eps)
+    for _ in range(steps):  # дефолт 7 → 2**7 = 128
+        u = u * u
+    return a, u
+
+
+def band_analytic(
+    eeg_band: np.ndarray, weights: np.ndarray, pitch_steps: int = PITCH_STEPS,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Комплексное ядро полосы: (K, N) @500 Гц → ``(a, u)`` @48000 Гц.
+
+    ``mono = weights @ eeg_band`` → :func:`_analytic_stem`. Вход пространственного
+    слоя «Монтажа» (``dipole_spatial.spatialize``): один моно-вход полосы,
+    L/R строятся фазовым вращением момента диполя.
+    """
+    data = np.asarray(eeg_band, dtype=np.float64)
+    if data.ndim != 2:
+        raise ValueError(f"eeg_band должен быть (K, N), получено {data.shape}")
+    steps = int(pitch_steps)
+    if steps < 1:
+        raise ValueError(f"pitch_steps должен быть >= 1, получено {pitch_steps}")
+    w = np.asarray(weights, dtype=np.float64)
+    if w.shape != (data.shape[0],):
+        raise ValueError(f"веса должны иметь длину K={data.shape[0]}, получено {w.shape}")
+    a, u = _analytic_stem(w @ data, steps)
+    expected = data.shape[1] * RESAMPLE_UP
+    if a.shape != (expected,):
+        raise AssertionError(f"Неверная длина трека: {a.shape}, ожидалось {(expected,)}")
+    return a, u
+
+
 def band_stem(
     eeg_band: np.ndarray, w_left: np.ndarray, w_right: np.ndarray,
     pitch_steps: int = PITCH_STEPS,
@@ -69,19 +117,7 @@ def band_stem(
 
     stems: list[np.ndarray] = []
     for w in weights:
-        mono = w @ data
-        z = hilbert(mono)
-        # Ресемпл ×96: Re и Im независимо (комплексный resample_poly не меняет
-        # математику, но эталон ТЗ требует явного разноса вещественной/мнимой).
-        z48 = (
-            resample_poly(z.real, RESAMPLE_UP, 1, window=RESAMPLE_WINDOW)
-            + 1j * resample_poly(z.imag, RESAMPLE_UP, 1, window=RESAMPLE_WINDOW)
-        )
-        a = np.abs(z48)
-        eps = _PHASE_EPS_REL * max(float(a.max()), _PHASE_EPS_FLOOR)
-        u = z48 / np.maximum(a, eps)
-        for _ in range(steps):  # дефолт 7 → 2**7 = 128
-            u = u * u
+        a, u = _analytic_stem(w @ data, steps)
         stems.append(a * u.real)
 
     stem = np.stack(stems, axis=1)

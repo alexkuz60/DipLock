@@ -24,9 +24,8 @@ import numpy as np
 
 from app.core.config import Settings, settings
 from app.services import journal
-from app.services.audio_render import emo_radar, store, vamp_analysis
-from app.services.audio_render import rows as rows_module
-from app.services.audio_render.core import FS_AUDIO, RESAMPLE_UP, band_stem
+from app.services.audio_render import dipole_scene, dipole_spatial, emo_radar, store, vamp_analysis
+from app.services.audio_render.core import FS_AUDIO, RESAMPLE_UP, band_analytic, band_stem
 from app.services.audio_render.export import (
     build_sidecar,
     input_checksum,
@@ -49,13 +48,15 @@ from app.services.audio_render.mix import (
     TRACK_RMS_DBFS,
     apply_peak_ceiling,
     bus_weights,
-    normalize_group,
     normalize_track,
     track_rms,
 )
 from app.services.recordings import Recording
 
 logger = logging.getLogger(__name__)
+
+# Варианты рендера (поле ``variant`` в API и ``render_sig``).
+RENDER_VARIANTS: tuple[str, ...] = ("express", "montage")
 
 # TTL состояния рендера в памяти: артефакты живут на диске (store), сюда
 # попадают только статус/прогресс — старое удаляется, восстановить можно из
@@ -86,8 +87,6 @@ class RenderArtifacts:
     recording_id: str
     sig: str
     variant: str = "express"
-    rows: list[str] = field(default_factory=list)
-    """Для «Монтажа»: id рядов, по которым есть рядовые треки (иначе пусто)."""
     directory: str | None = None
     memory: dict[str, bytes] = field(default_factory=dict)
 
@@ -149,7 +148,6 @@ def _state_from_manifest(
             recording_id=recording_id,
             sig=sig,
             variant=str(manifest.get("variant") or "express"),
-            rows=list(manifest.get("rows") or []),
             directory=directory,
         ),
         started_at=now,
@@ -164,6 +162,7 @@ def start_render(
     loudness_autobase: bool = True,
     octave_shift: int = 7,
     variant: str = "express",
+    dipole_job_id: str | None = None,
 ) -> tuple[str, bool]:
     """Возвращает ``(render_id, cached)``: запускает рендер либо отдаёт кэш.
 
@@ -181,13 +180,15 @@ def start_render(
     выключить, чистый RMS без поправок). ``loudness_autobase`` — стратегия A:
     при включённой компенсации база ограничивается потолком «ямы» (θ/α/β
     выравниваются по перцептиву, boost срезается до запаса потолка); ``False``
-    — «максимум громкости» (база −18+boost, треки crest-limited). Один активный
+    — «максимум громкости» (база −18+boost, треки crest-limited).
+    ``dipole_job_id`` — источник дипольных траекторий «Монтажа» (прогон
+    ``dipole_batch``; ``None`` — последний прогон записи). Один активный
     рендер за раз (``RenderBusy`` → 409 в API): FIFO-очередь задач тут
     намеренно не вводится — это эксперимент, а не job-система.
     """
     sig = store.render_sig(
         recording, cfg, gains_db, boost_db, loudness_phon, loudness_autobase,
-        octave_shift, variant,
+        octave_shift, variant, dipole_job_id,
     )
     lookup_started = time.perf_counter()
     # 1) Кэш в памяти: недавний рендер с теми же параметрами (в том числе
@@ -221,6 +222,7 @@ def start_render(
         args=(
             state, recording, cfg, dict(gains_db), float(boost_db),
             loudness_phon, bool(loudness_autobase), int(octave_shift), variant,
+            dipole_job_id,
         ),
         name=f"audio-render-{sig}",
         daemon=True,
@@ -357,6 +359,7 @@ def _run_render(
     loudness_autobase: bool = True,
     octave_shift: int = 7,
     variant: str = "express",
+    dipole_job_id: str | None = None,
 ) -> None:
     """Цикл рендера: подготовка → ядро по полосам → мастер → экспорт.
 
@@ -364,10 +367,11 @@ def _run_render(
     сведение/экспорт 0.9..1.0 — клиент рисует единый прогресс-бар (ТЗ M5).
 
     ``variant`` — «express» (7 треков L/C/R, шины ``bus_weights``) или
-    «montage» (ряды ``rows.row_mixes``: для каждой полосы отдельный стем на
-    каждый непустой ряд, групповой гейн ``normalize_group`` сохраняет
-    баланс рядов; файлы ``track_{row}_{band}.wav``). Мастер и психоакустика
-    общие для обоих вариантов.
+    «montage» (дипольный рендер, срез 19.11.2026): 7 входов полос, у которых
+    локализация — данные анимации диполей (``dipole_scene``): фазы L/R от
+    вращения момента, M/S-ширина по стереобазе полосы, панорама по позиции
+    x, «колодезное» эхо от глубины z (``dipole_spatial``). Мастер и
+    психоакустика общие для обоих вариантов.
     """
     started = time.perf_counter()
     try:
@@ -380,24 +384,19 @@ def _run_render(
         # Отпечаток входа — до освобождения пакетов (в sidecar и для детерминизма).
         checksum = input_checksum(packages.packages)
         # Веса шин считаются всегда: фаза автобазы меряет crest по шинному
-        # стему (веса шин не зависят от варианта). Для «Монтажа» группу
-        # стемов каждой полосы дают ряды, а groups/sidecar описывают ряды.
-        w_left, w_right, groups = bus_weights(packages.channels)
-        row_mixes_list: list[rows_module.RowMix] = []
-        sidecar_rows: list[dict[str, Any]] | None = None
+        # стему (веса шин не зависят от варианта).
+        w_left, w_right, bus_groups = bus_weights(packages.channels)
+        groups: dict[str, list[str]] | None = bus_groups
+        scene: dipole_scene.DipoleScene | None = None
+        scene_payload: dict[str, Any] | None = None
         if variant == "montage":
-            row_mixes_list, row_warnings = rows_module.row_mixes(packages.channels)
-            packages.warnings.extend(row_warnings)
-            groups = {mix.id: mix.channels for mix in row_mixes_list}
-            sidecar_rows = [
-                {
-                    "id": mix.id,
-                    "label": mix.label,
-                    "channels": mix.channels,
-                    "members": mix.members(),
-                }
-                for mix in row_mixes_list
-            ]
+            state.stage = "Дипольная сцена (траектории диполей)"
+            state.pct = 0.25
+            state.message = "Данные анимации диполей: «эпоха × полоса» пакетного прогона"
+            scene = dipole_scene.load_dipole_scene(cfg, recording, dipole_job_id)
+            packages.warnings.extend(scene.warnings)
+            scene_payload = dipole_scene.scene_payload(scene, cfg)
+            groups = None  # шины L/C/R — «Экспресс»; у «Монтажа» веса не шинные
 
         bands = list(cfg.freq_bands)
         # Психоакустические смещения ISO 226 (считаются один раз на рендер):
@@ -480,27 +479,33 @@ def _run_render(
             gain_db = float(gains_db.get(band, 0.0))
             loudness_db = 0.0 if offsets is None else offsets.get(band, 0.0)
             if variant == "montage":
-                # Один пакет полосы → стем на каждый непустой ряд; общий гейн
-                # группы (normalize_group) сохраняет баланс рядов внутри полосы.
+                # Дипольный рендер: моно-вход полосы (равные веса каналов) →
+                # ядро (a, u) → пространственная обработка по дипольной сцене
+                # (фазы ±θ/2, M/S-ширина, панорама, «колодец»).
                 eeg_band = packages.packages.pop(band)
-                stems = [
-                    band_stem(eeg_band, mix.w_left, mix.w_right, pitch_steps=octave_shift)
-                    for mix in row_mixes_list
-                ]
+                n_channels = eeg_band.shape[0]
+                weights = np.full(n_channels, 1.0 / max(1, n_channels))
+                amplitude, unit = band_analytic(eeg_band, weights, pitch_steps=octave_shift)
                 del eeg_band
-                normalized_list, applied_db, rms_dbfs = normalize_group(
-                    stems, gain_db=gain_db, boost_db=effective_boost,
-                    loudness_db=loudness_db,
+                if scene is None:  # pragma: no cover — montage всегда со сценой
+                    raise dipole_scene.DipoleSceneError("Нет дипольной сцены для «Монтажа»")
+                frame_times = dipole_scene.frame_times_of(scene)[band]
+                series = dipole_scene.band_series(
+                    scene.bands[band], frame_times, n_out, FS_AUDIO, cfg,
                 )
-                del stems
-                for mix, normalized in zip(row_mixes_list, normalized_list, strict=True):
-                    master += normalized
-                    _persist(
-                        store.row_track_name(mix.id, band),
-                        wav_bytes(normalized, FS_AUDIO),
-                    )
-                    del normalized
-                del normalized_list
+                stem = dipole_spatial.spatialize(
+                    amplitude, unit, series,
+                    stereo_base=float(cfg.dipole_stereo_base[band]),
+                    cfg=cfg,
+                )
+                del amplitude, unit, series
+                normalized, applied_db, rms_dbfs = normalize_track(
+                    stem, gain_db=gain_db, boost_db=effective_boost, loudness_db=loudness_db,
+                )
+                del stem
+                master += normalized
+                _persist(store.track_name(band), wav_bytes(normalized, FS_AUDIO))
+                del normalized
             else:
                 if band in pit_stems:
                     stem = pit_stems.pop(band)
@@ -579,7 +584,7 @@ def _run_render(
             groups=groups,
             octave_shift=octave_shift,
             variant=variant,
-            rows=sidecar_rows,
+            dipole=scene_payload,
         ))
         state.stage = "Сохранение на диск"
         state.pct = 0.95
@@ -596,12 +601,11 @@ def _run_render(
         del emo_payload
         del master_wav
         elapsed = time.perf_counter() - started
-        n_tracks = len(bands) if variant != "montage" else len(bands) * len(row_mixes_list)
+        n_tracks = len(bands)
         message = (
             f"{n_tracks} треков + мастер, {packages.duration_s:.1f} с, "
             f"пик мастера ×{peak_scale:.3f}, {elapsed:.1f} с"
         )
-        row_ids = [mix.id for mix in row_mixes_list]
         manifest = {
             "format": store.RENDER_FORMAT_VERSION,
             "sig": state.render_id,
@@ -610,7 +614,6 @@ def _run_render(
             "duration_s": float(packages.duration_s),
             "bands": bands,
             "variant": variant,
-            "rows": row_ids,
             "params": {
                 "gains_db": {name: float(value) for name, value in sorted(gains_db.items())},
                 "boost_db": float(boost_db),
@@ -618,6 +621,7 @@ def _run_render(
                 "loudness_autobase": bool(loudness_autobase),
                 "octave_shift": int(octave_shift),
                 "variant": variant,
+                "dipole_job_id": dipole_job_id,
             },
             "files": dict(file_sizes),
             "message": message,
@@ -635,7 +639,6 @@ def _run_render(
             recording_id=recording.recording_id,
             sig=state.render_id,
             variant=variant,
-            rows=row_ids,
             # Диск даже при files_ok=False: успешные файлы там, сбойные — в
             # memory (read сначала смотрит каталог, затем память).
             directory=store.render_dir(cfg, recording.recording_id, state.render_id),

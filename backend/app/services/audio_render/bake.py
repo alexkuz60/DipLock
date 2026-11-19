@@ -14,8 +14,8 @@
 2. **Панорама** — равномощная амплитудная панорама по азимуту источника
    (приближение вместо HRTF ``Panner3D`` — «Ловушки» в
    `docs/rules/neuromusic.md`, §«Варианты рендера»); геометрия азимутов та же,
-   что у плеера: «Экспресс» — дуга ±60°, «Монтаж» — 4 модуля рядов
-   (:func:`module_position`);
+   что у плеера: «Экспресс» — дуга ±60°, «Монтаж» (дипольный рендер) —
+   средние позиции диполей полос из ``extensions.dipoles`` sidecar;
 3. **Общая Convolver** на сумме модулей: ``oaconvolve`` со stereo-IR пресета,
    нормировка единичной энергией (приближение ``ConvolverNode.normalize``),
    линейный dry/wet по ``wet_pct``.
@@ -53,8 +53,8 @@ from scipy.signal import oaconvolve
 
 from app.core.config import Settings, settings
 from app.services import audio_ir, journal
+from app.services.audio_render import dipole_scene, store
 from app.services.audio_render import render as neuro_render
-from app.services.audio_render import store
 from app.services.audio_render.core import FS_AUDIO
 from app.services.audio_render.export import wav_bytes
 from app.services.audio_render.mix import apply_peak_ceiling
@@ -64,8 +64,9 @@ from app.utils.versions import library_versions
 logger = logging.getLogger(__name__)
 
 # Версия формата/математики запекания: меняется формула цепочки — поднимите,
-# иначе старый кэш отдаст старые байты под тем же ключом.
-BAKE_FORMAT_VERSION = 1
+# иначе старый кэш отдаст старые байты под тем же ключом. 2 — геометрия
+# «Монтажа» (ряды 4×7 → средние позиции диполей, срез 19.11.2026).
+BAKE_FORMAT_VERSION = 2
 
 # TTL статуса в памяти (как у рендера): готовый бак переживает его на диске.
 BAKE_TTL_SEC = 15 * 60
@@ -148,19 +149,6 @@ SOURCE_DISTANCE_M = 1.5
 ARC_HALF_DEG = 60.0
 """«Экспресс»: полудуга дуги источников при полном разбросе."""
 
-FRONTAL_HALF_DEG = 30.0
-"""«Монтаж», лобной ряд: узкая дуга к лбу."""
-
-OCCIPITAL_HALF_DEG = 30.0
-"""«Монтаж», затылочный: зеркало лобной (тоже узкое)."""
-
-PARIETAL_HALF_DEG = 60.0
-"""«Монтаж», теменной: смещён в тыл, широкая дуга к затылку."""
-
-TEMPORAL_HALF_M = 1.5
-"""«Монтаж», височный: прямая линия на уровне ушей (вдоль X, Z=0)."""
-
-
 def _clamp(value: float) -> float:
     """Схлопывает параметр разброса к 0…1 (NaN → 0, как на клиенте)."""
     if math.isnan(value):
@@ -178,31 +166,6 @@ def arc_position(index: int, count: int, spread: float) -> tuple[float, float]:
     """Позиция ``(x, z)`` на дуге «Экспресса»: ±60°·spread перед слушателем."""
     unit = 0.0 if count <= 1 else index / (count - 1) * 2.0 - 1.0
     return _polar((ARC_HALF_DEG * unit) * _clamp(spread))
-
-
-def module_position(row: str, index: int, count: int, spread: float) -> tuple[float, float]:
-    """Позиция ``(x, z)`` источника модуля «Монтажа» (спецификация 07.10.2026).
-
-    * **frontal** — дуга к лбу, узкая (±30°·spread);
-    * **temporal** — прямая линия на уровне ушей (Z = 0, X −1.5…+1.5 м):
-      панорама широкая, крайние точки — у слушателя на уровне ушей;
-    * **parietal** — смещён в тыл, широкая дуга к затылку (180° ± 60°·spread);
-    * **occipital** — зеркало лобной (180° ± 30°·spread).
-
-    ``spread`` 0…1 схлопывает модуль к его центру. Неизвестный ряд —
-    ``ValueError`` (id рядов приходят из манифеста рендера, там только свои).
-    """
-    unit = 0.0 if count <= 1 else index / (count - 1) * 2.0 - 1.0
-    spread = _clamp(spread)
-    if row == "frontal":
-        return _polar((FRONTAL_HALF_DEG * unit) * spread)
-    if row == "temporal":
-        return TEMPORAL_HALF_M * unit * spread, 0.0
-    if row == "parietal":
-        return _polar(180.0 + (PARIETAL_HALF_DEG * unit) * spread)
-    if row == "occipital":
-        return _polar(180.0 + (OCCIPITAL_HALF_DEG * unit) * spread)
-    raise ValueError(f"Неизвестный ряд модуля «Монтажа»: {row!r}")
 
 
 def azimuth_deg(x: float, z: float) -> float:
@@ -328,17 +291,33 @@ def _source_azimuths(
     """``(имя файла, азимут)`` для каждого стема в порядке партитуры.
 
     «Экспресс»: один трек полосы на дуге ±60° (слева δ, справа γ-high).
-    «Монтаж»: ``rows × bands`` — стем ряда стоит в геометрии своего модуля
-    (:func:`module_position`), индекс внутри модуля — индекс полосы (та же
-    логика «слева низкие частоты»).
+    «Монтаж» (дипольный рендер): трек полосы стоит по **средней позиции её
+    диполя** (``extensions.dipoles`` sidecar; азимут ``atan2(x, y)`` MNI —
+    0° фронт, +90° вправо); ``spread`` схлопывает азимуты к фронту, как
+    дугу «Экспресса». Нет дипольной сцены в sidecar — ошибка статуса
+    (рендер старого формата — пересчитать запись).
     """
     sources: list[tuple[str, float]] = []
     bands = list(artifacts.bands)
     if artifacts.variant == "montage":
-        for row in artifacts.rows:
-            for index, band in enumerate(bands):
-                x, z = module_position(row, index, len(bands), spread)
-                sources.append((store.row_track_name(row, band), azimuth_deg(x, z)))
+        blob = artifacts.read(store.SIDECAR_NAME)
+        payload: dict[str, Any] | None = None
+        if blob is not None:
+            try:
+                payload = json.loads(blob)
+            except ValueError:
+                payload = None
+        dipole = ((payload or {}).get("extensions") or {}).get("dipoles") or {}
+        means = dipole_scene.mean_positions(dipole)
+        for band in bands:
+            position = means.get(band)
+            if position is None:
+                raise ValueError(
+                    "В sidecar рендера нет дипольной сцены полосы "
+                    f"{band} — пересчитайте запись (старый формат рендера)"
+                )
+            azimuth = math.degrees(math.atan2(position[0], position[1]))
+            sources.append((store.track_name(band), azimuth * _clamp(spread)))
         return sources
     for index, band in enumerate(bands):
         x, z = arc_position(index, len(bands), spread)

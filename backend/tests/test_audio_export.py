@@ -117,10 +117,10 @@ def test_sidecar_matches_contract_schema() -> None:
         notch_harmonics=2,
         groups={"left": ["F3"], "right": ["F4"], "midline": ["Cz", "Fz"]},
     )
-    assert sidecar["schema_version"] == SIDECAR_SCHEMA_VERSION == 1
+    assert sidecar["schema_version"] == SIDECAR_SCHEMA_VERSION == 2
     assert sidecar["fs_eeg"] == 500 and sidecar["fs_audio"] == FS
-    assert sidecar["variant"] == "express"  # дефолт — Экспресс, rows не заданы
-    assert sidecar["rows"] is None
+    assert sidecar["variant"] == "express"  # дефолт — Экспресс, дипольной сцены нет
+    assert "rows" not in sidecar  # ключ упразднён схемой 2 (19.11.2026)
     assert sidecar["octave_shift"] == 7 and sidecar["pitch_factor"] == 128
     assert sidecar["duration_s"] == 103.7
     assert sidecar["boost_db"] == 6.0
@@ -137,8 +137,14 @@ def test_sidecar_matches_contract_schema() -> None:
     assert blob == sidecar_bytes(sidecar)
 
 
-def test_sidecar_montage_variant_carries_rows() -> None:
-    """Вариант «Монтаж»: variant=montage, блок rows с весами рядов в партитуре."""
+def test_sidecar_montage_variant_carries_dipole_scene() -> None:
+    """Вариант «Монтаж»: variant=montage, дипольная сцена в extensions.dipoles."""
+    dipole = {
+        "source_job_id": "job-1",
+        "epoch_length_ms": 2000.0,
+        "stereo_base_note": "пример",
+        "bands": {"delta": {"stereo_base": 0.8, "frames": [{"t": 0.0, "x": 1.0}]}},
+    }
     sidecar = build_sidecar(
         duration_s=4.0,
         channels=["O1", "O2", "Oz"],
@@ -152,21 +158,15 @@ def test_sidecar_montage_variant_carries_rows() -> None:
         interpolated=[],
         notch_hz=50.0,
         notch_harmonics=2,
-        groups={"occipital": ["O1", "O2", "Oz"]},
+        groups=None,
         variant="montage",
-        rows=[{
-            "id": "occipital",
-            "label": "Затылочный",
-            "channels": ["O1", "O2", "Oz"],
-            "members": {"O1": [1.0 / 1.5, 0.0], "O2": [0.0, 1.0 / 1.5], "Oz": [1.0 / 3, 1.0 / 3]},
-        }],
+        dipole=dipole,
     )
     assert sidecar["variant"] == "montage"
-    assert sidecar["rows"] is not None and len(sidecar["rows"]) == 1
-    assert sidecar["rows"][0]["id"] == "occipital"
-    assert sidecar["busses"]["occipital"] == ["O1", "O2", "Oz"]
-    # Ключи схемы не меняются — schema_version остаётся 1 (additive).
-    assert sidecar["schema_version"] == SIDECAR_SCHEMA_VERSION
+    assert sidecar["extensions"]["dipoles"] == dipole
+    assert "rows" not in sidecar
+    # Ключ rows упразднён — schema_version поднят до 2 (ломающее изменение).
+    assert sidecar["schema_version"] == SIDECAR_SCHEMA_VERSION == 2
 
 
 def test_audio_frequency_grid_matches_octave_shift() -> None:

@@ -1780,26 +1780,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/audio/render/{render_id}/track/{row}/{band}.wav": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * WAV рядового трека «Монтажа» (ряд × полоса)
-         * @description Рядовой трек «Монтажа»: 4 ряда схемы × полосы (варианты рендера).
-         */
-        get: operations["audio_render_row_track_api_v1_audio_render__render_id__track__row___band__wav_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/audio/render/{render_id}/sidecar.json": {
         parameters: {
             query?: never;
@@ -4036,10 +4016,15 @@ export interface components {
             octave_shift: number;
             /**
              * Variant
-             * @description Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — 4 ряда схемы × 7 полос = 28 рядовых треков для 3D-обработки); иное значение — 400
+             * @description Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — дипольный рендер: 7 входов полос локализуются по данным анимации диполей); иное значение — 400
              * @default express
              */
             variant: string;
+            /**
+             * Dipole Job Id
+             * @description Источник дипольных траекторий (variant=montage): id задачи dipole_batch; None — последний прогон пакета диполей записи
+             */
+            dipole_job_id?: string | null;
         };
         /**
          * AudioRenderRequest
@@ -4079,10 +4064,15 @@ export interface components {
             octave_shift: number;
             /**
              * Variant
-             * @description Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — 4 ряда схемы × 7 полос = 28 рядовых треков для 3D-обработки); иное значение — 400
+             * @description Вариант рендера: «express» (Экспресс — шины L/C/R, 7 треков, дефолт) или «montage» (Монтаж — дипольный рендер: 7 входов полос локализуются по данным анимации диполей); иное значение — 400
              * @default express
              */
             variant: string;
+            /**
+             * Dipole Job Id
+             * @description Источник дипольных траекторий (variant=montage): id задачи dipole_batch; None — последний прогон пакета диполей записи
+             */
+            dipole_job_id?: string | null;
             /**
              * Recording Id
              * @description Идентификатор записи из реестра просмотра
@@ -4148,15 +4138,10 @@ export interface components {
             tracks?: string[];
             /**
              * Variant
-             * @description Вариант рендера: «montage» — файлы треков отдаются как track/{row}/{band}.wav по списку rows; «express» — track/{band}.wav
+             * @description Вариант рендера: «montage» — дипольный рендер (7 треков track/{band}.wav с локализацией по диполям); «express» — track/{band}.wav по шинам L/C/R
              * @default express
              */
             variant: string;
-            /**
-             * Rows
-             * @description Для «Монтажа»: id рядов, по которым есть треки (иначе пусто)
-             */
-            rows?: string[];
         };
         /**
          * AudioTempoSegment
@@ -15382,39 +15367,6 @@ export interface operations {
             header?: never;
             path: {
                 render_id: string;
-                band: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "audio/wav": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    audio_render_row_track_api_v1_audio_render__render_id__track__row___band__wav_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                render_id: string;
-                row: string;
                 band: string;
             };
             cookie?: never;

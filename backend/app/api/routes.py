@@ -174,6 +174,7 @@ from app.services.audio_render import bake as neuro_bake
 from app.services.audio_render import render as neuro_render
 from app.services.audio_render import store as neuro_store
 from app.services.audio_render.core import PITCH_STEPS_CHOICES
+from app.services.audio_render.dipole_scene import DipoleSceneError, load_dipole_scene
 from app.services.audio_render.loudness import (
     LOUDNESS_PHON_MAX,
     LOUDNESS_PHON_MIN,
@@ -184,7 +185,6 @@ from app.services.audio_render.mix import (
     GAIN_MAX_DB,
     GAIN_MIN_DB,
 )
-from app.services.audio_render.rows import RENDER_VARIANTS
 from app.services.brain_silhouette import (
     outlines as brain_silhouette_outlines,
 )
@@ -2704,21 +2704,28 @@ async def start_audio_render(payload: AudioRenderRequest) -> AudioRenderStart:
             ),
         )
     variant = str(payload.variant)
-    if variant not in RENDER_VARIANTS:
+    if variant not in neuro_render.RENDER_VARIANTS:
         raise HTTPException(
             status_code=400,
             detail=(
                 f"variant: {payload.variant} — неизвестный вариант рендера, "
-                f"допустимо {'/'.join(RENDER_VARIANTS)} "
-                "«Экспресс» (7 треков L/C/R) / «Монтаж» (4 ряда × 7 полос)"
+                f"допустимо {'/'.join(neuro_render.RENDER_VARIANTS)} "
+                "«Экспресс» (7 треков L/C/R) / «Монтаж» (дипольный рендер 7 полос)"
             ),
         )
+    if variant == "montage":
+        # Быстрая проверка данных анимации диполей до запуска конвейера:
+        # «Монтажу» нужен прогон пакета диполей, покрывающий все полосы.
+        try:
+            await asyncio.to_thread(load_dipole_scene, settings, recording, payload.dipole_job_id)
+        except DipoleSceneError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         # render_sig/load_manifest читают диск — вне event loop (409 оттуда же)
         render_id, cached = await asyncio.to_thread(
             neuro_render.start_render,
             recording, settings, payload.gains_db, boost, loudness_phon,
-            payload.loudness_autobase, octave_shift, variant,
+            payload.loudness_autobase, octave_shift, variant, payload.dipole_job_id,
         )
     except neuro_render.RenderBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -2781,7 +2788,6 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
         error=state.error,
         tracks=sorted(artifacts.bands) if artifacts else [],
         variant=artifacts.variant if artifacts else "express",
-        rows=list(artifacts.rows) if artifacts else [],
     )
 
 
@@ -2812,52 +2818,12 @@ async def audio_render_track(render_id: str, band: str, request: Request) -> Res
     artifacts = state.artifacts
     if artifacts is None:  # не бывает: _audio_state уже проверил, но для типов
         raise HTTPException(status_code=409, detail="Артефакты рендера недоступны")
-    if artifacts.variant == "montage":
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Это рендер «Монтаж»: треки отдаются по ряду — "
-                f"track/{{row}}/{{band}}.wav, ряды: {', '.join(artifacts.rows)}"
-            ),
-        )
     if band not in artifacts.bands:
         raise HTTPException(
             status_code=404,
             detail=f"Трек {band} не найден; доступны: {', '.join(artifacts.bands)}",
         )
     data = await _artifact_bytes(state, neuro_store.track_name(band))
-    return byte_range_response(data, range_header=request.headers.get("range"))
-
-
-@router.get(
-    "/audio/render/{render_id}/track/{row}/{band}.wav",
-    response_class=Response,
-    responses={200: {"content": {"audio/wav": {}}}},
-    summary="WAV рядового трека «Монтажа» (ряд × полоса)",
-)
-async def audio_render_row_track(render_id: str, row: str, band: str, request: Request) -> Response:
-    """Рядовой трек «Монтажа»: 4 ряда схемы × полосы (варианты рендера)."""
-    state = await _audio_state(render_id)
-    artifacts = state.artifacts
-    if artifacts is None:  # не бывает: _audio_state уже проверил, но для типов
-        raise HTTPException(status_code=409, detail="Артефакты рендера недоступны")
-    if artifacts.variant != "montage":
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Это рендер «Экспресс»: рядовых треков нет — "
-                f"track/{{band}}.wav, полосы: {', '.join(artifacts.bands)}"
-            ),
-        )
-    if row not in artifacts.rows or band not in artifacts.bands:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Трек ряда {row}/{band} не найден; ряды: "
-                f"{', '.join(artifacts.rows)}, полосы: {', '.join(artifacts.bands)}"
-            ),
-        )
-    data = await _artifact_bytes(state, neuro_store.row_track_name(row, band))
     return byte_range_response(data, range_header=request.headers.get("range"))
 
 

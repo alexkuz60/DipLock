@@ -132,6 +132,7 @@ export function EmoLabTracker({ emo = null }: EmoLabTrackerProps) {
       source: MASTER_SOURCE,
       rate: 1,
       spatial: false,
+      variant: 'express',
       widthPct: 100,
       spreadPct: 100,
       wetPct: 0,

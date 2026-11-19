@@ -25,7 +25,6 @@ import { Panel } from '@/shared/ui/Panel'
 import { SegmentedControl } from '@/shared/ui/SegmentedControl'
 import { SelectField } from '@/shared/ui/SelectField'
 import { bandLabel } from './bandLabels'
-import { ROW_LABELS } from './rowMeta'
 
 /**
  * Стиль ссылок-кнопок («Скачать…»): тот же набор, что ``Button variant="secondary"`` —
@@ -108,11 +107,11 @@ export function NeuromusicPanel() {
               {
                 value: 'montage',
                 label: 'Монтаж',
-                title: '4 ряда схемы × 7 полос = 28 стерео-источников: геометрия модулей для 3D и запекания',
+                title: 'Дипольный рендер: 7 входов полос локализуются по данным анимации диполей',
               },
             ]}
             onChange={(value) => setVariant(value as AudioRenderVariant)}
-            hint="Как считать партитуру: «Экспресс» — шины полушарий, «Монтаж» — 4 ряда для 3D-цепочки; считает кнопка"
+            hint="Как считать партитуру: «Экспресс» — шины полушарий, «Монтаж» — локализация по дипольным траекториям; считает кнопка"
             disabled={running}
           />
           <SegmentedControl
@@ -183,11 +182,7 @@ export function NeuromusicPanel() {
       {renderId && status?.status === 'succeeded' && (
         <Panel
           title="Файлы"
-          hint={
-            (status?.rows ?? []).length > 0
-              ? 'Готовый рендер «Монтаж»: WAV-мастер, рядовые треки (ряд × полоса) и партитура'
-              : 'Готовый рендер: WAV-мастер, соль-треки полос и партитура (справка — § «Партитура»)'
-          }
+          hint="Готовый рендер: WAV-мастер, соль-треки полос и партитура (справка — § «Партитура»)"
         >
           <div className="flex flex-col gap-2">
             <a
@@ -204,48 +199,20 @@ export function NeuromusicPanel() {
             >
               Скачать партитуру (.json)
             </a>
-            {(status?.variant === 'montage' && (status?.rows ?? []).length > 0) ? (
-              // «Монтаж»: 4 ряда × полосы — группировка по модулям, в том же
-              // порядке, что и в статусе рендера (rows).
-              <div className="flex flex-col gap-3" data-testid="montage-files">
-                {(status?.rows ?? []).map((row) => (
-                  <div key={row} className="flex flex-col gap-1">
-                    <p className="text-xs font-medium uppercase tracking-wide text-fg-2">
-                      {ROW_LABELS[row] ?? row}
-                    </p>
-                    <ul className="divide-y divide-border rounded-lg border border-border">
-                      {(status?.tracks ?? []).map((band) => (
-                        <li key={band} className="flex items-center gap-3 px-3 py-2">
-                          <span className="text-sm text-fg-1">{bandLabel(band)}</span>
-                          <a
-                            className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
-                            href={api.audioRowTrackUrl(renderId, row, band)}
-                            download={`neuromusic-${renderId}-${row}-${band}.wav`}
-                          >
-                            Скачать .wav
-                          </a>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <ul className="divide-y divide-border rounded-lg border border-border">
-                {(status?.tracks ?? []).map((band) => (
-                  <li key={band} className="flex items-center gap-3 px-3 py-2">
-                    <span className="text-sm text-fg-1">{bandLabel(band)}</span>
-                    <a
-                      className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
-                      href={api.audioTrackUrl(renderId, band)}
-                      download={`neuromusic-${renderId}-${band}.wav`}
-                    >
-                      Скачать .wav
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
+            <ul className="divide-y divide-border rounded-lg border border-border">
+              {(status?.tracks ?? []).map((band) => (
+                <li key={band} className="flex items-center gap-3 px-3 py-2">
+                  <span className="text-sm text-fg-1">{bandLabel(band)}</span>
+                  <a
+                    className="ml-auto text-xs text-accent underline-offset-2 hover:underline"
+                    href={api.audioTrackUrl(renderId, band)}
+                    download={`neuromusic-${renderId}-${band}.wav`}
+                  >
+                    Скачать .wav
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
         </Panel>
       )}
@@ -261,7 +228,7 @@ export function NeuromusicPanel() {
             label="3D-режим плеера"
             checked={spatialEnabled}
             onChange={setSpatialEnabled}
-            hint="Вместо обычного плеера — сцена на дуге («Экспресс») или в 4 модулях рядов («Монтаж»), HRTF-панорамирование и общая свёрточная реверберация"
+            hint="Пост-обработка на лету: «Экспресс» — сцена на дуге с HRTF-панорамированием, «Монтаж» — стерео уже пространственное (запечено по диполям), остаётся общая свёрточная реверберация"
           />
           <NumberField
             label="Ширина базы"
@@ -271,8 +238,12 @@ export function NeuromusicPanel() {
             min={0}
             max={MAX_SPATIAL_WIDTH_PCT}
             step={10}
-            hint="Mid/Side стерео: 100 — без изменения, меньше — к моно, больше — шире"
-            disabled={!spatialEnabled}
+            hint={
+              sceneVariant === 'montage'
+                ? 'В «Монтаже» стереобаза запечена в треках (0.8 δ → 0.1 γ-high) — ползунок действует на 3D-bake'
+                : 'Mid/Side стерео: 100 — без изменения, меньше — к моно, больше — шире'
+            }
+            disabled={!spatialEnabled || sceneVariant === 'montage'}
           />
           <NumberField
             label="Разброс по дуге"
@@ -284,10 +255,10 @@ export function NeuromusicPanel() {
             step={10}
             hint={
               sceneVariant === 'montage'
-                ? '100 — полные геометрии модулей (дуги и линия ушей), 0 — все ряды свёрнуты к центрам'
+                ? 'В «Монтаже» позиции запечены по дипольным траекториям — ползунок действует на 3D-bake'
                 : '100 — полная дуга ±60° (слева δ, справа γ-high), 0 — все треки перед слушателем'
             }
-            disabled={!spatialEnabled}
+            disabled={!spatialEnabled || sceneVariant === 'montage'}
           />
           <NumberField
             label="Влажность реверберации"
