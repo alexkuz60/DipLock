@@ -1,6 +1,19 @@
 # Памятка агенту: с чего начинать сессию
 
-> **Последний срез — 18.11.2026: «Нейромузыка» — кусочная загрузка WAV
+> **Последний срез — 19.11.2026: «Монтаж» — дипольный рендер и восьмёрки на
+> силуэте, задеплоен на ВМ.** Коммит `698ab6e`: `audio_render/dipole_scene.py`
+> (траектории из прогона `dipole_batch`, интерполяция как в `playback.ts`),
+> `dipole_spatial.py` (фазы `φ_L/R = ±θ/2`, «колодец» по глубине z, стереобаза
+> 0.8 → 0.1), `core.band_analytic`; рядовый слой 4×7 удалён (`rows.py`, роут
+> `track/{row}/{band}.wav`), `RENDER_FORMAT_VERSION=2`/`SIDECAR_SCHEMA_VERSION=2`,
+> дипольная сцена — `extensions.dipoles`; UI — `shared/lib/dipoleScene.ts` и
+> `BrainRoomView` (∞ на полосу). **Проверки:** pytest 1243 / Vitest 1470,
+> ruff/mypy/ESLint/tsc чистые. **Деплой:** `./deploy/update.sh` на ВМ — exit 0,
+> `code.stale=false`, `check.sh` 5/5, Range `206`/`416`, sidecar v2, `montage`
+> без диполей → `400`. **Дальше:** живая проверка «Монтажа» в браузере через
+> публичный адрес (basic auth) — за владельцем.
+>
+> **Предыдущий срез — 18.11.2026: «Нейромузыка» — кусочная загрузка WAV
 > (`Range`) и параллельная докачка.** Приёмка облака: плеер падал «Не удалось
 > загрузить аудио «…/master.wav»: NetworkError when attempting to fetch
 > resource». Логи ВМ: nginx отдаёт `200` и все 30009644 байта, `499` нет,
