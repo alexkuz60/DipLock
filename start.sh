@@ -33,6 +33,14 @@ server_pid() {
   echo "$pid"
 }
 
+# Кто держит порт (когда PID-файл потерян, а сервер жив/завис/остановлен).
+port_pid() {
+  local pid
+  pid="$(ss -ltnpH "sport = :$PORT" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || return 1
+  echo "$pid"
+}
+
 # Отвечает ли сервер на /health.
 server_healthy() {
   curl -sf -m 2 "$BASE_URL/health" >/dev/null 2>&1
@@ -52,17 +60,52 @@ open_ui() {
 }
 
 cmd_start() {
-  # Сервер уже жив — просто открываем UI (идемпотентный повторный клик).
-  if server_pid >/dev/null && server_healthy; then
-    echo "Сервер уже запущен (PID $(server_pid)), открываю $UI_URL"
+  local pid
+
+  # Сервер уже отвечает — просто открываем UI (идемпотентный повторный клик).
+  # PID-файл при необходимости восстанавливаем: он мог потеряться при неудачных
+  # стартах, а сам сервер жив (иначе «Старт» уходил в Errno 98 без UI).
+  if server_healthy; then
+    pid="$(server_pid || port_pid || true)"
+    if [[ -n "$pid" && ! -f "$PID_FILE" ]]; then
+      echo "$pid" >"$PID_FILE"
+    fi
+    echo "Сервер уже запущен (PID ${pid:-неизвестен}), открываю $UI_URL"
     open_ui
     return 0
   fi
-  # Мёртвый PID-файл (kill -9 / перезагрузка) — убираем.
-  if [[ -f "$PID_FILE" ]] && ! server_pid >/dev/null; then
-    echo "Устаревший PID-файл удалён: $PID_FILE"
-    rm -f "$PID_FILE"
+
+  # Порт занят, но /health молчит: процесс завис или остановлен (Ctrl+Z/SIGSTOP).
+  # Новый uvicorn не встанет на занятый порт (Errno 98) и «Старт» ушёл бы в
+  # таймаут без открытия UI. Находим процесс по PID-файлу или порту, сначала
+  # пробуждаем (SIGCONT) — остановленный часто просто ждёт продолжения;
+  # не помогло — освобождаем порт перед перезапуском.
+  pid="$(server_pid || port_pid || true)"
+  if [[ -n "$pid" ]]; then
+    echo "Процесс $pid не отвечает — пробуждаю (SIGCONT)…"
+    kill -CONT "$pid" 2>/dev/null || true
+    sleep 1
+    if server_healthy; then
+      echo "$pid" >"$PID_FILE"
+      echo "Сервер снова отвечает (PID $pid), открываю $UI_URL"
+      open_ui
+      return 0
+    fi
+    echo "Процесс $pid не отвечает — останавливаю перед перезапуском…"
+    kill -CONT "$pid" 2>/dev/null || true  # иначе SIGTERM повиснет до пробуждения
+    kill "$pid" 2>/dev/null || true
+    local waited=0
+    while kill -0 "$pid" 2>/dev/null; do
+      if (( waited >= 10 )); then
+        echo "Процесс не завершился за 10 с — SIGKILL."
+        kill -9 "$pid" 2>/dev/null || true
+        break
+      fi
+      sleep 1
+      ((waited++)) || true
+    done
   fi
+  rm -f "$PID_FILE"
 
   if [[ ! -x "$UVICORN" ]]; then
     echo "Не найден $UVICORN" >&2
@@ -108,12 +151,13 @@ cmd_start() {
 
 cmd_stop() {
   local pid
-  if ! pid="$(server_pid)"; then
+  if ! pid="$(server_pid || port_pid)"; then
     [[ -f "$PID_FILE" ]] && rm -f "$PID_FILE"
     echo "Сервер не запущен."
     return 0
   fi
   echo "Останавливаю сервер (PID $pid)…"
+  kill -CONT "$pid" 2>/dev/null || true  # остановленный (Ctrl+Z) не обработает SIGTERM
   kill "$pid" 2>/dev/null || true
   local waited=0
   while kill -0 "$pid" 2>/dev/null; do
