@@ -698,6 +698,39 @@ async def test_chat_model_route_picks_selected_model(router_config, monkeypatch)
     assert result.model == "m-second"
 
 
+@pytest.mark.asyncio
+async def test_chat_explicit_provider_model_override(router_config, monkeypatch):
+    """Назначение модели роли переопределяет маршрут, чужая модель не подменяется."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-first, m-second", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content)["model"])
+        return _model_aware_handler(request)
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    result = await llm_router.chat(
+        [{"role": "user", "content": "привет"}],
+        provider_id=provider_id, model="m-first",
+    )
+    assert result.model == "m-first"
+    assert seen == ["m-first"]
+    with pytest.raises(llm_router.LlmRouterError, match="не входит в список"):
+        await llm_router.chat(
+            [{"role": "user", "content": "привет"}],
+            provider_id=provider_id, model="m-unknown",
+        )
+
+
 def test_chat_model_route_validation(client, router_config):
     """Модель маршрута chat: только из списка провайдера и только с провайдером."""
     orphan = client.put(PREFIX, json={

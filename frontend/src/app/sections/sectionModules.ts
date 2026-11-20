@@ -127,9 +127,9 @@ const LOADERS: Record<SectionId, () => Promise<SectionModule>> = {
   consilium: async () => {
     const [section, panel] = await Promise.all([
       import('./consilium/ConsiliumSection'),
-      import('./consilium/ConsiliumOptionsPanel'),
+      import('./consilium/ConsiliumPanel'),
     ])
-    return { Component: section.ConsiliumSection, Panel: panel.ConsiliumOptionsPanel }
+    return { Component: section.ConsiliumSection, Panel: panel.ConsiliumPanel }
   },
   neuroaudio: async () => {
     const stubs = await import('./Stubs')

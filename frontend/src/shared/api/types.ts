@@ -454,3 +454,15 @@ export const CHECK_TITLES: Record<string, string> = {
   bem: 'BEM-модель головы',
 }
 
+
+/** Общий чат консилиума с ролевыми ИИ-агентами. */
+export type AgentRole = Schemas['AgentRoleOut']
+export type AgentRolesPage = Schemas['AgentRolesPage']
+export type AgentRoleCreate = Schemas['AgentRoleCreate']
+export type AgentRoleUpdate = Schemas['AgentRoleUpdate']
+export type AgentThread = Schemas['AgentThreadOut']
+export type AgentThreadsPage = Schemas['AgentThreadsPage']
+export type AgentMessage = Schemas['AgentMessageOut']
+export type AgentMessagesPage = Schemas['AgentMessagesPage']
+export type AgentMessageCreate = Schemas['AgentMessageCreate']
+export type AgentSend = Schemas['AgentSendOut']

@@ -1,17 +1,17 @@
 /** Раздел Т1: ручные исследования, контекст, выбранные материалы и снимки досье. */
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { consiliumApi } from '@/shared/api/consilium'
 import { apiErrorText } from '@/shared/api/client'
 import type { ConsiliumCaseCreate, ConsiliumCaseUpdate } from '@/shared/api/types'
 import { Button } from '@/shared/ui/Button'
-import { ErrorBlock } from '@/shared/ui/StateViews'
+import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { CaseForm } from './CaseForm'
 import { CaseWorkspace } from './CaseWorkspace'
 import { PageButtons, QueryState } from './common'
 
-export function ConsiliumSection() {
+function ConsiliumResearchView() {
   const [params, setParams] = useSearchParams()
   const caseId = params.get('case') ?? ''
   const [offset, setOffset] = useState(0)
@@ -51,8 +51,7 @@ export function ConsiliumSection() {
   return (
     <div className="space-y-4 p-4">
       <p className="text-fg-2">
-        Вопрос, рассказ добровольца и проверяемые материалы. Сейчас — ручная работа, без ИИ и
-        аудиозаписи.
+        Материалы дела и снимки формируются вручную; общий чат экспертов не получает их автоматически.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -130,6 +129,58 @@ export function ConsiliumSection() {
           recordings={recordings.data ?? []}
           onDeleted={() => select('')}
         />
+      )}
+    </div>
+  )
+}
+
+
+const AgentChatView = lazy(() =>
+  import('../agentchat/AgentChatSection').then(({ AgentChatSection }) => ({
+    default: AgentChatSection,
+  })),
+)
+
+/** Раздел сохраняет ручное исследование Т1 и добавляет рядом общий чат экспертов. */
+export function ConsiliumSection() {
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') === 'chat' ? 'chat' : 'research'
+
+  function selectView(nextView: 'research' | 'chat') {
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      if (nextView === 'chat') next.set('view', 'chat')
+      else next.delete('view')
+      return next
+    })
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <nav aria-label="Разделы Консилиума" className="flex shrink-0 gap-2 border-b border-border p-3">
+        <Button
+          variant={view === 'research' ? 'primary' : 'secondary'}
+          aria-pressed={view === 'research'}
+          onClick={() => selectView('research')}
+        >
+          Исследование
+        </Button>
+        <Button
+          variant={view === 'chat' ? 'primary' : 'secondary'}
+          aria-pressed={view === 'chat'}
+          onClick={() => selectView('chat')}
+        >
+          Чат экспертов
+        </Button>
+      </nav>
+      {view === 'chat' ? (
+        <Suspense fallback={<LoadingBlock label="Загрузка чата экспертов..." />}>
+          <AgentChatView />
+        </Suspense>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-auto">
+          <ConsiliumResearchView />
+        </div>
       )}
     </div>
   )

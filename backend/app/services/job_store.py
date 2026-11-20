@@ -31,7 +31,7 @@ import json
 import logging
 import os
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import Settings
@@ -87,7 +87,7 @@ def save_record(cfg: Settings, record: dict[str, Any]) -> str | None:
 
     payload = dict(record)
     payload["version"] = RECORD_VERSION
-    payload["saved_at"] = datetime.utcnow().isoformat()
+    payload["saved_at"] = datetime.now(UTC).isoformat()
     # Run manifest (4.6): версии/параметры/отпечатки — рядом с результатом.
     # Сбой манифеста не лишает истории: файл задачи важнее полей внутри него.
     try:

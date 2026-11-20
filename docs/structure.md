@@ -15,10 +15,12 @@ backend/app/
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
 │   ├── consilium.py   # Консилиум: форма и контракт, работа — services/consilium (Т1)
+│   ├── agent_chat.py  # общий ролевой чат Консилиума: API, работа — services/agent_chat (0019)
+│   ├── sse.py         # общий SSE-стрим ответов Консилиума и ролевого чата
 │   ├── llm_router.py  # модельный роутер ИИ: провайдеры API + probe (10.10.2026)
 │   └── uploads.py     # приём EDF: имя, размер, sha256 (F10)
 ├── schemas/           # Pydantic-контракт ответов (OpenAPI → TS-типы UI)
-├── models/db.py       # SQLAlchemy модели (Session, Epoch, Dipole): пишется только legacy-анализ
+├── models/db.py       # SQLAlchemy модели результатов, Консилиума и общего agent-chat; схема — alembic
 ├── utils/             # brain_export.py, versions.py, png.py (энкодер PNG: срезы, топокарты),
 │                      # marching_squares.py (изолинии маски), robust.py (медиана/MAD детекторов)
 ├── services/          # КАЖДЫЙ модуль = один шаг пайплайна
@@ -71,6 +73,8 @@ backend/app/
 │   ├── server_control.py  # перезапуск бэкенд из UI: guard'ы + os.execv (POST /server/restart)
 │   ├── gpu.py           # локальный ресурс: автоопределение GPU/CuPy + тумблер «Использовать GPU» → n_jobs='cuda' (GET/PUT /resource)
 │   ├── llm_router.py      # модельный роутер ИИ: провайдеры внешних API (openai/anthropic), маршруты chat/transcribe, ключи маскируются
+│   ├── consilium/         # исследовательские дела, досье, раунды, консультации, стриминг
+│   └── agent_chat/        # роли, нити и ответы общего чата экспертов
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)
 │   ├── fsaverage_assets.py # BEM/transform fsaverage: файл → кэш → расчёт MNE (FreeSurfer)
 │   ├── mri_slices.py      # том T1 на MNI-сетке, срез картинкой (PNG) + ETag/304 (3.2)

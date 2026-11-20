@@ -1,6 +1,5 @@
 """HTTP-контракт основания Консилиума: работа выполняется сервисом хранения."""
 
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api.private import PrivateRoute
+from app.api.sse import stream_frames
 from app.schemas.consilium import (
     ConsiliumAnswerRetry,
     ConsiliumBrainstormCreate,
@@ -321,39 +321,6 @@ async def get_round(case_id: str, round_id: str, response: Response) -> Consiliu
         return await rounds_store.get_round(case_id, round_id)
 
 
-_SSE_PING_S = 15.0
-
-
-def _sse_frame(event: ConsiliumStreamEvent) -> str:
-    """Один фрейм SSE: тип события и JSON-данные (без обрезки дельт)."""
-    return f"event: {event.type}\ndata: {event.model_dump_json()}\n\n"
-
-
-async def _stream_frames(progress: streams.RoundProgress | None) -> AsyncIterator[str]:
-    """Кадры SSE из журнала потока (механизм 0011); позднему подписчику — round_done."""
-    if progress is None:
-        # Запуск завершён (или бэкенд перезапущен) — только round_done
-        yield _sse_frame(ConsiliumStreamEvent(type="round_done"))
-        return
-    sent = 0
-    while True:
-        progress.changed.clear()
-        while sent < len(progress.log):
-            yield _sse_frame(progress.log[sent])
-            sent += 1
-        if progress.finished:
-            if progress.error:
-                yield _sse_frame(ConsiliumStreamEvent(type="error", error=progress.error))
-            yield _sse_frame(
-                ConsiliumStreamEvent(type="round_done", error=progress.error),
-            )
-            return
-        try:
-            await asyncio.wait_for(progress.changed.wait(), timeout=_SSE_PING_S)
-        except TimeoutError:
-            yield _sse_frame(ConsiliumStreamEvent(type="ping"))
-
-
 @router.get(
     "/cases/{case_id}/rounds/{round_id}/stream",
     responses={
@@ -386,7 +353,7 @@ async def stream_round(
         await rounds_store.get_round(case_id, round_id)
 
     return StreamingResponse(
-        _stream_frames(streams.get_round(round_id)),
+        stream_frames(streams.get_round(round_id)),
         media_type="text/event-stream",
         headers={"Cache-Control": "private, no-store", "X-Accel-Buffering": "no"},
     )
@@ -573,7 +540,7 @@ async def stream_brainstorm(
         # Принадлежность запуска делу: чужой/отсутствующий — честный 404
         await brainstorm.get_brainstorm(case_id, brainstorm_id)
     return StreamingResponse(
-        _stream_frames(streams.get_round(brainstorm_id)),
+        stream_frames(streams.get_round(brainstorm_id)),
         media_type="text/event-stream",
         headers={"Cache-Control": "private, no-store", "X-Accel-Buffering": "no"},
     )
@@ -720,7 +687,7 @@ async def stream_chat_reply(
         # Принадлежность реплики делу: чужая/отсутствующая — честный 404
         await chat_store.require_message(case_id, message_id)
     return StreamingResponse(
-        _stream_frames(streams.get_round(message_id)),
+        stream_frames(streams.get_round(message_id)),
         media_type="text/event-stream",
         headers={"Cache-Control": "private, no-store", "X-Accel-Buffering": "no"},
     )

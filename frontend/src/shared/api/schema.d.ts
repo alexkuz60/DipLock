@@ -2853,6 +2853,182 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent-chat/roles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Roles
+         * @description Роли агентов (первый вызов создаёт стартовый набор).
+         */
+        get: operations["list_roles_api_v1_agent_chat_roles_get"];
+        put?: never;
+        /**
+         * Create Role
+         * @description Пользовательская роль.
+         */
+        post: operations["create_role_api_v1_agent_chat_roles_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-chat/roles/{role_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Role
+         * @description Правка роли: инструкция, модель, включение.
+         */
+        put: operations["update_role_api_v1_agent_chat_roles__role_id__put"];
+        post?: never;
+        /**
+         * Delete Role
+         * @description Удалить пользовательскую роль.
+         */
+        delete: operations["delete_role_api_v1_agent_chat_roles__role_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-chat/threads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Threads
+         * @description Нити чата, новые сверху.
+         */
+        get: operations["list_threads_api_v1_agent_chat_threads_get"];
+        put?: never;
+        /**
+         * Create Thread
+         * @description Новая нить.
+         */
+        post: operations["create_thread_api_v1_agent_chat_threads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-chat/threads/{thread_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Thread
+         * @description Удалить нить с репликами.
+         */
+        delete: operations["delete_thread_api_v1_agent_chat_threads__thread_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-chat/threads/{thread_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Messages
+         * @description Переписка нити.
+         */
+        get: operations["list_messages_api_v1_agent_chat_threads__thread_id__messages_get"];
+        put?: never;
+        /**
+         * Send Message
+         * @description Сообщение исследователя: ответы адресатов приходят задачами и стримом.
+         */
+        post: operations["send_message_api_v1_agent_chat_threads__thread_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-chat/threads/{thread_id}/messages/{message_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Message
+         * @description Одна реплика (поллинг ответа).
+         */
+        get: operations["get_message_api_v1_agent_chat_threads__thread_id__messages__message_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-chat/threads/{thread_id}/messages/{message_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Message
+         * @description Повторить неудавшийся ответ агента.
+         */
+        post: operations["retry_message_api_v1_agent_chat_threads__thread_id__messages__message_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-chat/threads/{thread_id}/messages/{message_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Message
+         * @description Стрим ответа агента; позднему подписчику — только round_done.
+         */
+        get: operations["stream_message_api_v1_agent_chat_threads__thread_id__messages__message_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/emolab/analyze": {
         parameters: {
             query?: never;
@@ -3190,6 +3366,170 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgentMessageCreate
+         * @description Сообщение исследователя: адресаты — из ``@упоминаний`` и/или явного списка.
+         */
+        AgentMessageCreate: {
+            /** Text */
+            text: string;
+            /** Role Ids */
+            role_ids?: string[];
+        };
+        /**
+         * AgentMessageOut
+         * @description Реплика исследователя или агента.
+         */
+        AgentMessageOut: {
+            /** Id */
+            id: string;
+            /** Thread Id */
+            thread_id: string;
+            /**
+             * Author
+             * @enum {string}
+             */
+            author: "researcher" | "agent";
+            /** Role Id */
+            role_id: string | null;
+            /** Addressees */
+            addressees: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "running" | "failed" | "interrupted";
+            /** Text */
+            text: string | null;
+            /** Model */
+            model: string | null;
+            /** Error */
+            error: string | null;
+            /** Warnings */
+            warnings: string[];
+            /** Latency Ms */
+            latency_ms: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Finished At */
+            finished_at: string | null;
+        };
+        /**
+         * AgentMessagesPage
+         * @description Переписка нити в порядке времени.
+         */
+        AgentMessagesPage: {
+            /** Items */
+            items: components["schemas"]["AgentMessageOut"][];
+        };
+        /**
+         * AgentRoleCreate
+         * @description Новая пользовательская роль.
+         */
+        AgentRoleCreate: {
+            /** Label */
+            label: string;
+            /** Instruction */
+            instruction: string;
+            /** Provider Id */
+            provider_id?: string | null;
+            /** Model */
+            model?: string | null;
+        };
+        /**
+         * AgentRoleOut
+         * @description Роль агента: инструкция и выбранная модель.
+         */
+        AgentRoleOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Instruction */
+            instruction: string;
+            /** Provider Id */
+            provider_id: string | null;
+            /** Model */
+            model: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Builtin */
+            builtin: boolean;
+            /** Sort */
+            sort: number;
+        };
+        /**
+         * AgentRoleUpdate
+         * @description Правка роли: не заданные поля не меняются; пустая строка модели — маршрут chat.
+         */
+        AgentRoleUpdate: {
+            /** Label */
+            label?: string | null;
+            /** Instruction */
+            instruction?: string | null;
+            /** Provider Id */
+            provider_id?: string | null;
+            /** Model */
+            model?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * AgentRolesPage
+         * @description Все роли чата (включая выключенные — для настройки).
+         */
+        AgentRolesPage: {
+            /** Items */
+            items: components["schemas"]["AgentRoleOut"][];
+        };
+        /**
+         * AgentSendOut
+         * @description Реплика исследователя и ожидающие ответы адресатов (задачи запущены).
+         */
+        AgentSendOut: {
+            message: components["schemas"]["AgentMessageOut"];
+            /** Replies */
+            replies: components["schemas"]["AgentMessageOut"][];
+        };
+        /**
+         * AgentThreadCreate
+         * @description Новая нить чата.
+         */
+        AgentThreadCreate: {
+            /**
+             * Title
+             * @default Новое обсуждение
+             */
+            title: string;
+        };
+        /**
+         * AgentThreadOut
+         * @description Нить с числом реплик.
+         */
+        AgentThreadOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Messages */
+            messages: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * AgentThreadsPage
+         * @description Нити чата, новые сверху.
+         */
+        AgentThreadsPage: {
+            /** Items */
+            items: components["schemas"]["AgentThreadOut"][];
+        };
         /**
          * AnalysesPageOut
          * @description Страница прогонов пакета: ``total`` честный (считается до limit/offset).
@@ -17409,6 +17749,368 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description SSE-поток событий ответа консультации: фреймы `event:` + JSON `ConsiliumStreamEvent` (роль советника: role_started/delta/role_done/error/ping); после `round_done` поздних дельт нет */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsiliumStreamEvent"];
+                    "text/event-stream": components["schemas"]["ConsiliumStreamEvent"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_roles_api_v1_agent_chat_roles_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRolesPage"];
+                };
+            };
+        };
+    };
+    create_role_api_v1_agent_chat_roles_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRoleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRoleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_role_api_v1_agent_chat_roles__role_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentRoleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRoleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_role_api_v1_agent_chat_roles__role_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                role_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_threads_api_v1_agent_chat_threads_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentThreadsPage"];
+                };
+            };
+        };
+    };
+    create_thread_api_v1_agent_chat_threads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentThreadCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentThreadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_thread_api_v1_agent_chat_threads__thread_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_messages_api_v1_agent_chat_threads__thread_id__messages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMessagesPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_message_api_v1_agent_chat_threads__thread_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentMessageCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSendOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_message_api_v1_agent_chat_threads__thread_id__messages__message_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_message_api_v1_agent_chat_threads__thread_id__messages__message_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentMessageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_message_api_v1_agent_chat_threads__thread_id__messages__message_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE-поток ответа агента: фреймы `event:` + JSON `ConsiliumStreamEvent` */
             200: {
                 headers: {
                     [name: string]: unknown;

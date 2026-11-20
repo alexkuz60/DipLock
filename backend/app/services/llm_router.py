@@ -923,21 +923,32 @@ async def chat(
     max_tokens: int = 1024,
     client: httpx.AsyncClient | None = None,
     on_delta: Callable[[str], None] | None = None,
+    provider_id: str | None = None,
+    model: str | None = None,
 ) -> ChatResult:
     """Вызов модели по маршруту: примитив советников (Т3), без инструментов и очереди.
 
     ``on_delta`` — стриминг кусочков ответа (срез 0011): вызывается синхронно
     по мере прихода текста; без него вызов обычный, без потока.
+    ``provider_id``/``model`` — явный выбор провайдера и модели из его списка
+    (роли чата консилиума) в обход назначения маршрута; ``model`` вне списка
+    провайдера — честная ошибка, а не молчаливая подмена.
     """
     state = await get_state()
-    target = state.routes.get(route)
+    target = provider_id or state.routes.get(route)
     if target is None:
         raise LlmRouterError("Маршрут ИИ не назначен в модельном роутере")
     provider = _find_provider(state, target)
     if not provider.enabled:
         raise LlmRouterError("Провайдер маршрута выключен — включите его в настройках")
     models = _split_models(provider.model) or (provider.model,)
-    chosen = state.routes.get("chat_model") if route == "chat" else None
+    if model is not None and model not in models:
+        raise LlmRouterError(
+            f"Модель «{model}» не входит в список провайдера «{provider.label}»",
+        )
+    chosen = model
+    if chosen is None and route == "chat" and not provider_id:
+        chosen = state.routes.get("chat_model")
     return await _chat_completion(
         provider,
         messages,

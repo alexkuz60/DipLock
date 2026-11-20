@@ -83,6 +83,14 @@
 | `POST /consilium/cases/{case_id}/chat-messages` | сообщение исследователя и задача ответа советника (202); нить заводится первым сообщением; повтор `request_id` — прежний ответ; без снимка/маршрута `chat` — 400, идущий ответ — 409 |
 | `POST /consilium/cases/{case_id}/chat-messages/{message_id}/retry` | повтор неудавшегося ответа советника новой попыткой (202, append-only) |
 | `GET /consilium/cases/{case_id}/chat-messages/{message_id}/stream` | SSE-стрим ответа консультации (механизм 0011, роль советника): растущий текст, `round_done` на границе |
+| `GET /agent-chat/roles` | роли общего чата с инструкциями и выбранными моделями |
+| `POST /agent-chat/roles`, `PUT/DELETE /agent-chat/roles/{role_id}` | создание/правка/удаление пользовательской роли; встроенную можно только выключить |
+| `GET/POST /agent-chat/threads`, `DELETE /agent-chat/threads/{thread_id}` | список, создание и явное удаление нитей с репликами; удалить нить с ответом `running` нельзя (409) |
+| `GET /agent-chat/threads/{thread_id}/messages` | сообщения исследователя и ответы всех адресованных ролей |
+| `POST /agent-chat/threads/{thread_id}/messages` | сообщение и ответы выбранных/упомянутых ролей (202); отдельная задача класса `llm` на каждую роль |
+| `GET /agent-chat/threads/{thread_id}/messages/{message_id}` | чтение состояния и сохранённого ответа для поллинга |
+| `POST /agent-chat/threads/{thread_id}/messages/{message_id}/retry` | повтор неудавшегося ответа (202), успешный ответ повторить нельзя |
+| `GET /agent-chat/threads/{thread_id}/messages/{message_id}/stream` | SSE-дельты ответа агента; итог дочитывается из БД, позднему подписчику — `round_done` |
 
 Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
 без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;
@@ -113,7 +121,8 @@
 
 Три SSE-эндпоинта с общим механизмом: `GET .../rounds/{id}/stream` (раунд),
 `GET .../brainstorms/{id}/stream` (штурм) и `GET .../chat-messages/{id}/stream`
-(ответ боковой консультации, срез 0015). `StreamingResponse(text/event-stream)`
+(ответ боковой консультации, срез 0015) и `GET /agent-chat/threads/{thread_id}/messages/{message_id}/stream`
+(общий ролевой чат, миграция 0019). `StreamingResponse(text/event-stream)`
 отдаёт фреймы `event:` + JSON
 `ConsiliumStreamEvent` (`role_started`/`delta`/`role_done`/`error`/`ping`,
 завершение — `round_done`). Частичный текст живёт только в RAM

@@ -159,9 +159,9 @@ export const SECTIONS: SectionConfig[] = [
   },
   {
     id: 'consilium',
-    title: 'Консилиум — исследовательское обсуждение',
+    title: 'Консилиум — исследование и чат экспертов',
     shortTitle: 'Консилиум',
-    hint: 'Исследования, контекст добровольца и снимки досье',
+    hint: 'Ручное исследование, досье и общий чат с ролевыми ИИ-экспертами',
     hotkey: '',
     icon: MessagesSquare,
     route: '/consilium',

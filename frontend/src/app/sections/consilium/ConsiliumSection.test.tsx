@@ -59,6 +59,12 @@ function mockServer(
   const snapshots: ConsiliumSnapshot[] = []
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost')
+    if (url.pathname.startsWith('/api/v1/agent-chat')) {
+      const agentPath = url.pathname.replace('/api/v1/agent-chat', '')
+      if (agentPath === '/roles') return response({ items: [] })
+      if (agentPath === '/threads') return response({ items: [] })
+      return response({ detail: 'нет' }, 404)
+    }
     const path = url.pathname.replace('/api/v1/consilium', '')
     const method = init?.method ?? 'GET'
     const payload = init?.body ? JSON.parse(String(init.body)) : {}
@@ -169,6 +175,16 @@ function mockServer(
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Консилиум: ручное исследование Т1', () => {
+  it('добавляет общий чат, не скрывая исследование и его историю', async () => {
+    mockServer()
+    renderWithProviders(<ConsiliumSection />, { route: '/consilium?case=case-a' })
+    await screen.findByRole('heading', { name: 'Музыка' })
+    fireEvent.click(screen.getByRole('button', { name: 'Чат экспертов' }))
+    await screen.findByText(/Создайте обсуждение/)
+    fireEvent.click(screen.getByRole('button', { name: 'Исследование' }))
+    await screen.findByRole('heading', { name: 'Музыка' })
+  })
+
   it('создаёт дело только кнопкой, без расчётов и чувствительного localStorage', async () => {
     const fetchMock = mockServer({ empty: true })
     const storage = vi.spyOn(Storage.prototype, 'setItem')

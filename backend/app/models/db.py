@@ -819,6 +819,58 @@ class ConsiliumChatMessage(Base):
     finished_at = Column(DateTime, nullable=True)
 
 
+class AgentRole(Base):
+    """Роль ИИ-агента чата консилиума: инструкция и (необязательно) своя модель.
+
+    Роль — данные, а не код: правится из интерфейса. ``provider_id``/``model`` —
+    выбор из модельного роутера; пусто — маршрут ``chat``.
+    """
+
+    __tablename__ = "agent_roles"
+    id = Column(String, primary_key=True)  # slug: psychologist, archivist, ...
+    label = Column(String, nullable=False)
+    instruction = Column(String, nullable=False)
+    provider_id = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    builtin = Column(Boolean, nullable=False, default=False)
+    sort = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, nullable=False)
+
+
+class AgentThread(Base):
+    """Нить общего чата исследователя с ролевыми агентами."""
+
+    __tablename__ = "agent_threads"
+    id = Column(String, primary_key=True)
+    title = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class AgentMessage(Base):
+    """Реплика общего чата: исследователя или одного агента (все видят нить)."""
+
+    __tablename__ = "agent_messages"
+    __table_args__ = (
+        Index("ix_agent_messages_thread_created", "thread_id", "created_at", "id"),
+    )
+    id = Column(String, primary_key=True)
+    thread_id = Column(String, ForeignKey("agent_threads.id"), nullable=False, index=True)
+    author_kind = Column(String, nullable=False)  # researcher | agent
+    role_id = Column(String, nullable=True)  # роль агента (NULL у исследователя)
+    question_id = Column(String, nullable=True)  # исходная реплика исследователя для ответа
+    addressees = Column(JSON, nullable=False)  # роли, к которым обращена реплика
+    status = Column(String, nullable=False)  # ok | running | failed | interrupted
+    text = Column(String, nullable=True)
+    model = Column(String, nullable=True)
+    error = Column(String, nullable=True)
+    warnings = Column(JSON, nullable=False)
+    job_id = Column(String, nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+
 def _sync_driver_url(url: URL) -> str:
     """Синхронный URL для alembic: срезаем async-драйвер из URL движка.
 
