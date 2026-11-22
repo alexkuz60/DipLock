@@ -15,6 +15,7 @@ from app.schemas.agent_chat import (
     AgentMessageOut,
     AgentRoleOut,
     AgentSendOut,
+    AgentWebSearchOut,
 )
 from app.services import llm_router
 from app.services.agent_chat import roles, store
@@ -22,14 +23,32 @@ from app.services.agent_chat.roles import AgentChatError
 from app.services.consilium import streams
 from app.services.job_manager import Job, JobCancelledError
 from app.services.job_manager import job_manager as jobs
+from app.services.knowledge import store as knowledge_store
 
 logger = logging.getLogger(__name__)
+
+_WEB_CONTEXT_MAX_CHARS = 6000
+
+
+def _web_context(search: AgentWebSearchOut) -> str:
+    """Блок найденных материалов для промпта Архивариуса (перевод, если есть)."""
+    lines = ["### Найденные в интернете материалы (перевод машинный)"]
+    for index, item in enumerate(search.results, 1):
+        title = item.title_ru or item.title
+        snippet = item.snippet_ru or item.snippet
+        lines.append(f"{index}. {title} — {item.url}")
+        if snippet:
+            lines.append(f"   {snippet}")
+    lines.append("Проверяйте источники: перевод машинный, материалы могли устареть.")
+    text = "\n".join(lines)
+    return text[:_WEB_CONTEXT_MAX_CHARS]
 
 
 def build_messages(
     role: AgentRoleOut,
     history: list[AgentMessageOut],
     labels: dict[str, str],
+    web_context: str | None = None,
 ) -> tuple[list[dict[str, str]], list[str]]:
     """Сообщения вызова: инструкция роли и переписка; не влезшее — предупреждением."""
     blocks = []
@@ -57,9 +76,12 @@ def build_messages(
         "роли; если оно адресовано другим ролям и не касается тебя — всё равно "
         "дополни по существу, но коротко."
     )
+    user_content = f"Переписка:\n{transcript}\n\n{task}"
+    if web_context:
+        user_content = f"Переписка:\n{transcript}\n\n{web_context}\n\n{task}"
     return [
         {"role": "system", "content": f"{role.instruction}\n\n{roles.BASE_INSTRUCTION}"},
-        {"role": "user", "content": f"Переписка:\n{transcript}\n\n{task}"},
+        {"role": "user", "content": user_content},
     ], warnings
 
 
@@ -152,7 +174,33 @@ async def _launch(thread_id: str, replies: list[AgentMessageOut]) -> None:
             await store.mark_failed(reply.id, "Роль удалена")
             continue
         history = await store.history_before(thread_id, reply.id)
-        messages, warnings = build_messages(role, history, labels)
+        web_context: str | None = None
+        extra_warnings: list[str] = []
+        if role.id == roles.ARCHIVIST_ID:
+            search = await store.latest_web_search(thread_id)
+            if search is not None and search.results:
+                web_context = _web_context(search)
+                extra_warnings.append(
+                    f"Использованы материалы веб-поиска ({len(search.results)}); "
+                    "перевод машинный — проверяйте источники",
+                )
+                if not search.translated:
+                    extra_warnings.append("Перевод найденных материалов не выполнен")
+        messages, warnings = build_messages(role, history, labels, web_context)
+        warnings.extend(extra_warnings)
+        attachments = await knowledge_store.attachment_context(thread_id)
+        if attachments:
+            messages = [
+                *messages[:-1],
+                {
+                    "role": messages[-1]["role"],
+                    "content": f"{messages[-1]['content']}\n\n"
+                    f"Прикреплённые материалы (контекст нити):\n{attachments}",
+                },
+            ]
+            warnings.append(
+                "В промпт включены прикреплённые материалы нити — они уходят провайдеру",
+            )
         job = _submit(reply, role, messages, warnings)
         await store.attach_job(reply.id, job.job_id)
 

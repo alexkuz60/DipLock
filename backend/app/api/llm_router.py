@@ -6,7 +6,7 @@
 контракте не участвуют — наружу идёт только маска ``key_hint``.
 """
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from app.api.private import PrivateRoute
 from app.schemas.llm_router import (
@@ -23,8 +23,9 @@ from app.schemas.llm_router import (
     LlmRouterOut,
     LlmRouterUpdate,
     LlmRoutes,
+    RouteLlmModelsOut,
 )
-from app.services import llm_router
+from app.services import llm_router, routellm_catalog
 from app.services.llm_router import LlmRouterError, Provider, RouterState
 
 _NO_STORE = {"Cache-Control": "private, no-store"}
@@ -107,6 +108,23 @@ async def put_llm_router(payload: LlmRouterUpdate, response: Response) -> LlmRou
     except LlmRouterError as exc:
         raise HTTPException(exc.status, str(exc), headers=_NO_STORE) from None
     return _router_out(state)
+
+
+@router.get(
+    "/routellm/models",
+    response_model=RouteLlmModelsOut,
+    summary="Каталог RouteLLM: модели, стоимость, модальности и лимиты",
+)
+async def routellm_models(
+    response: Response,
+    provider_id: str = Query(min_length=1, max_length=64),
+) -> RouteLlmModelsOut:
+    """Список моделей провайдера; остаток кредитов — честный отказ со ссылкой."""
+    response.headers["Cache-Control"] = _NO_STORE["Cache-Control"]
+    try:
+        return await routellm_catalog.list_models(provider_id)
+    except LlmRouterError as exc:
+        raise HTTPException(exc.status, str(exc), headers=_NO_STORE) from None
 
 
 @router.post(

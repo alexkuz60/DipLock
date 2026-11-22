@@ -150,3 +150,53 @@ class AgentSendOut(BaseModel):
 
     message: AgentMessageOut
     replies: list[AgentMessageOut]
+
+
+class AgentWebSearchCreate(BaseModel):
+    """Запрос веб-поиска Архивариуса: уходит поисковику только по кнопке."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=500)
+    role_id: str | None = Field(default=None, max_length=60)
+    limit: int | None = Field(default=None, ge=1, le=10)
+
+    @field_validator("query")
+    @classmethod
+    def query_must_not_be_blank(cls, value: str) -> str:
+        """Обрезает пробелы и запрещает пустой поисковый запрос."""
+        value = value.strip()
+        if not value:
+            raise ValueError("Поисковый запрос не должен быть пустым")
+        return value
+
+
+class AgentWebSearchResultOut(BaseModel):
+    """Найденный материал: оригинал и машинный перевод на русский."""
+
+    title: str
+    url: str
+    snippet: str
+    title_ru: str | None = None
+    snippet_ru: str | None = None
+    error: str | None = None
+
+
+class AgentWebSearchOut(BaseModel):
+    """Сохранённый поиск нити: запрос, материалы и признак перевода."""
+
+    id: str
+    thread_id: str
+    role_id: str | None
+    query: str
+    provider: str
+    results: list[AgentWebSearchResultOut]
+    translated: bool
+    created_at: datetime
+    translated_at: datetime | None
+
+
+class AgentWebSearchesPage(BaseModel):
+    """Поиски нити, новые сверху."""
+
+    items: list[AgentWebSearchOut]

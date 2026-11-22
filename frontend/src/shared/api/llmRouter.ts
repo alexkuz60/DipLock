@@ -9,6 +9,7 @@ import type {
   LlmProbeResult,
   LlmRouter,
   LlmRouterUpdate,
+  RouteLlmModels,
 } from './types'
 
 const base = `${API_PREFIX}/llm-router`
@@ -32,4 +33,10 @@ export const llmRouterApi = {
   /** Проба решающего классификатора Jev: синтетический state, без материалов дела. */
   decideProbe: (payload: LlmDecideProbeRequest) =>
     request<LlmDecideProbeResult>(`${base}/decide-probe`, json('POST', payload)),
+  /** Каталог RouteLLM: модели провайдера, стоимость, модальности и лимиты. */
+  routellmModels: (providerId: string, signal?: AbortSignal) =>
+    request<RouteLlmModels>(
+      `${base}/routellm/models?provider_id=${encodeURIComponent(providerId)}`,
+      { signal },
+    ),
 }

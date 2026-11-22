@@ -62,6 +62,8 @@ function mockServer(messages: AgentMessage[], streamFrames: unknown[] = []) {
       })
     }
     if (path === '/threads/t-1/messages' && method === 'GET') return response({ items })
+    if (path === '/threads/t-1/web-search' && method === 'GET') return response({ items: [] })
+    if (path === '/threads/t-1/attachments' && method === 'GET') return response({ items: [] })
     if (path === '/threads/t-1/messages' && method === 'POST') {
       const body = JSON.parse(String(init?.body ?? '{}')) as { text: string; role_ids: string[] }
       const question = makeMessage({ id: 'm-q', text: body.text, addressees: body.role_ids })
@@ -136,4 +138,47 @@ describe('AgentChatSection', () => {
       ).toBe(true),
     )
   })
+
+  it('из Wiki создаёт нить, прикрепляет статью и подставляет вопрос', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), 'http://localhost')
+      const path = url.pathname.replace('/api/v1/agent-chat', '')
+      const method = init?.method ?? 'GET'
+      if (path === '/roles') return response({ items: roles })
+      if (path === '/threads' && method === 'GET') return response({ items: [] })
+      if (path === '/threads' && method === 'POST') {
+        return response({ id: 't-2', title: 'Wiki', messages: 0, created_at: '2026-11-22T10:00:00' }, 201)
+      }
+      if (path === '/threads/t-2/messages') return response({ items: [] })
+      if (path === '/threads/t-2/web-search') return response({ items: [] })
+      if (path === '/threads/t-2/attachments' && method === 'GET') return response({ items: [] })
+      if (path === '/threads/t-2/attachments' && method === 'POST') {
+        return response(
+          {
+            id: 'att-9', thread_id: 't-2', kind: 'document', ref_id: 'k-1',
+            label: 'Документ из Wiki', created_at: '2026-11-22T10:00:01',
+          },
+          201,
+        )
+      }
+      return response({ detail: 'нет' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderWithProviders(<AgentChatSection />, {
+      route: '/consilium?view=chat&attach=k-1&ask=Что такое бета-ритм?',
+    })
+
+    expect(await screen.findByLabelText('Сообщение')).toHaveValue('Что такое бета-ритм?')
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([input, init]) =>
+            String(input).includes('/knowledge/threads/t-2/attachments') &&
+            init?.method === 'POST',
+        ),
+      ).toBe(true),
+    )
+  })
 })
+

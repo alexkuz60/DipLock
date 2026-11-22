@@ -11,6 +11,7 @@ import {
   llmDecideProbeFixture,
   llmProbeFixture,
   llmRouterFixture,
+  routeLlmModelsFixture,
 } from '@/test/fixtures'
 import { mockApiFetch } from '@/test/apiMocks'
 import { renderWithProviders } from '@/test/renderWithProviders'
@@ -446,5 +447,54 @@ describe('панель «Модельный роутер ИИ»', () => {
     expect(
       await screen.findByText('Проба не прошла: Провайдер ответил 402: недостаточно средств'),
     ).toBeInTheDocument()
+  })
+
+  it('каталог RouteLLM: загрузка, выбор модели и добавление в список', async () => {
+    const user = userEvent.setup()
+    const base = llmRouterFixture()
+    const fetchMock = mockApiFetch({
+      llmRouter: llmRouterFixture({
+        providers: [{ ...base.providers[0], model: 'other-model' }],
+      }),
+      routeLlmModels: routeLlmModelsFixture(),
+    })
+    renderWithProviders(<ModelRouterPanel />)
+
+    await screen.findByRole('textbox', { name: 'Имя' })
+    await user.selectOptions(screen.getByLabelText('Провайдер каталога'), 'prov-full')
+    await user.click(screen.getByRole('button', { name: 'Загрузить модели' }))
+
+    expect(await screen.findByText('big-model-1')).toBeInTheDocument()
+    expect(screen.getByText('1 000 000 / 128 000')).toBeInTheDocument()
+    expect(screen.getByText('$5 / $25')).toBeInTheDocument()
+    expect(screen.getByText(/RouteLLM не отдаёт остаток кредитов/)).toBeInTheDocument()
+
+    await user.click(screen.getByRole('checkbox', { name: 'Выбрать big-model-1' }))
+    await user.click(screen.getByRole('button', { name: 'Добавить выбранные (1)' }))
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => expect(putBodies(fetchMock)).toHaveLength(1))
+    const body = putBodies(fetchMock)[0] as { providers: { model: string }[] }
+    expect(body.providers[0].model).toBe('other-model, big-model-1')
+  })
+
+  it('пресет RouteLLM добавляет провайдера без внешнего запроса', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch({
+      llmRouter: llmRouterFixture({
+        providers: [],
+        routes: { chat: null, chat_model: null, transcribe: null, decide: null },
+      }),
+    })
+    renderWithProviders(<ModelRouterPanel />)
+
+    expect(
+      await screen.findByText('Провайдеры не добавлены — ИИ-советники и распознавание недоступны.'),
+    ).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Добавить RouteLLM' }))
+
+    expect(screen.getByDisplayValue('RouteLLM (Abacus.AI)')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('https://routellm.abacus.ai/v1')).toBeInTheDocument()
+    expect(putBodies(fetchMock)).toHaveLength(0)
   })
 })

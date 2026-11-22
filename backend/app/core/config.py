@@ -82,6 +82,15 @@ class Settings(BaseSettings):
     # Общий чат консилиума с ролевыми агентами (docs/rules/consilium.md §0.9).
     agent_chat_answer_max_tokens: int = Field(default=4096, gt=0)
     agent_chat_prompt_max_chars: int = Field(default=48_000, ge=2000)
+    # Веб-поиск Архивариуса (docs/rules/consilium.md §0.10): запрос уходит
+    # поисковику только явной кнопкой, перевод найденного — провайдеру модели.
+    agent_web_search_url: str = Field(
+        default="https://html.duckduckgo.com/html/",
+        description="HTML-эндпоинт поисковика (POST q=...); ключ не требуется",
+    )
+    agent_web_search_limit: int = Field(default=5, ge=1, le=10)
+    agent_web_search_timeout_s: float = Field(default=20.0, gt=0)
+    agent_web_search_translate_max_tokens: int = Field(default=800, gt=0)
     # Триаж готовности досье (docs/rules/consilium.md §5.2): порог калиброванной
     # вероятности noul, выше которого досье объявляется достаточным для раунда.
     # Уверенность классификатора калибрована, но не гарантирует правильность.
@@ -112,6 +121,16 @@ class Settings(BaseSettings):
             "ложный «пустой ответ» (случай 11.10.2026)"
         ),
     )
+    # Каталог RouteLLM (docs/rules/consilium.md §5): список моделей провайдера
+    # дополняется публичным каталогом models.dev — стоимость, модальности,
+    # лимиты токенов. Кэш в памяти процесса; остаток кредитов RouteLLM через
+    # inference-API недоступен, панель показывает честную ссылку на Billing.
+    routellm_catalog_url: str = Field(
+        default="https://models.dev/api.json",
+        description="Публичный каталог моделей для обогащения ответа /v1/models",
+    )
+    routellm_catalog_ttl_s: float = Field(default=86_400.0, gt=0)
+    routellm_catalog_timeout_s: float = Field(default=15.0, gt=0)
 
     # Локальный ресурс (GPU/CUDA): дефолт тумблера «Использовать GPU» в
     # «Настройках». Выбор пользователя хранится в MNE-конфиге сервера
@@ -192,6 +211,28 @@ class Settings(BaseSettings):
     cache_dir: str = Field(
         default=str(_REPO_DIR / "data" / "cache"),
     )
+    # Библиотека знаний Консилиума (docs/rules/knowledge.md): загруженные книги,
+    # статьи и веб-страницы. Файлы — вне git (`data/` в .gitignore), дедуп по
+    # sha256; квоты проверяются до записи на диск.
+    knowledge_dir: str = Field(
+        default=str(_REPO_DIR / "data" / "knowledge"),
+    )
+    knowledge_max_file_mb: int = Field(
+        default=50, gt=0, description="Лимит одного файла библиотеки, МБ",
+    )
+    knowledge_max_total_mb: int = Field(
+        default=2048, gt=0, description="Лимит объёма библиотеки, МБ",
+    )
+    # Нарезка на фрагменты: размер в символах и перекрытие. Перекрытие держит
+    # контекст на границе абзацев, размер — под бюджет промпта роли.
+    knowledge_chunk_chars: int = Field(default=1200, ge=200, le=8000)
+    knowledge_chunk_overlap: int = Field(default=150, ge=0, le=2000)
+    # Семантический поиск: эмбеддинги считает провайдер модельного роутера
+    # (`POST {base_url}/embeddings`). Пустая модель — маршрут `embedding`
+    # роутера; недоступность провайдера не ломает поиск — остаётся TF-IDF.
+    knowledge_embedding_model: str = Field(default="", description="Модель эмбеддингов (пусто — маршрут роутера)")
+    knowledge_embedding_batch: int = Field(default=16, ge=1, le=128)
+    knowledge_search_limit: int = Field(default=20, ge=1, le=100)
     # Квота дискового кэша по объёму (N40/4.6): 0 — без ограничения; при
     # превышении обход сирот удаляет самые старые кэши записей (LRU по mtime).
     # Журнал, ассеты FreeSurfer и файлы задач в квоту не входят — они не «кэш

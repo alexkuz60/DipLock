@@ -7,6 +7,7 @@
 наружу отдаётся только маска ``key_hint`` (правила — ``docs/rules/consilium.md`` §5).
 """
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -232,3 +233,40 @@ class LlmDecideProbeOut(BaseModel):
         default_factory=list,
         description="Перебор моделей списка провайдера: решения и задержка каждой",
     )
+
+
+class RouteLlmModelOut(BaseModel):
+    """Модель каталога RouteLLM: стоимость, модальности и лимиты токенов."""
+
+    id: str
+    name: str | None = Field(default=None, description="Человеческое имя модели")
+    context: int | None = Field(default=None, description="Лимит контекста, токенов")
+    output: int | None = Field(default=None, description="Лимит ответа, токенов")
+    cost_input: float | None = Field(default=None, description="Цена входа, $ за 1M токенов")
+    cost_output: float | None = Field(default=None, description="Цена выхода, $ за 1M токенов")
+    modalities_input: list[str] = Field(default_factory=list)
+    modalities_output: list[str] = Field(default_factory=list)
+    reasoning: bool | None = Field(default=None, description="Поддерживает рассуждение")
+    tool_call: bool | None = Field(default=None, description="Поддерживает вызов инструментов")
+    source: Literal["provider", "catalog", "both"] = Field(
+        description="Откуда взяты поля: ответ /v1/models, каталог models.dev или оба",
+    )
+
+
+class RouteLlmCreditsOut(BaseModel):
+    """Остаток кредитов RouteLLM: честный отказ, если API его не отдаёт."""
+
+    available: bool = Field(description="Удалось ли получить остаток через API")
+    note: str = Field(description="Текст для UI: почему остаток недоступен")
+    billing_url: str = Field(description="Ссылка на страницу Billing в Abacus.AI")
+
+
+class RouteLlmModelsOut(BaseModel):
+    """``GET /api/v1/llm-router/routellm/models`` — каталог моделей провайдера."""
+
+    provider_id: str
+    provider_label: str
+    models: list[RouteLlmModelOut] = Field(default_factory=list)
+    credits: RouteLlmCreditsOut
+    warnings: list[str] = Field(default_factory=list)
+    fetched_at: datetime

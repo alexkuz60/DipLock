@@ -21,10 +21,13 @@ from app.schemas.agent_chat import (
     AgentThreadCreate,
     AgentThreadOut,
     AgentThreadsPage,
+    AgentWebSearchCreate,
+    AgentWebSearchesPage,
+    AgentWebSearchOut,
 )
 from app.schemas.consilium import ConsiliumStreamEvent
 from app.services import llm_router
-from app.services.agent_chat import roles, runner, store
+from app.services.agent_chat import roles, runner, store, web_search
 from app.services.agent_chat.roles import AgentChatError
 from app.services.consilium import streams
 
@@ -103,6 +106,55 @@ async def list_messages(thread_id: str, response: Response) -> AgentMessagesPage
     """Переписка нити."""
     async with guarded(response):
         return await store.list_messages(thread_id)
+
+
+@router.get("/threads/{thread_id}/web-search", response_model=AgentWebSearchesPage)
+async def list_web_searches(thread_id: str, response: Response) -> AgentWebSearchesPage:
+    """Поиски нити, новые сверху."""
+    async with guarded(response):
+        return await store.list_web_searches(thread_id)
+
+
+@router.post(
+    "/threads/{thread_id}/web-search", status_code=201, response_model=AgentWebSearchOut,
+)
+async def create_web_search(
+    thread_id: str, payload: AgentWebSearchCreate, response: Response,
+) -> AgentWebSearchOut:
+    """Веб-поиск Архивариуса: запрос уходит поисковику только по этой кнопке."""
+    async with guarded(response):
+        await store.require_thread(thread_id)
+        results, provider = await web_search.search(payload.query, limit=payload.limit)
+        return await store.save_web_search(
+            thread_id, query=payload.query, provider=provider,
+            results=results, role_id=payload.role_id,
+        )
+
+
+@router.post(
+    "/threads/{thread_id}/web-search/{search_id}/translate",
+    response_model=AgentWebSearchOut,
+)
+async def translate_web_search(
+    thread_id: str, search_id: str, response: Response,
+) -> AgentWebSearchOut:
+    """Перевод найденных материалов на русский — отдельным явным действием."""
+    async with guarded(response):
+        saved = await store.get_web_search(thread_id, search_id)
+        provider_id: str | None = None
+        model: str | None = None
+        if saved.role_id:
+            try:
+                role = await roles.get_role(saved.role_id)
+            except AgentChatError:
+                role = None
+            if role is not None:
+                provider_id, model = role.provider_id, role.model
+        translated = await web_search.translate(
+            [item.model_dump() for item in saved.results],
+            provider_id=provider_id, model=model,
+        )
+        return await store.update_web_search_results(thread_id, search_id, translated)
 
 
 @router.post(

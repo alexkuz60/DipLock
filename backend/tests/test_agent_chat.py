@@ -79,9 +79,9 @@ def test_default_roles_seeded_once(client: TestClient) -> None:
     items = client.get(f"{PREFIX}/roles").json()["items"]
     assert [r["id"] for r in items] == [
         "psychologist", "psychotherapist", "neurophysiologist",
-        "eeg_methodist", "mne_expert", "archivist",
+        "eeg_methodist", "mne_expert", "archivist", "assistant",
     ]
-    assert len(client.get(f"{PREFIX}/roles").json()["items"]) == 6
+    assert len(client.get(f"{PREFIX}/roles").json()["items"]) == 7
 
 
 def test_mention_routes_to_role_and_reply_is_saved(
@@ -270,7 +270,10 @@ def test_prompt_budget_drops_early_replies(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_mark_interrupted_marks_running(client: TestClient, fake_llm: SimpleNamespace) -> None:
     thread_id = new_thread(client)
-    asyncio.run(store.add_exchange(thread_id, "q", ["psychologist"]))
+    _, replies = asyncio.run(store.add_exchange(thread_id, "q", ["psychologist"]))
     assert asyncio.run(store.mark_interrupted()) == 1
     items = client.get(f"{PREFIX}/threads/{thread_id}/messages").json()["items"]
+    # Вопрос и ответ делят created_at: порядок задан явно, ответ — последний.
+    assert items[0]["author"] == "researcher"
+    assert items[-1]["id"] == replies[0].id
     assert items[-1]["status"] == "interrupted"

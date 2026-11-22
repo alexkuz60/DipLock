@@ -11,7 +11,7 @@ import httpx
 import pytest
 
 from app.core.config import settings
-from app.services import llm_router
+from app.services import llm_router, routellm_catalog
 
 PREFIX = "/api/v1/llm-router"
 _TEST_KEY = "sk-secret-1234"
@@ -23,6 +23,14 @@ def router_config(tmp_path, monkeypatch):
     path = tmp_path / "llm_router.json"
     monkeypatch.setattr(settings, "llm_router_config_path", str(path))
     return path
+
+
+@pytest.fixture()
+def catalog_cache():
+    """Сброс кэша models.dev между тестами каталога RouteLLM."""
+    routellm_catalog._catalog_cache = None
+    yield
+    routellm_catalog._catalog_cache = None
 
 
 def _provider_payload(**overrides) -> dict:
@@ -1155,3 +1163,127 @@ async def test_chat_stream_http_error_is_honest(monkeypatch):
         )
     assert "Провайдер ответил 500" in str(excinfo.value)
     assert _TEST_KEY not in str(excinfo.value)
+
+
+# ---------- каталог RouteLLM ----------
+
+_CATALOG = {
+    "abacus": {
+        "id": "abacus",
+        "api": "https://routellm.abacus.ai/v1",
+        "models": {
+            "claude-opus-4-6": {
+                "id": "claude-opus-4-6",
+                "name": "Claude Opus 4.6",
+                "modalities": {"input": ["text", "image"], "output": ["text"]},
+                "limit": {"context": 1_000_000, "output": 128_000},
+                "cost": {"input": 5, "output": 25},
+                "reasoning": True,
+                "tool_call": True,
+            },
+        },
+    },
+}
+
+
+def _catalog_handler(request: httpx.Request) -> httpx.Response:
+    """MockTransport: /models провайдера и публичный каталог models.dev."""
+    if "models.dev" in str(request.url):
+        return httpx.Response(200, json=_CATALOG)
+    assert request.headers.get("Authorization") == f"Bearer {_TEST_KEY}"
+    return httpx.Response(200, json={"data": [{"id": "claude-opus-4-6"}]})
+
+
+def _create_routellm(client, **overrides) -> str:
+    payload = _provider_payload(
+        label="RouteLLM",
+        base_url="https://routellm.abacus.ai/v1",
+        model="claude-opus-4-6",
+    )
+    payload.update(overrides)
+    created = client.put(PREFIX, json={"providers": [payload], "routes": {}})
+    assert created.status_code == 200, created.text
+    return created.json()["providers"][0]["id"]
+
+
+def test_routellm_models_enriches_from_catalog(client, router_config, catalog_cache, monkeypatch):
+    """Каталог: модель провайдера дополнена стоимостью, модальностями и лимитами."""
+    provider_id = _create_routellm(client)
+    monkeypatch.setattr(
+        routellm_catalog, "_client", lambda: _mock_client(_catalog_handler),
+    )
+    result = client.get(f"{PREFIX}/routellm/models", params={"provider_id": provider_id})
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["provider_label"] == "RouteLLM"
+    model = body["models"][0]
+    assert model["id"] == "claude-opus-4-6"
+    assert model["source"] == "both"
+    assert model["context"] == 1_000_000
+    assert model["output"] == 128_000
+    assert model["cost_input"] == 5.0
+    assert model["cost_output"] == 25.0
+    assert model["modalities_input"] == ["text", "image"]
+    assert model["reasoning"] is True
+    assert body["credits"]["available"] is False
+    assert "Billing" in body["credits"]["note"]
+    assert body["credits"]["billing_url"].startswith("https://abacus.ai/")
+    assert _TEST_KEY not in result.text
+
+
+def test_routellm_models_catalog_unavailable_warns(
+    client, router_config, catalog_cache, monkeypatch,
+):
+    """models.dev недоступен: честное предупреждение, поля провайдера сохранены."""
+    provider_id = _create_routellm(client)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "models.dev" in str(request.url):
+            return httpx.Response(503, text="down")
+        return httpx.Response(200, json={"data": [{"id": "claude-opus-4-6"}]})
+
+    monkeypatch.setattr(routellm_catalog, "_client", lambda: _mock_client(handler))
+    result = client.get(f"{PREFIX}/routellm/models", params={"provider_id": provider_id})
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert body["models"][0]["source"] == "provider"
+    assert any("models.dev" in item for item in body["warnings"])
+
+
+def test_routellm_models_requires_key_and_enabled(client, router_config, catalog_cache):
+    """Без ключа и у выключенного провайдера каталог не запрашивается."""
+    no_key = _create_routellm(client, api_key="")
+    result = client.get(f"{PREFIX}/routellm/models", params={"provider_id": no_key})
+    assert result.status_code == 400
+    assert "ключ" in result.json()["detail"]
+
+    disabled = _create_routellm(client, enabled=False)
+    result = client.get(f"{PREFIX}/routellm/models", params={"provider_id": disabled})
+    assert result.status_code == 400
+    assert "выключен" in result.json()["detail"]
+
+
+def test_routellm_models_rejects_systemone(client, router_config, catalog_cache):
+    """Решающий классификатор не имеет каталога моделей — честный 400."""
+    provider_id = _create_routellm(
+        client, protocol="systemone", base_url="https://api.example.com/v1/decide",
+    )
+    result = client.get(f"{PREFIX}/routellm/models", params={"provider_id": provider_id})
+    assert result.status_code == 400
+    assert "OpenAI/Anthropic" in result.json()["detail"]
+
+
+def test_routellm_models_provider_error_sanitized(
+    client, router_config, catalog_cache, monkeypatch,
+):
+    """Ошибка провайдера не эхом отдаёт ключ API."""
+    provider_id = _create_routellm(client)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, text=f"bad key {_TEST_KEY}")
+
+    monkeypatch.setattr(routellm_catalog, "_client", lambda: _mock_client(handler))
+    result = client.get(f"{PREFIX}/routellm/models", params={"provider_id": provider_id})
+    assert result.status_code == 502
+    assert _TEST_KEY not in result.text
+    assert "401" in result.json()["detail"]

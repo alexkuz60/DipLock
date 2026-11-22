@@ -11,6 +11,9 @@ import type {
   AgentSend,
   AgentThread,
   AgentThreadsPage,
+  AgentWebSearch,
+  AgentWebSearchCreate,
+  AgentWebSearchesPage,
 } from './types'
 
 const base = `${API_PREFIX}/agent-chat`
@@ -46,6 +49,18 @@ export const agentChatApi = {
   retry: (id: string, messageId: string) =>
     request<AgentMessage>(
       `${thread(id)}/messages/${encodeURIComponent(messageId)}/retry`,
+      { method: 'POST' },
+    ),
+  /** Поиски нити, новые сверху. */
+  webSearches: (id: string, signal?: AbortSignal) =>
+    request<AgentWebSearchesPage>(`${thread(id)}/web-search`, { signal }),
+  /** Веб-поиск: запрос уходит поисковику только по этой кнопке. */
+  webSearch: (id: string, payload: AgentWebSearchCreate) =>
+    request<AgentWebSearch>(`${thread(id)}/web-search`, json('POST', payload)),
+  /** Перевод найденных материалов на русский — отдельным явным действием. */
+  translateWebSearch: (id: string, searchId: string) =>
+    request<AgentWebSearch>(
+      `${thread(id)}/web-search/${encodeURIComponent(searchId)}/translate`,
       { method: 'POST' },
     ),
 }

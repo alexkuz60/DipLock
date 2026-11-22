@@ -6,11 +6,12 @@
  * частичный текст идущего ответа виден из стрима, готовый дочитывается
  * поллингом из БД (стрим — только удобство).
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { apiErrorText } from '@/shared/api/client'
 import { agentChatApi, agentReplyStreamUrl } from '@/shared/api/agentChat'
+import { knowledgeApi } from '@/shared/api/knowledge'
 import type { AgentMessage, AgentRole } from '@/shared/api/types'
 import {
   applyStreamEvent,
@@ -22,6 +23,8 @@ import { Button } from '@/shared/ui/Button'
 import { cx } from '@/shared/ui/cx'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'
 import { WarnList } from '@/shared/ui/WarnList'
+import { AgentWebSearch } from './AgentWebSearch'
+import { AgentAttachments } from './AgentAttachments'
 
 function mentionText(label: string): string {
   return `@${label} `
@@ -97,6 +100,37 @@ export function AgentChatSection() {
       selectThread(created.id)
     },
   })
+
+  const attachId = params.get('attach') ?? ''
+  const askText = params.get('ask') ?? ''
+  const autoThread = useRef(false)
+
+  useEffect(() => {
+    if (!attachId && !askText) return
+    if (askText) setText(askText)
+    if (attachId && !threadId) {
+      if (!autoThread.current) {
+        autoThread.current = true
+        createThread.mutate(`Wiki: ${askText.slice(0, 60) || 'вопрос Ассистенту'}`)
+      }
+      return
+    }
+    if (attachId) {
+      void knowledgeApi
+        .attach(threadId, { kind: 'document', ref_id: attachId, label: 'Документ из Wiki' })
+        .then(() =>
+          queryClient.invalidateQueries({ queryKey: ['knowledge', 'attachments', threadId] }),
+        )
+        .catch(() => undefined)
+    }
+    setParams((previous) => {
+      const next = new URLSearchParams(previous)
+      next.delete('attach')
+      next.delete('ask')
+      return next
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachId, askText, threadId])
   const deleteThread = useMutation({
     mutationFn: (id: string) => agentChatApi.deleteThread(id),
     onSuccess: async () => {
@@ -184,6 +218,8 @@ export function AgentChatSection() {
           под полем ввода. Модели и инструкции ролей — в правой панели.
         </p>
       )}
+      {threadId && <AgentWebSearch threadId={threadId} />}
+      {threadId && <AgentAttachments threadId={threadId} />}
       {messages.error != null && <ErrorBlock message={apiErrorText(messages.error)} />}
 
       <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto" aria-label="Переписка">

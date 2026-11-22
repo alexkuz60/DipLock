@@ -13,6 +13,7 @@ from app.api.agent_chat import router as agent_chat_router
 from app.api.consilium import router as consilium_router
 from app.api.emolab import router as emolab_router
 from app.api.hypotheses import router as hypotheses_router
+from app.api.knowledge import router as knowledge_router
 from app.api.llm_router import router as llm_router_api
 from app.api.routes import router as api_router
 from app.core.config import Settings, settings
@@ -143,6 +144,7 @@ app.include_router(agent_chat_router, prefix=settings.api_prefix)
 app.include_router(emolab_router, prefix=settings.api_prefix)
 app.include_router(hypotheses_router, prefix=settings.api_prefix)
 app.include_router(llm_router_api, prefix=settings.api_prefix)
+app.include_router(knowledge_router, prefix=settings.api_prefix)
 
 
 def _read_html(path: str) -> str:

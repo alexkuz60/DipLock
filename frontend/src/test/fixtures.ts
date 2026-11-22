@@ -26,8 +26,16 @@ import type {
   GroupAnalysisSummary,
   InitStatus,
   JobStatus,
+  KnowledgeDocument,
+  KnowledgeDocumentDetail,
+  KnowledgeFoldersPage,
+  KnowledgeGraph,
+  KnowledgeSearch,
+  KnowledgeTagsPage,
+  AgentAttachment,
   LlmChatProbeResult,
   LlmDecideProbeResult,
+  RouteLlmModels,
   LlmProbeResult,
   LlmRouter,
   LocalResource,
@@ -1452,6 +1460,39 @@ export function llmDecideProbeFixture(
   }
 }
 
+/** Каталог RouteLLM (`GET /llm-router/routellm/models`): модель с ценой и лимитами. */
+export function routeLlmModelsFixture(
+  overrides: Partial<RouteLlmModels> = {},
+): RouteLlmModels {
+  return {
+    provider_id: 'prov-full',
+    provider_label: 'Полная модель',
+    models: [
+      {
+        id: 'big-model-1',
+        name: 'Big Model 1',
+        context: 1_000_000,
+        output: 128_000,
+        cost_input: 5,
+        cost_output: 25,
+        modalities_input: ['text', 'image'],
+        modalities_output: ['text'],
+        reasoning: true,
+        tool_call: true,
+        source: 'both',
+      },
+    ],
+    credits: {
+      available: false,
+      note: 'RouteLLM не отдаёт остаток кредитов через inference-API.',
+      billing_url: 'https://abacus.ai/help/howTo/chatllm/faqs/billing',
+    },
+    warnings: [],
+    fetched_at: '2026-11-22T10:00:00Z',
+    ...overrides,
+  }
+}
+
 /** Полоса прогона пакета (С1): точки + статус + базис КД своей полосы. */
 function batchBandRun(
   scan: DipoleScanResult,
@@ -1743,3 +1784,135 @@ export function archiveBatchResultFixture(
 }
 
 
+
+/** Папки библиотеки знаний: корневая «Источники» с одним документом. */
+export const knowledgeFoldersFixture: KnowledgeFoldersPage = {
+  items: [
+    {
+      id: 'f-1',
+      name: 'Источники',
+      parent_id: null,
+      documents: 1,
+      created_at: '2026-11-22T09:00:00',
+    },
+  ],
+}
+
+/** Документ библиотеки: PDF с текстовым слоем, разобранный на фрагменты. */
+export function knowledgeDocumentFixture(
+  changes: Partial<KnowledgeDocument> = {},
+): KnowledgeDocument {
+  return {
+    id: 'k-1',
+    folder_id: 'f-1',
+    title: 'Бета-активность в височной области',
+    filename: 'beta.pdf',
+    kind: 'pdf',
+    source_url: null,
+    size_bytes: 2048,
+    pages: 3,
+    text_chars: 1200,
+    status: 'ok',
+    error: null,
+    tags: ['ЭЭГ'],
+    chunks: 2,
+    created_at: '2026-11-22T09:05:00',
+    indexed_at: '2026-11-22T09:05:10',
+    ...changes,
+  }
+}
+
+/** Документ с оглавлением и аннотацией раздела. */
+export function knowledgeDocumentDetailFixture(): KnowledgeDocumentDetail {
+  return {
+    document: knowledgeDocumentFixture(),
+    chunks: [
+      {
+        id: 'c-1',
+        ordinal: 0,
+        heading: 'Введение',
+        page_from: 1,
+        page_to: 1,
+        text: 'Бета-ритм 13–30 Гц отражает активность коры.',
+        tokens: 9,
+      },
+      {
+        id: 'c-2',
+        ordinal: 1,
+        heading: 'Височная область',
+        page_from: 2,
+        page_to: 3,
+        text: 'В левой височной области бета связана с речевыми зонами.',
+        tokens: 11,
+      },
+    ],
+    annotations: [
+      {
+        id: 'a-1',
+        document_id: 'k-1',
+        chunk_id: 'c-2',
+        heading: 'Височная область',
+        note: 'Сверить с монтажом 10-20.',
+        created_at: '2026-11-22T09:10:00',
+      },
+    ],
+  }
+}
+
+/** Теги Базы знаний. */
+export const knowledgeTagsFixture: KnowledgeTagsPage = {
+  items: [{ id: 'tag-1', name: 'ЭЭГ', documents: 1 }],
+}
+
+/** Поиск: TF-IDF-режим, один найденный фрагмент. */
+export const knowledgeSearchFixture: KnowledgeSearch = {
+  query: 'бета',
+  mode: 'tfidf',
+  hits: [
+    {
+      chunk_id: 'c-2',
+      document_id: 'k-1',
+      document_title: 'Бета-активность в височной области',
+      ordinal: 1,
+      heading: 'Височная область',
+      page_from: 2,
+      text: 'В левой височной области бета связана с речевыми зонами.',
+      score: 0.82,
+    },
+  ],
+}
+
+/** Граф знаний: документ и тег, одно подтверждённое ребро. */
+export const knowledgeGraphFixture: KnowledgeGraph = {
+  nodes: [
+    { kind: 'document', id: 'k-1', label: 'Бета-активность в височной области', documents: 0 },
+    { kind: 'tag', id: 'tag-1', label: 'ЭЭГ', documents: 1 },
+  ],
+  edges: [
+    {
+      id: 'l-1',
+      from_kind: 'document',
+      from_id: 'k-1',
+      to_kind: 'tag',
+      to_id: 'tag-1',
+      relation: 'related',
+      confirmed: true,
+      created_at: '2026-11-22T09:12:00',
+    },
+  ],
+}
+
+/** Вложение нити чата: документ библиотеки. */
+export function agentAttachmentFixture(
+  changes: Partial<AgentAttachment> = {},
+): AgentAttachment {
+  return {
+    id: 'att-1',
+    thread_id: 't-1',
+    kind: 'document',
+    ref_id: 'k-1',
+    label: 'Бета-активность в височной области',
+    created_at: '2026-11-22T09:15:00',
+    ...changes,
+  }
+}

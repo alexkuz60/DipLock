@@ -22,6 +22,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     event,
 )
@@ -869,6 +870,175 @@ class AgentMessage(Base):
     latency_ms = Column(Float, nullable=True)
     created_at = Column(DateTime, nullable=False)
     finished_at = Column(DateTime, nullable=True)
+
+
+class AgentWebSearch(Base):
+    """Веб-поиск Архивариуса: запрос, найденные материалы и машинный перевод.
+
+    Результаты хранятся JSON-списком ``{title, url, snippet, title_ru,
+    snippet_ru, error}``. Поиск и перевод — только явными кнопками; последний
+    поиск нити подмешивается в промпт роли ``archivist``.
+    """
+
+    __tablename__ = "agent_web_searches"
+    __table_args__ = (
+        Index("ix_agent_web_searches_thread_created", "thread_id", "created_at", "id"),
+    )
+    id = Column(String, primary_key=True)
+    thread_id = Column(String, ForeignKey("agent_threads.id"), nullable=False, index=True)
+    role_id = Column(String, nullable=True)
+    query = Column(String, nullable=False)
+    provider = Column(String, nullable=False)
+    results = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    translated_at = Column(DateTime, nullable=True)
+
+
+class KnowledgeFolder(Base):
+    """Папка библиотеки знаний: дерево «Источники» (книги, статьи, веб-страницы).
+
+    ``parent_id`` — вложенность; удаление папки каскадно убирает документы
+    (файлы на диске удаляет сервис, БД — внешние ключи).
+    """
+
+    __tablename__ = "knowledge_folders"
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    parent_id = Column(String, ForeignKey("knowledge_folders.id"), nullable=True, index=True)
+    created_at = Column(DateTime, nullable=False)
+
+
+class KnowledgeDocument(Base):
+    """Документ библиотеки: файл на диске либо сохранённая веб-страница.
+
+    ``status``: ``ok`` (текст извлечён), ``empty`` (текстового слоя нет —
+    скан без OCR), ``failed`` (разбор упал, причина в ``error``). ``sha256``
+    даёт дедуп: повторная загрузка того же файла возвращает существующий
+    документ, а не копию.
+    """
+
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        Index("ix_knowledge_documents_folder_created", "folder_id", "created_at", "id"),
+    )
+    id = Column(String, primary_key=True)
+    folder_id = Column(String, ForeignKey("knowledge_folders.id"), nullable=True, index=True)
+    title = Column(String, nullable=False)
+    filename = Column(String, nullable=False)
+    kind = Column(String, nullable=False)  # pdf | docx | xlsx | image | web | text
+    source_url = Column(String, nullable=True)
+    sha256 = Column(String, nullable=False, index=True)
+    size_bytes = Column(Integer, nullable=False, default=0)
+    pages = Column(Integer, nullable=True)
+    text_chars = Column(Integer, nullable=False, default=0)
+    status = Column(String, nullable=False, default="ok")
+    error = Column(String, nullable=True)
+    meta = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime, nullable=False)
+    indexed_at = Column(DateTime, nullable=True)
+
+
+class KnowledgeChunk(Base):
+    """Фрагмент документа: единица поиска и цитирования в чате.
+
+    ``heading`` — ближайший заголовок раздела/главы, ``page_from``/``page_to`` —
+    страницы PDF. ``embedding`` — вектор провайдера (JSON-список), пусто, если
+    эмбеддинги недоступны: поиск тогда идёт по TF-IDF.
+    """
+
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        Index("ix_knowledge_chunks_document_ordinal", "document_id", "ordinal"),
+    )
+    id = Column(String, primary_key=True)
+    document_id = Column(
+        String, ForeignKey("knowledge_documents.id"), nullable=False, index=True,
+    )
+    ordinal = Column(Integer, nullable=False)
+    heading = Column(String, nullable=True)
+    page_from = Column(Integer, nullable=True)
+    page_to = Column(Integer, nullable=True)
+    text = Column(Text, nullable=False)
+    tokens = Column(Integer, nullable=False, default=0)
+    embedding = Column(JSON, nullable=True)
+
+
+class KnowledgeTag(Base):
+    """Поисковый тег Базы знаний (одно имя на всю библиотеку)."""
+
+    __tablename__ = "knowledge_tags"
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False)
+
+
+class KnowledgeDocTag(Base):
+    """Связь документа с тегом (составной ключ)."""
+
+    __tablename__ = "knowledge_doc_tags"
+    document_id = Column(
+        String, ForeignKey("knowledge_documents.id"), primary_key=True,
+    )
+    tag_id = Column(String, ForeignKey("knowledge_tags.id"), primary_key=True, index=True)
+
+
+class KnowledgeAnnotation(Base):
+    """Аннотация раздела: заметка исследователя к документу или фрагменту."""
+
+    __tablename__ = "knowledge_annotations"
+    __table_args__ = (
+        Index("ix_knowledge_annotations_document_created", "document_id", "created_at", "id"),
+    )
+    id = Column(String, primary_key=True)
+    document_id = Column(
+        String, ForeignKey("knowledge_documents.id"), nullable=False, index=True,
+    )
+    chunk_id = Column(String, ForeignKey("knowledge_chunks.id"), nullable=True)
+    heading = Column(String, nullable=True)
+    note = Column(Text, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class KnowledgeLink(Base):
+    """Ребро графа знаний: связь документа, тега или понятия с другим узлом.
+
+    В граф попадают только подтверждённые связи (``confirmed``): ИИ может
+    предложить ребро, но показывается оно отдельно и в граф не входит.
+    """
+
+    __tablename__ = "knowledge_links"
+    __table_args__ = (
+        Index("ix_knowledge_links_from", "from_kind", "from_id"),
+        Index("ix_knowledge_links_to", "to_kind", "to_id"),
+    )
+    id = Column(String, primary_key=True)
+    from_kind = Column(String, nullable=False)  # document | tag | concept
+    from_id = Column(String, nullable=False)
+    to_kind = Column(String, nullable=False)
+    to_id = Column(String, nullable=False)
+    relation = Column(String, nullable=False)  # cites | related | defines | mentions
+    confirmed = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime, nullable=False)
+
+
+class AgentThreadAttachment(Base):
+    """Вложение нити чата: документ библиотеки, веб-ссылка или отчёт ЭЭГ.
+
+    Пока вложение прикреплено, его содержимое (фрагменты документа, сводка
+    отчёта) попадает в промпт ролей. Наружу уходит только при отправке
+    сообщения — правило «явное действие».
+    """
+
+    __tablename__ = "agent_thread_attachments"
+    __table_args__ = (
+        Index("ix_agent_thread_attachments_thread", "thread_id", "created_at", "id"),
+    )
+    id = Column(String, primary_key=True)
+    thread_id = Column(String, ForeignKey("agent_threads.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)  # document | web | report | analysis
+    ref_id = Column(String, nullable=False)
+    label = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False)
 
 
 def _sync_driver_url(url: URL) -> str:

@@ -91,6 +91,9 @@
 | `GET /agent-chat/threads/{thread_id}/messages/{message_id}` | чтение состояния и сохранённого ответа для поллинга |
 | `POST /agent-chat/threads/{thread_id}/messages/{message_id}/retry` | повтор неудавшегося ответа (202), успешный ответ повторить нельзя |
 | `GET /agent-chat/threads/{thread_id}/messages/{message_id}/stream` | SSE-дельты ответа агента; итог дочитывается из БД, позднему подписчику — `round_done` |
+| `GET /agent-chat/threads/{thread_id}/web-search` | поиски нити, новые сверху (миграция 0020) |
+| `POST /agent-chat/threads/{thread_id}/web-search` | веб-поиск Архивариуса (201): запрос уходит поисковику только этим действием, результаты сохраняются в нити |
+| `POST /agent-chat/threads/{thread_id}/web-search/{search_id}/translate` | перевод найденных материалов на русский провайдером роли; ошибки — по каждому материалу |
 
 Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
 без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;
@@ -113,6 +116,7 @@
 | `POST /llm-router/probe` | нейтральная проверка связи без материалов дела; при списке моделей — перебором (параллельно), итог по каждой; ошибка провайдера — в `error`, не HTTP-исключение |
 | `POST /llm-router/chat-probe` | проба советника (§10): синтетический сценарий (`dialog`/`role`/`insufficient`/`leading`) на выбранном провайдере; при списке моделей — перебором (параллельно), ответ и задержка каждой; `truncated` — ответ обрезан по бюджету токенов (`llm_probe_max_tokens`); материалы дела не отправляются; ошибка провайдера — в `error` |
 | `POST /llm-router/decide-probe` | проба решающего классификатора Jev (§5.2): синтетический state (учебное описание досье), типизированные ответы `choice`/`noul` и задержка; перебор моделей списка параллельно; материалы дела не отправляются; ошибка провайдера — в `error` |
+| `GET /llm-router/routellm/models` | каталог моделей провайдера RouteLLM (`?provider_id=`): id, цена за 1M токенов, модальности, лимиты контекста/ответа из models.dev; остаток кредитов API не отдаёт — только пояснение и ссылка на биллинг |
 
 Ответы приватные `no-store`, 422 без эха `input` (`PrivateRoute`); 400 — текст
 для UI (адрес/маршруты), 404 — нет провайдера, 409 — устаревший id.
@@ -168,6 +172,37 @@
 | `GET /hypotheses` / `GET /hypotheses/{id}` | список/строка библиотеки (новые сверху); 404 — нет правила |
 | `DELETE /hypotheses/{id}` | удалить правило (204; повторный — 404) |
 | `POST /hypotheses/{id}/recheck` | пересчёт сохранённого правила по текущим прогонам (`HypothesisCheckOut`; 404 — нет) |
+
+### Отдельный роутер «Знания» (библиотека Консилиума, 22.11.2026)
+
+`backend/app/api/knowledge.py` подключён в main с тем же `settings.api_prefix`;
+работа — `services/knowledge/` (`storage`, `extract`, `chunking`, `index`,
+`store`), контракт — `schemas/knowledge.py`, миграция `0021_knowledge_library`,
+правила — `docs/rules/knowledge.md`. Паттерн — `PrivateRoute` Консилиума
+(`Cache-Control: private, no-store`, без эха ввода в 422); разбор файлов идёт в
+`asyncio.to_thread`. 413 — лимит файла/библиотеки, 400 — пустой файл/запрос или
+не http(s) ссылка, 404 — нет папки/документа/вложения, 503 — БД недоступна.
+
+| Метод и путь (относительно `/api/v1`) | Назначение |
+|---|---|
+| `GET /knowledge/folders` | папки библиотеки с числом документов |
+| `POST /knowledge/folders` | новая папка (`name`, `parent_id`) — 201 |
+| `DELETE /knowledge/folders/{id}` | удалить папку каскадом с документами — 204 |
+| `GET /knowledge/documents` | документы (`folder_id`, `limit`, `offset`), новые сверху |
+| `POST /knowledge/documents` | загрузка файла (`file`, `folder_id`, `title`): дедуп по sha256, разбор, нарезка, индексация — 201 |
+| `POST /knowledge/documents/web` | сохранить веб-страницу по `http(s)`-ссылке — 201 |
+| `GET /knowledge/documents/{id}` | документ с оглавлением, аннотациями и тегами |
+| `DELETE /knowledge/documents/{id}` | удалить документ и его файлы — 204 |
+| `POST /knowledge/documents/{id}/annotations` | аннотация раздела/фрагмента — 201 |
+| `DELETE /knowledge/annotations/{id}` | удалить аннотацию — 204 |
+| `PUT /knowledge/documents/{id}/tags` | заменить набор тегов документа (`tags`) |
+| `GET /knowledge/tags` / `POST /knowledge/tags` | теги с числом документов / создать тег (повтор имени — существующий) |
+| `GET /knowledge/search?q=` | поиск по фрагментам: `mode` = `hybrid`/`tfidf`, `hits` с оценкой |
+| `GET /knowledge/graph` | узлы и **только подтверждённые** рёбра |
+| `POST /knowledge/links` / `DELETE /knowledge/links/{id}` | ребро графа (201) / удалить ребро (204) |
+| `GET /knowledge/threads/{thread_id}/attachments` | вложения нити чата |
+| `POST /knowledge/threads/{thread_id}/attachments` | прикрепить `document`/`web`/`report`/`analysis` — 201 |
+| `DELETE /knowledge/attachments/{id}` | снять вложение — 204 |
 
 ## Инвентарь эндпоинтов (89 в `routes.py`, порядок файла)
 

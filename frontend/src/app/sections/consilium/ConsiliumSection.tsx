@@ -141,16 +141,23 @@ const AgentChatView = lazy(() =>
   })),
 )
 
+const KnowledgeView = lazy(() =>
+  import('../knowledge/KnowledgeSection').then(({ KnowledgeSection }) => ({
+    default: KnowledgeSection,
+  })),
+)
+
 /** Раздел сохраняет ручное исследование Т1 и добавляет рядом общий чат экспертов. */
 export function ConsiliumSection() {
   const [params, setParams] = useSearchParams()
-  const view = params.get('view') === 'chat' ? 'chat' : 'research'
+  const raw = params.get('view')
+  const view = raw === 'chat' ? 'chat' : raw === 'knowledge' ? 'knowledge' : 'research'
 
-  function selectView(nextView: 'research' | 'chat') {
+  function selectView(nextView: 'research' | 'chat' | 'knowledge') {
     setParams((previous) => {
       const next = new URLSearchParams(previous)
-      if (nextView === 'chat') next.set('view', 'chat')
-      else next.delete('view')
+      if (nextView === 'research') next.delete('view')
+      else next.set('view', nextView)
       return next
     })
   }
@@ -172,10 +179,21 @@ export function ConsiliumSection() {
         >
           Чат экспертов
         </Button>
+        <Button
+          variant={view === 'knowledge' ? 'primary' : 'secondary'}
+          aria-pressed={view === 'knowledge'}
+          onClick={() => selectView('knowledge')}
+        >
+          Знания
+        </Button>
       </nav>
       {view === 'chat' ? (
         <Suspense fallback={<LoadingBlock label="Загрузка чата экспертов..." />}>
           <AgentChatView />
+        </Suspense>
+      ) : view === 'knowledge' ? (
+        <Suspense fallback={<LoadingBlock label="Загрузка знаний..." />}>
+          <KnowledgeView />
         </Suspense>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">

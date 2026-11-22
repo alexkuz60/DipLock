@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 
 from app.models import db
 from app.schemas.agent_chat import (
@@ -17,6 +17,9 @@ from app.schemas.agent_chat import (
     AgentThreadCreate,
     AgentThreadOut,
     AgentThreadsPage,
+    AgentWebSearchesPage,
+    AgentWebSearchOut,
+    AgentWebSearchResultOut,
 )
 from app.services.agent_chat.roles import AgentChatError
 from app.services.agent_chat.roles import utcnow as _utcnow
@@ -106,17 +109,30 @@ async def delete_thread(thread_id: str) -> None:
         await session.execute(
             delete(db.AgentMessage).where(db.AgentMessage.thread_id == thread_id),
         )
+        await session.execute(
+            delete(db.AgentWebSearch).where(db.AgentWebSearch.thread_id == thread_id),
+        )
         await session.delete(row)
         await session.commit()
 
 
 async def list_messages(thread_id: str) -> AgentMessagesPage:
-    """Переписка нити по времени."""
+    """Переписка нити по времени.
+
+    Вопрос и ответы одного обмена создаются одной транзакцией с общим
+    ``created_at``, поэтому равенство времени добирается явно: сначала реплика
+    исследователя, затем ответы агентов (по id). Иначе порядок в переписке
+    зависел бы от случайных UUID.
+    """
     await require_thread(thread_id)
     async with db.AsyncSessionLocal() as session:
         rows = (await session.scalars(
             select(db.AgentMessage).where(db.AgentMessage.thread_id == thread_id)
-            .order_by(db.AgentMessage.created_at, db.AgentMessage.id),
+            .order_by(
+                db.AgentMessage.created_at,
+                case((db.AgentMessage.author_kind == "researcher", 0), else_=1),
+                db.AgentMessage.id,
+            ),
         )).all()
         return AgentMessagesPage(items=[message_out(row) for row in rows])
 
@@ -257,3 +273,87 @@ async def mark_interrupted() -> int:
             )
         await session.commit()
         return len(rows)
+
+
+def web_search_out(row: db.AgentWebSearch) -> AgentWebSearchOut:
+    """Типизированный поиск с материалами и переводом."""
+    items = [
+        AgentWebSearchResultOut.model_validate(item)
+        for item in list(row.results or [])
+        if isinstance(item, dict)
+    ]
+    return AgentWebSearchOut.model_validate({
+        "id": row.id, "thread_id": row.thread_id, "role_id": row.role_id,
+        "query": row.query, "provider": row.provider, "results": items,
+        "translated": row.translated_at is not None,
+        "created_at": row.created_at, "translated_at": row.translated_at,
+    })
+
+
+async def save_web_search(
+    thread_id: str,
+    *,
+    query: str,
+    provider: str,
+    results: list[dict[str, Any]],
+    role_id: str | None = None,
+) -> AgentWebSearchOut:
+    """Сохранить поиск нити до показа результатов."""
+    await require_thread(thread_id)
+    async with db.AsyncSessionLocal() as session:
+        row = db.AgentWebSearch(
+            id=str(uuid.uuid4()), thread_id=thread_id, role_id=role_id,
+            query=query, provider=provider, results=results,
+            created_at=_utcnow(), translated_at=None,
+        )
+        session.add(row)
+        await session.commit()
+        return web_search_out(row)
+
+
+async def list_web_searches(thread_id: str, limit: int = 10) -> AgentWebSearchesPage:
+    """Поиски нити, новые сверху."""
+    await require_thread(thread_id)
+    async with db.AsyncSessionLocal() as session:
+        rows = (await session.scalars(
+            select(db.AgentWebSearch).where(db.AgentWebSearch.thread_id == thread_id)
+            .order_by(db.AgentWebSearch.created_at.desc(), db.AgentWebSearch.id)
+            .limit(limit),
+        )).all()
+        return AgentWebSearchesPage(items=[web_search_out(row) for row in rows])
+
+
+async def get_web_search(thread_id: str, search_id: str) -> AgentWebSearchOut:
+    """Поиск нити; чужой/отсутствующий — 404."""
+    await require_thread(thread_id)
+    async with db.AsyncSessionLocal() as session:
+        row = await session.get(db.AgentWebSearch, search_id)
+        if row is None or row.thread_id != thread_id:
+            raise AgentChatError(404, "Веб-поиск не найден в этой нити")
+        return web_search_out(row)
+
+
+async def update_web_search_results(
+    thread_id: str, search_id: str, results: list[dict[str, Any]],
+) -> AgentWebSearchOut:
+    """Записать перевод материалов и отметить поиск переведённым."""
+    await require_thread(thread_id)
+    async with db.AsyncSessionLocal() as session:
+        row = await session.get(db.AgentWebSearch, search_id)
+        if row is None or row.thread_id != thread_id:
+            raise AgentChatError(404, "Веб-поиск не найден в этой нити")
+        _set(row, results=results, translated_at=_utcnow())
+        await session.commit()
+        return web_search_out(row)
+
+
+async def latest_web_search(thread_id: str) -> AgentWebSearchOut | None:
+    """Последний поиск нити — контекст ответа Архивариуса."""
+    await require_thread(thread_id)
+    async with db.AsyncSessionLocal() as session:
+        row = await session.scalar(
+            select(db.AgentWebSearch).where(db.AgentWebSearch.thread_id == thread_id)
+            .order_by(db.AgentWebSearch.created_at.desc(), db.AgentWebSearch.id)
+            .limit(1),
+        )
+        return web_search_out(row) if row is not None else None

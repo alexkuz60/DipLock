@@ -11,6 +11,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { ArrowLeft, ArrowRight } from 'lucide-react'
 import { cx } from '@/shared/ui/cx'
 import { Button } from '@/shared/ui/Button'
+import { AskAssistantButton } from './AskAssistantButton'
 import { ArtifactsArticle } from './articles/ArtifactsArticle'
 import { CleanArticle } from './articles/CleanArticle'
 import { CompareArticle } from './articles/CompareArticle'
@@ -153,6 +154,9 @@ export function WikiSection() {
         </nav>
 
         <div className="min-w-0 p-6 pb-16">
+          <div className="mb-3 flex justify-end">
+            <AskAssistantButton articleId={active} title={WIKI_ARTICLES[activeIndex]?.title ?? active} />
+          </div>
           <article id="wiki-article" key={active} data-article={active}>
             <Current />
           </article>

@@ -3,6 +3,7 @@
  */
 import { vi } from 'vitest'
 import {
+  agentAttachmentFixture,
   analysisDetailFixture,
   analysisPointsFixture,
   analysisSummaryFixture,
@@ -18,6 +19,12 @@ import {
   groupAggregateFixture,
   groupRunSummaryFixture,
   initStatusFixture,
+  knowledgeDocumentDetailFixture,
+  knowledgeDocumentFixture,
+  knowledgeFoldersFixture,
+  knowledgeGraphFixture,
+  knowledgeSearchFixture,
+  knowledgeTagsFixture,
   llmChatProbeFixture,
   llmDecideProbeFixture,
   llmProbeFixture,
@@ -30,6 +37,7 @@ import {
   recordingFixture,
   reportHtmlOutFixture,
   reportResultFixture,
+  routeLlmModelsFixture,
   bundleResultFixture,
   recordingReadinessDetailFixture,
   recordingsFixture,
@@ -40,6 +48,8 @@ import {
 import { encodeSignalBlob } from './signalBlob'
 import { spectrogramBlobFixture } from './spectrogramBlob'
 import type {
+  AgentAttachment,
+  AgentAttachmentsPage,
   AnalysisDetail,
   AnalysisSummary,
   ArchiveBatchResult,
@@ -57,6 +67,12 @@ import type {
   GroupAnalysisSummary,
   InitStatus,
   JobStatus,
+  KnowledgeDocument,
+  KnowledgeDocumentDetail,
+  KnowledgeFoldersPage,
+  KnowledgeGraph,
+  KnowledgeSearch,
+  KnowledgeTagsPage,
   LlmChatProbeResult,
   LlmDecideProbeResult,
   LlmProbeResult,
@@ -72,6 +88,7 @@ import type {
   RecordingSummary,
   ReportHtmlOut,
   ReportResult,
+  RouteLlmModels,
   SpectrogramResult,
   SpectrumResult,
 } from '@/shared/api/types'
@@ -160,6 +177,8 @@ export type MockApiOptions = {
   llmChatProbe?: LlmChatProbeResult
   /** Результат пробы решающего классификатора `POST /llm-router/decide-probe` (§5.2) */
   llmDecideProbe?: LlmDecideProbeResult
+  /** Каталог RouteLLM `GET /llm-router/routellm/models` (модели, цена, лимиты) */
+  routeLlmModels?: RouteLlmModels
   /** Смоделировать отказ сигналов записи (например 404 после TTL) */
   signalsFail?: boolean
   /** Стадия предподготовки, если запрос её не указал (срез 2.7) */
@@ -240,6 +259,22 @@ export type MockApiOptions = {
   restartFail?: string
   /** История задач для `GET /jobs?limit=` (подтверждение перезапуска) */
   jobs?: JobStatus[]
+  /** Папки библиотеки знаний (`GET /knowledge/folders`) */
+  knowledgeFolders?: KnowledgeFoldersPage
+  /** Документы библиотеки (`GET /knowledge/documents`) */
+  knowledgeDocuments?: { items: KnowledgeDocument[]; total: number }
+  /** Документ с оглавлением (`GET /knowledge/documents/{id}`) */
+  knowledgeDocument?: KnowledgeDocumentDetail
+  /** Теги Базы знаний (`GET /knowledge/tags`) */
+  knowledgeTags?: KnowledgeTagsPage
+  /** Поиск по База знаний (`GET /knowledge/search`) */
+  knowledgeSearch?: KnowledgeSearch
+  /** Граф знаний (`GET /knowledge/graph`) */
+  knowledgeGraph?: KnowledgeGraph
+  /** Вложения нити чата (`GET /knowledge/threads/{id}/attachments`) */
+  agentAttachments?: AgentAttachmentsPage
+  /** Ответ `POST /knowledge/threads/{id}/attachments` */
+  agentAttachment?: AgentAttachment
 }
 
 export function mockApiFetch(options: MockApiOptions = {}) {
@@ -606,6 +641,10 @@ export function mockApiFetch(options: MockApiOptions = {}) {
       // Раньше общей ветки `/recordings/`: URL mains её содержит
       return jsonResponse(options.mains ?? mainsFixture())
     }
+    if (url.includes('/llm-router/routellm/models')) {
+      // Каталог RouteLLM: модели провайдера с ценой и лимитами
+      return jsonResponse(options.routeLlmModels ?? routeLlmModelsFixture())
+    }
     if (url.includes('/llm-router/decide-probe')) {
       // Проба решающего классификатора (§5.2): по умолчанию успех, ошибка — через options
       return jsonResponse(options.llmDecideProbe ?? llmDecideProbeFixture())
@@ -680,6 +719,103 @@ export function mockApiFetch(options: MockApiOptions = {}) {
         return jsonResponse({ id: 1, created_at: null, ...body }, 201)
       }
       return jsonResponse([])
+    }
+    if (url.includes('/knowledge/')) {
+      // Библиотека знаний Консилиума: папки, документы, теги, поиск, граф, вложения.
+      // Порядок веток важен: `/documents/{id}/annotations` и `/documents/{id}/tags`
+      // содержат подстроки общих веток, поэтому узкие пути идут раньше.
+      if (url.includes('/attachments')) {
+        if (method === 'POST') {
+          return jsonResponse(options.agentAttachment ?? agentAttachmentFixture(), 201)
+        }
+        if (method === 'DELETE') return new Response(null, { status: 204 })
+        return jsonResponse(options.agentAttachments ?? { items: [] })
+      }
+      if (url.includes('/annotations')) {
+        if (method === 'DELETE') return new Response(null, { status: 204 })
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          note?: string
+          chunk_id?: string | null
+          heading?: string | null
+        }
+        return jsonResponse(
+          {
+            id: 'a-new',
+            document_id: 'k-1',
+            chunk_id: body.chunk_id ?? null,
+            heading: body.heading ?? null,
+            note: body.note ?? '',
+            created_at: '2026-11-22T09:20:00',
+          },
+          201,
+        )
+      }
+      if (url.includes('/links')) {
+        if (method === 'DELETE') return new Response(null, { status: 204 })
+        const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+        return jsonResponse(
+          {
+            id: 'l-new',
+            relation: 'related',
+            confirmed: true,
+            created_at: '2026-11-22T09:22:00',
+            ...body,
+          },
+          201,
+        )
+      }
+      if (url.includes('/search')) {
+        return jsonResponse(options.knowledgeSearch ?? knowledgeSearchFixture)
+      }
+      if (url.includes('/graph')) {
+        return jsonResponse(options.knowledgeGraph ?? knowledgeGraphFixture)
+      }
+      if (url.includes('/folders')) {
+        if (method === 'DELETE') return new Response(null, { status: 204 })
+        if (method === 'POST') {
+          const body = JSON.parse(String(init?.body ?? '{}')) as {
+            name?: string
+            parent_id?: string | null
+          }
+          return jsonResponse(
+            {
+              id: 'f-new',
+              name: body.name ?? 'Папка',
+              parent_id: body.parent_id ?? null,
+              documents: 0,
+              created_at: '2026-11-22T09:25:00',
+            },
+            201,
+          )
+        }
+        return jsonResponse(options.knowledgeFolders ?? knowledgeFoldersFixture)
+      }
+      if (url.includes('/tags')) {
+        if (method === 'PUT') {
+          const body = JSON.parse(String(init?.body ?? '{}')) as { tags?: string[] }
+          return jsonResponse(body.tags ?? [])
+        }
+        if (method === 'POST') {
+          const body = JSON.parse(String(init?.body ?? '{}')) as { name?: string }
+          return jsonResponse({ id: 'tag-new', name: body.name ?? 'тег', documents: 0 }, 201)
+        }
+        return jsonResponse(options.knowledgeTags ?? knowledgeTagsFixture)
+      }
+      if (/\/knowledge\/documents\/[^/?]+$/.test(url)) {
+        if (method === 'DELETE') return new Response(null, { status: 204 })
+        return jsonResponse(options.knowledgeDocument ?? knowledgeDocumentDetailFixture())
+      }
+      if (url.includes('/documents')) {
+        if (method === 'POST') {
+          return jsonResponse(
+            knowledgeDocumentFixture({ id: 'k-new', title: 'Новый документ' }),
+            201,
+          )
+        }
+        return jsonResponse(
+          options.knowledgeDocuments ?? { items: [knowledgeDocumentFixture()], total: 1 },
+        )
+      }
     }
     if (url.includes('/meta')) {
       return jsonResponse(options.meta ?? metaFixture)

@@ -2969,6 +2969,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent-chat/threads/{thread_id}/web-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Web Searches
+         * @description Поиски нити, новые сверху.
+         */
+        get: operations["list_web_searches_api_v1_agent_chat_threads__thread_id__web_search_get"];
+        put?: never;
+        /**
+         * Create Web Search
+         * @description Веб-поиск Архивариуса: запрос уходит поисковику только по этой кнопке.
+         */
+        post: operations["create_web_search_api_v1_agent_chat_threads__thread_id__web_search_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent-chat/threads/{thread_id}/web-search/{search_id}/translate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Translate Web Search
+         * @description Перевод найденных материалов на русский — отдельным явным действием.
+         */
+        post: operations["translate_web_search_api_v1_agent_chat_threads__thread_id__web_search__search_id__translate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agent-chat/threads/{thread_id}/messages/{message_id}": {
         parameters: {
             query?: never;
@@ -3265,6 +3309,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm-router/routellm/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Каталог RouteLLM: модели, стоимость, модальности и лимиты
+         * @description Список моделей провайдера; остаток кредитов — честный отказ со ссылкой.
+         */
+        get: operations["routellm_models_api_v1_llm_router_routellm_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm-router/probe": {
         parameters: {
             query?: never;
@@ -3325,6 +3389,326 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Folders
+         * @description Папки библиотеки с числом документов.
+         */
+        get: operations["list_folders_api_v1_knowledge_folders_get"];
+        put?: never;
+        /**
+         * Create Folder
+         * @description Новая папка (вложенность через ``parent_id``).
+         */
+        post: operations["create_folder_api_v1_knowledge_folders_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/folders/{folder_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Folder
+         * @description Удаляет папку; документы внутри удаляются каскадом.
+         */
+        delete: operations["delete_folder_api_v1_knowledge_folders__folder_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Documents
+         * @description Документы библиотеки, новые сверху.
+         */
+        get: operations["list_documents_api_v1_knowledge_documents_get"];
+        put?: never;
+        /**
+         * Upload Document
+         * @description Загрузка файла: дедуп по sha256, разбор в потоке, индексация фрагментов.
+         */
+        post: operations["upload_document_api_v1_knowledge_documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/documents/web": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Web Document
+         * @description Сохраняет веб-страницу в библиотеку по ссылке (текст, без картинок).
+         */
+        post: operations["add_web_document_api_v1_knowledge_documents_web_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/documents/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Document
+         * @description Документ с оглавлением по разделам и аннотациями.
+         */
+        get: operations["get_document_api_v1_knowledge_documents__document_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Document
+         * @description Удаляет документ и его файлы с диска.
+         */
+        delete: operations["delete_document_api_v1_knowledge_documents__document_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/documents/{document_id}/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Annotation
+         * @description Аннотация раздела или фрагмента документа.
+         */
+        post: operations["add_annotation_api_v1_knowledge_documents__document_id__annotations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/annotations/{annotation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Annotation
+         * @description Удаляет аннотацию.
+         */
+        delete: operations["delete_annotation_api_v1_knowledge_annotations__annotation_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/documents/{document_id}/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Document Tags
+         * @description Заменяет набор тегов документа (новые имена создаются).
+         */
+        put: operations["set_document_tags_api_v1_knowledge_documents__document_id__tags_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tags
+         * @description Все теги библиотеки с числом документов.
+         */
+        get: operations["list_tags_api_v1_knowledge_tags_get"];
+        put?: never;
+        /**
+         * Create Tag
+         * @description Создаёт тег (повтор имени возвращает существующий).
+         */
+        post: operations["create_tag_api_v1_knowledge_tags_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search
+         * @description Поиск по фрагментам: TF-IDF и эмбеддинги, режим — в ответе.
+         */
+        get: operations["search_api_v1_knowledge_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Graph
+         * @description Граф знаний: узлы и подтверждённые рёбра.
+         */
+        get: operations["graph_api_v1_knowledge_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Link
+         * @description Ребро графа знаний.
+         */
+        post: operations["create_link_api_v1_knowledge_links_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/links/{link_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Link
+         * @description Удаляет ребро графа.
+         */
+        delete: operations["delete_link_api_v1_knowledge_links__link_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/threads/{thread_id}/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Attachments
+         * @description Вложения нити чата.
+         */
+        get: operations["list_attachments_api_v1_knowledge_threads__thread_id__attachments_get"];
+        put?: never;
+        /**
+         * Add Attachment
+         * @description Прикрепляет документ, ссылку или отчёт ЭЭГ к нити.
+         */
+        post: operations["add_attachment_api_v1_knowledge_threads__thread_id__attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/knowledge/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Attachment
+         * @description Снимает вложение с нити.
+         */
+        delete: operations["delete_attachment_api_v1_knowledge_attachments__attachment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/init-status": {
         parameters: {
             query?: never;
@@ -3366,6 +3750,53 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgentAttachmentCreate
+         * @description Вложение нити чата: документ, веб-ссылка, отчёт или анализ ЭЭГ.
+         */
+        AgentAttachmentCreate: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "document" | "web" | "report" | "analysis";
+            /** Ref Id */
+            ref_id: string;
+            /** Label */
+            label: string;
+        };
+        /**
+         * AgentAttachmentOut
+         * @description Прикреплённое к нити вложение.
+         */
+        AgentAttachmentOut: {
+            /** Id */
+            id: string;
+            /** Thread Id */
+            thread_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "document" | "web" | "report" | "analysis";
+            /** Ref Id */
+            ref_id: string;
+            /** Label */
+            label: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * AgentAttachmentsOut
+         * @description Вложения нити, новые сверху.
+         */
+        AgentAttachmentsOut: {
+            /** Items */
+            items: components["schemas"]["AgentAttachmentOut"][];
+        };
         /**
          * AgentMessageCreate
          * @description Сообщение исследователя: адресаты — из ``@упоминаний`` и/или явного списка.
@@ -3529,6 +3960,71 @@ export interface components {
         AgentThreadsPage: {
             /** Items */
             items: components["schemas"]["AgentThreadOut"][];
+        };
+        /**
+         * AgentWebSearchCreate
+         * @description Запрос веб-поиска Архивариуса: уходит поисковику только по кнопке.
+         */
+        AgentWebSearchCreate: {
+            /** Query */
+            query: string;
+            /** Role Id */
+            role_id?: string | null;
+            /** Limit */
+            limit?: number | null;
+        };
+        /**
+         * AgentWebSearchOut
+         * @description Сохранённый поиск нити: запрос, материалы и признак перевода.
+         */
+        AgentWebSearchOut: {
+            /** Id */
+            id: string;
+            /** Thread Id */
+            thread_id: string;
+            /** Role Id */
+            role_id: string | null;
+            /** Query */
+            query: string;
+            /** Provider */
+            provider: string;
+            /** Results */
+            results: components["schemas"]["AgentWebSearchResultOut"][];
+            /** Translated */
+            translated: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Translated At */
+            translated_at: string | null;
+        };
+        /**
+         * AgentWebSearchResultOut
+         * @description Найденный материал: оригинал и машинный перевод на русский.
+         */
+        AgentWebSearchResultOut: {
+            /** Title */
+            title: string;
+            /** Url */
+            url: string;
+            /** Snippet */
+            snippet: string;
+            /** Title Ru */
+            title_ru?: string | null;
+            /** Snippet Ru */
+            snippet_ru?: string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * AgentWebSearchesPage
+         * @description Поиски нити, новые сверху.
+         */
+        AgentWebSearchesPage: {
+            /** Items */
+            items: components["schemas"]["AgentWebSearchOut"][];
         };
         /**
          * AnalysesPageOut
@@ -5455,6 +5951,15 @@ export interface components {
              * @default welch
              */
             psd_method: string;
+        };
+        /** Body_upload_document_api_v1_knowledge_documents_post */
+        Body_upload_document_api_v1_knowledge_documents_post: {
+            /** File */
+            file: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Title */
+            title?: string | null;
         };
         /**
          * BrodmannAreaOut
@@ -10202,6 +10707,339 @@ export interface components {
             kd_gof_basis?: string | null;
         };
         /**
+         * KnowledgeAnnotationCreate
+         * @description Аннотация раздела: заметка к документу или фрагменту.
+         */
+        KnowledgeAnnotationCreate: {
+            /** Note */
+            note: string;
+            /** Chunk Id */
+            chunk_id?: string | null;
+            /** Heading */
+            heading?: string | null;
+        };
+        /**
+         * KnowledgeAnnotationOut
+         * @description Аннотация с привязкой к фрагменту и заголовку.
+         */
+        KnowledgeAnnotationOut: {
+            /** Id */
+            id: string;
+            /** Document Id */
+            document_id: string;
+            /** Chunk Id */
+            chunk_id: string | null;
+            /** Heading */
+            heading: string | null;
+            /** Note */
+            note: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * KnowledgeChunkOut
+         * @description Фрагмент документа: заголовок, страницы и текст.
+         */
+        KnowledgeChunkOut: {
+            /** Id */
+            id: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Heading */
+            heading: string | null;
+            /** Page From */
+            page_from: number | null;
+            /** Page To */
+            page_to: number | null;
+            /** Text */
+            text: string;
+            /** Tokens */
+            tokens: number;
+        };
+        /**
+         * KnowledgeDocTagsUpdate
+         * @description Полный набор тегов документа (замена, не добавление).
+         */
+        KnowledgeDocTagsUpdate: {
+            /** Tags */
+            tags?: string[];
+        };
+        /**
+         * KnowledgeDocumentDetail
+         * @description Документ с оглавлением, аннотациями и тегами.
+         */
+        KnowledgeDocumentDetail: {
+            document: components["schemas"]["KnowledgeDocumentOut"];
+            /** Chunks */
+            chunks: components["schemas"]["KnowledgeChunkOut"][];
+            /** Annotations */
+            annotations: components["schemas"]["KnowledgeAnnotationOut"][];
+        };
+        /**
+         * KnowledgeDocumentOut
+         * @description Документ библиотеки: метаданные, теги и число фрагментов.
+         */
+        KnowledgeDocumentOut: {
+            /** Id */
+            id: string;
+            /** Folder Id */
+            folder_id: string | null;
+            /** Title */
+            title: string;
+            /** Filename */
+            filename: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "pdf" | "docx" | "xlsx" | "image" | "web" | "text";
+            /** Source Url */
+            source_url: string | null;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Pages */
+            pages: number | null;
+            /** Text Chars */
+            text_chars: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "empty" | "failed";
+            /** Error */
+            error: string | null;
+            /** Tags */
+            tags: string[];
+            /** Chunks */
+            chunks: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Indexed At */
+            indexed_at: string | null;
+        };
+        /**
+         * KnowledgeDocumentsPage
+         * @description Документы библиотеки, новые сверху.
+         */
+        KnowledgeDocumentsPage: {
+            /** Items */
+            items: components["schemas"]["KnowledgeDocumentOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * KnowledgeFolderCreate
+         * @description Новая папка библиотеки: имя и (необязательно) родитель.
+         */
+        KnowledgeFolderCreate: {
+            /** Name */
+            name: string;
+            /** Parent Id */
+            parent_id?: string | null;
+        };
+        /**
+         * KnowledgeFolderOut
+         * @description Папка библиотеки с числом документов внутри.
+         */
+        KnowledgeFolderOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Parent Id */
+            parent_id: string | null;
+            /** Documents */
+            documents: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * KnowledgeFoldersOut
+         * @description Все папки библиотеки (дерево строится на клиенте по ``parent_id``).
+         */
+        KnowledgeFoldersOut: {
+            /** Items */
+            items: components["schemas"]["KnowledgeFolderOut"][];
+        };
+        /**
+         * KnowledgeGraphNode
+         * @description Узел графа: документ, тег или понятие с подписью.
+         */
+        KnowledgeGraphNode: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "document" | "tag" | "concept";
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /**
+             * Documents
+             * @default 0
+             */
+            documents: number;
+        };
+        /**
+         * KnowledgeGraphOut
+         * @description Граф знаний: узлы и подтверждённые рёбра.
+         */
+        KnowledgeGraphOut: {
+            /** Nodes */
+            nodes: components["schemas"]["KnowledgeGraphNode"][];
+            /** Edges */
+            edges: components["schemas"]["KnowledgeLinkOut"][];
+        };
+        /**
+         * KnowledgeLinkCreate
+         * @description Ребро графа знаний: связь двух узлов.
+         */
+        KnowledgeLinkCreate: {
+            /**
+             * From Kind
+             * @enum {string}
+             */
+            from_kind: "document" | "tag" | "concept";
+            /** From Id */
+            from_id: string;
+            /**
+             * To Kind
+             * @enum {string}
+             */
+            to_kind: "document" | "tag" | "concept";
+            /** To Id */
+            to_id: string;
+            /**
+             * Relation
+             * @default related
+             * @enum {string}
+             */
+            relation: "cites" | "related" | "defines" | "mentions";
+            /**
+             * Confirmed
+             * @default true
+             */
+            confirmed: boolean;
+        };
+        /**
+         * KnowledgeLinkOut
+         * @description Ребро графа с признаком подтверждения.
+         */
+        KnowledgeLinkOut: {
+            /** Id */
+            id: string;
+            /**
+             * From Kind
+             * @enum {string}
+             */
+            from_kind: "document" | "tag" | "concept";
+            /** From Id */
+            from_id: string;
+            /**
+             * To Kind
+             * @enum {string}
+             */
+            to_kind: "document" | "tag" | "concept";
+            /** To Id */
+            to_id: string;
+            /** Relation */
+            relation: string;
+            /** Confirmed */
+            confirmed: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * KnowledgeSearchHitOut
+         * @description Найденный фрагмент с документом и оценкой.
+         */
+        KnowledgeSearchHitOut: {
+            /** Chunk Id */
+            chunk_id: string;
+            /** Document Id */
+            document_id: string;
+            /** Document Title */
+            document_title: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Heading */
+            heading: string | null;
+            /** Page From */
+            page_from: number | null;
+            /** Text */
+            text: string;
+            /** Score */
+            score: number;
+        };
+        /**
+         * KnowledgeSearchOut
+         * @description Результат поиска и честный режим: ``hybrid`` или ``tfidf``.
+         */
+        KnowledgeSearchOut: {
+            /** Query */
+            query: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "hybrid" | "tfidf";
+            /** Hits */
+            hits: components["schemas"]["KnowledgeSearchHitOut"][];
+        };
+        /**
+         * KnowledgeTagCreate
+         * @description Новый тег Базы знаний.
+         */
+        KnowledgeTagCreate: {
+            /** Name */
+            name: string;
+        };
+        /**
+         * KnowledgeTagOut
+         * @description Тег и число документов с ним.
+         */
+        KnowledgeTagOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Documents */
+            documents: number;
+        };
+        /**
+         * KnowledgeTagsOut
+         * @description Все теги библиотеки.
+         */
+        KnowledgeTagsOut: {
+            /** Items */
+            items: components["schemas"]["KnowledgeTagOut"][];
+        };
+        /**
+         * KnowledgeWebAdd
+         * @description Добавление веб-страницы в библиотеку по ссылке.
+         */
+        KnowledgeWebAdd: {
+            /** Url */
+            url: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /**
          * LlmChatProbeModelOut
          * @description Итог пробы советника для одной модели списка провайдера (перебор).
          */
@@ -12265,6 +13103,100 @@ export interface components {
             bands?: {
                 [key: string]: components["schemas"]["RoiBandCellOut"];
             };
+        };
+        /**
+         * RouteLlmCreditsOut
+         * @description Остаток кредитов RouteLLM: честный отказ, если API его не отдаёт.
+         */
+        RouteLlmCreditsOut: {
+            /**
+             * Available
+             * @description Удалось ли получить остаток через API
+             */
+            available: boolean;
+            /**
+             * Note
+             * @description Текст для UI: почему остаток недоступен
+             */
+            note: string;
+            /**
+             * Billing Url
+             * @description Ссылка на страницу Billing в Abacus.AI
+             */
+            billing_url: string;
+        };
+        /**
+         * RouteLlmModelOut
+         * @description Модель каталога RouteLLM: стоимость, модальности и лимиты токенов.
+         */
+        RouteLlmModelOut: {
+            /** Id */
+            id: string;
+            /**
+             * Name
+             * @description Человеческое имя модели
+             */
+            name?: string | null;
+            /**
+             * Context
+             * @description Лимит контекста, токенов
+             */
+            context?: number | null;
+            /**
+             * Output
+             * @description Лимит ответа, токенов
+             */
+            output?: number | null;
+            /**
+             * Cost Input
+             * @description Цена входа, $ за 1M токенов
+             */
+            cost_input?: number | null;
+            /**
+             * Cost Output
+             * @description Цена выхода, $ за 1M токенов
+             */
+            cost_output?: number | null;
+            /** Modalities Input */
+            modalities_input?: string[];
+            /** Modalities Output */
+            modalities_output?: string[];
+            /**
+             * Reasoning
+             * @description Поддерживает рассуждение
+             */
+            reasoning?: boolean | null;
+            /**
+             * Tool Call
+             * @description Поддерживает вызов инструментов
+             */
+            tool_call?: boolean | null;
+            /**
+             * Source
+             * @description Откуда взяты поля: ответ /v1/models, каталог models.dev или оба
+             * @enum {string}
+             */
+            source: "provider" | "catalog" | "both";
+        };
+        /**
+         * RouteLlmModelsOut
+         * @description ``GET /api/v1/llm-router/routellm/models`` — каталог моделей провайдера.
+         */
+        RouteLlmModelsOut: {
+            /** Provider Id */
+            provider_id: string;
+            /** Provider Label */
+            provider_label: string;
+            /** Models */
+            models?: components["schemas"]["RouteLlmModelOut"][];
+            credits: components["schemas"]["RouteLlmCreditsOut"];
+            /** Warnings */
+            warnings?: string[];
+            /**
+             * Fetched At
+             * Format: date-time
+             */
+            fetched_at: string;
         };
         /**
          * RuleDraftIn
@@ -18034,6 +18966,104 @@ export interface operations {
             };
         };
     };
+    list_web_searches_api_v1_agent_chat_threads__thread_id__web_search_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentWebSearchesPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_web_search_api_v1_agent_chat_threads__thread_id__web_search_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentWebSearchCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentWebSearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    translate_web_search_api_v1_agent_chat_threads__thread_id__web_search__search_id__translate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+                search_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentWebSearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_message_api_v1_agent_chat_threads__thread_id__messages__message_id__get: {
         parameters: {
             query?: never;
@@ -18522,6 +19552,37 @@ export interface operations {
             };
         };
     };
+    routellm_models_api_v1_llm_router_routellm_models_get: {
+        parameters: {
+            query: {
+                provider_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteLlmModelsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     probe_llm_provider_api_v1_llm_router_probe_post: {
         parameters: {
             query?: never;
@@ -18609,6 +19670,608 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LlmDecideProbeOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_folders_api_v1_knowledge_folders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeFoldersOut"];
+                };
+            };
+        };
+    };
+    create_folder_api_v1_knowledge_folders_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeFolderCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeFolderOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_folder_api_v1_knowledge_folders__folder_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folder_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_documents_api_v1_knowledge_documents_get: {
+        parameters: {
+            query?: {
+                folder_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeDocumentsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_document_api_v1_knowledge_documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_document_api_v1_knowledge_documents_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeDocumentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_web_document_api_v1_knowledge_documents_web_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeWebAdd"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeDocumentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_document_api_v1_knowledge_documents__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeDocumentDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_document_api_v1_knowledge_documents__document_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_annotation_api_v1_knowledge_documents__document_id__annotations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeAnnotationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeAnnotationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_annotation_api_v1_knowledge_annotations__annotation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                annotation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_document_tags_api_v1_knowledge_documents__document_id__tags_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeDocTagsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_tags_api_v1_knowledge_tags_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeTagsOut"];
+                };
+            };
+        };
+    };
+    create_tag_api_v1_knowledge_tags_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeTagCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeTagOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_api_v1_knowledge_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeSearchOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    graph_api_v1_knowledge_graph_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeGraphOut"];
+                };
+            };
+        };
+    };
+    create_link_api_v1_knowledge_links_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeLinkCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeLinkOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_link_api_v1_knowledge_links__link_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                link_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_attachments_api_v1_knowledge_threads__thread_id__attachments_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAttachmentsOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_attachment_api_v1_knowledge_threads__thread_id__attachments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                thread_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentAttachmentCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentAttachmentOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_attachment_api_v1_knowledge_attachments__attachment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

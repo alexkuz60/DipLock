@@ -18,6 +18,7 @@ import type {
   LlmProviderIn,
   LlmRouterUpdate,
   LlmRoutes,
+  RouteLlmModels,
 } from '@/shared/api/types'
 import { Button } from '@/shared/ui/Button'
 import { CheckboxRow } from '@/shared/ui/CheckboxRow'
@@ -59,6 +60,15 @@ type DecideProbeState = {
   providerId: string | null
   pending: boolean
   result: LlmDecideProbeResult | null
+}
+
+/** Состояние каталога RouteLLM: выбранный провайдер, ответ и выбранные модели. */
+type CatalogState = {
+  providerId: string | null
+  pending: boolean
+  data: RouteLlmModels | null
+  error: string | null
+  selected: string[]
 }
 
 /** Сценарии проб §10: русский диалог, роль/структура, отказ при нехватке данных, вопросы. */
@@ -115,6 +125,39 @@ function emptyRow(): ProviderRow {
     clearKey: false,
     extraText: '',
   }
+}
+
+/** Пресет RouteLLM: OpenAI-совместимый шлюз Abacus.AI, ключ вводится владельцем. */
+function routellmRow(): ProviderRow {
+  return {
+    ...emptyRow(),
+    label: 'RouteLLM (Abacus.AI)',
+    baseUrl: 'https://routellm.abacus.ai/v1',
+    model: 'route-llm',
+  }
+}
+
+/** Лимит токенов для таблицы каталога: 1 000 000 или «—». */
+function formatLimit(value: number | null | undefined): string {
+  return typeof value === 'number' ? value.toLocaleString('ru-RU') : '—'
+}
+
+/** Цена за 1M токенов: «$5» или «—». */
+function formatCost(value: number | null | undefined): string {
+  return typeof value === 'number' ? `$${value}` : '—'
+}
+
+/** Модальности модели: «текст, изображение» или «—». */
+function formatModalities(values: string[] | null | undefined): string {
+  if (!values || values.length === 0) return '—'
+  const names: Record<string, string> = {
+    text: 'текст',
+    image: 'изображение',
+    audio: 'аудио',
+    video: 'видео',
+    pdf: 'PDF',
+  }
+  return values.map((value) => names[value] ?? value).join(', ')
 }
 
 /**
@@ -184,6 +227,13 @@ export function ModelRouterPanel() {
     providerId: null,
     pending: false,
     result: null,
+  })
+  const [catalog, setCatalog] = useState<CatalogState>({
+    providerId: null,
+    pending: false,
+    data: null,
+    error: null,
+    selected: [],
   })
 
   useEffect(() => {
@@ -393,6 +443,41 @@ export function ModelRouterPanel() {
     ...splitModels(chatProviderRow?.model ?? '').map((model) => ({ value: model, label: model })),
   ]
 
+  /** Каталог RouteLLM: список моделей провайдера — только по кнопке. */
+  const loadCatalog = async () => {
+    const providerId = catalog.providerId
+    if (!providerId) return
+    setCatalog((prev) => ({ ...prev, pending: true, data: null, error: null, selected: [] }))
+    try {
+      const data = await llmRouterApi.routellmModels(providerId)
+      setCatalog((prev) => ({ ...prev, pending: false, data, selected: [] }))
+    } catch (error) {
+      setCatalog((prev) => ({ ...prev, pending: false, error: apiErrorText(error) }))
+    }
+  }
+
+  const toggleCatalogModel = (modelId: string) => {
+    setCatalog((prev) => ({
+      ...prev,
+      selected: prev.selected.includes(modelId)
+        ? prev.selected.filter((item) => item !== modelId)
+        : [...prev.selected, modelId],
+    }))
+  }
+
+  /** Добавить выбранные модели в поле «Модель» провайдера (сохранение — кнопкой). */
+  const addSelectedModels = () => {
+    if (!catalog.providerId || catalog.selected.length === 0) return
+    const index = providerRows.findIndex((row) => row.id === catalog.providerId)
+    if (index < 0) return
+    const merged = splitModels(providerRows[index].model)
+    for (const modelId of catalog.selected) {
+      if (!merged.includes(modelId)) merged.push(modelId)
+    }
+    editRow(index, { model: merged.join(', ') })
+    setCatalog((prev) => ({ ...prev, selected: [] }))
+  }
+
   return (
     <Panel title="Модельный роутер ИИ" hint={panelHint}>
       <p className="text-sm text-fg-2">
@@ -534,7 +619,125 @@ export function ModelRouterPanel() {
         )
       })}
 
-      <Button onClick={addRow}>Добавить провайдера</Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={addRow}>Добавить провайдера</Button>
+        <Button onClick={() => { setRows((prev) => [...(prev ?? []), routellmRow()]); setDirty(true) }}>
+          Добавить RouteLLM
+        </Button>
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-border p-3">
+        <p className="text-sm font-medium text-fg-0">Каталог RouteLLM</p>
+        <p className="text-sm text-fg-2">
+          Список моделей провайдера с ценой за 1M токенов, модальностями и лимитами контекста.
+          Запрос уходит провайдеру только по кнопке; ключ остаётся на сервере. Выбранные модели
+          добавляются в поле «Модель» и сохраняются общей кнопкой «Сохранить».
+        </p>
+        <SelectField
+          label="Провайдер каталога"
+          value={catalog.providerId ?? ''}
+          options={[
+            { value: '', label: '— выберите —' },
+            ...savedProviders.map((row) => ({
+              value: row.id as string,
+              label: row.label.trim() || 'Без имени',
+              disabled: row.protocol === 'systemone',
+            })),
+          ]}
+          onChange={(value) =>
+            setCatalog({
+              providerId: value || null,
+              pending: false,
+              data: null,
+              error: null,
+              selected: [],
+            })
+          }
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            disabled={!catalog.providerId || catalog.pending || save.isPending}
+            onClick={() => void loadCatalog()}
+          >
+            {catalog.pending ? 'Загрузка...' : 'Загрузить модели'}
+          </Button>
+          <Button disabled={catalog.selected.length === 0} onClick={addSelectedModels}>
+            Добавить выбранные ({catalog.selected.length})
+          </Button>
+        </div>
+        {catalog.error ? (
+          <p role="alert" className="text-sm text-danger">
+            {catalog.error}
+          </p>
+        ) : null}
+        {catalog.data ? (
+          <div className="space-y-2">
+            {(catalog.data.warnings ?? []).map((warning) => (
+              <p key={warning} className="text-sm text-danger">
+                ⚠ {warning}
+              </p>
+            ))}
+            {(catalog.data.models ?? []).length === 0 ? (
+              <p className="text-sm text-fg-2">Провайдер не вернул ни одной модели.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-fg-2">
+                      <th className="py-1 pr-2 font-medium"> </th>
+                      <th className="py-1 pr-2 font-medium">Модель</th>
+                      <th className="py-1 pr-2 font-medium">Вход</th>
+                      <th className="py-1 pr-2 font-medium">Контекст / ответ</th>
+                      <th className="py-1 pr-2 font-medium">$ вход / выход</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(catalog.data.models ?? []).map((model) => (
+                      <tr key={model.id} className="border-t border-border align-top">
+                        <td className="py-1 pr-2">
+                          <input
+                            type="checkbox"
+                            aria-label={`Выбрать ${model.id}`}
+                            checked={catalog.selected.includes(model.id)}
+                            onChange={() => toggleCatalogModel(model.id)}
+                          />
+                        </td>
+                        <td className="py-1 pr-2">
+                          <span className="font-mono text-xs text-fg-0">{model.id}</span>
+                          {model.name ? (
+                            <span className="block text-fg-2">{model.name}</span>
+                          ) : null}
+                        </td>
+                        <td className="py-1 pr-2 text-fg-1">
+                          {formatModalities(model.modalities_input)}
+                        </td>
+                        <td className="py-1 pr-2 text-fg-1">
+                          {formatLimit(model.context)} / {formatLimit(model.output)}
+                        </td>
+                        <td className="py-1 pr-2 text-fg-1">
+                          {formatCost(model.cost_input)} / {formatCost(model.cost_output)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="text-sm text-fg-2">
+              Остаток кредитов:{' '}
+              {catalog.data.credits.available ? 'доступен' : catalog.data.credits.note}{' '}
+              <a
+                className="underline"
+                href={catalog.data.credits.billing_url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Billing and Invoices
+              </a>
+            </p>
+          </div>
+        ) : null}
+      </div>
 
       <SelectField
         label="Советники (chat)"

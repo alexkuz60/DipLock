@@ -7955,6 +7955,152 @@
         }
       }
     },
+    "/api/v1/agent-chat/threads/{thread_id}/web-search": {
+      "get": {
+        "tags": [
+          "Консилиум-чат"
+        ],
+        "summary": "List Web Searches",
+        "description": "Поиски нити, новые сверху.",
+        "operationId": "list_web_searches_api_v1_agent_chat_threads__thread_id__web_search_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWebSearchesPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Консилиум-чат"
+        ],
+        "summary": "Create Web Search",
+        "description": "Веб-поиск Архивариуса: запрос уходит поисковику только по этой кнопке.",
+        "operationId": "create_web_search_api_v1_agent_chat_threads__thread_id__web_search_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWebSearchCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWebSearchOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent-chat/threads/{thread_id}/web-search/{search_id}/translate": {
+      "post": {
+        "tags": [
+          "Консилиум-чат"
+        ],
+        "summary": "Translate Web Search",
+        "description": "Перевод найденных материалов на русский — отдельным явным действием.",
+        "operationId": "translate_web_search_api_v1_agent_chat_threads__thread_id__web_search__search_id__translate_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "search_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Search Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentWebSearchOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agent-chat/threads/{thread_id}/messages/{message_id}": {
       "get": {
         "tags": [
@@ -8616,6 +8762,51 @@
         }
       }
     },
+    "/api/v1/llm-router/routellm/models": {
+      "get": {
+        "tags": [
+          "Настройки ИИ"
+        ],
+        "summary": "Каталог RouteLLM: модели, стоимость, модальности и лимиты",
+        "description": "Список моделей провайдера; остаток кредитов — честный отказ со ссылкой.",
+        "operationId": "routellm_models_api_v1_llm_router_routellm_models_get",
+        "parameters": [
+          {
+            "name": "provider_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Provider Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RouteLlmModelsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/llm-router/probe": {
       "post": {
         "tags": [
@@ -8742,6 +8933,830 @@
         }
       }
     },
+    "/api/v1/knowledge/folders": {
+      "get": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "List Folders",
+        "description": "Папки библиотеки с числом документов.",
+        "operationId": "list_folders_api_v1_knowledge_folders_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeFoldersOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Create Folder",
+        "description": "Новая папка (вложенность через ``parent_id``).",
+        "operationId": "create_folder_api_v1_knowledge_folders_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeFolderCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeFolderOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/folders/{folder_id}": {
+      "delete": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Delete Folder",
+        "description": "Удаляет папку; документы внутри удаляются каскадом.",
+        "operationId": "delete_folder_api_v1_knowledge_folders__folder_id__delete",
+        "parameters": [
+          {
+            "name": "folder_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Folder Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/documents": {
+      "get": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "List Documents",
+        "description": "Документы библиотеки, новые сверху.",
+        "operationId": "list_documents_api_v1_knowledge_documents_get",
+        "parameters": [
+          {
+            "name": "folder_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Folder Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeDocumentsPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Upload Document",
+        "description": "Загрузка файла: дедуп по sha256, разбор в потоке, индексация фрагментов.",
+        "operationId": "upload_document_api_v1_knowledge_documents_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_document_api_v1_knowledge_documents_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeDocumentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/documents/web": {
+      "post": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Add Web Document",
+        "description": "Сохраняет веб-страницу в библиотеку по ссылке (текст, без картинок).",
+        "operationId": "add_web_document_api_v1_knowledge_documents_web_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeWebAdd"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeDocumentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/documents/{document_id}": {
+      "get": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Get Document",
+        "description": "Документ с оглавлением по разделам и аннотациями.",
+        "operationId": "get_document_api_v1_knowledge_documents__document_id__get",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeDocumentDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Delete Document",
+        "description": "Удаляет документ и его файлы с диска.",
+        "operationId": "delete_document_api_v1_knowledge_documents__document_id__delete",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/documents/{document_id}/annotations": {
+      "post": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Add Annotation",
+        "description": "Аннотация раздела или фрагмента документа.",
+        "operationId": "add_annotation_api_v1_knowledge_documents__document_id__annotations_post",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeAnnotationCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeAnnotationOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/annotations/{annotation_id}": {
+      "delete": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Delete Annotation",
+        "description": "Удаляет аннотацию.",
+        "operationId": "delete_annotation_api_v1_knowledge_annotations__annotation_id__delete",
+        "parameters": [
+          {
+            "name": "annotation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Annotation Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/documents/{document_id}/tags": {
+      "put": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Set Document Tags",
+        "description": "Заменяет набор тегов документа (новые имена создаются).",
+        "operationId": "set_document_tags_api_v1_knowledge_documents__document_id__tags_put",
+        "parameters": [
+          {
+            "name": "document_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Document Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeDocTagsUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "title": "Response Set Document Tags Api V1 Knowledge Documents  Document Id  Tags Put"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/tags": {
+      "get": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "List Tags",
+        "description": "Все теги библиотеки с числом документов.",
+        "operationId": "list_tags_api_v1_knowledge_tags_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeTagsOut"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Create Tag",
+        "description": "Создаёт тег (повтор имени возвращает существующий).",
+        "operationId": "create_tag_api_v1_knowledge_tags_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeTagCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeTagOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/search": {
+      "get": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Search",
+        "description": "Поиск по фрагментам: TF-IDF и эмбеддинги, режим — в ответе.",
+        "operationId": "search_api_v1_knowledge_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeSearchOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/graph": {
+      "get": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Graph",
+        "description": "Граф знаний: узлы и подтверждённые рёбра.",
+        "operationId": "graph_api_v1_knowledge_graph_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeGraphOut"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/links": {
+      "post": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Create Link",
+        "description": "Ребро графа знаний.",
+        "operationId": "create_link_api_v1_knowledge_links_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeLinkCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeLinkOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/links/{link_id}": {
+      "delete": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Delete Link",
+        "description": "Удаляет ребро графа.",
+        "operationId": "delete_link_api_v1_knowledge_links__link_id__delete",
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Link Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/threads/{thread_id}/attachments": {
+      "get": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "List Attachments",
+        "description": "Вложения нити чата.",
+        "operationId": "list_attachments_api_v1_knowledge_threads__thread_id__attachments_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentAttachmentsOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Add Attachment",
+        "description": "Прикрепляет документ, ссылку или отчёт ЭЭГ к нити.",
+        "operationId": "add_attachment_api_v1_knowledge_threads__thread_id__attachments_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentAttachmentCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentAttachmentOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/knowledge/attachments/{attachment_id}": {
+      "delete": {
+        "tags": [
+          "Консилиум-знания"
+        ],
+        "summary": "Delete Attachment",
+        "description": "Снимает вложение с нити.",
+        "operationId": "delete_attachment_api_v1_knowledge_attachments__attachment_id__delete",
+        "parameters": [
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Attachment Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/init-status": {
       "get": {
         "summary": "Init Status",
@@ -8782,6 +9797,104 @@
   },
   "components": {
     "schemas": {
+      "AgentAttachmentCreate": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "document",
+              "web",
+              "report",
+              "analysis"
+            ],
+            "title": "Kind"
+          },
+          "ref_id": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Ref Id"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Label"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "ref_id",
+          "label"
+        ],
+        "title": "AgentAttachmentCreate",
+        "description": "Вложение нити чата: документ, веб-ссылка, отчёт или анализ ЭЭГ."
+      },
+      "AgentAttachmentOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "document",
+              "web",
+              "report",
+              "analysis"
+            ],
+            "title": "Kind"
+          },
+          "ref_id": {
+            "type": "string",
+            "title": "Ref Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "thread_id",
+          "kind",
+          "ref_id",
+          "label",
+          "created_at"
+        ],
+        "title": "AgentAttachmentOut",
+        "description": "Прикреплённое к нити вложение."
+      },
+      "AgentAttachmentsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentAttachmentOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AgentAttachmentsOut",
+        "description": "Вложения нити, новые сверху."
+      },
       "AgentMessageCreate": {
         "properties": {
           "text": {
@@ -9237,6 +10350,195 @@
         ],
         "title": "AgentThreadsPage",
         "description": "Нити чата, новые сверху."
+      },
+      "AgentWebSearchCreate": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Query"
+          },
+          "role_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Id"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 10.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "AgentWebSearchCreate",
+        "description": "Запрос веб-поиска Архивариуса: уходит поисковику только по кнопке."
+      },
+      "AgentWebSearchOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          },
+          "role_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Id"
+          },
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/AgentWebSearchResultOut"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "translated": {
+            "type": "boolean",
+            "title": "Translated"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "translated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Translated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "thread_id",
+          "role_id",
+          "query",
+          "provider",
+          "results",
+          "translated",
+          "created_at",
+          "translated_at"
+        ],
+        "title": "AgentWebSearchOut",
+        "description": "Сохранённый поиск нити: запрос, материалы и признак перевода."
+      },
+      "AgentWebSearchResultOut": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "snippet": {
+            "type": "string",
+            "title": "Snippet"
+          },
+          "title_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title Ru"
+          },
+          "snippet_ru": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snippet Ru"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "url",
+          "snippet"
+        ],
+        "title": "AgentWebSearchResultOut",
+        "description": "Найденный материал: оригинал и машинный перевод на русский."
+      },
+      "AgentWebSearchesPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentWebSearchOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AgentWebSearchesPage",
+        "description": "Поиски нити, новые сверху."
       },
       "AnalysesPageOut": {
         "properties": {
@@ -12590,6 +13892,42 @@
         },
         "type": "object",
         "title": "Body_create_spectrum_job_api_v1_recordings__recording_id__spectrum_post"
+      },
+      "Body_upload_document_api_v1_knowledge_documents_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_document_api_v1_knowledge_documents_post"
       },
       "BrodmannAreaOut": {
         "properties": {
@@ -22404,6 +23742,830 @@
         "title": "KdCriteriaOut",
         "description": "Паспорт критерия КД (С0) в манифесте прогона: пороги и базисы нормировки."
       },
+      "KnowledgeAnnotationCreate": {
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Note"
+          },
+          "chunk_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Id"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "note"
+        ],
+        "title": "KnowledgeAnnotationCreate",
+        "description": "Аннотация раздела: заметка к документу или фрагменту."
+      },
+      "KnowledgeAnnotationOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "chunk_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Id"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "document_id",
+          "chunk_id",
+          "heading",
+          "note",
+          "created_at"
+        ],
+        "title": "KnowledgeAnnotationOut",
+        "description": "Аннотация с привязкой к фрагменту и заголовку."
+      },
+      "KnowledgeChunkOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "ordinal": {
+            "type": "integer",
+            "title": "Ordinal"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "page_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page From"
+          },
+          "page_to": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page To"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "ordinal",
+          "heading",
+          "page_from",
+          "page_to",
+          "text",
+          "tokens"
+        ],
+        "title": "KnowledgeChunkOut",
+        "description": "Фрагмент документа: заголовок, страницы и текст."
+      },
+      "KnowledgeDocTagsUpdate": {
+        "properties": {
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 40,
+            "title": "Tags"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "KnowledgeDocTagsUpdate",
+        "description": "Полный набор тегов документа (замена, не добавление)."
+      },
+      "KnowledgeDocumentDetail": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/KnowledgeDocumentOut"
+          },
+          "chunks": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeChunkOut"
+            },
+            "type": "array",
+            "title": "Chunks"
+          },
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeAnnotationOut"
+            },
+            "type": "array",
+            "title": "Annotations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "document",
+          "chunks",
+          "annotations"
+        ],
+        "title": "KnowledgeDocumentDetail",
+        "description": "Документ с оглавлением, аннотациями и тегами."
+      },
+      "KnowledgeDocumentOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "pdf",
+              "docx",
+              "xlsx",
+              "image",
+              "web",
+              "text"
+            ],
+            "title": "Kind"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "pages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pages"
+          },
+          "text_chars": {
+            "type": "integer",
+            "title": "Text Chars"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "empty",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "chunks": {
+            "type": "integer",
+            "title": "Chunks"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "indexed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Indexed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "folder_id",
+          "title",
+          "filename",
+          "kind",
+          "source_url",
+          "size_bytes",
+          "pages",
+          "text_chars",
+          "status",
+          "error",
+          "tags",
+          "chunks",
+          "created_at",
+          "indexed_at"
+        ],
+        "title": "KnowledgeDocumentOut",
+        "description": "Документ библиотеки: метаданные, теги и число фрагментов."
+      },
+      "KnowledgeDocumentsPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeDocumentOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "KnowledgeDocumentsPage",
+        "description": "Документы библиотеки, новые сверху."
+      },
+      "KnowledgeFolderCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "KnowledgeFolderCreate",
+        "description": "Новая папка библиотеки: имя и (необязательно) родитель."
+      },
+      "KnowledgeFolderOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "documents": {
+            "type": "integer",
+            "title": "Documents"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "parent_id",
+          "documents",
+          "created_at"
+        ],
+        "title": "KnowledgeFolderOut",
+        "description": "Папка библиотеки с числом документов внутри."
+      },
+      "KnowledgeFoldersOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeFolderOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "KnowledgeFoldersOut",
+        "description": "Все папки библиотеки (дерево строится на клиенте по ``parent_id``)."
+      },
+      "KnowledgeGraphNode": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "document",
+              "tag",
+              "concept"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "documents": {
+            "type": "integer",
+            "title": "Documents",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "label"
+        ],
+        "title": "KnowledgeGraphNode",
+        "description": "Узел графа: документ, тег или понятие с подписью."
+      },
+      "KnowledgeGraphOut": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeGraphNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeLinkOut"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "title": "KnowledgeGraphOut",
+        "description": "Граф знаний: узлы и подтверждённые рёбра."
+      },
+      "KnowledgeLinkCreate": {
+        "properties": {
+          "from_kind": {
+            "type": "string",
+            "enum": [
+              "document",
+              "tag",
+              "concept"
+            ],
+            "title": "From Kind"
+          },
+          "from_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "From Id"
+          },
+          "to_kind": {
+            "type": "string",
+            "enum": [
+              "document",
+              "tag",
+              "concept"
+            ],
+            "title": "To Kind"
+          },
+          "to_id": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "To Id"
+          },
+          "relation": {
+            "type": "string",
+            "enum": [
+              "cites",
+              "related",
+              "defines",
+              "mentions"
+            ],
+            "title": "Relation",
+            "default": "related"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "title": "Confirmed",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "from_kind",
+          "from_id",
+          "to_kind",
+          "to_id"
+        ],
+        "title": "KnowledgeLinkCreate",
+        "description": "Ребро графа знаний: связь двух узлов."
+      },
+      "KnowledgeLinkOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "from_kind": {
+            "type": "string",
+            "enum": [
+              "document",
+              "tag",
+              "concept"
+            ],
+            "title": "From Kind"
+          },
+          "from_id": {
+            "type": "string",
+            "title": "From Id"
+          },
+          "to_kind": {
+            "type": "string",
+            "enum": [
+              "document",
+              "tag",
+              "concept"
+            ],
+            "title": "To Kind"
+          },
+          "to_id": {
+            "type": "string",
+            "title": "To Id"
+          },
+          "relation": {
+            "type": "string",
+            "title": "Relation"
+          },
+          "confirmed": {
+            "type": "boolean",
+            "title": "Confirmed"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "from_kind",
+          "from_id",
+          "to_kind",
+          "to_id",
+          "relation",
+          "confirmed",
+          "created_at"
+        ],
+        "title": "KnowledgeLinkOut",
+        "description": "Ребро графа с признаком подтверждения."
+      },
+      "KnowledgeSearchHitOut": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "document_id": {
+            "type": "string",
+            "title": "Document Id"
+          },
+          "document_title": {
+            "type": "string",
+            "title": "Document Title"
+          },
+          "ordinal": {
+            "type": "integer",
+            "title": "Ordinal"
+          },
+          "heading": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heading"
+          },
+          "page_from": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page From"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "document_id",
+          "document_title",
+          "ordinal",
+          "heading",
+          "page_from",
+          "text",
+          "score"
+        ],
+        "title": "KnowledgeSearchHitOut",
+        "description": "Найденный фрагмент с документом и оценкой."
+      },
+      "KnowledgeSearchOut": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "tfidf"
+            ],
+            "title": "Mode"
+          },
+          "hits": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeSearchHitOut"
+            },
+            "type": "array",
+            "title": "Hits"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "mode",
+          "hits"
+        ],
+        "title": "KnowledgeSearchOut",
+        "description": "Результат поиска и честный режим: ``hybrid`` или ``tfidf``."
+      },
+      "KnowledgeTagCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "KnowledgeTagCreate",
+        "description": "Новый тег Базы знаний."
+      },
+      "KnowledgeTagOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "documents": {
+            "type": "integer",
+            "title": "Documents"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "documents"
+        ],
+        "title": "KnowledgeTagOut",
+        "description": "Тег и число документов с ним."
+      },
+      "KnowledgeTagsOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/KnowledgeTagOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "KnowledgeTagsOut",
+        "description": "Все теги библиотеки."
+      },
+      "KnowledgeWebAdd": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 8,
+            "title": "Url"
+          },
+          "folder_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Folder Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "KnowledgeWebAdd",
+        "description": "Добавление веб-страницы в библиотеку по ссылке."
+      },
       "LlmChatProbeModelOut": {
         "properties": {
           "model": {
@@ -26177,6 +28339,199 @@
         ],
         "title": "RoiRowOut",
         "description": "Строка ROI (структура или поле Бродмана): итог по полосам + ячейки."
+      },
+      "RouteLlmCreditsOut": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available",
+            "description": "Удалось ли получить остаток через API"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "description": "Текст для UI: почему остаток недоступен"
+          },
+          "billing_url": {
+            "type": "string",
+            "title": "Billing Url",
+            "description": "Ссылка на страницу Billing в Abacus.AI"
+          }
+        },
+        "type": "object",
+        "required": [
+          "available",
+          "note",
+          "billing_url"
+        ],
+        "title": "RouteLlmCreditsOut",
+        "description": "Остаток кредитов RouteLLM: честный отказ, если API его не отдаёт."
+      },
+      "RouteLlmModelOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "Человеческое имя модели"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context",
+            "description": "Лимит контекста, токенов"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output",
+            "description": "Лимит ответа, токенов"
+          },
+          "cost_input": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Input",
+            "description": "Цена входа, $ за 1M токенов"
+          },
+          "cost_output": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Output",
+            "description": "Цена выхода, $ за 1M токенов"
+          },
+          "modalities_input": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Modalities Input"
+          },
+          "modalities_output": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Modalities Output"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning",
+            "description": "Поддерживает рассуждение"
+          },
+          "tool_call": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call",
+            "description": "Поддерживает вызов инструментов"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "catalog",
+              "both"
+            ],
+            "title": "Source",
+            "description": "Откуда взяты поля: ответ /v1/models, каталог models.dev или оба"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source"
+        ],
+        "title": "RouteLlmModelOut",
+        "description": "Модель каталога RouteLLM: стоимость, модальности и лимиты токенов."
+      },
+      "RouteLlmModelsOut": {
+        "properties": {
+          "provider_id": {
+            "type": "string",
+            "title": "Provider Id"
+          },
+          "provider_label": {
+            "type": "string",
+            "title": "Provider Label"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/RouteLlmModelOut"
+            },
+            "type": "array",
+            "title": "Models"
+          },
+          "credits": {
+            "$ref": "#/components/schemas/RouteLlmCreditsOut"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "fetched_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Fetched At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider_id",
+          "provider_label",
+          "credits",
+          "fetched_at"
+        ],
+        "title": "RouteLlmModelsOut",
+        "description": "``GET /api/v1/llm-router/routellm/models`` — каталог моделей провайдера."
       },
       "RuleDraftIn": {
         "properties": {

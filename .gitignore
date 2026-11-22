@@ -82,6 +82,8 @@ data/backups/
 # Кэш тяжёлых ассетов (меш fsaverage, атлас Brodmann) — пересчитывается автоматически
 data/cache/
 backend/data/cache/
+# Библиотека знаний Консилиума: загруженные книги/статьи и веб-страницы (0021)
+data/knowledge/
 
 # --- Сборка frontend (генерируется командой `npm run build`) ---
 frontend/node_modules/
