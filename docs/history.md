@@ -3,6 +3,32 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 22.11.2026 — Деплой «Знаний» на ВМ Abacus (коммит `eb6ebef`)
+
+`git push origin main` (`54707a1..eb6ebef`), затем на ВМ
+`./deploy/update.sh` — 33 с, exit 0: `git pull --ff-only`, `pip install`
+(в т.ч. `pypdf`, `python-docx`, `openpyxl`), `npm ci`, сборка UI 5.85 с,
+`systemctl restart diplock`, `check.sh` без пароля — 5/5 совпали
+(`/health` 200, `/ui/` и `/api/v1/meta` без пароля 401, `/docs` и
+`/openapi.json` 404). Журнал — `data/logs/update-20261122.log`.
+
+Состояние после деплоя: `HEAD` = `eb6ebef`, дерево чистое, служба `active`,
+`/init-status` → `ready`, `code.stale=false`, миграция `0021` применена
+(`init_db` в `lifespan`), в `static/ui/assets` есть `KnowledgeSection-*.js` и
+`knowledge-*.js`.
+
+Smoke через loopback (без basic-auth, пароль не передавался):
+`/knowledge/folders|documents|tags|graph` → 200; загрузка пустого PDF → 201,
+`kind=pdf`, `status=empty`, `chunks=0` (текстового слоя нет — честный статус);
+загрузка текста с заголовками → 201, `chunks=2`, оглавление
+`['Бета-ритм', 'Клиника']`; `search?q=бета` → 200, `mode=tfidf`, 2 хита;
+`DELETE /knowledge/documents/{id}` → 204, каталог `data/knowledge` пуст,
+владелец `ubuntu:ubuntu`. Диск `/` — 35 % (17 из 48 ГБ).
+
+Замечание: `curl` с сырой кириллицей в URL (`?q=бета` без percent-encoding)
+зависает на стороне клиента — проверять только с `encodeURIComponent`
+(UI так и делает). Сервер на такой запрос отвечает за 3 мс.
+
 ## 22.11.2026 — Консилиум: «Знания» — библиотека источников и База знаний
 
 Вкладка «Знания» (`?view=knowledge`) рядом с «Чат экспертов» и исследованием Т1:
