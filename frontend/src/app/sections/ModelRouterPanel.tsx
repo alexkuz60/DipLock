@@ -223,6 +223,8 @@ export function ModelRouterPanel() {
   })
   const [dirty, setDirty] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  /** Проба сразу после сохранения: без неё провал ключа терялся между перезагрузками. */
+  const [saveProbe, setSaveProbe] = useState<ProbeState>({ pending: false, result: null })
   const [probes, setProbes] = useState<Record<string, ProbeState>>({})
   const [chatProbe, setChatProbe] = useState<ChatProbeState>({
     providerId: null,
@@ -292,6 +294,74 @@ export function ModelRouterPanel() {
       return prev.filter((_, i) => i !== index)
     })
     setDirty(true)
+  }
+
+  /** Собрать тело PUT из формы; null — форма невалидна, текст уже в saveError. */
+  const collectPayload = (): LlmRouterUpdate | null => {
+    const chosen = routes.chat_model ?? null
+    const allowed = splitModels(chatProviderRow?.model ?? '')
+    if (chosen && (!routes.chat || !allowed.includes(chosen))) {
+      setSaveError(
+        'Модель маршрута chat не входит в список моделей выбранного провайдера — выберите заново',
+      )
+      return null
+    }
+    try {
+      return {
+        providers: providerRows.map(toProviderIn),
+        routes: {
+          chat: routes.chat,
+          chat_model: chosen,
+          transcribe: routes.transcribe,
+          decide: routes.decide,
+        },
+      }
+    } catch {
+      setSaveError(
+        'Дополнительные параметры — некорректный JSON (нужен объект вида {"ключ": значение})',
+      )
+      return null
+    }
+  }
+
+  /** «Сохранить и проверить»: PUT, затем проба маршрута chat по свежему состоянию. */
+  const saveAndProbe = async () => {
+    const payload = collectPayload()
+    if (!payload) return
+    setSaveProbe({ pending: true, result: null })
+    try {
+      const data = await save.mutateAsync(payload)
+      const providerId = data.routes.chat
+      if (!providerId) {
+        setSaveProbe({
+          pending: false,
+          result: {
+            ok: false,
+            provider_id: '',
+            route: 'chat',
+            model: null,
+            latency_ms: null,
+            error: 'Маршрут «Советники (chat)» не выбран — проба невозможна',
+          },
+        })
+        return
+      }
+      const result = await llmRouterApi.probe({ provider_id: providerId, route: 'chat' })
+      setSaveProbe({ pending: false, result })
+      setProbes((prev) => ({ ...prev, [providerId]: { pending: false, result } }))
+    } catch (error) {
+      setSaveProbe({
+        pending: false,
+        result: {
+          ok: false,
+          provider_id: '',
+          route: 'chat',
+          model: null,
+          latency_ms: null,
+          error: apiErrorText(error),
+        },
+      })
+    }
   }
 
   const save = useMutation({
@@ -801,43 +871,43 @@ export function ModelRouterPanel() {
         }}
       />
 
-      <div className="flex items-center gap-3 pt-2">
+      <div className="flex flex-wrap items-center gap-3 pt-2">
         <Button
           variant="primary"
-          disabled={!dirty || save.isPending}
+          disabled={!dirty || save.isPending || saveProbe.pending}
           onClick={() => {
-            const chosen = routes.chat_model ?? null
-            const allowed = splitModels(chatProviderRow?.model ?? '')
-            if (chosen && (!routes.chat || !allowed.includes(chosen))) {
-              setSaveError(
-                'Модель маршрута chat не входит в список моделей выбранного провайдера — выберите заново',
-              )
-              return
-            }
-            try {
-              save.mutate({
-                providers: providerRows.map(toProviderIn),
-                routes: {
-                  chat: routes.chat,
-                  chat_model: chosen,
-                  transcribe: routes.transcribe,
-                  decide: routes.decide,
-                },
-              })
-            } catch {
-              setSaveError(
-                'Дополнительные параметры — некорректный JSON (нужен объект вида {"ключ": значение})',
-              )
-            }
+            const payload = collectPayload()
+            if (payload) save.mutate(payload)
           }}
         >
           Сохранить
         </Button>
-        {save.isPending ? <span className="text-sm text-fg-2">Сохранение…</span> : null}
+        <Button
+          variant="secondary"
+          disabled={!dirty || save.isPending || saveProbe.pending}
+          onClick={() => void saveAndProbe()}
+        >
+          Сохранить и проверить
+        </Button>
+        {save.isPending || saveProbe.pending ? (
+          <span className="text-sm text-fg-2">
+            {saveProbe.pending ? 'Сохранение и проба...' : 'Сохранение...'}
+          </span>
+        ) : null}
       </div>
       {saveError ? (
         <p role="alert" className="text-sm text-danger">
           {saveError}
+        </p>
+      ) : null}
+      {saveProbe.result ? (
+        <p
+          role="status"
+          className={saveProbe.result.ok ? 'text-sm text-fg-1' : 'text-sm text-danger'}
+        >
+          {saveProbe.result.ok
+            ? `Ключ принят: ${probeSummary(saveProbe.result)}`
+            : `Ключ не принят: ${saveProbe.result.error ?? 'неизвестная ошибка'}`}
         </p>
       ) : null}
 

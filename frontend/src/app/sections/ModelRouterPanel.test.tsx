@@ -163,6 +163,46 @@ describe('панель «Модельный роутер ИИ»', () => {
     expect(await screen.findByText('Нет связи: Провайдер ответил 401: нет доступа')).toBeInTheDocument()
   })
 
+  it('«Сохранить и проверить»: PUT, затем проба маршрута chat с результатом', async () => {
+    const user = userEvent.setup()
+    mockApiFetch({ llmProbe: llmProbeFixture() })
+    renderWithProviders(<ModelRouterPanel />)
+
+    await screen.findByRole('textbox', { name: 'Имя' })
+    await user.type(screen.getByRole('textbox', { name: 'Имя' }), '!')
+    await user.click(screen.getByRole('button', { name: 'Сохранить и проверить' }))
+
+    expect(await screen.findByText('Ключ принят: Связь есть (420 мс)')).toBeInTheDocument()
+    const calls = vi.mocked(fetch).mock.calls.map(([url, init]) => ({
+      url: String(url),
+      method: init?.method ?? 'GET',
+    }))
+    const putIndex = calls.findIndex((call) => call.url.includes('/llm-router') && call.method === 'PUT')
+    const probeIndex = calls.findIndex((call) => call.url.includes('/llm-router/probe'))
+    expect(putIndex).toBeGreaterThanOrEqual(0)
+    expect(probeIndex).toBeGreaterThan(putIndex)
+  })
+
+  it('«Сохранить и проверить»: отказ провайдера показывается как «Ключ не принят»', async () => {
+    const user = userEvent.setup()
+    mockApiFetch({
+      llmProbe: llmProbeFixture({
+        ok: false,
+        latency_ms: null,
+        error: 'Провайдер ответил 403: Invalid API Key',
+      }),
+    })
+    renderWithProviders(<ModelRouterPanel />)
+
+    await screen.findByRole('textbox', { name: 'Имя' })
+    await user.type(screen.getByRole('textbox', { name: 'Имя' }), '!')
+    await user.click(screen.getByRole('button', { name: 'Сохранить и проверить' }))
+
+    expect(
+      await screen.findByText('Ключ не принят: Провайдер ответил 403: Invalid API Key'),
+    ).toBeInTheDocument()
+  })
+
   it('новый провайдер: проба недоступна до сохранения', async () => {
     const user = userEvent.setup()
     mockApiFetch({ llmRouter: llmRouterFixture({ providers: [], routes: { chat: null, transcribe: null } }) })
