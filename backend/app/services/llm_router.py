@@ -19,7 +19,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import httpx
 
@@ -32,6 +32,8 @@ LlmRouteKey = Literal["chat", "transcribe"]
 LlmChatProbeScenarioKey = Literal["dialog", "role", "insufficient", "leading"]
 
 _ROUTE_KEYS: tuple[str, ...] = ("chat", "transcribe")
+# Протоколы, которые понимает роутер (``systemone`` удалён вместе с «Исследованием»).
+_PROTOCOLS: frozenset[str] = frozenset({"openai", "anthropic"})
 _ANTHROPIC_VERSION = "2023-06-01"
 _PROBE_PROMPT = "Ответь одним словом: готов"
 # Список моделей провайдера: id через запятую, пробы идут перебором по каждому.
@@ -323,25 +325,51 @@ def _read_state() -> RouterState:
     except OSError as exc:
         raise LlmRouterError("Не удалось прочитать настройки модельного роутера", 500) from exc
     providers = tuple(
-        Provider(
-            id=str(item.get("id", "")),
-            label=str(item.get("label", "")),
-            protocol=item.get("protocol", "openai"),
-            base_url=str(item.get("base_url", "")),
-            model=str(item.get("model", "")),
-            enabled=bool(item.get("enabled", True)),
-            api_key=_clean_key(str(item["api_key"])) if item.get("api_key") else None,
-            extra=(item["extra"] if isinstance(item.get("extra"), dict) else None),
+        provider
+        for provider in (
+            _provider_from_file(item)
+            for item in raw.get("providers", [])
+            if isinstance(item, dict)
         )
-        for item in raw.get("providers", [])
+        if provider is not None
     )
+    known = {provider.id for provider in providers}
     routes: dict[str, str | None] = {
         "chat": None, "chat_model": None, "transcribe": None,
     }
     for key, value in dict(raw.get("routes", {})).items():
         if key in routes:
             routes[key] = str(value) if value else None
+    # Маршрут на провайдера, которого больше нет в файле (например, удалённый
+    # протокол), не должен валить панель: он честно пуст.
+    for key in ("chat", "transcribe"):
+        if routes[key] is not None and routes[key] not in known:
+            routes[key] = None
+    if routes["chat"] is None:
+        routes["chat_model"] = None
     return RouterState(providers=providers, routes=routes)
+
+
+def _provider_from_file(item: dict[str, Any]) -> Provider | None:
+    """Провайдер из файла настроек; неизвестный протокол — строка пропускается.
+
+    В файле могли остаться строки удалённых протоколов (``systemone`` — режим
+    «Исследование» снят 23.11.2026): такой провайдер не поддерживается кодом и
+    не должен превращать чтение настроек в 500.
+    """
+    protocol = item.get("protocol", "openai")
+    if protocol not in _PROTOCOLS:
+        return None
+    return Provider(
+        id=str(item.get("id", "")),
+        label=str(item.get("label", "")),
+        protocol=cast(LlmProtocol, protocol),
+        base_url=str(item.get("base_url", "")),
+        model=str(item.get("model", "")),
+        enabled=bool(item.get("enabled", True)),
+        api_key=_clean_key(str(item["api_key"])) if item.get("api_key") else None,
+        extra=(item["extra"] if isinstance(item.get("extra"), dict) else None),
+    )
 
 
 def _write_state(state: RouterState) -> None:

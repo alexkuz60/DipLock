@@ -154,6 +154,58 @@ async def test_read_state_strips_legacy_key_whitespace(router_config, monkeypatc
     assert ok.ok is True, ok.error
 
 
+def test_legacy_systemone_provider_does_not_break_panel(client, router_config):
+    """Строка удалённого протокола ``systemone`` в файле — не 500, а пропуск строки.
+
+    Режим «Исследование» снят 23.11.2026, но в ``data/llm_router.json`` могли
+    остаться провайдеры с этим протоколом: панель обязана открыться, а маршрут
+    на пропущенного провайдера — стать пустым.
+    """
+    router_config.write_text(json.dumps({
+        "version": 1,
+        "providers": [
+            {
+                "id": "chat-1",
+                "label": "Чат",
+                "protocol": "openai",
+                "base_url": "https://api.example.com/v1",
+                "model": "m1",
+                "enabled": True,
+                "api_key": _TEST_KEY,
+                "extra": None,
+            },
+            {
+                "id": "jev-1",
+                "label": "Jev",
+                "protocol": "systemone",
+                "base_url": "https://jev.example.com/api/v1/decide",
+                "model": "jev-1.13.0",
+                "enabled": True,
+                "api_key": _TEST_KEY,
+                "extra": None,
+            },
+        ],
+        "routes": {"chat": "chat-1", "chat_model": "m1", "decide": "jev-1"},
+    }), encoding="utf-8")
+
+    result = client.get(PREFIX)
+    assert result.status_code == 200, result.text
+    body = result.json()
+    assert [item["id"] for item in body["providers"]] == ["chat-1"]
+    assert body["routes"]["chat"] == "chat-1"
+    assert body["routes"]["chat_model"] == "m1"
+
+    router_config.write_text(json.dumps({
+        "version": 1,
+        "providers": [],
+        "routes": {"chat": "jev-1", "chat_model": "jev-1.13.0"},
+    }), encoding="utf-8")
+    orphan = client.get(PREFIX)
+    assert orphan.status_code == 200, orphan.text
+    assert orphan.json()["routes"]["chat"] is None
+    assert orphan.json()["routes"]["chat_model"] is None
+
+
 def test_put_empty_model_is_russian_400(client, router_config):
     """Пустая модель — русский 400, а не английский 422: текст виден в панели."""
     result = client.put(PREFIX, json={

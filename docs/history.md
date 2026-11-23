@@ -3,6 +3,24 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 23.11.2026 — Панель роутера: 500 из-за строки `systemone` в файле настроек
+
+После удаления «Исследования» локальная панель «Модельный роутер ИИ» отвечала
+`500 Internal Server Error`: в `data/llm_router.json` остался провайдер с
+`protocol: "systemone"` (Jev) и маршрут `decide`, а `LlmProviderOut.protocol`
+принимает только `openai`/`anthropic` — `pydantic.ValidationError` в
+`_provider_out`. Теперь `_read_state` собирает провайдеров через
+`_provider_from_file`: строка с неизвестным протоколом пропускается, маршрут
+`chat`/`transcribe` на пропущенного провайдера обнуляется (и `chat_model`
+вместе с ним). Файл не переписывается — строка уйдёт при следующем сохранении
+формы. Тест `test_legacy_systemone_provider_does_not_break_panel`;
+`test_llm_router.py` — 44 passed, ruff/mypy чисты.
+
+Проверено на локальном сервере: `POST /api/v1/server/restart` → 202,
+`GET /api/v1/llm-router` → **200**, в ответе два провайдера (`deepseek-flash`,
+`deepseek-v4.1-flash`), маршрут `chat` = `a835cafe35c5`, `chat_model` =
+`deepseek-flash`, `decide` в ответе нет.
+
 ## 23.11.2026 — `jev-latest` и `gemini-decision-1` — не чат-модели
 
 Проба маршрута `chat` на ВМ показывала две красные строки: RouteLLM отвечал
