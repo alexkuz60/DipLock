@@ -3,6 +3,14 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 23.11.2026 — Контракт OpenAPI после смягчения схемы роутера
+
+Полный pytest дал `1290 passed` и один провал
+`test_openapi_json_is_up_to_date`: снятие `min_length` со схемы провайдера
+изменило `openapi.json`. Перегенерены `frontend/src/shared/api/openapi.json`
+(163 пути) и `schema.d.ts` (`npm run gen:api`); `test_api_contract.py` +
+`test_docs_guards.py` — 24 passed, `tsc --noEmit` и ESLint чисты.
+
 ## 23.11.2026 — Одна строка на адрес провайдера
 
 Две строки RouteLLM с одинаковым `base_url` оказались ловушкой: ключ вставили во
