@@ -3,6 +3,31 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 23.11.2026 — Удаление режима «Исследование» (миграция 0022)
+
+Режим отменён владельцем: «бюрократические принципы досье» не подходят для
+анализа ЭЭГ. Удалены `api/consilium.py`, `schemas/consilium.py` и 14 модулей
+`services/consilium/`; из `models/db.py` — 16 классов `Consilium*`; миграция
+`0022_drop_research.py` дропает 16 таблиц идемпотентно (`downgrade` пустой —
+откат требует копии БД). Во фронтенде удалены 34 файла раздела (досье, раунды,
+триаж, JEV, штурм, библиотека, консультация, `consilium.ts`, `roundStream.ts`,
+`consiliumOptions.ts`); `ConsiliumSection` оставляет две вкладки — «Чат
+экспертов» и «Знания», старая ссылка `?view=research` открывает чат.
+
+Общий SSE-механизм вынесен из консилиума: `app/schemas/streams.py` (`StreamEvent`)
+и `app/services/streams.py` (RAM-журнал дельт); `api/sse.py`, `api/agent_chat.py`
+и `services/agent_chat/runner.py` переведены на них. Из модельного роутера убраны
+маршрут `decide`, протокол `systemone` и `POST /llm-router/decide-probe`;
+остались `chat` и `transcribe`. Контракт OpenAPI перегенерён — 124 пути вместо
+163.
+
+Проверки: pytest `test_llm_router.py` — 42 passed, `test_agent_chat`/
+`test_agent_web_search`/`test_job_manager`/`test_migrations`/`test_api_contract`/
+`test_docs_guards` — зелёные; Vitest — **1437 passed (134 файла)**, в том числе
+`ConsiliumSection.test` (3) и `streamEvents.test` (5); ruff, mypy (132 файла),
+`tsc --noEmit`, ESLint и `npm run build` чисты. Полный pytest — **1179 passed**
+(560 с; было 1291 — минус 112 тестов удалённого режима).
+
 ## 23.11.2026 — «Сохранить и проверить»: проба сразу после сохранения
 
 Провал ключа терялся: сохранение проходило, а проба требовала отдельного нажатия,

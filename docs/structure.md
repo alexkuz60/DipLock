@@ -14,7 +14,6 @@ backend/app/
 │   ├── assets.py      # ETag/304: единственный помощник отдачи ассетов (A2)
 │   ├── params.py      # формы → параметры сервисов, 400 с текстом для UI (A1)
 │   ├── recording_jobs.py # задачи записи: старт 202, статус, результат (A1)
-│   ├── consilium.py   # Консилиум: форма и контракт, работа — services/consilium (Т1)
 │   ├── agent_chat.py  # общий ролевой чат Консилиума: API, работа — services/agent_chat (0019)
 │   ├── knowledge.py   # «Знания»: библиотека источников, поиск, граф, вложения чата (0021)
 │   ├── sse.py         # общий SSE-стрим ответов Консилиума и ролевого чата
@@ -74,7 +73,7 @@ backend/app/
 │   ├── server_control.py  # перезапуск бэкенд из UI: guard'ы + os.execv (POST /server/restart)
 │   ├── gpu.py           # локальный ресурс: автоопределение GPU/CuPy + тумблер «Использовать GPU» → n_jobs='cuda' (GET/PUT /resource)
 │   ├── llm_router.py      # модельный роутер ИИ: провайдеры внешних API (openai/anthropic), маршруты chat/transcribe, ключи маскируются
-│   ├── consilium/         # исследовательские дела, досье, раунды, консультации, стриминг
+│   ├── streams.py         # RAM-журнал дельт SSE: общий для чата экспертов (вынесен из консилиума 23.11.2026)
 │   ├── agent_chat/        # роли, нити и ответы общего чата экспертов
 │   └── knowledge/         # библиотека источников: storage, extract, chunking, index, store (0021)
 │   ├── surface_cache.py   # кэш меша/BA на диске + ETag/304 (F6)

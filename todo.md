@@ -46,8 +46,8 @@
 
 - [ ] `n_jobs` для `compute_psd` (`spectral`/`bandpass_filter`), `eloreta`, `compare` —
       замер до/после через `journal`/`analytics.db` (RS2: OM10/OM11/OM12 актуальны).
-- [ ] Разрезка `api/routes.py` (образец — `consilium.py`), ответственности в `report.py`/
-      `compare.py`, `models/db.py` → `results.py`/`consilium.py`, `edfRecording.ts` на слайсы,
+- [ ] Разрезка `api/routes.py` (образец — `agent_chat.py`), ответственности в `report.py`/
+      `compare.py`, `models/db.py` → `results.py`/`agent_chat.py`, `edfRecording.ts` на слайсы,
       `TypedDict`-контракты сервисов (начать с `artifact_detector`, `results_store`).
 - [ ] Клиент после замеров: код-сплиттинг бандла (~2.4 МБ), память аудио, float32
       в `prepared_signal` (с проверкой точности).

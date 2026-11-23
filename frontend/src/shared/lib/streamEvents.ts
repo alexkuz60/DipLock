@@ -1,13 +1,12 @@
 /**
- * Живой стрим событий раунда (срез 0011): подписка на SSE и наложение дельт.
+ * Живой стрим событий ответов агентов: подписка на SSE и наложение дельт.
  *
  * Стрим — только удобство: готовые ответы приходят поллингом из БД, поэтому
  * обрыв потока не ошибка (`onError` молча переводит клиента к поллингу), а
- * поздние события другого запуска отбрасываются по `roundId` — состояние
- * чужого раунда не подменяется (`docs/rules/frontend-state.md`).
+ * поздние события другого запуска отбрасываются по `runId` — состояние чужого
+ * запуска не подменяется (`docs/rules/frontend-state.md`).
  */
-import { API_PREFIX } from '@/shared/api/client'
-import type { ConsiliumStreamEvent } from '@/shared/api/types'
+import type { StreamEvent } from '@/shared/api/types'
 
 export type LiveRole = {
   status: 'waiting' | 'streaming' | 'done' | 'failed'
@@ -33,7 +32,7 @@ const EMPTY_ROLE: LiveRole = { status: 'waiting', text: '', model: null, error: 
 export function applyStreamEvent(
   live: LiveRound | null,
   roundId: string,
-  event: ConsiliumStreamEvent,
+  event: StreamEvent,
 ): LiveRound | null {
   // Поздние события другого запуска состояние не трогают
   if (live != null && live.roundId !== roundId) return live
@@ -76,32 +75,8 @@ export function applyStreamEvent(
   }
 }
 
-/** Адрес потока событий раунда (SSE). */
-export function roundStreamUrl(caseId: string, roundId: string): string {
-  return (
-    `${API_PREFIX}/consilium/cases/${encodeURIComponent(caseId)}` +
-    `/rounds/${encodeURIComponent(roundId)}/stream`
-  )
-}
-
-/** Адрес потока событий штурма (SSE, тот же механизм 0011, роль `brainstorm`). */
-export function brainstormStreamUrl(caseId: string, brainstormId: string): string {
-  return (
-    `${API_PREFIX}/consilium/cases/${encodeURIComponent(caseId)}` +
-    `/brainstorms/${encodeURIComponent(brainstormId)}/stream`
-  )
-}
-
-/** Адрес потока ответа боковой консультации (SSE, механизм 0011, срез 0015). */
-export function chatReplyStreamUrl(caseId: string, messageId: string): string {
-  return (
-    `${API_PREFIX}/consilium/cases/${encodeURIComponent(caseId)}` +
-    `/chat-messages/${encodeURIComponent(messageId)}/stream`
-  )
-}
-
 /** Разобрать SSE-фрейм (`data:` + JSON) в событие; мусорные фреймы — мимо. */
-function parseFrame(frame: string): ConsiliumStreamEvent | null {
+function parseFrame(frame: string): StreamEvent | null {
   const data = frame
     .split('\n')
     .filter((line) => line.startsWith('data:'))
@@ -109,20 +84,19 @@ function parseFrame(frame: string): ConsiliumStreamEvent | null {
     .join('')
   if (!data) return null
   try {
-    return JSON.parse(data) as ConsiliumStreamEvent
+    return JSON.parse(data) as StreamEvent
   } catch {
     return null
   }
 }
 
 /**
- * Подписка на стрим (раунд или штурм — механизм 0011): события приходят в
- * `onEvent`, обрыв/отказ — в `onError` (клиент остаётся на поллинге).
- * Возврат — отмена подписки.
+ * Подписка на стрим: события приходят в `onEvent`, обрыв/отказ — в `onError`
+ * (клиент остаётся на поллинге). Возврат — отмена подписки.
  */
 export function subscribeStream(
   url: string,
-  onEvent: (event: ConsiliumStreamEvent) => void,
+  onEvent: (event: StreamEvent) => void,
   onError?: () => void,
 ): () => void {
   const controller = new AbortController()
@@ -156,24 +130,4 @@ export function subscribeStream(
     }
   })()
   return () => controller.abort()
-}
-
-/** Подписка на стрим раунда: обёртка над общим `subscribeStream`. */
-export function subscribeRoundStream(
-  caseId: string,
-  roundId: string,
-  onEvent: (event: ConsiliumStreamEvent) => void,
-  onError?: () => void,
-): () => void {
-  return subscribeStream(roundStreamUrl(caseId, roundId), onEvent, onError)
-}
-
-/** Подписка на стрим штурма (роль `brainstorm`): тот же механизм 0011. */
-export function subscribeBrainstormStream(
-  caseId: string,
-  brainstormId: string,
-  onEvent: (event: ConsiliumStreamEvent) => void,
-  onError?: () => void,
-): () => void {
-  return subscribeStream(brainstormStreamUrl(caseId, brainstormId), onEvent, onError)
 }

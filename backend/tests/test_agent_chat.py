@@ -13,10 +13,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import db
 from app.schemas.agent_chat import AgentMessageOut
-from app.schemas.consilium import ConsiliumStreamEvent
-from app.services import llm_router
+from app.schemas.streams import StreamEvent
+from app.services import llm_router, streams
 from app.services.agent_chat import roles, runner, store
-from app.services.consilium import streams
 
 PREFIX = "/api/v1/agent-chat"
 REPLY = "С точки зрения методиста, сначала проверьте артефакты."
@@ -236,7 +235,7 @@ def test_stream_late_subscriber_gets_round_done(
         assert r.status_code == 200
         text = "".join(r.iter_text())
     assert "round_done" in text
-    assert ConsiliumStreamEvent  # контракт потока общий с Консилиумом
+    assert StreamEvent  # контракт потока общий с Консилиумом
 
 
 def test_find_mentions_respects_word_boundary() -> None:

@@ -14,70 +14,8 @@ import type { components } from './schema'
 
 type Schemas = components['schemas']
 
-/** Консилиум: контракт ручного исследования, материалов и снимков. */
-export type ConsiliumCase = Schemas['ConsiliumCaseOut']
-export type ConsiliumCaseCreate = Schemas['ConsiliumCaseCreate']
-export type ConsiliumCaseUpdate = Schemas['ConsiliumCaseUpdate']
-export type ConsiliumCasesPage = Schemas['ConsiliumCasesPage']
-export type ConsiliumContext = Schemas['ConsiliumContextOut']
-export type ConsiliumContextCreate = Schemas['ConsiliumContextCreate']
-export type ConsiliumContextUpdate = Schemas['ConsiliumContextUpdate']
-export type ConsiliumContextPage = Schemas['ConsiliumContextPage']
-export type ConsiliumMessage = Schemas['ConsiliumMessageOut']
-export type ConsiliumMessageCreate = Schemas['ConsiliumMessageCreate']
-export type ConsiliumMessageUpdate = Schemas['ConsiliumMessageUpdate']
-export type ConsiliumMessagesPage = Schemas['ConsiliumMessagesPage']
-export type ConsiliumDeletionPreview = Schemas['ConsiliumDeletionPreview']
-/** Консилиум: триаж готовности досье решающим классификатором (Jev, §5.2). */
-export type ConsiliumTriage = Schemas['ConsiliumTriageOut']
-export type ConsiliumTriageCreate = Schemas['ConsiliumTriageCreate']
-export type ConsiliumTriagePage = Schemas['ConsiliumTriagePage']
-export type ConsiliumJevMark = Schemas['ConsiliumJevMarkOut']
-export type ConsiliumJevMarkRoundPlanCreate = Schemas['ConsiliumJevMarkRoundPlanCreate']
-export type ConsiliumJevMarkAnswerCreate = Schemas['ConsiliumJevMarkAnswerCreate']
-export type ConsiliumJevMarksPage = Schemas['ConsiliumJevMarksPage']
-/** Консилиум Т3: раунды советников и их ответы (append-only история). */
-export type ConsiliumRound = Schemas['ConsiliumRoundOut']
-export type ConsiliumRoundsPage = Schemas['ConsiliumRoundsPage']
-export type ConsiliumRoundCreate = Schemas['ConsiliumRoundCreate']
-export type ConsiliumRoundAction = Schemas['ConsiliumRoundAction']
-export type ConsiliumAnswer = Schemas['ConsiliumAnswerOut']
-export type ConsiliumAnswerRetry = Schemas['ConsiliumAnswerRetry']
-/** Событие SSE-стрима раунда (срез 0011): дельты ролей и границы ответов. */
-export type ConsiliumStreamEvent = Schemas['ConsiliumStreamEvent']
-/** Консилиум: мозговой штурм (срез 0012): идеи и резюме по снимку досье. */
-export type ConsiliumBrainstorm = Schemas['ConsiliumBrainstormOut']
-export type ConsiliumBrainstormCreate = Schemas['ConsiliumBrainstormCreate']
-export type ConsiliumBrainstormIdea = Schemas['ConsiliumBrainstormIdeaOut']
-export type ConsiliumBrainstormsPage = Schemas['ConsiliumBrainstormsPage']
-export type ConsiliumBrainstormKind = ConsiliumBrainstormIdea['kind']
-/** Консилиум: библиотека исследования (Т5, срез 0013): предложения и решения. */
-export type ConsiliumProposal = Schemas['ConsiliumProposalOut']
-export type ConsiliumProposalCreate = Schemas['ConsiliumProposalCreate']
-export type ConsiliumProposalUpdate = Schemas['ConsiliumProposalUpdate']
-export type ConsiliumProposalsPage = Schemas['ConsiliumProposalsPage']
-export type ConsiliumDecision = Schemas['ConsiliumDecisionOut']
-export type ConsiliumDecisionCreate = Schemas['ConsiliumDecisionCreate']
-export type ConsiliumExecution = Schemas['ConsiliumExecutionOut']
-export type ConsiliumExecutionCreate = Schemas['ConsiliumExecutionCreate']
-/** Консилиум: боковая консультация (срез 0015): чат с одним советником. */
-export type ConsiliumChat = Schemas['ConsiliumChatOut']
-export type ConsiliumChatsPage = Schemas['ConsiliumChatsPage']
-export type ConsiliumChatMessage = Schemas['ConsiliumChatMessageOut']
-export type ConsiliumChatMessageCreate = Schemas['ConsiliumChatMessageCreate']
-export type ConsiliumChatMessageRetry = Schemas['ConsiliumChatMessageRetry']
-export type ConsiliumChatMessagesPage = Schemas['ConsiliumChatMessagesPage']
-export type ConsiliumChatSend = Schemas['ConsiliumChatSendOut']
-export type ConsiliumRecording = Schemas['ConsiliumRecording']
-export type ConsiliumSource = Schemas['ConsiliumSource']
-export type ConsiliumSourcesPage = Schemas['ConsiliumSourcesPage']
-export type ConsiliumEvidence = Schemas['ConsiliumEvidence']
-export type ConsiliumEvidenceCreate = Schemas['ConsiliumEvidenceCreate']
-export type ConsiliumEvidencePage = Schemas['ConsiliumEvidencePage']
-export type ConsiliumEvidenceDeletion = Schemas['ConsiliumEvidenceDeletion']
-export type ConsiliumSnapshot = Schemas['ConsiliumSnapshot']
-export type ConsiliumSnapshotCreate = Schemas['ConsiliumSnapshotCreate']
-export type ConsiliumSnapshotsPage = Schemas['ConsiliumSnapshotsPage']
+/** Событие SSE-стрима ответов агентов: дельты ролей и границы ответов. */
+export type StreamEvent = Schemas['StreamEvent']
 
 /** Статусы фоновой задачи: поле `status` схемы `JobStatus` */
 export type JobState = Schemas['JobStatus']['status']
@@ -348,10 +286,6 @@ export type LlmChatProbeRequest = Schemas['LlmChatProbeRequest']
 export type LlmChatProbeScenario = LlmChatProbeRequest['scenario']
 export type LlmChatProbeResult = Schemas['LlmChatProbeOut']
 export type LlmChatProbeModelResult = Schemas['LlmChatProbeModelOut']
-/** Проба решающего классификатора Jev (`POST /llm-router/decide-probe`): синтетический state. */
-export type LlmDecideProbeRequest = Schemas['LlmDecideProbeRequest']
-export type LlmDecideProbeResult = Schemas['LlmDecideProbeOut']
-export type LlmDecideProbeModelResult = Schemas['LlmDecideProbeModelOut']
 
 export type MriSliceRef = Schemas['MriSliceRef']
 

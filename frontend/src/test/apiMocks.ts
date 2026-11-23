@@ -26,7 +26,6 @@ import {
   knowledgeSearchFixture,
   knowledgeTagsFixture,
   llmChatProbeFixture,
-  llmDecideProbeFixture,
   llmProbeFixture,
   llmRouterFixture,
   localResourceFixture,
@@ -74,7 +73,6 @@ import type {
   KnowledgeSearch,
   KnowledgeTagsPage,
   LlmChatProbeResult,
-  LlmDecideProbeResult,
   LlmProbeResult,
   LlmRouter,
   LocalResource,
@@ -175,8 +173,6 @@ export type MockApiOptions = {
   llmProbe?: LlmProbeResult
   /** Результат пробы советника `POST /llm-router/chat-probe` (§10; ошибка провайдера) */
   llmChatProbe?: LlmChatProbeResult
-  /** Результат пробы решающего классификатора `POST /llm-router/decide-probe` (§5.2) */
-  llmDecideProbe?: LlmDecideProbeResult
   /** Каталог RouteLLM `GET /llm-router/routellm/models` (модели, цена, лимиты) */
   routeLlmModels?: RouteLlmModels
   /** Смоделировать отказ сигналов записи (например 404 после TTL) */
@@ -644,10 +640,6 @@ export function mockApiFetch(options: MockApiOptions = {}) {
     if (url.includes('/llm-router/routellm/models')) {
       // Каталог RouteLLM: модели провайдера с ценой и лимитами
       return jsonResponse(options.routeLlmModels ?? routeLlmModelsFixture())
-    }
-    if (url.includes('/llm-router/decide-probe')) {
-      // Проба решающего классификатора (§5.2): по умолчанию успех, ошибка — через options
-      return jsonResponse(options.llmDecideProbe ?? llmDecideProbeFixture())
     }
     if (url.includes('/llm-router/chat-probe')) {
       // Проба советника (§10): по умолчанию успех, ошибка — через options.llmChatProbe

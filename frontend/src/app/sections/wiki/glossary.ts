@@ -538,7 +538,7 @@ export const GLOSSARY: GlossaryEntry[] = [
   {
     id: 'llm-router',
     term: 'Модельный роутер ИИ',
-    def: 'Провайдеры внешних API моделей и маршруты chat/transcribe/decide в разделе «Настройки». Ключи живут только в серверном файле, наружу идёт маска key_hint. Проба — POST /llm-router/probe без материалов дела.',
+    def: 'Провайдеры внешних API моделей и маршруты chat/transcribe в разделе «Настройки». Ключи живут только в серверном файле, наружу идёт маска key_hint. Проба — POST /llm-router/probe без материалов дела.',
     group: 'Консилиум',
   },
   {

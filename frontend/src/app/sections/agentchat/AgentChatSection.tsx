@@ -18,7 +18,7 @@ import {
   emptyLiveRound,
   subscribeStream,
   type LiveRound,
-} from '@/shared/lib/roundStream'
+} from '@/shared/lib/streamEvents'
 import { Button } from '@/shared/ui/Button'
 import { cx } from '@/shared/ui/cx'
 import { ErrorBlock, LoadingBlock } from '@/shared/ui/StateViews'

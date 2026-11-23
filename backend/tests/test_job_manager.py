@@ -286,7 +286,7 @@ def test_resource_classes_have_separate_limits():
         assert await asyncio.to_thread(mne_started.wait, 5), "MNE-воркер не стартовал"
 
         # Слот mne занят, но llm идёт своим семафором — завершается без ожидания
-        llm_job = manager.submit("consilium_round", None, llm_worker, resource="llm")
+        llm_job = manager.submit("agent_chat", None, llm_worker, resource="llm")
         await asyncio.wait_for(llm_job.task, timeout=5)
         assert llm_job.status == "succeeded"
         assert llm_job.result == {"round_id": "r1"}
@@ -311,7 +311,7 @@ def test_async_worker_runs_in_event_loop():
             progress("advisers", 0.5, "Ответы советников")
             return {"round_id": "r2"}
 
-        job = manager.submit("consilium_round", None, worker, resource="llm")
+        job = manager.submit("agent_chat", None, worker, resource="llm")
         await job.task
 
         assert job.status == "succeeded"
@@ -336,7 +336,7 @@ def test_on_success_required_failure_fails_job():
             raise RuntimeError("БД недоступна")
 
         job = manager.submit(
-            "consilium_round", None, worker,
+            "agent_chat", None, worker,
             on_success=on_success, on_success_required=True,
         )
         await job.task
@@ -363,7 +363,7 @@ def test_on_success_required_success_finishes_job():
             await asyncio.sleep(0)
 
         job = manager.submit(
-            "consilium_round", None, worker,
+            "agent_chat", None, worker,
             on_success=on_success, on_success_required=True,
         )
         await job.task
@@ -401,7 +401,7 @@ def test_custom_start_stage_labels_job():
             return {"round_id": "r5"}
 
         job = manager.submit(
-            "consilium_round", None, worker, resource="llm",
+            "agent_chat", None, worker, resource="llm",
             start_stage="advisers", start_message="Ответы советников",
         )
         await job.task

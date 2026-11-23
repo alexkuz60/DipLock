@@ -1,10 +1,10 @@
-"""RAM-состояние стриминга ответов раунда (срез 0011).
+"""RAM-состояние стриминга ответов ролевых агентов.
 
 Частичный текст ответа — **не результат**: готовые тексты пишутся в БД до
 объявления успеха задачи (§8 `docs/rules/consilium.md`), в файл задачи они не
 попадают, поэтому и стрим живёт только в памяти процесса. Перезапуск бэкенда
-теряет частичный текст — клиент честно возвращается к поллингу раунда и
-дочитывает готовые ответы из БД.
+теряет частичный текст — клиент честно возвращается к поллингу и дочитывает
+готовые ответы из БД.
 
 Каждое событие попадает в журнал ``RoundProgress.log`` — подписчик SSE
 дочитывает журнал по мере роста и не пропускает дельты между тиками.
@@ -13,12 +13,12 @@
 import asyncio
 from dataclasses import dataclass, field
 
-from app.schemas.consilium import ConsiliumStreamEvent, StreamRoleStatus
+from app.schemas.streams import StreamEvent, StreamRoleStatus
 
 
 @dataclass
 class RoleProgress:
-    """Состояние одной роли в текущем запуске раунда."""
+    """Состояние одной роли в текущем запуске."""
 
     role: str
     status: StreamRoleStatus = "waiting"
@@ -29,16 +29,16 @@ class RoleProgress:
 
 @dataclass
 class RoundProgress:
-    """Журнал событий раунда и будильник для SSE-подписчиков."""
+    """Журнал событий запуска и будильник для SSE-подписчиков."""
 
     round_id: str
     roles: dict[str, RoleProgress] = field(default_factory=dict)
-    log: list[ConsiliumStreamEvent] = field(default_factory=list)
+    log: list[StreamEvent] = field(default_factory=list)
     finished: bool = False
     error: str | None = None
     changed: asyncio.Event = field(default_factory=asyncio.Event)
 
-    def _emit(self, event: ConsiliumStreamEvent) -> None:
+    def _emit(self, event: StreamEvent) -> None:
         self.log.append(event)
         self.changed.set()
 
@@ -46,14 +46,14 @@ class RoundProgress:
         """Роль начала запрос к внешней модели."""
         entry = self.roles.setdefault(role, RoleProgress(role=role))
         entry.status = "streaming"
-        self._emit(ConsiliumStreamEvent(type="role_started", role=role, status="streaming"))
+        self._emit(StreamEvent(type="role_started", role=role, status="streaming"))
 
     def append_delta(self, role: str, delta: str) -> None:
         """Кусочек текста роли по мере генерации (без обрезки краёв)."""
         entry = self.roles.setdefault(role, RoleProgress(role=role))
         entry.status = "streaming"
         entry.text += delta
-        self._emit(ConsiliumStreamEvent(type="delta", role=role, delta=delta))
+        self._emit(StreamEvent(type="delta", role=role, delta=delta))
 
     def role_finished(
         self, role: str, *, status: StreamRoleStatus,
@@ -64,7 +64,7 @@ class RoundProgress:
         entry.status = status
         entry.model = model
         entry.error = error
-        self._emit(ConsiliumStreamEvent(
+        self._emit(StreamEvent(
             type="role_done", role=role, status=status, model=model, error=error,
         ))
 
@@ -79,11 +79,11 @@ _ROUNDS: dict[str, RoundProgress] = {}
 
 
 def open_round(round_id: str, roles: tuple[str, ...]) -> RoundProgress:
-    """Открыть поток запуска; прежний запуск того же раунда (повтор ответа)
-    закрывается — его подписчики получают честный ``round_done``."""
+    """Открыть поток запуска; прежний запуск того же ключа закрывается —
+    его подписчики получают честный ``round_done``."""
     previous = _ROUNDS.get(round_id)
     if previous is not None:
-        previous.finish("Запущен новый запрос по этому раунду")
+        previous.finish("Запущен новый запрос по этому ключу")
     progress = RoundProgress(
         round_id=round_id,
         roles={role: RoleProgress(role=role) for role in roles},
@@ -93,7 +93,7 @@ def open_round(round_id: str, roles: tuple[str, ...]) -> RoundProgress:
 
 
 def get_round(round_id: str) -> RoundProgress | None:
-    """Текущий поток раунда (``None`` — запуск уже завершён или перезапущен)."""
+    """Текущий поток (``None`` — запуск уже завершён или перезапущен)."""
     return _ROUNDS.get(round_id)
 
 

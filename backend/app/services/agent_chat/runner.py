@@ -17,10 +17,9 @@ from app.schemas.agent_chat import (
     AgentSendOut,
     AgentWebSearchOut,
 )
-from app.services import llm_router
+from app.services import llm_router, streams
 from app.services.agent_chat import roles, store
 from app.services.agent_chat.roles import AgentChatError
-from app.services.consilium import streams
 from app.services.job_manager import Job, JobCancelledError
 from app.services.job_manager import job_manager as jobs
 from app.services.knowledge import store as knowledge_store

@@ -8,12 +8,12 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   applyStreamEvent,
   emptyLiveRound,
-  subscribeRoundStream,
+  subscribeStream,
   type LiveRound,
-} from '@/shared/lib/roundStream'
-import type { ConsiliumStreamEvent } from '@/shared/api/types'
+} from '@/shared/lib/streamEvents'
+import type { StreamEvent } from '@/shared/api/types'
 
-function event(changes: Partial<ConsiliumStreamEvent>): ConsiliumStreamEvent {
+function event(changes: Partial<StreamEvent>): StreamEvent {
   return { type: 'delta', role: null, delta: null, model: null, status: null, error: null, ...changes }
 }
 
@@ -73,7 +73,7 @@ function sseResponse(frames: string[]): Response {
   )
 }
 
-describe('subscribeRoundStream', () => {
+describe('subscribeStream', () => {
   it('разбирает SSE-фреймы в события и закрывается по концу потока', async () => {
     const urls: string[] = []
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -84,15 +84,15 @@ describe('subscribeRoundStream', () => {
       ])
     })
     vi.stubGlobal('fetch', fetchMock)
-    const seen: ConsiliumStreamEvent[] = []
+    const seen: StreamEvent[] = []
     await new Promise<void>((resolve) => {
-      subscribeRoundStream('case-a', 'round-1', (item) => seen.push(item), undefined)
+      subscribeStream('/api/v1/agent-chat/threads/t-1/messages/m-1/stream', (item) => seen.push(item))
       // Поток отдаёт все фреймы сразу и закрывается — события видны через тик
       setTimeout(resolve, 0)
     })
     vi.unstubAllGlobals()
 
-    expect(urls[0]).toContain('/rounds/round-1/stream')
+    expect(urls[0]).toContain('/agent-chat/threads/t-1/messages/m-1/stream')
     expect(seen.map((item) => item.type)).toEqual(['delta', 'round_done'])
     expect(seen[0].delta).toBe('Привет')
   })
@@ -101,7 +101,7 @@ describe('subscribeRoundStream', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('нет', { status: 500 })))
     const onError = vi.fn()
     await new Promise<void>((resolve) => {
-      subscribeRoundStream('case-a', 'round-1', () => {}, onError)
+      subscribeStream('/api/v1/agent-chat/threads/t-1/messages/m-1/stream', () => {}, onError)
       setTimeout(resolve, 0)
     })
     vi.unstubAllGlobals()

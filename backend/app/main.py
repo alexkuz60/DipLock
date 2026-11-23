@@ -10,7 +10,6 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.api.agent_chat import router as agent_chat_router
-from app.api.consilium import router as consilium_router
 from app.api.emolab import router as emolab_router
 from app.api.hypotheses import router as hypotheses_router
 from app.api.knowledge import router as knowledge_router
@@ -82,27 +81,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     restored = job_manager.restore(settings)
     if restored:
         logger.info("Поднято задач из файлов на диске: %d", restored)
-    # Консилиум (§8): живых LLM-задач после рестарта нет, строки «running» —
-    # прерванная операция; состояние честно показывается в строке раунда/штурма.
+    # Чат экспертов (§0.9): живых LLM-задач после рестарта нет, строки «running» —
+    # прерванная операция; состояние честно показывается в строке ответа.
     try:
-        from app.services.consilium import brainstorm, chat_store, rounds_store
-
-        interrupted = await rounds_store.mark_interrupted()
-        if interrupted:
-            logger.info("Прерванные раунды Консилиума помечены: %d", interrupted)
-        brainstormed = await brainstorm.mark_interrupted()
-        if brainstormed:
-            logger.info("Прерванные штурмы Консилиума помечены: %d", brainstormed)
-        chatted = await chat_store.mark_interrupted()
-        if chatted:
-            logger.info("Прерванные ответы консультаций помечены: %d", chatted)
         from app.services.agent_chat import store as agent_chat_store
 
         agents = await agent_chat_store.mark_interrupted()
         if agents:
             logger.info("Прерванные ответы агентов чата помечены: %d", agents)
     except Exception:
-        logger.exception("Не удалось пометить прерванные операции Консилиума")
+        logger.exception("Не удалось пометить прерванные ответы агентов чата")
     yield
 
 
@@ -139,7 +127,6 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 app.include_router(api_router, prefix=settings.api_prefix)
-app.include_router(consilium_router, prefix=settings.api_prefix)
 app.include_router(agent_chat_router, prefix=settings.api_prefix)
 app.include_router(emolab_router, prefix=settings.api_prefix)
 app.include_router(hypotheses_router, prefix=settings.api_prefix)

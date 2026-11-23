@@ -25,11 +25,10 @@ from app.schemas.agent_chat import (
     AgentWebSearchesPage,
     AgentWebSearchOut,
 )
-from app.schemas.consilium import ConsiliumStreamEvent
-from app.services import llm_router
+from app.schemas.streams import StreamEvent
+from app.services import llm_router, streams
 from app.services.agent_chat import roles, runner, store, web_search
 from app.services.agent_chat.roles import AgentChatError
-from app.services.consilium import streams
 
 router = APIRouter(prefix="/agent-chat", tags=["Консилиум-чат"], route_class=PrivateRoute)
 
@@ -191,13 +190,13 @@ async def retry_message(
     "/threads/{thread_id}/messages/{message_id}/stream",
     responses={
         200: {
-            "model": ConsiliumStreamEvent,
+            "model": StreamEvent,
             "description": (
-                "SSE-поток ответа агента: фреймы `event:` + JSON `ConsiliumStreamEvent`"
+                "SSE-поток ответа агента: фреймы `event:` + JSON `StreamEvent`"
             ),
             "content": {
                 "text/event-stream": {
-                    "schema": {"$ref": "#/components/schemas/ConsiliumStreamEvent"},
+                    "schema": {"$ref": "#/components/schemas/StreamEvent"},
                 },
             },
         },

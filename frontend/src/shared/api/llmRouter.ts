@@ -3,8 +3,6 @@ import { API_PREFIX, request } from './client'
 import type {
   LlmChatProbeRequest,
   LlmChatProbeResult,
-  LlmDecideProbeRequest,
-  LlmDecideProbeResult,
   LlmProbeRequest,
   LlmProbeResult,
   LlmRouter,
@@ -30,9 +28,6 @@ export const llmRouterApi = {
   /** Проба советника (§10): синтетический сценарий на выбранном провайдере. */
   chatProbe: (payload: LlmChatProbeRequest) =>
     request<LlmChatProbeResult>(`${base}/chat-probe`, json('POST', payload)),
-  /** Проба решающего классификатора Jev: синтетический state, без материалов дела. */
-  decideProbe: (payload: LlmDecideProbeRequest) =>
-    request<LlmDecideProbeResult>(`${base}/decide-probe`, json('POST', payload)),
   /** Каталог RouteLLM: модели провайдера, стоимость, модальности и лимиты. */
   routellmModels: (providerId: string, signal?: AbortSignal) =>
     request<RouteLlmModels>(

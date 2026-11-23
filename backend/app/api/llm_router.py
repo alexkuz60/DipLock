@@ -2,7 +2,7 @@
 
 Панель «Модельный роутер ИИ» раздела «Настройки»: провайдеры внешних API
 полноценных моделей (llama.cpp отклонён 10.10.2026) и маршруты
-``chat``/``transcribe``/``decide``. Ответы приватные ``no-store``; ключи API в
+``chat``/``transcribe``. Ответы приватные ``no-store``; ключи API в
 контракте не участвуют — наружу идёт только маска ``key_hint``.
 """
 
@@ -13,9 +13,6 @@ from app.schemas.llm_router import (
     LlmChatProbeModelOut,
     LlmChatProbeOut,
     LlmChatProbeRequest,
-    LlmDecideProbeModelOut,
-    LlmDecideProbeOut,
-    LlmDecideProbeRequest,
     LlmProbeModelOut,
     LlmProbeOut,
     LlmProbeRequest,
@@ -54,7 +51,6 @@ def _router_out(state: RouterState) -> LlmRouterOut:
             chat=state.routes.get("chat"),
             chat_model=state.routes.get("chat_model"),
             transcribe=state.routes.get("transcribe"),
-            decide=state.routes.get("decide"),
         ),
     )
 
@@ -102,7 +98,6 @@ async def put_llm_router(payload: LlmRouterUpdate, response: Response) -> LlmRou
                 "chat": payload.routes.chat,
                 "chat_model": payload.routes.chat_model,
                 "transcribe": payload.routes.transcribe,
-                "decide": payload.routes.decide,
             },
         )
     except LlmRouterError as exc:
@@ -190,41 +185,6 @@ async def chat_probe_llm_provider(
                 text=item.text,
                 error=item.error,
                 truncated=item.truncated,
-            )
-            for item in result.models
-        ],
-    )
-
-
-@router.post(
-    "/decide-probe",
-    response_model=LlmDecideProbeOut,
-    summary="Проба решающего классификатора Jev (маршрут decide)",
-)
-async def decide_probe_llm_provider(
-    payload: LlmDecideProbeRequest,
-    response: Response,
-) -> LlmDecideProbeOut:
-    """Синтетический state пробы (без материалов дела): типизированные решения и задержка."""
-    response.headers["Cache-Control"] = _NO_STORE["Cache-Control"]
-    try:
-        result = await llm_router.decide_probe(payload.provider_id)
-    except LlmRouterError as exc:
-        raise HTTPException(exc.status, str(exc), headers=_NO_STORE) from None
-    return LlmDecideProbeOut(
-        ok=result.ok,
-        provider_id=result.provider_id,
-        model=result.model,
-        latency_ms=result.latency_ms,
-        answers=result.answers,
-        error=result.error,
-        models=[
-            LlmDecideProbeModelOut(
-                model=item.model,
-                ok=item.ok,
-                latency_ms=item.latency_ms,
-                answers=item.answers,
-                error=item.error,
             )
             for item in result.models
         ],

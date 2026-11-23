@@ -13,10 +13,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models import db
 from app.schemas.agent_chat import AgentRoleOut
-from app.services import llm_router
+from app.services import llm_router, streams
 from app.services.agent_chat import runner, store, web_search
 from app.services.agent_chat.roles import AgentChatError
-from app.services.consilium import streams
 
 PREFIX = "/api/v1/agent-chat"
 

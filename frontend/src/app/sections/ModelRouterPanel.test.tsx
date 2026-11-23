@@ -8,7 +8,6 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { ModelRouterPanel } from './ModelRouterPanel'
 import {
   llmChatProbeFixture,
-  llmDecideProbeFixture,
   llmProbeFixture,
   llmRouterFixture,
   routeLlmModelsFixture,
@@ -468,53 +467,6 @@ describe('панель «Модельный роутер ИИ»', () => {
     expect(putBodies(fetchMock)).toHaveLength(0)
   })
 
-  it('проба решающего классификатора (Jev) шлётся кнопкой и показывает решения', async () => {
-    const user = userEvent.setup()
-    const fetchMock = mockApiFetch({ llmDecideProbe: llmDecideProbeFixture() })
-    renderWithProviders(<ModelRouterPanel />)
-
-    await screen.findByRole('textbox', { name: 'Имя' })
-    await user.selectOptions(screen.getByLabelText('Провайдер пробы (Jev)'), 'prov-full')
-    // Правка выбора провайдера ничего не отправляет — считает только кнопка
-    expect(
-      fetchMock.mock.calls.filter(
-        ([url, init]) =>
-          String(url).includes('/llm-router/decide-probe') && init?.method === 'POST',
-      ),
-    ).toHaveLength(0)
-
-    await user.click(screen.getByRole('button', { name: 'Проба Jev' }))
-    expect(await screen.findByText('jev-1.13.0 · 150 мс')).toBeInTheDocument()
-    expect(screen.getByText(/measurements_and_report/)).toBeInTheDocument()
-    const bodies = fetchMock.mock.calls
-      .filter(
-        ([url, init]) => String(url).includes('/llm-router/decide-probe') && init?.method === 'POST',
-      )
-      .map(([, init]) => JSON.parse(String(init?.body)))
-    expect(bodies).toEqual([{ provider_id: 'prov-full' }])
-  })
-
-  it('проба решающего классификатора: ошибка провайдера показывается честно', async () => {
-    const user = userEvent.setup()
-    mockApiFetch({
-      llmDecideProbe: llmDecideProbeFixture({
-        ok: false,
-        model: null,
-        latency_ms: null,
-        answers: {},
-        error: 'Провайдер ответил 402: недостаточно средств',
-      }),
-    })
-    renderWithProviders(<ModelRouterPanel />)
-
-    await screen.findByRole('textbox', { name: 'Имя' })
-    await user.selectOptions(screen.getByLabelText('Провайдер пробы (Jev)'), 'prov-full')
-    await user.click(screen.getByRole('button', { name: 'Проба Jev' }))
-    expect(
-      await screen.findByText('Проба не прошла: Провайдер ответил 402: недостаточно средств'),
-    ).toBeInTheDocument()
-  })
-
   it('каталог RouteLLM: загрузка, выбор модели и добавление в список', async () => {
     const user = userEvent.setup()
     const base = llmRouterFixture()
@@ -549,7 +501,7 @@ describe('панель «Модельный роутер ИИ»', () => {
     const fetchMock = mockApiFetch({
       llmRouter: llmRouterFixture({
         providers: [],
-        routes: { chat: null, chat_model: null, transcribe: null, decide: null },
+        routes: { chat: null, chat_model: null, transcribe: null },
       }),
     })
     renderWithProviders(<ModelRouterPanel />)

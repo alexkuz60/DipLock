@@ -34,73 +34,13 @@
   `test_openapi_json_is_up_to_date` и CI-шаг `git diff`, 4.2).
 - Swagger: `http://localhost:8000/docs`.
 
-### Отдельный роутер Консилиума (начало Т1, 10.10.2026)
+### Отдельный роутер «Чат экспертов» (0019)
 
-`backend/app/api/consilium.py` подключён в main с тем же `settings.api_prefix`:
-50 операций, 38 уникальных путей. Pydantic — `schemas/consilium.py`; обязательный
-сервис хранения — `services/consilium/store.py`; подробности —
-`docs/rules/consilium.md` §0. Не фоновые задачи и не best-effort запись.
-
-| Метод и путь (относительно `/api/v1`) | Назначение |
-|---|---|
-| `POST/GET /consilium/cases` | дело (201, request_id), список/total с пагинацией |
-| `GET/PATCH/DELETE /consilium/cases/{case_id}` | паспорт, полный новый паспорт с expected_version, удаление после предпросмотра |
-| `POST/GET /consilium/cases/{case_id}/context` | ручной контекст (201), все ревизии с пагинацией |
-| `PATCH /consilium/cases/{case_id}/context/{entry_id}` | новая ревизия с expected_revision и expected_version |
-| `POST/GET /consilium/cases/{case_id}/messages` | только ручные реплики, без запуска модели |
-| `PATCH /consilium/cases/{case_id}/messages/{entry_id}` | новая ревизия ручной реплики |
-| `GET /consilium/cases/{case_id}/deletion-preview` | число ревизий и версия для явного удаления; исходные ЭЭГ сохраняются |
-| `GET /consilium/recordings` | зарегистрированные строки для явного связывания дела, без чтения EDF |
-| `GET /consilium/cases/{case_id}/sources` | конкретные источники, пагинация/total, полный состав пары/группы |
-| `POST/GET /consilium/cases/{case_id}/evidence` | принять серверную копию выбранного прогона / читать принятые копии |
-| `POST/GET /consilium/cases/{case_id}/snapshots` | опубликовать снимок / читать историю досье |
-| `GET /consilium/cases/{case_id}/snapshots/{snapshot_id}` | точная зафиксированная версия без пересчёта |
-| `GET /consilium/cases/{case_id}/evidence/{evidence_id}/deletion-preview` | зависимые снимки перед удалением материала |
-| `DELETE /consilium/cases/{case_id}/evidence/{evidence_id}` | очистить копию, содержащие её снимки и квитанции дела; expected_version |
-| `POST /consilium/cases/{case_id}/rounds` | раунд советников Т3: старт 202, состояние — в строке раунда |
-| `GET /consilium/cases/{case_id}/rounds` | раунды с append-only ответами, пагинация/total |
-| `GET /consilium/cases/{case_id}/rounds/{round_id}` | раунд со всеми попытками; `interrupted` — честный статус прерванного |
-| `POST /consilium/cases/{case_id}/rounds/{round_id}/summary` | итог с сохранением разногласий, один на снимок |
-| `POST /consilium/cases/{case_id}/rounds/{round_id}/retry` | повтор одного неудавшегося ответа (новая попытка в истории) |
-| `GET /consilium/cases/{case_id}/rounds/{round_id}/stream` | SSE-стрим раунда (срез 0011): дельты ролей по мере генерации, позднему подписчику — `round_done`; тексты в файл задачи не попадают |
-| `POST /consilium/cases/{case_id}/triage` | триаж готовности досье Jev (§5.2): типизированные решения одного вызова, 201; повтор `request_id` — прежняя строка без повторной передачи данных; ошибка провайдера — строка `failed` без достроенных решений |
-| `GET /consilium/cases/{case_id}/triage` | история попыток триажа (append-only, новые сверху), пагинация/total |
-| `GET /consilium/cases/{case_id}/triage/{triage_id}` | точная строка триажа с сырыми решениями и предупреждениями |
-| `POST /consilium/cases/{case_id}/jev-marks/round-plan` | разметка Jev (§5.3) «быстрый раунд»: подсказка ролей/глубины по снимку, 201; advisory-метки по порогу настроек, не вердикт |
-| `POST /consilium/cases/{case_id}/jev-marks/proposal` | карточка предложения из текста ответа советника: вид шага §7 и поля (advisory), 201 |
-| `POST /consilium/cases/{case_id}/jev-marks/source-marks` | разметка источников утверждений ответа (три источника не смешиваются, advisory), 201 |
-| `GET /consilium/cases/{case_id}/jev-marks` | история попыток разметки (append-only, новые сверху) с фильтрами `kind`/`subject_id` |
-| `GET /consilium/cases/{case_id}/jev-marks/{mark_id}` | точная строка разметки с метками, вероятностями и предупреждениями |
-| `POST/GET /consilium/cases/{case_id}/brainstorms` | мозговой штурм (срез 0012): запуск 202 кнопкой по снимку досье, история (новые сверху); повтор `request_id` — прежняя строка |
-| `GET /consilium/cases/{case_id}/brainstorms/{brainstorm_id}` | точный запуск: резюме, идеи §7 и сырой текст ответа модели (`draft`) |
-| `GET /consilium/cases/{case_id}/brainstorms/{brainstorm_id}/stream` | SSE-стрим штурма (механизм 0011, роль `brainstorm`): растущий текст, `round_done` на границе |
-| `POST/GET /consilium/cases/{case_id}/proposals` | библиотека исследования (Т5, срез 0013): предложение вручную/из идеи штурма (201), список с пагинацией |
-| `GET/PATCH /consilium/cases/{case_id}/proposals/{proposal_id}` | карточка с append-only решениями/исполнениями; правка — новая версия карточки |
-| `POST /consilium/cases/{case_id}/proposals/{proposal_id}/decisions` | решение человека «принято/отклонено» (201, append-only) с адресом версии карточки |
-| `POST /consilium/cases/{case_id}/proposals/{proposal_id}/executions` | ручное исполнение предложения и результат (201, append-only) |
-| `GET /consilium/cases/{case_id}/chats` | нити боковой консультации (срез 0015): одна на пару дело × советник, число реплик |
-| `GET /consilium/cases/{case_id}/chats/{chat_id}/messages` | реплики нити по порядку переписки (append-only, без правок) |
-| `POST /consilium/cases/{case_id}/chat-messages` | сообщение исследователя и задача ответа советника (202); нить заводится первым сообщением; повтор `request_id` — прежний ответ; без снимка/маршрута `chat` — 400, идущий ответ — 409 |
-| `POST /consilium/cases/{case_id}/chat-messages/{message_id}/retry` | повтор неудавшегося ответа советника новой попыткой (202, append-only) |
-| `GET /consilium/cases/{case_id}/chat-messages/{message_id}/stream` | SSE-стрим ответа консультации (механизм 0011, роль советника): растущий текст, `round_done` на границе |
-| `GET /agent-chat/roles` | роли общего чата с инструкциями и выбранными моделями |
-| `POST /agent-chat/roles`, `PUT/DELETE /agent-chat/roles/{role_id}` | создание/правка/удаление пользовательской роли; встроенную можно только выключить |
-| `GET/POST /agent-chat/threads`, `DELETE /agent-chat/threads/{thread_id}` | список, создание и явное удаление нитей с репликами; удалить нить с ответом `running` нельзя (409) |
-| `GET /agent-chat/threads/{thread_id}/messages` | сообщения исследователя и ответы всех адресованных ролей |
-| `POST /agent-chat/threads/{thread_id}/messages` | сообщение и ответы выбранных/упомянутых ролей (202); отдельная задача класса `llm` на каждую роль |
-| `GET /agent-chat/threads/{thread_id}/messages/{message_id}` | чтение состояния и сохранённого ответа для поллинга |
-| `POST /agent-chat/threads/{thread_id}/messages/{message_id}/retry` | повтор неудавшегося ответа (202), успешный ответ повторить нельзя |
-| `GET /agent-chat/threads/{thread_id}/messages/{message_id}/stream` | SSE-дельты ответа агента; итог дочитывается из БД, позднему подписчику — `round_done` |
-| `GET /agent-chat/threads/{thread_id}/web-search` | поиски нити, новые сверху (миграция 0020) |
-| `POST /agent-chat/threads/{thread_id}/web-search` | веб-поиск Архивариуса (201): запрос уходит поисковику только этим действием, результаты сохраняются в нити |
-| `POST /agent-chat/threads/{thread_id}/web-search/{search_id}/translate` | перевод найденных материалов на русский провайдером роли; ошибки — по каждому материалу |
-
-Успешные ответы приватные `no-store`, ошибка формы без эха `input`, DB-ошибка
-без SQL/текста добровольца. 404 — нет дела/реплики/новой связанной записи;
-409 — конфликт версии/ключа или запись в архив; 503 — ошибка обязательного
-хранилища. 413 — лимит материала/досье/строк без молчаливого усечения.
-Аудио пока не доступно (Т2); ответы советников и боковых консультаций идут
-через модельный роутер ниже.
+`backend/app/api/agent_chat.py` подключён в main с тем же `settings.api_prefix`;
+Pydantic — `schemas/agent_chat.py`, работа — `services/agent_chat/`. Роутер
+`api/consilium.py` (50 операций исследования) удалён 23.11.2026 вместе с
+режимом; миграция `0022` дропнула его таблицы. Подробности —
+`docs/rules/consilium.md` §0.9.
 
 ### Модельный роутер ИИ («Настройки», 10.10.2026)
 
@@ -121,24 +61,21 @@
 Ответы приватные `no-store`, 422 без эха `input` (`PrivateRoute`); 400 — текст
 для UI (адрес/маршруты), 404 — нет провайдера, 409 — устаревший id.
 
-### SSE-стрим ответов (срез 0011, 14.10.2026)
+### SSE-стрим ответов (срез 0011, 14.10.2026; вынесен 23.11.2026)
 
-Три SSE-эндпоинта с общим механизмом: `GET .../rounds/{id}/stream` (раунд),
-`GET .../brainstorms/{id}/stream` (штурм) и `GET .../chat-messages/{id}/stream`
-(ответ боковой консультации, срез 0015) и `GET /agent-chat/threads/{thread_id}/messages/{message_id}/stream`
+Один SSE-эндпоинт: `GET /agent-chat/threads/{thread_id}/messages/{message_id}/stream`
 (общий ролевой чат, миграция 0019). `StreamingResponse(text/event-stream)`
-отдаёт фреймы `event:` + JSON
-`ConsiliumStreamEvent` (`role_started`/`delta`/`role_done`/`error`/`ping`,
-завершение — `round_done`). Частичный текст живёт только в RAM
-(`services/consilium/streams.py`), в БД и файл задачи дельты не пишутся.
+отдаёт фреймы `event:` + JSON `StreamEvent` (`role_started`/`delta`/`role_done`/
+`error`/`ping`, завершение — `round_done`). Частичный текст живёт только в RAM
+(`services/streams.py`), в БД и файл задачи дельты не пишутся.
 
 **Правило «SSE поверх задачи»:** живой поток — удобство над обычной задачей, не
 её замена. Задача остаётся единицей работы: поллинг `GET /rounds/{id}` —
 обязательный фолбэк клиента; события стрима не содержат результатов (готовые
-тексты пишутся в БД до объявления успеха, §8 `docs/rules/consilium.md`);
+тексты пишутся в БД до объявления успеха, §0.9 `docs/rules/consilium.md`);
 `Cache-Control: private, no-store` обязателен; обрыв потока не ошибка — клиент
-дочитывает готовое поллингом; принадлежность — та же, что у раунда (чужое
-дело — 404).
+дочитывает готовое поллингом; принадлежность — та же, что у нити (чужая
+нить — 404).
 
 ### Отдельный роутер «ЕмоЛаб» (шаг 1, 20.10.2026)
 
