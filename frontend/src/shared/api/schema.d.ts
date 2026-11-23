@@ -11284,7 +11284,7 @@ export interface components {
             id?: string | null;
             /**
              * Label
-             * @description Человеческое имя провайдера
+             * @description Человеческое имя провайдера; пустое значение отклоняет сервис с русским текстом (400), а не схема с английским 422
              */
             label: string;
             /**
@@ -11300,7 +11300,7 @@ export interface components {
             base_url: string;
             /**
              * Model
-             * @description Идентификатор модели провайдера
+             * @description Идентификатор модели провайдера; пустое значение отклоняет сервис с русским текстом (400), а не схема с английским 422
              */
             model: string;
             /**

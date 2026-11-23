@@ -25042,9 +25042,8 @@
           "label": {
             "type": "string",
             "maxLength": 80,
-            "minLength": 1,
             "title": "Label",
-            "description": "Человеческое имя провайдера"
+            "description": "Человеческое имя провайдера; пустое значение отклоняет сервис с русским текстом (400), а не схема с английским 422"
           },
           "protocol": {
             "type": "string",
@@ -25059,16 +25058,14 @@
           "base_url": {
             "type": "string",
             "maxLength": 300,
-            "minLength": 8,
             "title": "Base Url",
             "description": "Адрес API как у провайдера (с /v1 или без — роутер дописывает только /chat/completions или /messages): https://api.deepseek.com, https://api.openai.com/v1, https://api.anthropic.com/v1. Для protocol=systemone — полный адрес вызова решений, путь не дописывается: https://api.typesafe.ai/v1/systemone"
           },
           "model": {
             "type": "string",
             "maxLength": 120,
-            "minLength": 1,
             "title": "Model",
-            "description": "Идентификатор модели провайдера"
+            "description": "Идентификатор модели провайдера; пустое значение отклоняет сервис с русским текстом (400), а не схема с английским 422"
           },
           "enabled": {
             "type": "boolean",
