@@ -155,6 +155,14 @@ Anthropic-формат DeepSeek — `https://api.deepseek.com/anthropic`). Пр�
 пустые элементы отбрасываются. Модель маршрута обязана входить в список
 провайдера — иначе сохранение отклоняется с текстом для UI.
 
+**Длина списка моделей (23.11.2026).** Предел длины проверяет сервис, а не
+схема: у поля `model` в `LlmProviderIn` больше нет `max_length`, поэтому список
+из пяти-шести id (например, `route-llm, route-llm-code, gemini-decision-1,
+abacusai/Smaug-Flash, route-llm-code-low`) сохраняется, а не падает английским
+`providers.N.model: String should have at most 120 characters`. Границы:
+10 id, 200 символов на id, 1200 символов на список — сверх них русский 400
+(`Слишком длинный список моделей...`).
+
 **Каталог RouteLLM (22.11.2026).** Для провайдера Abacus RouteLLM
 (`https://routellm.abacus.ai/v1`, модель `route-llm`) панель роутера подтягивает
 список моделей: `GET /api/v1/llm-router/routellm/models?provider_id=...`

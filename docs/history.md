@@ -40,6 +40,17 @@ API Reference» (`abacus.ai/help/route-llm`) `gemini-decision-1` (Google) и
 `Invalid model`. `GET /v1/models` перечисляет 138 id, включая оба этих, — по
 каталогу чат-модель не отличить, отличает только проба.
 
+## 23.11.2026 — Список моделей длиннее 120 символов сохраняется
+
+Сохранение настроек роутера на локальном сервере падало английским 422
+`providers.2.model: String should have at most 120 characters`: у поля `model`
+в `LlmProviderIn` стоял `max_length=120`, а список из пяти id RouteLLM длиннее.
+Предел снят со схемы — длину проверяет сервис русским 400: до 10 id, 200
+символов на id, 1200 символов на список (`_MAX_MODELS_CHARS`). Тесты
+`test_long_model_list_is_accepted` (6 id, 143 символа → 200) и
+`test_model_list_too_long_is_russian_400`; `test_llm_router.py` +
+`test_docs_guards.py` — 49 passed, ruff и mypy чисты.
+
 ## 23.11.2026 — Проба: ok, если ответила хотя бы одна модель списка
 
 После деплоя `f8e9b8e` проба маршрута `chat` на ВМ вернула `ok=false` при живом

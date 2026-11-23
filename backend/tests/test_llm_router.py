@@ -852,6 +852,38 @@ def test_model_list_normalized_and_validated(client, router_config):
     assert "модели" in bad.json()["detail"]
 
 
+def test_long_model_list_is_accepted(client, router_config):
+    """Список моделей длиннее прежних 120 символов сохраняется (случай 23.11.2026)."""
+    models = [
+        "route-llm",
+        "route-llm-code",
+        "gemini-decision-1",
+        "abacusai/Smaug-Flash",
+        "route-llm-code-low",
+        "claude-sonnet-4-5-20250929",
+        "deepseek-ai/DeepSeek-V4-Pro-0813",
+    ]
+    raw = ", ".join(models)
+    assert len(raw) > 120
+    result = client.put(PREFIX, json={
+        "providers": [_provider_payload(model=raw)],
+        "routes": {},
+    })
+    assert result.status_code == 200, result.text
+    assert result.json()["providers"][0]["model"] == raw
+
+
+def test_model_list_too_long_is_russian_400(client, router_config):
+    """Список моделей сверх предела — русский 400, а не английский 422 схемы."""
+    raw = ", ".join(["m" * 150] * 10)
+    result = client.put(PREFIX, json={
+        "providers": [_provider_payload(model=raw)],
+        "routes": {},
+    })
+    assert result.status_code == 400
+    assert "Слишком длинный список моделей" in result.json()["detail"]
+
+
 # ---------- выбор модели маршрута chat (chat_model) ----------
 
 

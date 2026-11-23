@@ -39,6 +39,8 @@ _PROBE_PROMPT = "Ответь одним словом: готов"
 # Список моделей провайдера: id через запятую, пробы идут перебором по каждому.
 _MAX_MODELS = 10
 _MAX_MODEL_CHARS = 200
+# Список моделей целиком: с запасом на 10 реальных id.
+_MAX_MODELS_CHARS = 1200
 _MAX_ERROR_CHARS = 200
 _MAX_PROVIDERS = 20
 # Поля тела запроса, которые принадлежат роутеру, а не extra провайдера.
@@ -516,6 +518,10 @@ def _apply_update_sync(
         if any(len(item) > _MAX_MODEL_CHARS for item in models):
             raise LlmRouterError("Слишком длинный id модели — сократите")
         model = ", ".join(models)  # нормализованный список кандидатов
+        if len(model) > _MAX_MODELS_CHARS:
+            raise LlmRouterError(
+                f"Слишком длинный список моделей: не больше {_MAX_MODELS_CHARS} символов",
+            )
         if not (base_url.startswith("http://") or base_url.startswith("https://")):
             raise LlmRouterError("Адрес API должен начинаться с http:// или https://")
         if draft.extra is not None:
