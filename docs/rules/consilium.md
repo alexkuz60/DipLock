@@ -257,7 +257,8 @@ traceback. Удаление учитывает БД, файлы, версии и
 ## 11. Проверки по срезам
 
 **Срез 23.11.2026 — удаление «Исследования».** pytest: удалены 9 файлов
-`test_consilium_*.py`; `test_llm_router.py` — 42 (без `decide`/`systemone`);
+`test_consilium_*.py`; `test_llm_router.py` — 43 (без `decide`/`systemone`,
+плюс `test_probe_all_models_failed_is_not_ok`);
 `test_agent_chat.py`, `test_agent_web_search.py`, `test_job_manager.py`,
 `test_migrations.py`, `test_api_contract.py` — зелёные. Vitest: удалены 12
 файлов раздела; `ConsiliumSection.test` — 3 (две вкладки, старая ссылка
