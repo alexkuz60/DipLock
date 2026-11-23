@@ -695,10 +695,34 @@ async def test_probe_iterates_model_list(router_config, monkeypatch):
     assert seen == ["m-ok", "m-404", "m-ok2"]  # каждая модель — отдельный запрос
     assert [item.model for item in result.models] == ["m-ok", "m-404", "m-ok2"]
     assert [item.ok for item in result.models] == [True, False, True]
-    assert result.ok is False  # честно: ответили не все
+    assert result.ok is True  # ключ принят: провайдер ответил рабочими моделями
     assert result.model == "m-ok"  # сводка — первая успешная
     assert "m-404" in (result.error or "")
     assert _TEST_KEY not in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_probe_all_models_failed_is_not_ok(router_config, monkeypatch):
+    """Ни одна модель не ответила — проба честно не ok, ошибки в перечне."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://api.example.com/v1",
+            model="m-404, m-404b", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"error": {"message": "Invalid model"}})
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(handler))
+    result = await llm_router.probe(provider_id, "chat")
+    assert result.ok is False
+    assert result.model is None
+    assert "m-404" in (result.error or "") and "m-404b" in (result.error or "")
 
 
 @pytest.mark.asyncio

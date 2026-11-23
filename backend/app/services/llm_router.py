@@ -841,7 +841,13 @@ def _find_provider(state: RouterState, provider_id: str) -> Provider:
 
 
 def _probe_summary(results: list[ProbeModelResult]) -> ProbeResult:
-    """Сводка перебора моделей: ok — все ответили, error — перечень не прошедших."""
+    """Сводка перебора моделей: ok — хотя бы одна ответила, error — перечень не прошедших.
+
+    Ключ принят, если провайдер ответил хоть одной моделью списка: устаревшие
+    имена в списке (``gemini-decision-1``, ``jev-latest`` после смены каталога
+    RouteLLM) дают 400 в своей строке, но не отменяют рабочий маршрут. Полный
+    отказ — когда не ответила ни одна модель.
+    """
     successes = [item for item in results if item.ok]
     failures = [item for item in results if not item.ok]
     if not failures:
@@ -852,7 +858,7 @@ def _probe_summary(results: list[ProbeModelResult]) -> ProbeResult:
         error = "; ".join(f"«{item.model}»: {item.error}" for item in failures)
     latencies = [item.latency_ms for item in successes if item.latency_ms is not None]
     return ProbeResult(
-        ok=not failures,
+        ok=bool(successes),
         latency_ms=min(latencies, default=None),
         model=successes[0].model if successes else None,
         error=error,
