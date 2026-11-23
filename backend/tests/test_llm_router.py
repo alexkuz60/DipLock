@@ -171,6 +171,21 @@ def test_put_empty_model_is_russian_400(client, router_config):
     assert "имя провайдера" in blank_label.json()["detail"].lower()
 
 
+def test_put_duplicate_endpoint_is_rejected(client, router_config):
+    """Две строки на один адрес — ошибка с именем существующей строки."""
+    result = client.put(PREFIX, json={
+        "providers": [
+            _provider_payload(label="RouteLLM (Abacus.AI)"),
+            _provider_payload(label="RouteLLM копия", api_key=""),
+        ],
+        "routes": {},
+    })
+    assert result.status_code == 400
+    detail = result.json()["detail"]
+    assert "RouteLLM (Abacus.AI)" in detail
+    assert "одну строку" in detail
+
+
 def test_put_unknown_provider_conflict(client, router_config):
     """Неизвестный id — 409 (устаревшая копия настроек), не молчаливое создание."""
     result = client.put(PREFIX, json={

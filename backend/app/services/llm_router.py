@@ -503,6 +503,26 @@ def _merge_provider(draft: ProviderDraft, known: dict[str, Provider]) -> Provide
     )
 
 
+def _reject_duplicate_endpoints(providers: list[Provider]) -> None:
+    """Две строки на один адрес — ловушка: маршрут уходит в строку без ключа.
+
+    Случай 23.11.2026: в файле оказались две строки RouteLLM с одинаковым
+    ``base_url``; ключ вставили во вторую, а маршрут ``chat`` смотрел в первую
+    без ключа, и проба отвечала «User not logged in». Поэтому дубль адреса —
+    честная ошибка с именем уже существующей строки, а не молчаливое слияние.
+    """
+    seen: dict[tuple[str, str], Provider] = {}
+    for provider in providers:
+        key = (provider.protocol, provider.base_url.rstrip("/").lower())
+        first = seen.get(key)
+        if first is not None:
+            raise LlmRouterError(
+                f"Провайдер «{provider.label}» повторяет адрес строки «{first.label}» — "
+                "оставьте одну строку на адрес и вставьте ключ в неё",
+            )
+        seen[key] = provider
+
+
 def _apply_update_sync(
     drafts: list[ProviderDraft],
     routes: dict[str, str | None],
@@ -555,6 +575,8 @@ def _apply_update_sync(
             raise LlmRouterError("Провайдеры не должны повторяться")
         seen_ids.add(provider.id)
         providers.append(provider)
+
+    _reject_duplicate_endpoints(providers)
 
     by_id = {provider.id: provider for provider in providers}
     new_routes: dict[str, str | None] = {
