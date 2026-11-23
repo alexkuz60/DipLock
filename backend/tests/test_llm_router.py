@@ -259,6 +259,36 @@ async def test_probe_chat_ok_and_error(router_config, monkeypatch):
     assert _TEST_KEY not in (failed.error or "")
 
 
+async def test_probe_auth_errors_carry_actionable_hint(router_config, monkeypatch):
+    """403 Invalid API Key и «User not logged in» объясняют, что делать, без ключа."""
+    state = await llm_router.apply_update(
+        [llm_router.ProviderDraft(
+            id=None, label="P", protocol="openai",
+            base_url="https://routellm.abacus.ai/v1", model="route-llm", enabled=True,
+            api_key=_TEST_KEY,
+        )],
+        {},
+    )
+    provider_id = state.providers[0].id
+
+    def invalid(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": "Invalid API Key"})
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(invalid))
+    bad_key = await llm_router.probe(provider_id, "chat")
+    assert bad_key.ok is False
+    assert "route-llm-apis" in (bad_key.error or "")
+    assert _TEST_KEY not in (bad_key.error or "")
+
+    def anonymous(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, json={"error": "User not logged in"})
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(anonymous))
+    no_key = await llm_router.probe(provider_id, "chat")
+    assert no_key.ok is False
+    assert "не сохранён" in (no_key.error or "")
+
+
 @pytest.mark.asyncio
 async def test_probe_requires_enabled_provider(router_config):
     """Неизвестный/выключенный провайдер — ошибка использования, не вызов модели."""

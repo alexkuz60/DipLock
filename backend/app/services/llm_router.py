@@ -621,7 +621,35 @@ def _provider_error(response: httpx.Response, api_key: str | None) -> str:
         detail = ""
     if not detail:
         detail = f"HTTP {response.status_code}"
-    return _sanitize(f"Провайдер ответил {response.status_code}: {detail}", api_key)
+    hint = _auth_hint(response.status_code, detail)
+    text = f"Провайдер ответил {response.status_code}: {detail}"
+    if hint:
+        text = f"{text}. {hint}"
+    return _sanitize(text, api_key)
+
+
+def _auth_hint(status: int, detail: str) -> str | None:
+    """Подсказка к отказу авторизации: что именно сделать, без догадок в UI.
+
+    ``Invalid API Key`` — ключ дошёл до сервера и отвергнут (отозван, чужой или
+    от другого продукта); ``User not logged in`` — заголовка авторизации нет
+    вовсе (ключ не сохранён у провайдера маршрута).
+    """
+    if status not in {401, 403}:
+        return None
+    low = detail.lower()
+    if "invalid api key" in low or "invalid_api_key" in low:
+        return (
+            "Ключ недействителен: создайте новый на странице RouteLLM API "
+            "(apps.abacus.ai/chatllm/admin/route-llm-apis) и вставьте его "
+            "в строку провайдера, на которую смотрит маршрут"
+        )
+    if "not logged in" in low or ("missing" in low and "key" in low):
+        return (
+            "Ключ не передан: у провайдера маршрута он не сохранён — "
+            "вставьте ключ в эту строку или назначьте маршрут на провайдера с ключом"
+        )
+    return None
 
 
 def _honest_text(text: str | None, truncated: bool, reasoning_chars: int) -> str:
