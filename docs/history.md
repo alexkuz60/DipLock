@@ -3,6 +3,25 @@
 > Журнал выполненных работ: сюда переносится всё закрытое из `todo.md` (дословно),
 > чтобы текущий список задач оставался коротким. Новые записи — сверху, датой среза.
 
+## 23.11.2026 — `jev-latest` и `gemini-decision-1` — не чат-модели
+
+Проба маршрута `chat` на ВМ показывала две красные строки: RouteLLM отвечал
+`400 Invalid model` на `gemini-decision-1` и `jev-latest`, хотя оба id есть в
+`GET /v1/models` (138 моделей). Причина — другой эндпоинт: по таблице «RouteLLM
+API Reference» (`abacus.ai/help/route-llm`) `gemini-decision-1` (Google) и
+`jev-latest` (TypeSafe) обслуживаются `/v1/decisions` и `/v1/systemone`, а не
+`/v1/chat/completions`. В поле «Модель» маршрута `chat` их держать не нужно:
+рабочий маршрут выбирает чат-модель (`route-llm`, `route-llm-code`,
+`abacusai/Smaug-Flash`). Правило записано в `docs/rules/consilium.md` §5.1;
+там же исправлена устаревшая фраза о сводке пробы (`ok` — хотя бы одна модель,
+с `72a7dee`).
+
+Проверено на ВМ ключом `...6a5a`: `POST /v1/systemone` с `jev-latest` → 200
+(`model=jev-1.14.0`, `noul=0.94`), `POST /v1/decisions` с `gemini-decision-1` →
+200 (`predicate=0.967`); `POST /v1/chat/completions` с теми же id → 400
+`Invalid model`. `GET /v1/models` перечисляет 138 id, включая оба этих, — по
+каталогу чат-модель не отличить, отличает только проба.
+
 ## 23.11.2026 — Проба: ok, если ответила хотя бы одна модель списка
 
 После деплоя `f8e9b8e` проба маршрута `chat` на ВМ вернула `ok=false` при живом
