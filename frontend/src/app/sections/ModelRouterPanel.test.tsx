@@ -109,6 +109,32 @@ describe('панель «Модельный роутер ИИ»', () => {
     expect(body.providers[0].api_key).toBe('sk-new-key-5678')
   })
 
+  it('ключ с обрамляющими пробелами сохраняется без них', async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApiFetch()
+    renderWithProviders(<ModelRouterPanel />)
+
+    const keyField = await screen.findByPlaceholderText(/сохранён/)
+    await user.type(keyField, '  sk-new-key-5678  ')
+    await user.click(screen.getByRole('button', { name: 'Сохранить' }))
+
+    await waitFor(() => expect(putBodies(fetchMock)).toHaveLength(1))
+    const body = putBodies(fetchMock)[0] as { providers: { api_key?: string }[] }
+    expect(body.providers[0].api_key).toBe('sk-new-key-5678')
+  })
+
+  it('предупреждает, что у провайдера маршрута chat нет ключа', async () => {
+    const base = llmRouterFixture()
+    mockApiFetch({
+      llmRouter: llmRouterFixture({
+        providers: [{ ...base.providers[0], key_hint: null }],
+      }),
+    })
+    renderWithProviders(<ModelRouterPanel />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('нет ключа API')
+  })
+
   it('проверка связи показывает успех с задержкой', async () => {
     const user = userEvent.setup()
     mockApiFetch({ llmProbe: llmProbeFixture() })

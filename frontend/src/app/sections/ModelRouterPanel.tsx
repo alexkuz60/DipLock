@@ -182,6 +182,11 @@ function splitModels(raw: string): string[] {
     .filter((part) => part.length > 0)
 }
 
+/** Локальный адрес: провайдеру без ключа (Ollama, LM Studio) ключ не нужен. */
+function isLocalBaseUrl(url: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::|\/|$)/i.test(url.trim())
+}
+
 /** Тело PUT: api_key/extra отправляются по явному видимому состоянию формы. */
 function toProviderIn(row: ProviderRow): LlmProviderIn {
   const base: LlmProviderIn = {
@@ -194,7 +199,8 @@ function toProviderIn(row: ProviderRow): LlmProviderIn {
     extra: parseExtra(row.extraText),
   }
   if (row.clearKey) return { ...base, api_key: '' }
-  if (row.apiKey) return { ...base, api_key: row.apiKey }
+  const apiKey = row.apiKey.trim()
+  if (apiKey) return { ...base, api_key: apiKey }
   return base
 }
 
@@ -753,6 +759,16 @@ export function ModelRouterPanel() {
           setDirty(true)
         }}
       />
+      {chatProviderRow &&
+      !chatProviderRow.keyHint &&
+      !chatProviderRow.apiKey &&
+      !chatProviderRow.clearKey &&
+      !isLocalBaseUrl(chatProviderRow.baseUrl) ? (
+        <p role="alert" className="text-sm text-danger">
+          У выбранного провайдера нет ключа API — маршрут «Советники» получит отказ
+          провайдера. Введите ключ в карточке провайдера и сохраните.
+        </p>
+      ) : null}
       <SelectField
         label="Модель советников (chat)"
         value={routes.chat_model ?? ''}

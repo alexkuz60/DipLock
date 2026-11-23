@@ -347,6 +347,19 @@ def key_hint(api_key: str | None) -> str | None:
     return f"…{api_key[-4:]}" if len(api_key) >= 4 else "…"
 
 
+def _clean_key(value: str | None) -> str | None:
+    """Ключ без обрамляющих пробелов и переводов строки; пустой — None.
+
+    h11/httpx отклоняет заголовок с хвостовым пробелом («Illegal header value»),
+    поэтому ключ нормализуется и при чтении файла, и при сохранении формы:
+    вставка из буфера с переводом строки не должна ломать вызов провайдера.
+    """
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
 def _config_path() -> Path:
     return Path(settings.llm_router_config_path)
 
@@ -383,7 +396,7 @@ def _read_state() -> RouterState:
             base_url=str(item.get("base_url", "")),
             model=str(item.get("model", "")),
             enabled=bool(item.get("enabled", True)),
-            api_key=(str(item["api_key"]) if item.get("api_key") else None),
+            api_key=_clean_key(str(item["api_key"])) if item.get("api_key") else None,
             extra=(item["extra"] if isinstance(item.get("extra"), dict) else None),
         )
         for item in raw.get("providers", [])
@@ -457,7 +470,7 @@ def _merge_provider(draft: ProviderDraft, known: dict[str, Provider]) -> Provide
     if draft.api_key is None:
         api_key = known[draft.id].api_key if draft.id in known else None
     else:
-        api_key = draft.api_key or None
+        api_key = _clean_key(draft.api_key)
     if draft.extra is None:
         extra = known[draft.id].extra if draft.id in known else None
     else:

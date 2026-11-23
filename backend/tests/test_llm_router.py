@@ -109,6 +109,51 @@ def test_put_keeps_and_clears_key(client, router_config):
     assert _TEST_KEY not in router_config.read_text(encoding="utf-8")
 
 
+def test_put_strips_key_whitespace(client, router_config):
+    """Ключ из буфера с пробелом и переводом строки хранится без обрамления."""
+    created = client.put(PREFIX, json={
+        "providers": [_provider_payload(api_key=f"  {_TEST_KEY} \n")],
+        "routes": {},
+    })
+    assert created.status_code == 200, created.text
+    assert created.json()["providers"][0]["key_hint"] == llm_router.key_hint(_TEST_KEY)
+    stored = json.loads(router_config.read_text(encoding="utf-8"))
+    assert stored["providers"][0]["api_key"] == _TEST_KEY
+
+    blank = client.put(PREFIX, json={
+        "providers": [_provider_payload(api_key="   \n")],
+        "routes": {},
+    })
+    assert blank.status_code == 200, blank.text
+    assert blank.json()["providers"][0]["key_hint"] is None
+
+
+@pytest.mark.asyncio
+async def test_read_state_strips_legacy_key_whitespace(router_config, monkeypatch):
+    """Старый файл с хвостовым пробелом в ключе читается очищенным — вызов проходит."""
+    router_config.write_text(json.dumps({
+        "version": 1,
+        "providers": [{
+            "id": "legacy-1",
+            "label": "P",
+            "protocol": "openai",
+            "base_url": "https://api.example.com/v1",
+            "model": "m1",
+            "enabled": True,
+            "api_key": f"{_TEST_KEY} ",
+            "extra": None,
+        }],
+        "routes": {},
+    }), encoding="utf-8")
+
+    state = await llm_router.get_state()
+    assert state.providers[0].api_key == _TEST_KEY
+
+    monkeypatch.setattr(llm_router, "_client", lambda: _mock_client(_ok_chat_handler))
+    ok = await llm_router.probe("legacy-1", "chat")
+    assert ok.ok is True, ok.error
+
+
 def test_put_unknown_provider_conflict(client, router_config):
     """Неизвестный id — 409 (устаревшая копия настроек), не молчаливое создание."""
     result = client.put(PREFIX, json={
