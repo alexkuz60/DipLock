@@ -24,7 +24,13 @@ class LlmProviderIn(BaseModel):
         max_length=64,
         description="Id существующего провайдера; None — новый (id назначит сервер)",
     )
-    label: str = Field(min_length=1, max_length=80, description="Человеческое имя провайдера")
+    label: str = Field(
+        max_length=80,
+        description=(
+            "Человеческое имя провайдера; пустое значение отклоняет сервис "
+            "с русским текстом (400), а не схема с английским 422"
+        ),
+    )
     protocol: LlmProtocol = Field(
         description=(
             "openai — совместимый /chat/completions; anthropic — Messages API; "
@@ -32,7 +38,6 @@ class LlmProviderIn(BaseModel):
         ),
     )
     base_url: str = Field(
-        min_length=8,
         max_length=300,
         description=(
             "Адрес API как у провайдера (с /v1 или без — роутер дописывает только "
@@ -42,7 +47,13 @@ class LlmProviderIn(BaseModel):
             "дописывается: https://api.typesafe.ai/v1/systemone"
         ),
     )
-    model: str = Field(min_length=1, max_length=120, description="Идентификатор модели провайдера")
+    model: str = Field(
+        max_length=120,
+        description=(
+            "Идентификатор модели провайдера; пустое значение отклоняет сервис "
+            "с русским текстом (400), а не схема с английским 422"
+        ),
+    )
     enabled: bool = Field(default=True, description="Выключенный провайдер не вызывается")
     api_key: str | None = Field(
         default=None,

@@ -154,6 +154,23 @@ async def test_read_state_strips_legacy_key_whitespace(router_config, monkeypatc
     assert ok.ok is True, ok.error
 
 
+def test_put_empty_model_is_russian_400(client, router_config):
+    """Пустая модель — русский 400, а не английский 422: текст виден в панели."""
+    result = client.put(PREFIX, json={
+        "providers": [_provider_payload(model="")],
+        "routes": {},
+    })
+    assert result.status_code == 400
+    assert "Модель" in result.json()["detail"]
+
+    blank_label = client.put(PREFIX, json={
+        "providers": [_provider_payload(label="")],
+        "routes": {},
+    })
+    assert blank_label.status_code == 400
+    assert "имя провайдера" in blank_label.json()["detail"].lower()
+
+
 def test_put_unknown_provider_conflict(client, router_config):
     """Неизвестный id — 409 (устаревшая копия настроек), не молчаливое создание."""
     result = client.put(PREFIX, json={

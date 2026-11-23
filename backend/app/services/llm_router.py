@@ -519,8 +519,13 @@ def _apply_update_sync(
         label = draft.label.strip()
         base_url = draft.base_url.strip().rstrip("/")
         model = draft.model.strip()
-        if not label or not model:
-            raise LlmRouterError("Имя провайдера и модель обязательны")
+        if not label:
+            raise LlmRouterError("Укажите имя провайдера — поле «Имя» не может быть пустым")
+        if not model:
+            raise LlmRouterError(
+                "Укажите id модели — поле «Модель» не может быть пустым "
+                "(для RouteLLM это route-llm)",
+            )
         models = _split_models(model)
         if not models:
             raise LlmRouterError("Укажите id модели — можно несколько через запятую")
