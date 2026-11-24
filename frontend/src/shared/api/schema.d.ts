@@ -3055,10 +3055,14 @@ export interface components {
             provider_id?: string | null;
             /** Model */
             model?: string | null;
+            /** Reasoning */
+            reasoning?: ("low" | "medium" | "high") | null;
+            /** Skills */
+            skills?: string[];
         };
         /**
          * AgentRoleOut
-         * @description Роль агента: инструкция и выбранная модель.
+         * @description Роль агента: инструкция, выбранная модель, уровень размышления и навыки.
          */
         AgentRoleOut: {
             /** Id */
@@ -3071,6 +3075,10 @@ export interface components {
             provider_id: string | null;
             /** Model */
             model: string | null;
+            /** Reasoning */
+            reasoning: ("low" | "medium" | "high") | null;
+            /** Skills */
+            skills: string[];
             /** Enabled */
             enabled: boolean;
             /** Builtin */
@@ -3091,6 +3099,10 @@ export interface components {
             provider_id?: string | null;
             /** Model */
             model?: string | null;
+            /** Reasoning */
+            reasoning?: ("low" | "medium" | "high") | null;
+            /** Skills */
+            skills?: string[] | null;
             /** Enabled */
             enabled?: boolean | null;
         };

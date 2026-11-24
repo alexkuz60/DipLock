@@ -93,6 +93,22 @@ DEFAULT_ROLES: tuple[tuple[str, str, str], ...] = (
 ARCHIVIST_ID = "archivist"
 ASSISTANT_ID = "assistant"
 
+REASONING_HINTS: dict[str, str] = {
+    "low": (
+        "Уровень размышления: низкий — отвечай сразу и коротко, без перебора "
+        "вариантов; одна-две фразы по существу."
+    ),
+    "medium": (
+        "Уровень размышления: обычный — сначала краткий ход мысли, затем ответ; "
+        "называй ключевые допущения."
+    ),
+    "high": (
+        "Уровень размышления: высокий — перечисли альтернативные объяснения и "
+        "проверь вывод на противоречия, затем дай ответ; явно отдели факты от "
+        "гипотез и укажи, чего не хватает для уверенного вывода."
+    ),
+}
+
 
 class AgentChatError(Exception):
     """Ошибка работы с ролью: текст для UI и HTTP-код."""
@@ -102,11 +118,20 @@ class AgentChatError(Exception):
         self.status = status
 
 
+def _split_skills(value: str | None) -> list[str]:
+    """Навыки из колонки (через запятую) — списком без пустых элементов."""
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
 def _out(row: db.AgentRole) -> AgentRoleOut:
     """Типизированная роль."""
     return AgentRoleOut.model_validate({
         "id": row.id, "label": row.label, "instruction": row.instruction,
         "provider_id": row.provider_id, "model": row.model,
+        "reasoning": row.reasoning or None,
+        "skills": _split_skills(str(row.skills) if row.skills else None),
         "enabled": bool(row.enabled), "builtin": bool(row.builtin),
         "sort": row.sort,
     })
@@ -169,6 +194,8 @@ async def create_role(payload: AgentRoleCreate) -> AgentRoleOut:
             id=f"custom-{uuid.uuid4().hex[:8]}", label=label,
             instruction=payload.instruction.strip(),
             provider_id=payload.provider_id or None, model=payload.model or None,
+            reasoning=payload.reasoning,
+            skills=", ".join(payload.skills) or None,
             enabled=True, builtin=False,
             sort=max([int(r.sort) for r in rows] + [0]) + 1,
             updated_at=utcnow(),
@@ -199,6 +226,10 @@ async def update_role(role_id: str, payload: AgentRoleUpdate) -> AgentRoleOut:
         for name in ("provider_id", "model"):
             if name in data:
                 _set(row, **{name: (data[name] or None)})
+        if "reasoning" in data:
+            _set(row, reasoning=data["reasoning"] or None)
+        if "skills" in data:
+            _set(row, skills=", ".join(data["skills"] or []) or None)
         if data.get("enabled") is not None:
             _set(row, enabled=bool(data["enabled"]))
         _set(row, updated_at=utcnow())

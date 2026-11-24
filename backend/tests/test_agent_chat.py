@@ -222,6 +222,55 @@ def test_custom_role_crud(client: TestClient) -> None:
     assert client.delete(f"{PREFIX}/roles/{role_id}").status_code == 404
 
 
+def test_role_reasoning_and_skills_roundtrip(client: TestClient) -> None:
+    created = client.post(f"{PREFIX}/roles", json={
+        "label": "Статистик", "instruction": "Считай эффекты.",
+        "reasoning": "high", "skills": [" статистика ", "Статистика", "ЭЭГ-артефакты"],
+    })
+    assert created.status_code == 201
+    body = created.json()
+    assert body["reasoning"] == "high"
+    assert body["skills"] == ["статистика", "ЭЭГ-артефакты"]
+    role_id = body["id"]
+    updated = client.put(f"{PREFIX}/roles/{role_id}", json={
+        "reasoning": "low", "skills": ["визуализация"],
+    })
+    assert updated.status_code == 200
+    assert updated.json()["reasoning"] == "low"
+    assert updated.json()["skills"] == ["визуализация"]
+    cleared = client.put(f"{PREFIX}/roles/{role_id}", json={"reasoning": None, "skills": []})
+    assert cleared.status_code == 200
+    assert cleared.json()["reasoning"] is None
+    assert cleared.json()["skills"] == []
+
+
+def test_role_reasoning_and_skills_are_validated(client: TestClient) -> None:
+    unknown = client.put(f"{PREFIX}/roles/psychologist", json={"reasoning": "max"})
+    assert unknown.status_code == 422
+    too_many = client.put(f"{PREFIX}/roles/psychologist", json={
+        "skills": [f"навык-{index}" for index in range(13)],
+    })
+    assert too_many.status_code == 422
+    too_long = client.put(f"{PREFIX}/roles/psychologist", json={"skills": ["я" * 41]})
+    assert too_long.status_code == 422
+
+
+def test_prompt_includes_skills_and_reasoning(
+    client: TestClient, fake_llm: SimpleNamespace,
+) -> None:
+    thread_id = new_thread(client)
+    client.put(f"{PREFIX}/roles/psychologist", json={
+        "reasoning": "high", "skills": ["ненаводящие вопросы", "риск внушения"],
+    })
+    sent = client.post(f"{PREFIX}/threads/{thread_id}/messages", json={
+        "text": "@Психолог привет",
+    }).json()
+    wait_reply(client, thread_id, sent["replies"][0]["id"])
+    system = fake_llm.calls[0]["messages"][0]["content"]
+    assert "Навыки специалиста: ненаводящие вопросы, риск внушения" in system
+    assert "Уровень размышления: высокий" in system
+
+
 def test_stream_late_subscriber_gets_round_done(
     client: TestClient, fake_llm: SimpleNamespace,
 ) -> None:

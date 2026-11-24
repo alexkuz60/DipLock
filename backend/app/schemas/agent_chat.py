@@ -7,16 +7,44 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 AgentAuthor = Literal["researcher", "agent"]
 AgentMessageStatus = Literal["ok", "running", "failed", "interrupted"]
+AgentReasoning = Literal["low", "medium", "high"]
+
+MAX_SKILLS = 12
+MAX_SKILL_CHARS = 40
+
+
+def normalize_skills(value: list[str] | None) -> list[str]:
+    """Навыки специалиста: обрезка, дедупликация без регистра, предел длины списка."""
+    if not value:
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        skill = item.strip()
+        if not skill:
+            continue
+        if len(skill) > MAX_SKILL_CHARS:
+            raise ValueError(f"Навык длиннее {MAX_SKILL_CHARS} символов")
+        key = skill.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(skill)
+    if len(result) > MAX_SKILLS:
+        raise ValueError(f"Навыков больше {MAX_SKILLS}")
+    return result
 
 
 class AgentRoleOut(BaseModel):
-    """Роль агента: инструкция и выбранная модель."""
+    """Роль агента: инструкция, выбранная модель, уровень размышления и навыки."""
 
     id: str
     label: str
     instruction: str
     provider_id: str | None
     model: str | None
+    reasoning: AgentReasoning | None
+    skills: list[str]
     enabled: bool
     builtin: bool
     sort: int
@@ -37,6 +65,8 @@ class AgentRoleCreate(BaseModel):
     instruction: str = Field(min_length=1, max_length=8000)
     provider_id: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=200)
+    reasoning: AgentReasoning | None = None
+    skills: list[str] = Field(default_factory=list)
 
     @field_validator("label", "instruction")
     @classmethod
@@ -46,6 +76,12 @@ class AgentRoleCreate(BaseModel):
         if not value:
             raise ValueError("Поле не должно быть пустым")
         return value
+
+    @field_validator("skills")
+    @classmethod
+    def skills_are_normalized(cls, value: list[str]) -> list[str]:
+        """Навыки роли — без пустых, дублей и переполнения списка."""
+        return normalize_skills(value)
 
 
 class AgentRoleUpdate(BaseModel):
@@ -57,6 +93,8 @@ class AgentRoleUpdate(BaseModel):
     instruction: str | None = Field(default=None, min_length=1, max_length=8000)
     provider_id: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=200)
+    reasoning: AgentReasoning | None = None
+    skills: list[str] | None = None
     enabled: bool | None = None
 
     @field_validator("label", "instruction")
@@ -69,6 +107,12 @@ class AgentRoleUpdate(BaseModel):
         if not value:
             raise ValueError("Поле не должно быть пустым")
         return value
+
+    @field_validator("skills")
+    @classmethod
+    def skills_are_normalized(cls, value: list[str] | None) -> list[str] | None:
+        """Навыки роли — без пустых, дублей и переполнения списка."""
+        return None if value is None else normalize_skills(value)
 
 
 class AgentThreadCreate(BaseModel):

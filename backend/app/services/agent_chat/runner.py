@@ -78,8 +78,17 @@ def build_messages(
     user_content = f"Переписка:\n{transcript}\n\n{task}"
     if web_context:
         user_content = f"Переписка:\n{transcript}\n\n{web_context}\n\n{task}"
+    system_parts = [role.instruction]
+    if role.skills:
+        system_parts.append(
+            "Навыки специалиста: " + ", ".join(role.skills) + ". Опирайся на них, "
+            "не выходи за их пределы и называй, каких навыков не хватает.",
+        )
+    if role.reasoning and role.reasoning in roles.REASONING_HINTS:
+        system_parts.append(roles.REASONING_HINTS[role.reasoning])
+    system_parts.append(roles.BASE_INSTRUCTION)
     return [
-        {"role": "system", "content": f"{role.instruction}\n\n{roles.BASE_INSTRUCTION}"},
+        {"role": "system", "content": "\n\n".join(system_parts)},
         {"role": "user", "content": user_content},
     ], warnings
 

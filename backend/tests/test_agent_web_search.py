@@ -206,7 +206,8 @@ def test_archivist_prompt_includes_latest_search(
 
     role = AgentRoleOut(
         id="archivist", label="Архивариус", instruction="Роль: архивариус.",
-        provider_id=None, model=None, enabled=True, builtin=True, sort=5,
+        provider_id=None, model=None, reasoning=None, skills=[],
+        enabled=True, builtin=True, sort=5,
     )
     search = asyncio.run(store.latest_web_search(thread["id"]))
     assert search is not None

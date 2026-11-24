@@ -7282,6 +7282,29 @@
               }
             ],
             "title": "Model"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skills"
           }
         },
         "additionalProperties": false,
@@ -7329,6 +7352,29 @@
             ],
             "title": "Model"
           },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skills"
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled"
@@ -7349,12 +7395,14 @@
           "instruction",
           "provider_id",
           "model",
+          "reasoning",
+          "skills",
           "enabled",
           "builtin",
           "sort"
         ],
         "title": "AgentRoleOut",
-        "description": "Роль агента: инструкция и выбранная модель."
+        "description": "Роль агента: инструкция, выбранная модель, уровень размышления и навыки."
       },
       "AgentRoleUpdate": {
         "properties": {
@@ -7407,6 +7455,36 @@
               }
             ],
             "title": "Model"
+          },
+          "reasoning": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoning"
+          },
+          "skills": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skills"
           },
           "enabled": {
             "anyOf": [

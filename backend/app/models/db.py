@@ -509,7 +509,9 @@ class AgentRole(Base):
     """Роль ИИ-агента чата консилиума: инструкция и (необязательно) своя модель.
 
     Роль — данные, а не код: правится из интерфейса. ``provider_id``/``model`` —
-    выбор из модельного роутера; пусто — маршрут ``chat``.
+    выбор из модельного роутера; пусто — маршрут ``chat``. ``reasoning`` — уровень
+    размышления (low/medium/high, директива в инструкции), ``skills`` — навыки
+    специалиста через запятую.
     """
 
     __tablename__ = "agent_roles"
@@ -518,6 +520,8 @@ class AgentRole(Base):
     instruction = Column(String, nullable=False)
     provider_id = Column(String, nullable=True)
     model = Column(String, nullable=True)
+    reasoning = Column(String, nullable=True)
+    skills = Column(String, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
     builtin = Column(Boolean, nullable=False, default=False)
     sort = Column(Integer, nullable=False, default=0)

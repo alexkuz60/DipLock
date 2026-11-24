@@ -11,11 +11,11 @@ import type { AgentMessage, AgentRole } from '@/shared/api/types'
 const roles: AgentRole[] = [
   {
     id: 'psychologist', label: 'Психолог', instruction: 'x', provider_id: null,
-    model: null, enabled: true, builtin: true, sort: 0,
+    model: null, reasoning: null, skills: [], enabled: true, builtin: true, sort: 0,
   },
   {
     id: 'archivist', label: 'Архивариус', instruction: 'y', provider_id: null,
-    model: null, enabled: true, builtin: true, sort: 1,
+    model: null, reasoning: null, skills: [], enabled: true, builtin: true, sort: 1,
   },
 ]
 
