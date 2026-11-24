@@ -140,6 +140,8 @@ type AudioFetchOptions = {
   emo?: AudioEmo | null
   /** Дипольная сцена sidecar (`extensions.dipoles`) для «Монтажа». */
   dipoleScene?: unknown
+  /** Мастер скачан и удалён с сервера (`master_consumed`, политика 24.11.2026). */
+  masterConsumed?: boolean
 }
 
 /** Мок рендера: POST 202, статус — running → succeeded, файлы — заглушки.
@@ -208,6 +210,7 @@ function audioFetchMock(tracks: string[] = TRACKS, opts: AudioFetchOptions = {})
         error: null,
         tracks,
         variant,
+        master_consumed: opts.masterConsumed ?? false,
       })
     }
     if (url.includes('/emo')) {
@@ -448,6 +451,37 @@ describe('Нейромузыка — раздел', () => {
     await waitFor(() => expect(screen.getByLabelText('Сигнал')).not.toBeDisabled())
     expect(screen.getByRole('option', { name: 'Микс (до эффектов)' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'α — альфа' })).toBeInTheDocument()
+  })
+
+  it('скачивание мастера — отдельный роут, после удаления ссылка гаснет', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await renderSucceeded(fetchMock)
+
+    const link = screen.getByRole('link', { name: 'Скачать мастер' })
+    expect(link).toHaveAttribute('href', expect.stringContaining('/master.wav/download'))
+    expect(screen.queryByTestId('master-consumed')).not.toBeInTheDocument()
+  })
+
+  it('мастер скачан и удалён — подсказка вместо ссылки, транспорт выключен', async () => {
+    useEdfRecording.setState({ recording: recordingFixture })
+    const fetchMock = audioFetchMock(TRACKS, { masterConsumed: true })
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Транспорт здесь выключен по контракту, поэтому ждём трекер, а не play.
+    renderNeuromusic()
+    fireEvent.click(screen.getByRole('button', { name: 'Создать аудио' }))
+    await waitFor(() => expect(fetchMock.postBodies).toHaveLength(1))
+    await waitFor(() => expect(screen.getByTestId('neuromusic-tracker')).toBeInTheDocument(), {
+      timeout: 3000,
+    })
+
+    expect(screen.queryByRole('link', { name: 'Скачать мастер' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('master-consumed')).toBeInTheDocument()
+    expect(screen.getByTestId('transport-play')).toBeDisabled()
+    expect(screen.getByTestId('transport-stop')).toBeDisabled()
   })
 
   it('усиление полос уходит в запрос рендера (дефолт +6, правка — 10)', async () => {

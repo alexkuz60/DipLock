@@ -61,6 +61,9 @@ export function NeuromusicToolActions() {
 
   const running = busy || status?.status === 'running'
   const succeeded = status?.status === 'succeeded'
+  // Мастер скачан и удалён с сервера (политика 24.11.2026): плееру нечего
+  // грузить — транспорт гаснет до пересчёта записи.
+  const masterConsumed = status?.master_consumed === true
   const tracks = useMemo(() => status?.tracks ?? [], [status])
 
   return (
@@ -90,8 +93,14 @@ export function NeuromusicToolActions() {
               )
             }
             label={playing ? 'Пауза' : 'Слушать'}
-            tooltip={playing ? 'Пауза' : 'Слушать трекер (волна и позиционер слева направо)'}
-            disabled={!playerReady}
+            tooltip={
+              masterConsumed
+                ? 'Мастер скачан и удалён — пересчитайте запись'
+                : playing
+                  ? 'Пауза'
+                  : 'Слушать трекер (волна и позиционер слева направо)'
+            }
+            disabled={!playerReady || masterConsumed}
             onClick={() => void togglePlay()}
             data-testid="transport-play"
           />
@@ -99,7 +108,7 @@ export function NeuromusicToolActions() {
             icon={<Square className="size-4" aria-hidden />}
             label="Стоп"
             tooltip="Стоп: остановить и вернуть позиционер в начало"
-            disabled={!playerReady}
+            disabled={!playerReady || masterConsumed}
             onClick={() => void stop()}
             data-testid="transport-stop"
           />

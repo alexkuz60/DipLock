@@ -51,19 +51,15 @@ def stub_vamp(monkeypatch):
     """
     calls: dict[str, str | None] = {"key_transform": None}
 
-    def _key(blob, cfg=None, transform_name=None):
-        calls["key_transform"] = transform_name
-        return [dict(segment) for segment in KEY_SEGMENTS]
+    def _tracks(blob, cfg=None, *, chord_transform=None):
+        calls["key_transform"] = chord_transform
+        return (
+            [dict(segment) for segment in KEY_SEGMENTS],
+            [dict(segment) for segment in TEMPO_SEGMENTS],
+            [dict(segment) for segment in SEGMENT_SEGMENTS],
+        )
 
-    def _tempo(blob, cfg=None):
-        return [dict(segment) for segment in TEMPO_SEGMENTS]
-
-    def _segment(blob, cfg=None, transform_name=None):
-        return [dict(segment) for segment in SEGMENT_SEGMENTS]
-
-    monkeypatch.setattr(vamp_analysis, "key_track_from_wav", _key)
-    monkeypatch.setattr(vamp_analysis, "tempo_track_from_wav", _tempo)
-    monkeypatch.setattr(vamp_analysis, "segment_track_from_wav", _segment)
+    monkeypatch.setattr(vamp_analysis, "tracks_from_wav", _tracks)
     return calls
 
 
@@ -142,7 +138,9 @@ def test_analysis_writes_cache_and_contract(stub_vamp, isolated_io):
     manifest = store.load_manifest(settings, track_id)
     assert manifest is not None
     assert store.EMO_NAME in manifest["files"]
-    assert "source.wav" in manifest["files"]
+    # Исходник не хранится (политика 24.11.2026): только результат анализа.
+    assert "source.wav" not in manifest["files"]
+    assert manifest["source_consumed"] is True
     assert manifest["fs_source"] == 44100 and manifest["channels_source"] == 2
     assert manifest["fs_analysis"] == track_input.ANALYSIS_FS == 32000
 
@@ -357,3 +355,19 @@ def test_live_vamp_chain_on_32k_mono():
     assert tempo is not None and any(abs(seg["bpm"] - 120.0) < 5.0 for seg in tempo)
     assert segments is not None and len(segments) >= 1
     assert all(seg["name"] in "ABCDEFGH" for seg in segments)
+
+
+def test_cache_keeps_only_last_track_and_no_source(stub_vamp, isolated_io):
+    """Политика 24.11.2026: один последний трек, исходник на диск не пишется."""
+    track_analysis.clear_states()
+    first_id, _ = track_analysis.start_analysis(_wav_blob(seconds=0.2), "one.wav", settings)
+    assert _wait_track(first_id).status == "succeeded"
+    first_dir = store.track_dir(settings, first_id)
+    assert os.path.isdir(first_dir)
+    assert not any(name.startswith(store.SOURCE_PREFIX) for name in os.listdir(first_dir))
+
+    second_id, _ = track_analysis.start_analysis(_wav_blob(seconds=0.3), "two.wav", settings)
+    assert _wait_track(second_id).status == "succeeded"
+    assert store.MAX_TRACKS == 1
+    assert not os.path.isdir(first_dir)
+    assert os.path.isdir(store.track_dir(settings, second_id))

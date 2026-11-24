@@ -16,7 +16,7 @@
   MP3** без внешних инструментов); битые байты и «не аудио» дают
   :class:`TrackInputError` (400 в API), а не 500;
 * длинные файлы режутся до накопления буфера: :data:`MAX_DURATION_SEC` —
-  защита памяти (200 МБ mp3 мог бы развернуться в гигабайты float64);
+  защита памяти (200 МБ mp3 мог бы развернуться в гигабайты float32);
 * каналов > 2 (5.1 и пр.) берутся первые два и сливается ``(L+R)/2`` — V-бабочку
   трекер рисует из ``File`` на клиенте, серверу каналы не нужны;
 * ресемпл — ``resample_poly`` (kaiser), частота источника сохраняется в
@@ -48,10 +48,10 @@ class TrackInputError(ValueError):
 
 @dataclass
 class TrackAudio:
-    """Нормализованный сигнал внешнего трека: **моно, 32000 Гц, float64**."""
+    """Нормализованный сигнал внешнего трека: **моно, 32000 Гц, float32**."""
 
     #: Отсчёты моно-сигнала (L+R)/2 после ресемпла в :data:`ANALYSIS_FS`
-    data: NDArray[np.float64]
+    data: NDArray[np.float32]
     #: Частота дискретизации исходного файла, Гц (паспорт трека)
     fs_source: int
     #: Число каналов исходного файла (паспорт трека)
@@ -95,10 +95,10 @@ def decode_track(blob: bytes) -> TrackAudio:
     max_frames = int(MAX_DURATION_SEC * fs)
     try:
         with sf.SoundFile(io.BytesIO(blob)) as snd:
-            blocks: list[NDArray[np.float64]] = []
+            blocks: list[NDArray[np.float32]] = []
             total = 0
             while True:
-                block = snd.read(frames=_READ_BLOCK, dtype="float64", always_2d=True)
+                block = snd.read(frames=_READ_BLOCK, dtype="float32", always_2d=True)
                 if block.size == 0:
                     break
                 total += block.shape[0]
@@ -121,7 +121,7 @@ def decode_track(blob: bytes) -> TrackAudio:
         divisor = math.gcd(fs, ANALYSIS_FS)
         mono = resample_poly(mono, ANALYSIS_FS // divisor, fs // divisor)
     return TrackAudio(
-        data=np.ascontiguousarray(mono, dtype=np.float64),
+        data=np.ascontiguousarray(mono, dtype=np.float32),
         fs_source=fs,
         channels_source=channels,
         duration_s=mono.shape[0] / ANALYSIS_FS,

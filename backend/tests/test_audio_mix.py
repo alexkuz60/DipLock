@@ -95,7 +95,7 @@ def test_normalize_track_hits_target_rms() -> None:
     assert gain is not None
     # После +12 dB пик гауссова трека переваливает −1 dBFS: трек прижимается
     # к потолку (только вниз), applied gain/rms честно уменьшаются на величину
-    # поджатия — PCM_24 не клипует значения >1.0.
+    # поджатия — PCM_16 не клипует значения >1.0.
     louder, gain_plus, rms_plus = normalize_track(track, gain_db=12.0)
     ideal = 10 ** ((TRACK_RMS_DBFS + 12.0) / 20)
     ceiling_db = 20.0 * float(np.log10(rms_plus / ideal))
@@ -121,7 +121,7 @@ def test_normalize_track_boost_raises_target() -> None:
 
 
 def test_track_peak_is_capped_at_ceiling_with_boost() -> None:
-    """Пик трека прижимается к 0.891: при boost громкий трек не клипнет в PCM_24."""
+    """Пик трека прижимается к 0.891: при boost громкий трек не клипнет в PCM_16."""
     spike = np.zeros((2000, 2))
     spike[1000, 0] = 1000.0  # импульсный трек с огромным crest-фактором
 

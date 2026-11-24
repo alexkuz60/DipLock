@@ -1748,10 +1748,36 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * WAV мастера партитуры (48 кГц, PCM_24, стерео)
+         * WAV мастера партитуры (48 кГц, PCM_16, стерео)
          * @description Мастер-трек из дискового кэша рендера (плеер и «Скачать WAV»).
          */
         get: operations["audio_render_master_api_v1_audio_render__render_id__master_wav_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/audio/render/{render_id}/master.wav/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Скачать мастер и удалить его с сервера (политика 24.11.2026)
+         * @description Мастер отдаётся вложением и удаляется после отправки ответа.
+         *
+         *     Политика 24.11.2026: на ВМ живёт один последний вариант аудио, а мастер
+         *     нужен пользователю на его компьютере. Удаление — в ``BackgroundTasks``
+         *     (после ответа), манифест помечается ``master_consumed``: остальные файлы
+         *     рендера (треки, sidecar, emo.json) остаются валидным кэшем. 409 — мастер
+         *     уже скачан и удалён либо рендер не готов.
+         */
+        get: operations["audio_render_master_download_api_v1_audio_render__render_id__master_wav_download_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1882,7 +1908,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * WAV запечённой 3D-сцены (48 кГц, PCM_24, стерео)
+         * WAV запечённой 3D-сцены (48 кГц, PCM_16, стерео)
          * @description Скачивание результата; 409 — ещё печатается/упал/файл вычищен квотой.
          */
         get: operations["audio_bake_wav_api_v1_audio_render__render_id__bake__bake_id__wav_get"];
@@ -4138,6 +4164,12 @@ export interface components {
              * @default express
              */
             variant: string;
+            /**
+             * Master Consumed
+             * @description true — мастер скачан пользователем и удалён с сервера (политика 24.11.2026): треки и sidecar остаются, мастер — 409
+             * @default false
+             */
+            master_consumed: boolean;
         };
         /**
          * AudioTempoSegment
@@ -14294,6 +14326,37 @@ export interface operations {
         };
     };
     audio_render_master_api_v1_audio_render__render_id__master_wav_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                render_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "audio/wav": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    audio_render_master_download_api_v1_audio_render__render_id__master_wav_download_get: {
         parameters: {
             query?: never;
             header?: never;

@@ -106,6 +106,8 @@ export type NeuromusicState = {
   setSpatialIr: (value: string) => void
   /** Запуск рендера кнопкой тулс-хедера: текущая запись + параметры из формы */
   start: () => Promise<void>
+  /** Перечитать статус рендера (после скачивания мастера — флаг `master_consumed`) */
+  refreshStatus: () => Promise<void>
   /**
    * 3D-bake: параметры «Пространства» → backend печатает детерминированный
    * WAV (spatial-audio, п.3); поллинг статуса до терминального.
@@ -201,6 +203,21 @@ export const useNeuromusic = create<NeuromusicState>()((set, get) => ({
     } catch (cause) {
       if (!isCurrent()) return
       set({ busy: false, error: errorText(cause) })
+    }
+  },
+
+  /**
+   * Перечитать статус готового рендера: после скачивания мастера сервер
+   * удаляет файл и ставит `master_consumed`, UI гасит источник «мастер».
+   */
+  refreshStatus: async () => {
+    const { renderId } = get()
+    if (!renderId) return
+    try {
+      const next = await api.audioRenderStatus(renderId)
+      set({ status: next })
+    } catch {
+      // 404 — рендер ушёл из кэша; прежний статус не трогаем.
     }
   },
 

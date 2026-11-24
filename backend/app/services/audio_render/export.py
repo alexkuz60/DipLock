@@ -1,7 +1,7 @@
-"""Экспорт рендера «Нейромузыки»: WAV 48 кГц/PCM_24 и sidecar-«партитура».
+"""Экспорт рендера «Нейромузыки»: WAV 48 кГц/PCM_16 и sidecar-«партитура».
 
 Детерминизм (ТЗ §3): при одинаковых входах байты WAV идентичны — в файле нет
-времени/случайности, float64 → int24 происходит только в момент записи.
+времени/случайности, float → int16 происходит только в момент записи.
 Сторонние аудио-библиотеки обработки (librosa/rubberband/pydub) не используются:
 только запись файла ``soundfile`` (libsndfile).
 """
@@ -22,11 +22,20 @@ from app.services.audio_render.core import FS_AUDIO
 SIDECAR_SCHEMA_VERSION = 2
 
 
-def wav_bytes(data: np.ndarray, fs: int = FS_AUDIO) -> bytes:
-    """Стерео float64 → байты WAV PCM_24 @48000 (конвертация только при записи)."""
-    payload = np.ascontiguousarray(data, dtype=np.float64)
+def wav_bytes(data: np.ndarray, fs: int = FS_AUDIO, subtype: str = "PCM_16") -> bytes:
+    """Стерео float → байты WAV @48000 (конвертация только при записи).
+
+    PCM_16 вместо PCM_24 (политика 24.11.2026): диск рендера −33 % при
+    динамическом диапазоне 96 дБ — для нормализованного по RMS микса с
+    потолком −1 dBFS этого достаточно. Версия формата кэша поднята
+    (``store.RENDER_FORMAT_VERSION``), старые комплекты пересчитываются.
+
+    ``subtype`` — исключение для IR-ассетов: они кэшируются по пресету
+    (``audio_ir``), остаются PCM_24 и не инвалидируют свой кэш.
+    """
+    payload = np.ascontiguousarray(data, dtype=np.float32)
     buffer = io.BytesIO()
-    sf.write(buffer, payload, int(fs), subtype="PCM_24", format="WAV")
+    sf.write(buffer, payload, int(fs), subtype=subtype, format="WAV")
     return buffer.getvalue()
 
 

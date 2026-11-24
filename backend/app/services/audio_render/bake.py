@@ -258,6 +258,33 @@ def _write_bake(
     return ok
 
 
+def prune_bakes(cfg: Settings, recording_id: str, keep_id: str) -> int:
+    """Оставляет в каталоге баков один комплект — последний (политика 24.11.2026).
+
+    WAV бака весит десятки МБ, а нужен только последний вариант цепочки:
+    прежние ``{bake_id}.wav``/``.json`` сносятся с диска. Возвращает число
+    удалённых файлов.
+    """
+    directory = bake_dir(cfg, recording_id)
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        return 0
+    removed = 0
+    for name in names:
+        stem, ext = os.path.splitext(name)
+        if stem == keep_id or ext not in (".wav", ".json"):
+            continue
+        try:
+            os.unlink(os.path.join(directory, name))
+        except OSError:
+            continue
+        removed += 1
+    if removed:
+        logger.info("Кэш баков записи %s: убрано файлов %d", recording_id, removed)
+    return removed
+
+
 def find_bake_sidecar(cfg: Settings, bake_id: str) -> tuple[str, dict[str, Any]] | None:
     """Ищет sidecar ``bake_id`` среди записей (восстановление после рестарта)."""
     root = cache_path(cfg.cache_dir, store.AUDIO_SUBDIR)
@@ -341,7 +368,7 @@ def bake_wav(
     ir_blob: bytes,
     on_progress: Callable[[float, str], None] | None = None,
 ) -> bytes:
-    """Печатает сцену рендера с 3D-цепочкой → байты WAV PCM_24 @48000.
+    """Печатает сцену рендера с 3D-цепочкой → байты WAV PCM_16 @48000.
 
     Каждый стем проходит widening → панораму по азимуту и сразу складывается
     в аккумулятор (в RAM — один стем + аккумулятор, а не 28 сразу); затем
@@ -513,6 +540,9 @@ def _run_bake(
             "message": "Запечённая 3D-цепочка (spatial-audio, п.3)",
         }
         ok = _write_bake(settings, state.recording_id, state.bake_id, wav, sidecar)
+        if ok:
+            # Политика 24.11.2026: в каталоге баков живёт один последний комплект.
+            prune_bakes(settings, state.recording_id, state.bake_id)
         if not ok:
             # Сбой записи не ломает расчёт: байты остаются в памяти (кэш —
             # оптимизация, а не источник истины, `data-and-caches.md` п.4).

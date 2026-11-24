@@ -34,7 +34,9 @@ def clean_state(tmp_path, monkeypatch):
     прогон плагина — ``test_audio_vamp.py`` (маркер ``integration``).
     """
     monkeypatch.setattr(settings, "cache_dir", str(tmp_path / "cache"))
-    monkeypatch.setattr(vamp_analysis, "key_track_from_wav", lambda blob, cfg=None: None)
+    monkeypatch.setattr(
+        vamp_analysis, "tracks_from_wav", lambda blob, cfg=None, **kwargs: (None, None, None),
+    )
     recording_registry.clear()
     clear_prepared_cache()
     neuro_render.clear_renders()
@@ -281,7 +283,7 @@ def test_frames_from_master_mono_blend():
 def test_frames_from_wav_roundtrip():
     """Байты master.wav → те же кадры (частота из файла, без временных файлов)."""
     rng = np.random.default_rng(11)
-    # Амплитуда ≪ 1: PCM_24 клипует |x| > 1 — иначе форма лучей исказится.
+    # Амплитуда ≪ 1: PCM_16 клипует |x| > 1 — иначе форма лучей исказится.
     mono = np.clip(rng.standard_normal(40_000) * 0.2, -0.9, 0.9)
     payload = emo_radar.frames_from_wav(wav_bytes(np.column_stack([mono, mono])))
     expected = emo_radar.emo_frames(mono)
@@ -290,7 +292,7 @@ def test_frames_from_wav_roundtrip():
     assert [frame["t_sec"] for frame in payload["frames"]] == [
         frame["t_sec"] for frame in expected["frames"]
     ]
-    # PCM_24 квантование + округление до 0.001 % R не меняют форму заметнее.
+    # PCM_16 квантование + округление до 0.001 % R не меняют форму заметнее.
     np.testing.assert_allclose(
         [frame["rays"] for frame in payload["frames"]],
         [frame["rays"] for frame in expected["frames"]],
@@ -423,18 +425,12 @@ def test_emo_rebuilds_cache_when_vamp_appears(client, tmp_path, edf_file, monkey
 
     monkeypatch.setattr(vamp_analysis, "available", lambda cfg=None: True)
     monkeypatch.setattr(
-        vamp_analysis, "key_track_from_wav",
-        lambda blob, cfg=None, transform_name=None: [
-            {"t_sec": 0.0, "key_code": 1, "label": "C"},
-        ],
-    )
-    monkeypatch.setattr(
-        vamp_analysis, "tempo_track_from_wav",
-        lambda blob, cfg=None: [{"t_sec": 0.0, "bpm": 120.0}],
-    )
-    monkeypatch.setattr(
-        vamp_analysis, "segment_track_from_wav",
-        lambda blob, cfg=None: [{"t_sec": 0.0, "segment_type": 1, "name": "A"}],
+        vamp_analysis, "tracks_from_wav",
+        lambda blob, cfg=None, **kwargs: (
+            [{"t_sec": 0.0, "key_code": 1, "label": "C"}],
+            [{"t_sec": 0.0, "bpm": 120.0}],
+            [{"t_sec": 0.0, "segment_type": 1, "name": "A"}],
+        ),
     )
     neuro_render.clear_renders()
 

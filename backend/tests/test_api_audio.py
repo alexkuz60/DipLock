@@ -4,6 +4,7 @@
 sidecar.json; рендер один активный за раз (in-memory, без job-системы).
 """
 import io
+import os
 import shutil
 import threading
 import time
@@ -15,6 +16,7 @@ import soundfile as sf
 from app.core.config import settings
 from app.services import job_store
 from app.services.audio_render import render as neuro_render
+from app.services.audio_render import store as neuro_store
 from app.services.prepared_signal import clear_prepared_cache
 from app.services.recordings import recording_registry
 
@@ -115,11 +117,11 @@ def test_full_render_cycle(client, tmp_path, edf_file):
     with sf.SoundFile(io.BytesIO(master.content)) as handle:
         assert handle.samplerate == 48000
         assert handle.channels == 2
-        assert handle.subtype == "PCM_24"
+        assert handle.subtype == "PCM_16"
         assert abs(len(handle) / 48000 - 4.0) < 0.01
 
     # Отдельный трек (соль-прослушивание): валидный WAV 48k/стерео, приведён
-    # к −18 dBFS сквозным циклом (размеры WAV не сравниваем: PCM_24 одинаков
+    # к −18 dBFS сквозным циклом (размеры WAV не сравниваем: PCM_16 одинаков
     # при любой амплитуде; мастер прижат пик-контролем вниз — это не значит,
     # что он «тише» по восприятию).
     alpha = client.get(f"{_PREFIX}/render/{render_id}/track/alpha.wav")
@@ -652,3 +654,37 @@ def test_render_writes_journal_line(client, tmp_path, edf_file):
     assert entries[-1]["step"] == "render"
     assert entries[-1]["cache_hit"] is False
     assert entries[-1]["ms"] >= 0
+
+
+def test_master_download_deletes_master_and_keeps_tracks(client, tmp_path, edf_file):
+    """Политика 24.11.2026: мастер отдаётся вложением и удаляется с сервера."""
+    recording = _register(tmp_path, edf_file)
+    started = client.post(
+        f"{_PREFIX}/render",
+        json={"recording_id": recording.recording_id, "boost_db": 0.0, "loudness_phon": None},
+    )
+    assert started.status_code == 202, started.text
+    render_id = started.json()["render_id"]
+    done = _wait_render(client, render_id)
+    assert done["status"] == "succeeded", done.get("error")
+    assert done["master_consumed"] is False
+
+    directory = neuro_store.render_dir(settings, recording.recording_id, render_id)
+    master = os.path.join(directory, neuro_store.MASTER_NAME)
+    assert os.path.isfile(master)
+
+    download = client.get(f"{_PREFIX}/render/{render_id}/master.wav/download")
+    assert download.status_code == 200
+    assert download.headers["content-disposition"].startswith("attachment;")
+    assert download.content[:4] == b"RIFF"
+    # Удаление — после ответа (BackgroundTasks): файла на диске больше нет,
+    # треки и sidecar остаются валидным кэшем.
+    assert not os.path.isfile(master)
+    assert os.path.isfile(os.path.join(directory, neuro_store.track_name("alpha")))
+
+    status = client.get(f"{_PREFIX}/render/{render_id}/status")
+    assert status.json()["master_consumed"] is True
+    again = client.get(f"{_PREFIX}/render/{render_id}/master.wav/download")
+    assert again.status_code == 409
+    play = client.get(f"{_PREFIX}/render/{render_id}/master.wav")
+    assert play.status_code == 409

@@ -4161,9 +4161,45 @@
     },
     "/api/v1/audio/render/{render_id}/master.wav": {
       "get": {
-        "summary": "WAV мастера партитуры (48 кГц, PCM_24, стерео)",
+        "summary": "WAV мастера партитуры (48 кГц, PCM_16, стерео)",
         "description": "Мастер-трек из дискового кэша рендера (плеер и «Скачать WAV»).",
         "operationId": "audio_render_master_api_v1_audio_render__render_id__master_wav_get",
+        "parameters": [
+          {
+            "name": "render_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Render Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "audio/wav": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audio/render/{render_id}/master.wav/download": {
+      "get": {
+        "summary": "Скачать мастер и удалить его с сервера (политика 24.11.2026)",
+        "description": "Мастер отдаётся вложением и удаляется после отправки ответа.\n\nПолитика 24.11.2026: на ВМ живёт один последний вариант аудио, а мастер\nнужен пользователю на его компьютере. Удаление — в ``BackgroundTasks``\n(после ответа), манифест помечается ``master_consumed``: остальные файлы\nрендера (треки, sidecar, emo.json) остаются валидным кэшем. 409 — мастер\nуже скачан и удалён либо рендер не готов.",
+        "operationId": "audio_render_master_download_api_v1_audio_render__render_id__master_wav_download_get",
         "parameters": [
           {
             "name": "render_id",
@@ -4417,7 +4453,7 @@
     },
     "/api/v1/audio/render/{render_id}/bake/{bake_id}.wav": {
       "get": {
-        "summary": "WAV запечённой 3D-сцены (48 кГц, PCM_24, стерео)",
+        "summary": "WAV запечённой 3D-сцены (48 кГц, PCM_16, стерео)",
         "description": "Скачивание результата; 409 — ещё печатается/упал/файл вычищен квотой.",
         "operationId": "audio_bake_wav_api_v1_audio_render__render_id__bake__bake_id__wav_get",
         "parameters": [
@@ -9335,6 +9371,12 @@
             "title": "Variant",
             "description": "Вариант рендера: «montage» — дипольный рендер (7 треков track/{band}.wav с локализацией по диполям); «express» — track/{band}.wav по шинам L/C/R",
             "default": "express"
+          },
+          "master_consumed": {
+            "type": "boolean",
+            "title": "Master Consumed",
+            "description": "true — мастер скачан пользователем и удалён с сервера (политика 24.11.2026): треки и sidecar остаются, мастер — 409",
+            "default": false
           }
         },
         "type": "object",

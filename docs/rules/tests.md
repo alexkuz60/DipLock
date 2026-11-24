@@ -1919,3 +1919,26 @@ RouteLLM, цена/лимиты/модальности, добавление в�
 и поток «Спросить Ассистента» из Wiki (создание нити, вложение статьи,
 подставленный вопрос). Внешних вызовов нет: провайдер эмбеддингов и веб-страницы
 подменяются. Итог: pytest **1286**, Vitest **1484** (144 файла).
+
+**Срез «Экономия ресурсов ВМ: один последний вариант аудио» (24.11.2026).**
+Политика владельца: в кэше живёт один последний рендер/трек, мастер уходит
+пользователю и с сервера удаляется, WAV — PCM_16, отдача без чтения файла
+целиком. Backend pytest **+7**: `test_audio_store.py` +2
+(`test_prune_renders_keeps_only_last` — после коммита остаётся один `sig`,
+каталог `bake` не тронут; `test_consume_master_keeps_other_files` — мастер
+удалён, `master_consumed` в манифесте, треки валидны, повтор идемпотентен),
+`test_api_assets.py` +2 (`file_range_response`: 206 отдаёт ровно срез, 416 за
+пределами, 200 целиком, `Content-Disposition` доезжает), `test_api_audio.py` +1
+(`test_master_download_deletes_master_and_keeps_tracks`: 200 + `attachment`,
+файла нет после ответа, статус `master_consumed=true`, повтор и плеер — 409),
+`test_audio_vamp.py` +1 (`test_tracks_from_wav_writes_one_temp_file`: три
+transform-а — один временный WAV, файл удалён), `test_emolab.py` +1
+(`test_cache_keeps_only_last_track_and_no_source`: `MAX_TRACKS=1`, второй трек
+вытесняет первый, `source.*` на диске нет). Обновлены под PCM_16
+`test_audio_export.py`, `test_audio_bake.py`, `test_api_audio.py`; заглушка
+VAMP в `test_emolab.py`/`test_audio_emo.py` — на `tracks_from_wav`. Frontend
+Vitest **+2** (`NeuromusicSection.test.tsx`: ссылка «Скачать мастер» ведёт на
+`/master.wav/download`; при `master_consumed` ссылки нет, подсказка
+`master-consumed`, транспорт выключен). Контракт: `schemas/audio.py`
+(`master_consumed`) + `export_openapi` (125 путей) + `gen:api`.
+Итог: pytest **1190**, Vitest **1439** (134 файла).

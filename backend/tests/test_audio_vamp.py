@@ -142,6 +142,37 @@ def test_key_track_from_wav_success(monkeypatch, tmp_path):
     assert not os.path.exists(cmd[3])
 
 
+def test_tracks_from_wav_writes_one_temp_file(monkeypatch, tmp_path):
+    """Политика 24.11.2026: три transform-а — один временный WAV, не три."""
+    created: list[str] = []
+    real_tempfile = vamp_analysis.tempfile.NamedTemporaryFile
+
+    def counting_tempfile(*args, **kwargs):
+        handle = real_tempfile(*args, **kwargs)
+        created.append(handle.name)
+        return handle
+
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    for name in (
+        vamp_analysis.CHORD_TRANSFORM_NAME,
+        vamp_analysis.TEMPO_TRANSFORM_NAME,
+        vamp_analysis.SEGMENTER_TRANSFORM_NAME_32K,
+    ):
+        (tmp_path / name).write_text("# фиктивный transform\n", encoding="utf-8")
+    monkeypatch.setattr(settings, "sonic_annotator_bin", vamp_analysis.__file__)
+    monkeypatch.setattr(settings, "vamp_transforms_dir", str(tmp_path))
+    monkeypatch.setattr(vamp_analysis.tempfile, "NamedTemporaryFile", counting_tempfile)
+    monkeypatch.setattr(vamp_analysis.subprocess, "run", fake_run)
+
+    assert vamp_analysis.tracks_from_wav(b"RIFF-fake") == ([], [], [])
+    assert len(created) == 1
+    import os
+
+    assert not os.path.exists(created[0])
+
+
 def test_key_track_from_wav_missing_binary(monkeypatch, tmp_path):
     """Нет бинаря — None и subprocess не вызывается (best-effort, не падение)."""
     called = False

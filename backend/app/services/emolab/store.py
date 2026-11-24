@@ -9,8 +9,10 @@
 
 ``track_id`` — sha256 содержимого исходного файла (хвост
 :data:`TRACK_ID_LEN`): один и тот же трек, открытый повторно, попадает в тот
-же каталог. Источник ``source.{wav|mp3}`` хранится ради будущего сравнения
-собранной карты с ЭЭГ-сессией прослушивания этого трека (отдельная задача).
+же каталог. Исходник ``source.{wav|mp3}`` **не хранится** (политика
+24.11.2026): работаем только с последним загруженным аудио, а для показа
+достаточно ``emo.json``; в манифесте остаются имя исходника и флаг
+``source_consumed``.
 
 Кэш **не привязан к записям ЭЭГ**, поэтому его нет в
 ``orphans.RECORDING_CACHE_SUBDIRS`` (сироты и квота записи его не трогают):
@@ -43,8 +45,10 @@ SOURCE_PREFIX = "source"
 TRACK_ID_LEN = 32
 
 # Жизненный цикл кэша: TTL каталога и лимит числа треков (LRU по mtime).
+# 1 — политика 24.11.2026: работаем только с последним загруженным аудио,
+# предыдущий анализ вытесняется при следующем.
 TRACK_TTL_SEC = 7 * 24 * 3600
-MAX_TRACKS = 24
+MAX_TRACKS = 1
 
 
 def source_name(filename: str) -> str:
@@ -99,7 +103,15 @@ def load_manifest(cfg: Settings, track_id: str) -> dict[str, Any] | None:
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
         return None
-    if any(not os.path.isfile(os.path.join(directory, name)) for name in files):
+    # Исходник не хранится (``source_consumed``): его отсутствие — не промах.
+    consumed = bool(manifest.get("source_consumed"))
+    missing = [
+        name
+        for name in files
+        if not (consumed and name.startswith(SOURCE_PREFIX))
+        and not os.path.isfile(os.path.join(directory, name))
+    ]
+    if missing:
         return None
     return manifest
 

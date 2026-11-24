@@ -37,7 +37,9 @@ logger = logging.getLogger(__name__)
 # 2 — «Монтаж» переписан на дипольный алгоритм (ряды 4×7 → 7 входов по
 # траекториям диполей, срез 19.11.2026): старые рядовые комплекты
 # пересчитываются честно (кэш-промах по формату).
-RENDER_FORMAT_VERSION = 2
+# 3 — WAV пишется PCM_16 вместо PCM_24 (политика 24.11.2026, диск −33 %):
+# байты файлов изменились, комплекты версии 2 пересчитываются.
+RENDER_FORMAT_VERSION = 3
 
 # Каталог кэша записей (ключ верхнего уровня — recording_id, как у других
 # производных кэшей: чистится с записью и обходом сирот).
@@ -152,7 +154,16 @@ def load_manifest(cfg: Settings, recording_id: str, sig: str) -> dict[str, Any] 
     files = manifest.get("files")
     if not isinstance(files, dict) or not files:
         return None
-    if any(not os.path.isfile(os.path.join(directory, name)) for name in files):
+    # Мастер удаляется после скачивания (``master_consumed``): его отсутствие —
+    # не промах, остальные файлы рендера остаются валидным кэшем.
+    consumed = bool(manifest.get("master_consumed"))
+    missing = [
+        name
+        for name in files
+        if not (consumed and name == MASTER_NAME)
+        and not os.path.isfile(os.path.join(directory, name))
+    ]
+    if missing:
         return None
     return manifest
 
@@ -199,4 +210,55 @@ def read_artifact(directory: str, name: str) -> bytes | None:
 def clear_audio_cache(cfg: Settings, recording_id: str) -> None:
     """Сносит все рендеры записи (вызывается вместе с её кэшами)."""
     cache_clear(cfg.cache_dir, AUDIO_SUBDIR, recording_id)
+
+
+def prune_renders(cfg: Settings, recording_id: str, keep_sig: str) -> int:
+    """Оставляет в кэше записи один комплект — последний (политика 24.11.2026).
+
+    Смена ЭЭГ-сессии или параметров даёт новый ``sig``, а прежний комплект
+    (мастер + семь треков, сотни МБ) больше не нужен: работаем с одним
+    последним вариантом аудио. Снос — через ``cache_clear`` (правило 9
+    ``docs/rules/data-and-caches.md``). Каталог баков ``bake`` — sibling
+    рендеров, его ключ не ``sig`` (длина другая), поэтому он не трогается.
+    Возвращает число удалённых комплектов.
+    """
+    root = cache_path(cfg.cache_dir, AUDIO_SUBDIR, recording_id)
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return 0
+    removed = 0
+    for name in names:
+        if name == keep_sig or len(name) != SIG_LEN:
+            continue
+        if not os.path.isdir(os.path.join(root, name)):
+            continue
+        cache_clear(cfg.cache_dir, AUDIO_SUBDIR, recording_id, name)
+        removed += 1
+    if removed:
+        logger.info("Кэш рендеров записи %s: убрано комплектов %d", recording_id, removed)
+    return removed
+
+
+def consume_master(cfg: Settings, recording_id: str, sig: str) -> bool:
+    """Удаляет мастер рендера и помечает манифест ``master_consumed``.
+
+    Политика 24.11.2026: мастер нужен пользователю на его компьютере, на ВМ
+    он не хранится. Остальные файлы (треки, sidecar, emo.json) остаются —
+    :func:`load_manifest` перестаёт требовать мастер по флагу. Манифест
+    читается **до** удаления: после сноса файла он уже промахивается.
+    """
+    directory = render_dir(cfg, recording_id, sig)
+    manifest = load_manifest(cfg, recording_id, sig)
+    if manifest is None:
+        return False
+    try:
+        os.unlink(os.path.join(directory, MASTER_NAME))
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning("Мастер рендера %s не удалён: %s", sig, exc)
+        return False
+    manifest["master_consumed"] = True
+    return write_manifest(cfg, recording_id, sig, manifest)
 

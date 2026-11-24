@@ -127,3 +127,47 @@ def test_find_manifest_scans_recordings_and_list_sorts(tmp_path):
     store.clear_audio_cache(settings, "rec-a")
     assert store.list_manifests(settings, "rec-a") == []
     assert store.find_manifest(settings, sig)[0] == "rec-b"
+
+
+def test_prune_renders_keeps_only_last(tmp_path):
+    """Политика 24.11.2026: в кэше записи остаётся один комплект — последний."""
+    rec = _recording(tmp_path)
+    keep = "a" * store.SIG_LEN
+    old = "b" * store.SIG_LEN
+    for sig in (old, keep):
+        directory = store.render_dir(settings, rec.recording_id, sig)
+        os.makedirs(directory, exist_ok=True)
+        with open(os.path.join(directory, store.MASTER_NAME), "wb") as fh:
+            fh.write(b"wav")
+    root = os.path.dirname(store.render_dir(settings, rec.recording_id, keep))
+    bake = os.path.join(root, "bake")
+    os.makedirs(bake, exist_ok=True)
+
+    assert store.prune_renders(settings, rec.recording_id, keep) == 1
+    assert os.path.isdir(store.render_dir(settings, rec.recording_id, keep))
+    assert not os.path.isdir(store.render_dir(settings, rec.recording_id, old))
+    # Каталог баков — sibling рендеров, его ключ не sig: не трогается.
+    assert os.path.isdir(bake)
+
+
+def test_consume_master_keeps_other_files(tmp_path):
+    """Мастер удаляется, манифест помечается, остальные файлы — валидный кэш."""
+    rec = _recording(tmp_path)
+    sig = "c" * store.SIG_LEN
+    directory = store.render_dir(settings, rec.recording_id, sig)
+    os.makedirs(directory, exist_ok=True)
+    files = {store.MASTER_NAME: b"m", store.track_name("alpha"): b"t"}
+    for name, blob in files.items():
+        with open(os.path.join(directory, name), "wb") as fh:
+            fh.write(blob)
+    assert store.write_manifest(settings, rec.recording_id, sig, {
+        "format": store.RENDER_FORMAT_VERSION,
+        "files": {name: len(blob) for name, blob in files.items()},
+    })
+
+    assert store.consume_master(settings, rec.recording_id, sig)
+    assert not os.path.isfile(os.path.join(directory, store.MASTER_NAME))
+    manifest = store.load_manifest(settings, rec.recording_id, sig)
+    assert manifest is not None and manifest["master_consumed"] is True
+    # Повторный вызов идемпотентен: мастера нет, флаг уже стоит.
+    assert store.consume_master(settings, rec.recording_id, sig)

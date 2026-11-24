@@ -16,6 +16,7 @@
 Версию ассета считает сервис (``*_version``/``asset_version``): клиент кэширует
 по URL + ETag, сам ответ отдаётся готовыми байтами из дискового кэша.
 """
+import os
 from collections.abc import Mapping
 from typing import Literal
 
@@ -121,28 +122,68 @@ def byte_range_response(
     *,
     media_type: str = "audio/wav",
     range_header: str | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> Response:
     """Отдаёт байты с поддержкой ``Range``: ``206`` куском, ``416`` за пределами.
 
     Большой WAV (мастер рендера — десятки мегабайт) одним ответом не доходит
     до браузера через облачный ingress, поэтому клиент качает его кусками
     (``neuromusicPlayer.loadBuffer``). ``Accept-Ranges: bytes`` стоит и в
-    ``200``: по нему клиент понимает, что куски поддержаны.
+    ``200``: по нему клиент понимает, что куски поддержаны. ``headers`` —
+    дополнительные заголовки ответа (например ``Content-Disposition``).
     """
     size = len(data)
-    headers = {"Accept-Ranges": "bytes"}
+    base = {"Accept-Ranges": "bytes", **(headers or {})}
     span = _parse_byte_range(range_header, size)
     if span is None:
-        return Response(content=data, media_type=media_type, headers=headers)
+        return Response(content=data, media_type=media_type, headers=base)
     if span == "unsatisfiable":
         return Response(
             status_code=416,
-            headers={**headers, "Content-Range": f"bytes */{size}"},
+            headers={**base, "Content-Range": f"bytes */{size}"},
         )
     start, end = span
     return Response(
         status_code=206,
         content=data[start : end + 1],
         media_type=media_type,
-        headers={**headers, "Content-Range": f"bytes {start}-{end}/{size}"},
+        headers={**base, "Content-Range": f"bytes {start}-{end}/{size}"},
+    )
+
+
+def file_range_response(
+    path: str,
+    *,
+    media_type: str = "audio/wav",
+    range_header: str | None = None,
+    headers: Mapping[str, str] | None = None,
+) -> Response:
+    """Отдаёт файл с поддержкой ``Range``, читая с диска только нужный срез.
+
+    Замена :func:`byte_range_response` для больших WAV: прежний помощник
+    получал байты целиком и резал копию в памяти, поэтому мастер на 35 МБ
+    читался столько раз, сколько кусков просил плеер (4 МиБ × 4 потока).
+    Здесь файл открывается, ``seek`` и читается только запрошенный диапазон.
+    """
+    size = os.path.getsize(path)
+    base = {"Accept-Ranges": "bytes", **(headers or {})}
+    span = _parse_byte_range(range_header, size)
+    if span == "unsatisfiable":
+        return Response(
+            status_code=416,
+            headers={**base, "Content-Range": f"bytes */{size}"},
+        )
+    if span is None:
+        start, end, status = 0, size - 1, 200
+    else:
+        start, end = span
+        status = 206
+    with open(path, "rb") as handle:
+        handle.seek(start)
+        chunk = handle.read(end - start + 1)
+    response_headers = dict(base)
+    if status == 206:
+        response_headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return Response(
+        status_code=status, content=chunk, media_type=media_type, headers=response_headers,
     )

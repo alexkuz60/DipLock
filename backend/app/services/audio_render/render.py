@@ -279,11 +279,7 @@ def _vamp_tracks(
     list[dict[str, Any]] | None,
 ]:
     """Аккорды, темп и сегменты мастера (VAMP, best-effort: нет — ``None``)."""
-    return (
-        vamp_analysis.key_track_from_wav(blob),
-        vamp_analysis.tempo_track_from_wav(blob),
-        vamp_analysis.segment_track_from_wav(blob),
-    )
+    return vamp_analysis.tracks_from_wav(blob)
 
 
 def _vamp_tracks_missing(payload: dict[str, Any]) -> bool:
@@ -634,6 +630,10 @@ def _run_render(
                 "Манифест рендера %s не записан — кэш-промах при следующем POST",
                 state.render_id,
             )
+        if manifest_ok:
+            # Политика 24.11.2026: в кэше записи живёт один последний рендер —
+            # комплекты прежних параметров/сессий сносятся сразу после коммита.
+            store.prune_renders(cfg, recording.recording_id, state.render_id)
         state.artifacts = RenderArtifacts(
             bands=bands,
             recording_id=recording.recording_id,

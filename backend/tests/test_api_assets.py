@@ -17,6 +17,7 @@ from app.api.assets import (
     asset_response,
     byte_range_response,
     etag_matches,
+    file_range_response,
     normalize_etag,
 )
 
@@ -146,3 +147,38 @@ def test_byte_range_response_416_reports_size():
     assert response.status_code == 416
     assert not response.body
     assert response.headers["content-range"] == "bytes */10"
+
+
+def test_file_range_response_reads_only_requested_slice(tmp_path):
+    """206 отдаёт ровно запрошенный диапазон, 416 — за пределами, 200 — целиком."""
+    path = tmp_path / "master.wav"
+    payload = bytes(range(256)) * 4
+    path.write_bytes(payload)
+
+    full = file_range_response(str(path))
+    assert full.status_code == 200
+    assert full.body == payload
+    assert full.headers["accept-ranges"] == "bytes"
+
+    part = file_range_response(str(path), range_header="bytes=10-19")
+    assert part.status_code == 206
+    assert part.body == payload[10:20]
+    assert part.headers["content-range"] == f"bytes 10-19/{len(payload)}"
+
+    tail = file_range_response(str(path), range_header="bytes=1000-")
+    assert tail.status_code == 206
+    assert tail.body == payload[1000:]
+
+    bad = file_range_response(str(path), range_header=f"bytes={len(payload)}-")
+    assert bad.status_code == 416
+    assert bad.headers["content-range"] == f"bytes */{len(payload)}"
+
+
+def test_file_range_response_passes_extra_headers(tmp_path):
+    """Content-Disposition (скачивание мастера) доезжает до ответа."""
+    path = tmp_path / "master.wav"
+    path.write_bytes(b"wav")
+    response = file_range_response(
+        str(path), headers={"Content-Disposition": 'attachment; filename="m.wav"'},
+    )
+    assert response.headers["content-disposition"] == 'attachment; filename="m.wav"'

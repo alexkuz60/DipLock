@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import math
+import os
 import shutil
 import sys
 from typing import Any
@@ -42,6 +43,7 @@ from app.api.assets import (
     CACHE_PUBLIC_WEEK,
     asset_response,
     byte_range_response,
+    file_range_response,
 )
 from app.api.params import (
     archive_batch_params,
@@ -2645,6 +2647,48 @@ async def _artifact_bytes(state: neuro_render.RenderState, name: str) -> bytes:
     return data
 
 
+def _is_file(path: str) -> bool:
+    """``os.path.isfile`` для ``asyncio.to_thread`` (явная подпись для mypy)."""
+    return os.path.isfile(path)
+
+
+async def _artifact_response(
+    state: neuro_render.RenderState,
+    name: str,
+    request: Request,
+    *,
+    media_type: str = "audio/wav",
+    headers: dict[str, str] | None = None,
+) -> Response:
+    """Файл артефакта с поддержкой ``Range``; с диска читается только срез.
+
+    Прежний путь читал файл целиком в RAM на каждый кусок (плеер просит
+    4 МиБ × 4 потока — мастер 35 МБ читался ~9 раз). Здесь диск отдаётся
+    ``file_range_response``; память остаётся фоллбэком, если запись на диск
+    не удалась (``RenderArtifacts.memory``).
+    """
+    artifacts = state.artifacts
+    if artifacts is None:  # не бывает: _audio_state уже проверил, но для типов
+        raise HTTPException(status_code=409, detail="Артефакты рендера недоступны")
+    path = os.path.join(artifacts.directory, name) if artifacts.directory else ""
+    on_disk = bool(path) and await asyncio.to_thread(_is_file, path)
+    if on_disk:
+        return await asyncio.to_thread(
+            file_range_response,
+            path,
+            media_type=media_type,
+            range_header=request.headers.get("range"),
+            headers=headers,
+        )
+    data = await _artifact_bytes(state, name)
+    return byte_range_response(
+        data,
+        media_type=media_type,
+        range_header=request.headers.get("range"),
+        headers=headers,
+    )
+
+
 @router.post(
     "/audio/render",
     status_code=202,
@@ -2779,6 +2823,12 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
     except neuro_render.RenderNotFound as exc:
         raise HTTPException(status_code=404, detail=f"Рендер {render_id} не найден") from exc
     artifacts = state.artifacts
+    consumed = False
+    if artifacts is not None:
+        manifest = await asyncio.to_thread(
+            neuro_store.load_manifest, settings, artifacts.recording_id, artifacts.sig,
+        )
+        consumed = bool((manifest or {}).get("master_consumed"))
     return AudioRenderStatus(
         render_id=state.render_id,
         status=state.status,
@@ -2788,6 +2838,7 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
         error=state.error,
         tracks=sorted(artifacts.bands) if artifacts else [],
         variant=artifacts.variant if artifacts else "express",
+        master_consumed=consumed,
     )
 
 
@@ -2795,15 +2846,55 @@ async def audio_render_status(render_id: str) -> AudioRenderStatus:
     "/audio/render/{render_id}/master.wav",
     response_class=Response,
     responses={200: {"content": {"audio/wav": {}}}},
-    summary="WAV мастера партитуры (48 кГц, PCM_24, стерео)",
+    summary="WAV мастера партитуры (48 кГц, PCM_16, стерео)",
 )
 async def audio_render_master(render_id: str, request: Request) -> Response:
     """Мастер-трек из дискового кэша рендера (плеер и «Скачать WAV»)."""
     state = await _audio_state(render_id)
-    data = await _artifact_bytes(state, neuro_store.MASTER_NAME)
     # Без Content-Disposition: файл должен проигрываться в <audio src=...>,
-    # а скачивание UI инициирует атрибутом download (same-origin).
-    return byte_range_response(data, range_header=request.headers.get("range"))
+    # а скачивание идёт отдельным роутом .../master.wav/download.
+    return await _artifact_response(state, neuro_store.MASTER_NAME, request)
+
+
+@router.get(
+    "/audio/render/{render_id}/master.wav/download",
+    response_class=Response,
+    responses={200: {"content": {"audio/wav": {}}}},
+    summary="Скачать мастер и удалить его с сервера (политика 24.11.2026)",
+)
+async def audio_render_master_download(
+    render_id: str, request: Request, background: BackgroundTasks,
+) -> Response:
+    """Мастер отдаётся вложением и удаляется после отправки ответа.
+
+    Политика 24.11.2026: на ВМ живёт один последний вариант аудио, а мастер
+    нужен пользователю на его компьютере. Удаление — в ``BackgroundTasks``
+    (после ответа), манифест помечается ``master_consumed``: остальные файлы
+    рендера (треки, sidecar, emo.json) остаются валидным кэшем. 409 — мастер
+    уже скачан и удалён либо рендер не готов.
+    """
+    state = await _audio_state(render_id)
+    artifacts = state.artifacts
+    if artifacts is None:  # не бывает: _audio_state уже проверил, но для типов
+        raise HTTPException(status_code=409, detail="Артефакты рендера недоступны")
+    manifest = await asyncio.to_thread(
+        neuro_store.load_manifest, settings, artifacts.recording_id, artifacts.sig,
+    )
+    if manifest is not None and manifest.get("master_consumed"):
+        raise HTTPException(
+            status_code=409,
+            detail="Мастер уже скачан и удалён с сервера — пересчитайте запись",
+        )
+    headers = {
+        "Content-Disposition": f'attachment; filename="neuromusic-{render_id}.wav"',
+    }
+    response = await _artifact_response(
+        state, neuro_store.MASTER_NAME, request, headers=headers,
+    )
+    background.add_task(
+        neuro_store.consume_master, settings, artifacts.recording_id, artifacts.sig,
+    )
+    return response
 
 
 @router.get(
@@ -2823,8 +2914,7 @@ async def audio_render_track(render_id: str, band: str, request: Request) -> Res
             status_code=404,
             detail=f"Трек {band} не найден; доступны: {', '.join(artifacts.bands)}",
         )
-    data = await _artifact_bytes(state, neuro_store.track_name(band))
-    return byte_range_response(data, range_header=request.headers.get("range"))
+    return await _artifact_response(state, neuro_store.track_name(band), request)
 
 
 @router.get(
@@ -2964,7 +3054,7 @@ async def audio_bake_status(render_id: str, bake_id: str) -> AudioBakeStatus:
     "/audio/render/{render_id}/bake/{bake_id}.wav",
     response_class=Response,
     responses={200: {"content": {"audio/wav": {}}}},
-    summary="WAV запечённой 3D-сцены (48 кГц, PCM_24, стерео)",
+    summary="WAV запечённой 3D-сцены (48 кГц, PCM_16, стерео)",
 )
 async def audio_bake_wav(render_id: str, bake_id: str, request: Request) -> Response:
     """Скачивание результата; 409 — ещё печатается/упал/файл вычищен квотой."""
@@ -2980,11 +3070,12 @@ async def audio_bake_wav(render_id: str, bake_id: str, request: Request) -> Resp
             else f"3D-bake не удался: {state.error or 'причина неизвестна'}"
         )
         raise HTTPException(status_code=409, detail=detail)
-    data = await asyncio.to_thread(
-        neuro_bake.read_bake, settings, state.recording_id, bake_id,
-    )
-    if data is None:
-        data = state.payload
+    path = os.path.join(neuro_bake.bake_dir(settings, state.recording_id), f"{bake_id}.wav")
+    if await asyncio.to_thread(_is_file, path):
+        return await asyncio.to_thread(
+            file_range_response, path, range_header=request.headers.get("range"),
+        )
+    data = state.payload
     if data is None:
         raise HTTPException(
             status_code=409,

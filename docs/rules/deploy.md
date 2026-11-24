@@ -31,7 +31,9 @@
 - **Большие WAV — только по `Range`.** Между nginx и браузером стоят Cloudflare
   и Envoy; один ответ на десятки мегабайт (мастер рендера ≈ 30 МБ) до браузера
   не доходит — `fetch` падает `NetworkError`, плеер пишет «Не удалось загрузить
-  аудио». Роуты `master.wav`/`track`/`bake` отдают `206` (`byte_range_response`),
+  аудио». Роуты `master.wav`/`track`/`bake` отдают `206` (`file_range_response` —
+  с диска читается только срез; `byte_range_response` остался фоллбэком для
+  артефактов в памяти),
   клиент качает кусками по 4 МиБ (`fetchWavChunks`). Проверка после деплоя:
   `curl -r 0-1023 -u diplock … /master.wav` → `206` и `Content-Range`.
 - **`data/cache` не переносится** — пересоздаётся, квота `CACHE_QUOTA_MB`.

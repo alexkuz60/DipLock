@@ -241,6 +241,13 @@ export const api = {
   /** URL мастер-WAV готового рендера (для `<audio src>` и скачивания). */
   audioMasterUrl: (renderId: string) => `${API_PREFIX}/audio/render/${renderId}/master.wav`,
 
+  /**
+   * URL скачивания мастера: сервер отдаёт файл вложением и удаляет его после
+   * ответа (политика 24.11.2026) — повторное скачивание даёт 409.
+   */
+  audioMasterDownloadUrl: (renderId: string) =>
+    `${API_PREFIX}/audio/render/${renderId}/master.wav/download`,
+
   /** URL WAV одного трека полосы (соль-прослушивание инструмента). */
   audioTrackUrl: (renderId: string, band: string) =>
     `${API_PREFIX}/audio/render/${renderId}/track/${band}.wav`,

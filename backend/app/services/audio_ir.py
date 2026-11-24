@@ -188,7 +188,7 @@ def generate_ir(preset: IrPreset) -> bytes:
     peak = float(np.abs(stereo).max())
     if peak > 0:
         stereo *= _IR_PEAK / peak
-    return wav_bytes(stereo, fs=_IR_FS)
+    return wav_bytes(stereo, fs=_IR_FS, subtype="PCM_24")
 
 
 def ir_path(preset_id: str) -> str:

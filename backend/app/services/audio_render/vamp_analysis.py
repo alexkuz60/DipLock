@@ -38,6 +38,7 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Iterator
 from typing import Any
 
 from app.core.config import Settings, settings
@@ -106,13 +107,32 @@ def _vamp_env(cfg: Settings) -> dict[str, str]:
     return env
 
 
-def _run_transform(blob: bytes, transform_name: str, cfg: Settings) -> str | None:
-    """WAV в байтах → CSV-вывод transform-файла Sonic Annotator либо ``None``.
+@contextlib.contextmanager
+def _temp_wav(blob: bytes) -> Iterator[str]:
+    """WAV в байтах → путь временного файла; файл удаляется на выходе.
+
+    Один файл на все transform-ы (политика 24.11.2026): прежний код писал
+    копию мастера перед каждым вызовом, и 30-минутный трек давал 3 × 115 МБ
+    дискового I/O вместо 115 МБ.
+    """
+    tmp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(blob)
+            tmp_path = tmp.name
+        yield tmp_path
+    finally:
+        if tmp_path:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+
+
+def _run_transform_path(path: str, transform_name: str, cfg: Settings) -> str | None:
+    """Путь к WAV → CSV-вывод transform-файла Sonic Annotator либо ``None``.
 
     ``None`` — sonic-annotator/transform недоступны, процесс упал или не
     уложился в ``VAMP_TIMEOUT_S``: вызывающая сторона оставляет свой трек
-    пустым (best-effort, расчёт никогда не падает). Байты WAV пишутся во
-    временный файл — инструмент читает только файлы; файл удаляется всегда.
+    пустым (best-effort, расчёт никогда не падает).
     """
     cfg = cfg or settings
     binary = cfg.sonic_annotator_bin
@@ -123,13 +143,9 @@ def _run_transform(blob: bytes, transform_name: str, cfg: Settings) -> str | Non
     if not os.path.isfile(transform):
         logger.warning("Transform %s не найден — %s пропущен", transform, transform_name)
         return None
-    tmp_path = ""
     try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp.write(blob)
-            tmp_path = tmp.name
         result = subprocess.run(  # noqa: S603 — список аргументов фиксирован, без shell
-            [binary, "-t", transform, tmp_path, "-w", "csv", "--csv-stdout"],
+            [binary, "-t", transform, path, "-w", "csv", "--csv-stdout"],
             capture_output=True,
             text=True,
             timeout=VAMP_TIMEOUT_S,
@@ -144,10 +160,6 @@ def _run_transform(blob: bytes, transform_name: str, cfg: Settings) -> str | Non
             "Sonic Annotator не уложился в %.0f с — %s пропущен", VAMP_TIMEOUT_S, transform_name,
         )
         return None
-    finally:
-        if tmp_path:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp_path)
     if result.returncode != 0:
         logger.warning(
             "Sonic Annotator rc=%s — %s пропущен: %s",
@@ -155,6 +167,42 @@ def _run_transform(blob: bytes, transform_name: str, cfg: Settings) -> str | Non
         )
         return None
     return result.stdout
+
+
+def _run_transform(blob: bytes, transform_name: str, cfg: Settings) -> str | None:
+    """WAV в байтах → CSV-вывод transform-файла (один временный файл)."""
+    with _temp_wav(blob) as path:
+        return _run_transform_path(path, transform_name, cfg)
+
+
+def tracks_from_wav(
+    blob: bytes,
+    cfg: Settings | None = None,
+    *,
+    chord_transform: str = CHORD_TRANSFORM_NAME,
+) -> tuple[
+    list[dict[str, Any]] | None,
+    list[dict[str, Any]] | None,
+    list[dict[str, Any]] | None,
+]:
+    """Три VAMP-признака за один временный WAV (политика 24.11.2026).
+
+    ``(key_track, tempo_track, segment_track)``; ``None`` — инструмент
+    недоступен/упал (best-effort, как у одиночных функций). ``chord_transform``
+    — transform Chordino под частоту входа: мастер рендера 48 кГц
+    (:data:`CHORD_TRANSFORM_NAME`) либо моно 32 кГц «ЕмоЛаб»
+    (:data:`CHORD_TRANSFORM_NAME_32K`).
+    """
+    cfg = cfg or settings
+    with _temp_wav(blob) as path:
+        key_text = _run_transform_path(path, chord_transform, cfg)
+        tempo_text = _run_transform_path(path, TEMPO_TRANSFORM_NAME, cfg)
+        segment_text = _run_transform_path(path, SEGMENTER_TRANSFORM_NAME_32K, cfg)
+    return (
+        None if key_text is None else parse_chord_csv(key_text),
+        None if tempo_text is None else parse_tempo_csv(tempo_text),
+        None if segment_text is None else parse_segmenter_csv(segment_text),
+    )
 
 
 def chord_key_code(label: str) -> int | None:

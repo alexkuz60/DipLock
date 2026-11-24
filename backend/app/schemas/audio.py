@@ -151,6 +151,13 @@ class AudioRenderStatus(BaseModel):
             "track/{band}.wav по шинам L/C/R"
         ),
     )
+    master_consumed: bool = Field(
+        default=False,
+        description=(
+            "true — мастер скачан пользователем и удалён с сервера "
+            "(политика 24.11.2026): треки и sidecar остаются, мастер — 409"
+        ),
+    )
 
 
 class AudioIrPresetOut(BaseModel):

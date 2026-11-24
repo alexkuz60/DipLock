@@ -50,6 +50,7 @@ export function NeuromusicPanel() {
   const setAutobase = useNeuromusic((state) => state.setAutobase)
   const setOctaveShift = useNeuromusic((state) => state.setOctaveShift)
   const setVariant = useNeuromusic((state) => state.setVariant)
+  const refreshStatus = useNeuromusic((state) => state.refreshStatus)
 
   // 3D-bake (spatial-audio, п.3): печать текущей цепочки на бэкенде.
   const bakeId = useNeuromusic((state) => state.bakeId)
@@ -185,13 +186,24 @@ export function NeuromusicPanel() {
           hint="Готовый рендер: WAV-мастер, соль-треки полос и партитура (справка — § «Партитура»)"
         >
           <div className="flex flex-col gap-2">
-            <a
-              className={LINK_BUTTON_CLASS}
-              href={api.audioMasterUrl(renderId)}
-              download={`neuromusic-${renderId}.wav`}
-            >
-              Скачать мастер
-            </a>
+            {status?.master_consumed ? (
+              <p className="text-sm text-fg-2" data-testid="master-consumed">
+                Мастер скачан и удалён с сервера — пересчитайте запись, чтобы получить его снова.
+              </p>
+            ) : (
+              <a
+                className={LINK_BUTTON_CLASS}
+                href={api.audioMasterDownloadUrl(renderId)}
+                data-testid="master-download"
+                onClick={() => {
+                  // Удаление идёт в BackgroundTasks после ответа — статус
+                  // перечитываем с запасом, чтобы UI увидел master_consumed.
+                  window.setTimeout(() => void refreshStatus(), 1500)
+                }}
+              >
+                Скачать мастер
+              </a>
+            )}
             <a
               className={LINK_BUTTON_CLASS}
               href={api.audioSidecarUrl(renderId)}

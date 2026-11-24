@@ -181,7 +181,7 @@ def test_bake_sig_key_depends_on_everything():
 
 
 def test_bake_wav_is_deterministic_and_bounded():
-    """Печать «Экспресса»: те же входы → байты в байт, WAV 48k/стерео/PCM_24."""
+    """Печать «Экспресса»: те же входы → байты в байт, WAV 48k/стерео/PCM_16."""
     artifacts = _memory_artifacts()
     params = neuro_bake.BakeParams(width_pct=100.0, spread_pct=100.0, wet_pct=0.0)
     first = neuro_bake.bake_wav(artifacts, params, _IR_BLOB)
@@ -190,7 +190,7 @@ def test_bake_wav_is_deterministic_and_bounded():
     with sf.SoundFile(io.BytesIO(first)) as handle:
         assert handle.samplerate == 48000
         assert handle.channels == 2
-        assert handle.subtype == "PCM_24"
+        assert handle.subtype == "PCM_16"
         data = handle.read(dtype="float64")
     assert data.shape == (480, 2)
     # δ слева на полном разбросе: левый канал громче правого.
@@ -230,7 +230,7 @@ def test_bake_wav_montage_widens_and_counts_sources():
 
 
 def test_bake_full_cycle_and_cache(client, tmp_path, edf_file):
-    """202 → поллинг → WAV 48k/PCM_24 → повтор POST: cached, байты те же."""
+    """202 → поллинг → WAV 48k/PCM_16 → повтор POST: cached, байты те же."""
     recording = _register(tmp_path, edf_file)
     started = client.post(
         f"{_PREFIX}/render",
@@ -256,7 +256,7 @@ def test_bake_full_cycle_and_cache(client, tmp_path, edf_file):
     with sf.SoundFile(io.BytesIO(wav.content)) as handle:
         assert handle.samplerate == 48000
         assert handle.channels == 2
-        assert handle.subtype == "PCM_24"
+        assert handle.subtype == "PCM_16"
         assert abs(len(handle) / 48000 - 4.0) < 0.01
 
     # Повтор тех же параметров — кэш: тот же ключ, конвейер не запускался.

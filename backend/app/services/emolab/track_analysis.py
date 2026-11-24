@@ -197,14 +197,10 @@ def _run_analysis(state: TrackState, blob: bytes, cfg: Settings) -> None:
             state.stage, state.pct = "Декодирование аудио", 0.05
             audio = track_input.decode_track(blob)
             wav_blob = track_input.wav_bytes(audio)
-            state.stage, state.pct = "Карта аккордов (Chordino)", 0.25
-            key_track = vamp_analysis.key_track_from_wav(
-                wav_blob, cfg, transform_name=vamp_analysis.CHORD_TRANSFORM_NAME_32K,
+            state.stage, state.pct = "VAMP: аккорды, темп, сегменты", 0.25
+            key_track, tempo_track, segment_track = vamp_analysis.tracks_from_wav(
+                wav_blob, cfg, chord_transform=vamp_analysis.CHORD_TRANSFORM_NAME_32K,
             )
-            state.stage, state.pct = "Карта темпа (VAMP)", 0.45
-            tempo_track = vamp_analysis.tempo_track_from_wav(wav_blob, cfg)
-            state.stage, state.pct = "Сегментер (VAMP)", 0.55
-            segment_track = vamp_analysis.segment_track_from_wav(wav_blob, cfg)
             state.stage, state.pct = "ФФТ-кадры «Эмо»", 0.65
             payload = emo_radar.emo_frames(
                 audio.data,
@@ -214,15 +210,16 @@ def _run_analysis(state: TrackState, blob: bytes, cfg: Settings) -> None:
                 segment_track=segment_track,
             )
             state.stage, state.pct = "Сохранение", 0.9
-            files = {
-                store.EMO_NAME: emo_radar.emo_bytes(payload),
-                store.source_name(state.filename): blob,
-            }
+            # Исходник не пишем (политика 24.11.2026): в кэше только результат
+            # анализа, для показа достаточно emo.json; имя файла остаётся в
+            # манифесте, флаг source_consumed снимает проверку его наличия.
+            files = {store.EMO_NAME: emo_radar.emo_bytes(payload)}
             manifest = {
                 "format": store.TRACK_FORMAT_VERSION,
                 "track_id": state.track_id,
                 "filename": state.filename,
                 "source": store.source_name(state.filename),
+                "source_consumed": True,
                 "created_at": time.time(),
                 "duration_s": round(audio.duration_s, 6),
                 "fs_source": audio.fs_source,

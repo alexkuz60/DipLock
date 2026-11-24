@@ -25,14 +25,14 @@ def _stereo(n: int = FS // 10) -> np.ndarray:
     return np.stack([left, right], axis=1)
 
 
-def test_wav_roundtrip_is_48k_stereo_int24() -> None:
-    """WAV читается обратно: fs=48000, стерео, точная длина (приёмка ТЗ M3)."""
+def test_wav_roundtrip_is_48k_stereo_int16() -> None:
+    """WAV читается обратно: fs=48000, стерео, PCM_16, точная длина (ТЗ M3)."""
     data = _stereo()
     blob = wav_bytes(data, FS)
     with sf.SoundFile(io.BytesIO(blob)) as handle:
         assert handle.samplerate == FS
         assert handle.channels == 2
-        assert handle.subtype == "PCM_24"
+        assert handle.subtype == "PCM_16"
         assert len(handle) == data.shape[0]
         back = handle.read(dtype="float64")
     assert back.shape == data.shape
@@ -44,8 +44,8 @@ def test_wav_bytes_are_deterministic() -> None:
     assert wav_bytes(data, FS) == wav_bytes(data, FS)
 
 
-def test_wav_peak_is_capped_by_pcm24() -> None:
-    """Пик ≤ 0.891 приходит в файл без переполнения (int24 из float64)."""
+def test_wav_peak_is_capped_by_pcm16() -> None:
+    """Пик ≤ 0.891 приходит в файл без переполнения (int16 из float64)."""
     data = np.full((FS // 100, 2), 0.891)
     blob = wav_bytes(data, FS)
     with sf.SoundFile(io.BytesIO(blob)) as handle:
@@ -53,10 +53,10 @@ def test_wav_peak_is_capped_by_pcm24() -> None:
     assert float(np.max(np.abs(back))) <= 0.891 + 1e-3
 
 
-def test_pcm24_sqnr_improves_with_boost() -> None:
-    """Тезис приёмки 05.10.2026: +6 дБ сигнала → лучший SQNR записи PCM_24.
+def test_pcm16_sqnr_improves_with_boost() -> None:
+    """Тезис приёмки 05.10.2026: +6 дБ сигнала → лучший SQNR записи PCM_16.
 
-    Квантование 24 бит — главный шум выхода (ресемпл ядра идёт в float64 и
+    Квантование 16 бит — главный шум выхода (ресемпл ядра идёт в float64 и
     SNR не портит): громкий сигнал ближе к шкале → относительный шум меньше.
     Проверка численная: «поднять сигнал при создании полосовых треков»
     действительно улучшает отношение сигнал/шум ресемплированного файла.
