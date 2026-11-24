@@ -16,6 +16,16 @@
 выделять: `DIPLOCK_CHECK_PASSWORD="$(sed -n 's/^DIPLOCK_CHECK_PASSWORD=//p'
 ~/dev/dppw)"`.
 
+Живой smoke нового роута на ВМ (HTTPS + basic-auth, запись `4dfc50e1…`,
+рендер `59504dce…`, мастер 20 974 124 Б): `Range: bytes=0-1023` → `206` +
+`content-range: bytes 0-1023/20974124` + `accept-ranges: bytes`;
+`master.wav/download` → `200`, `content-disposition: attachment;
+filename="neuromusic-59504dce….wav"`, тело 20 974 124 Б; повтор → `409`
+«Мастер уже скачан и удалён с сервера»; статус после — `succeeded`,
+`master_consumed=true`, 7 треков на месте; `Range` после удаления → `409`
+«Файл master.wav не найден в кэше рендера». ВМ здорова: `NRestarts=0`, OOM в
+журнале нет.
+
 ## 24.11.2026 — Экономия ресурсов ВМ: один последний вариант аудио
 
 Политика владельца: вычислительный ресурс, память и диск ВМ Abacus.Cloud не
