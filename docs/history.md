@@ -9,16 +9,12 @@
 (`deploy/update.sh`, 33 с, exit 0; сборка UI 6.23 с). `HEAD` на ВМ =
 `9cf2354b`, дерево чистое, служба `diplock` — `active`, `init-status` →
 `ready`, `code.stale=false`, все шесть проверок `ready`, `cache` 2.03 ГиБ из
-квоты 4.29 ГиБ (25 единиц). `check.sh` без пароля — 5/5 совпали; проверки с
-паролем — 401 на `/ui/`, `/api/v1/meta`, `/init-status`. Причина по
-`/var/log/nginx/error.log`: `user "diplock": password mismatch`. Пароль из
-`~/dev/dppw` проверен на ВМ авторитетно — `sudo htpasswd -vb
-/etc/nginx/.htpasswd diplock` → rc 3 «password verification failed» (и сверка
-`openssl passwd -apr1` по соли дала MISMATCH): содержимое файла не совпадает с
-хэшем `/etc/nginx/.htpasswd` от 17.11.2026. Кавычки из файла убраны, дело не в
-них. Варианты — положить в файл пароль, который реально работает в браузере,
-либо перезаписать его на ВМ (`sudo htpasswd /etc/nginx/.htpasswd diplock`);
-системное изменение без согласия владельца не делалось.
+квоты 4.29 ГиБ (25 единиц). `check.sh` — 8/8 совпали (без пароля 5/5, с паролем `/ui/`,
+`/api/v1/meta`, `/init-status` → 200). Ловушка проверки: `~/dev/dppw` хранит не
+пароль, а строку `DIPLOCK_CHECK_PASSWORD=<пароль>` — подстановка файла целиком
+даёт 401 и `password mismatch` в `/var/log/nginx/error.log`; значение надо
+выделять: `DIPLOCK_CHECK_PASSWORD="$(sed -n 's/^DIPLOCK_CHECK_PASSWORD=//p'
+~/dev/dppw)"`.
 
 ## 24.11.2026 — Экономия ресурсов ВМ: один последний вариант аудио
 
